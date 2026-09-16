@@ -45,6 +45,17 @@ def test_stdin_request_and_fragmented_events(helper):
     assert run(executable) == [{"type": "result", "requestID": "test-1", "manifest": "result.json"}]
 
 
+def test_text_preflight_uses_the_same_bounded_process_protocol(helper):
+    executable = helper(
+        "assert sys.argv[1:] == ['text-preflight']\n"
+        "print(json.dumps({'type':'result','requestID':request['requestID'],"
+        "'value':{'valid':True,'inputTokens':12,'outputTokenBudget':64}}))\n"
+    )
+    result = list(invoke_helper("text-preflight", {"requestID": "budget"},
+                              helper=executable, cancelled=lambda: False))
+    assert result[0]["value"] == {"valid": True, "inputTokens": 12, "outputTokenBudget": 64}
+
+
 @pytest.mark.parametrize(
     "line,match",
     [

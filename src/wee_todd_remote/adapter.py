@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import secrets
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
@@ -232,7 +233,11 @@ class DrawThingsAdapter:
     def _prepare(
         self, request: dict[str, Any], cancelled: Callable[[], bool]
     ) -> tuple[dict[str, Any], dict[str, Any], Any, dict[str, Any]]:
-        normalized = validate_request(request)
+        normalized = copy.deepcopy(validate_request(request))
+        # Resolve once before estimation/fingerprinting. Generation reuses this exact
+        # request, while saved drafts and portable jobs retain their random sentinel.
+        if normalized["configuration"].get("seed") == -1:
+            normalized["configuration"]["seed"] = secrets.randbits(32)
         validate_canonical_inputs(normalized)
         normalized.pop("account", None)
         normalized.pop("estimate", None)

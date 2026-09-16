@@ -1,0 +1,109 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "operation": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]+@[1-9][0-9]*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 24000
+    },
+    "inputs": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              }
+            },
+            "required": [
+              "input"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "step": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              },
+              "output": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              }
+            },
+            "required": [
+              "step",
+              "output"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "minProperties": 0,
+      "maxProperties": 128
+    },
+    "parameters": {
+      "type": "object",
+      "maxProperties": 32
+    },
+    "model": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "adapter": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+    },
+    "retry": {
+      "type": "object",
+      "properties": {
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        }
+      },
+      "required": [
+        "maxAttempts"
+      ],
+      "additionalProperties": false
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600
+    },
+    "requiresApproval": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "operation",
+    "name",
+    "inputs",
+    "parameters",
+    "retry",
+    "timeoutSeconds"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:weetodd:schema:step:1",
+  "title": "WeeTodd workflow step v1"
+}

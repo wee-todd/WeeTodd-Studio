@@ -20,6 +20,7 @@ struct AssetBrowser: View {
       }.font(.system(size: 11)).padding(10).background(
         Theme.raised, in: RoundedRectangle(cornerRadius: 6)
       ).padding(12)
+      Button("Production Library…") { store.showProductionLibrary = true }
       Button("LoRAs & Groups…") { store.showLoRALibrary = true }
         .padding(.horizontal, 12).padding(.bottom, 10)
       ScrollView {
@@ -213,7 +214,9 @@ struct AssetCard: View {
     VStack(alignment: .leading, spacing: 6) {
       ZStack {
         Theme.raised
-        if let image {
+        if asset.kind == .image {
+          CachedImageThumbnail(path: asset.path, maximumPixelSize: 320, contentMode: .fill)
+        } else if let image {
           Image(nsImage: image).resizable().scaledToFill()
         } else {
           Image(systemName: icon).font(.system(size: 22, weight: .light)).foregroundStyle(
@@ -248,9 +251,8 @@ struct AssetCard: View {
     }
   }
   func thumbnail() async {
-    if asset.kind == .image {
-      image = NSImage(contentsOfFile: asset.path)
-    } else if [.video, .sequence].contains(asset.kind) {
+    image = nil
+    if [.video, .sequence].contains(asset.kind) {
       let path = asset.path
       let cg = await Task.detached {
         let gen = AVAssetImageGenerator(asset: AVURLAsset(url: URL(fileURLWithPath: path)))
@@ -259,7 +261,7 @@ struct AssetCard: View {
         return try? gen.copyCGImage(
           at: CMTime(seconds: 0, preferredTimescale: 600), actualTime: nil)
       }.value
-      if let cg { image = NSImage(cgImage: cg, size: .zero) }
+      if let cg, !Task.isCancelled { image = NSImage(cgImage: cg, size: .zero) }
     }
   }
 }

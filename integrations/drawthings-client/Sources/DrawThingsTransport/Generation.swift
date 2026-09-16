@@ -47,6 +47,9 @@ public enum Generation {
       requiresAudio: requiresAudio,
       ltxAudio: [.ltx2, .ltx2_3].contains(ModelZoo.versionForModel(configuration.model ?? "")))
     let stream = TensorStream(writer: writer)
+    let preview = operation == "image" ? LivePreview(root: root,
+      version: ModelZoo.versionForModel(configuration.model ?? "")) : nil
+    defer { if let preview { try? FileManager.default.removeItem(at: preview.file) } }
     // All local, inventory and connection checks precede any quota reservation.
     // From this marker onward cancellation may leave a reserved/submitted request.
     progress(["stage": "submitting"])
@@ -62,7 +65,20 @@ public enum Generation {
         if response.hasScaleFactor, response.scaleFactor != 1 { throw TransportError.invalidMedia }
         try stream.receive(response)
         if response.hasCurrentSignpost {
-          progress(["stage": "generating", "framesReceived": writer.frameCount])
+          var update: [String: Any] = ["stage": "generating", "framesReceived": writer.frameCount]
+          switch response.currentSignpost.signpost {
+          case .sampling(let sampling):
+            update["message"] = "Sampling \(sampling.step)/\(configuration.steps)"
+          case .textEncoded: update["message"] = "Text encoded · preparing sampling…"
+          case .imageEncoded: update["message"] = "Image encoded · preparing sampling…"
+          case .imageDecoded: update["message"] = "Image decoded · saving…"
+          case .secondPassSampling(let sampling): update["message"] = "Refining · step \(sampling.step)"
+          default: update["message"] = "Draw Things generating…"
+          }
+          if response.hasPreviewImage, let fields = preview?.receive(response.previewImage) {
+            update.merge(fields) { _, new in new }
+          }
+          progress(update)
         }
       } catch { decodeFailure = error }
     }

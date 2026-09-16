@@ -34,8 +34,13 @@ class DownloadFile:
     provider: str = "huggingface"
 
     def __post_init__(self):
-        if self.provider not in {"huggingface", "github"}:
+        if self.provider not in {"huggingface", "github", "drawthings-static"}:
             raise ValueError("Unsupported download provider")
+        if self.provider == "drawthings-static" and (
+            self.repo != "drawthingsai/draw-things-community"
+            or self.filename != "qwen_3.5_4b_i8x.ckpt"
+        ):
+            raise ValueError("Unsupported Draw Things static catalog file")
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", self.repo):
             raise ValueError("Invalid model repository")
         if not re.fullmatch(r"[0-9a-f]{40}", self.revision):
@@ -48,6 +53,8 @@ class DownloadFile:
 
     @property
     def url(self):
+        if self.provider == "drawthings-static":
+            return "https://static.libnnc.org/" + self.filename
         if self.provider == "github":
             return f"https://raw.githubusercontent.com/{self.repo}/{self.revision}/{self.filename}"
         return f"https://huggingface.co/{self.repo}/resolve/{self.revision}/{urllib.parse.quote(self.filename)}"
@@ -216,10 +223,12 @@ def download_catalog():
     return [dict(item["descriptor"]) for item in PRECONVERTED] + result
 
 
-def _hash(path):
+def _hash(path, cancelled=lambda: False):
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         while chunk := stream.read(4 * 1024 * 1024):
+            if cancelled():
+                raise InterruptedError("Model setup cancelled; retry to resume")
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -257,14 +266,16 @@ def _hf_token():
         return os.environ.get("HF_TOKEN")
 
 
-def download_file(item, target, *, opener=None, progress=None):
+def download_file(item, target, *, opener=None, progress=None, cancelled=lambda: False):
     """Bounded streaming with validated ranges and full-file integrity before rename."""
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     report = progress or (lambda *_: None)
+    if cancelled():
+        raise InterruptedError("Model setup cancelled; retry to resume")
     if target.exists():
         report(f"Checking existing {item.filename}", 0.0)
-        if target.stat().st_size == item.size and _hash(target) == item.sha256:
+        if target.stat().st_size == item.size and _hash(target, cancelled) == item.sha256:
             report(f"Using verified {item.filename}", 1.0)
             return target
         raise ValueError(
@@ -285,7 +296,7 @@ def download_file(item, target, *, opener=None, progress=None):
         try:
             response = (opener or _open)(request, timeout=30)
         except urllib.error.HTTPError as error:
-            if error.code in (401, 403):
+            if error.code in (401, 403) and item.provider == "huggingface":
                 raise ValueError(
                     "Model access requires accepting its source terms and signing "
                     "in through Studio’s Hugging Face access controls or hf auth login, "
@@ -310,6 +321,8 @@ def download_file(item, target, *, opener=None, progress=None):
             updated = time.monotonic()
             with part.open(mode) as stream:
                 while chunk := response.read(4 * 1024 * 1024):
+                    if cancelled():
+                        raise InterruptedError("Model setup cancelled; retry to resume")
                     if offset + len(chunk) > item.size:
                         raise ValueError("Download exceeds its pinned file size")
                     stream.write(chunk)
@@ -322,7 +335,9 @@ def download_file(item, target, *, opener=None, progress=None):
         if offset != item.size:
             raise ValueError("Download incomplete; retry setup to resume the partial file")
     report(f"Verifying {item.filename}", 1.0)
-    if _hash(part) != item.sha256:
+    if cancelled():
+        raise InterruptedError("Model setup cancelled; retry to resume")
+    if _hash(part, cancelled) != item.sha256:
         part.unlink()
         raise ValueError("Download SHA-256 verification failed; retry to download a clean copy")
     # The setup lock serializes writers. Refuse replacement even for direct helper callers.

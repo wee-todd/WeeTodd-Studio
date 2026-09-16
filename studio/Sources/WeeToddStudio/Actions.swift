@@ -43,10 +43,10 @@ enum ClipState: String {
         parts.append("generationFPS:\(clip.settings(in: project).fps)")
       }
       for attachment in clip.attachments.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
-        guard let asset = allAssets.first(where: { $0.id == attachment.assetID }),
-          let data = FileManager.default.contents(atPath: asset.path) else { continue }
-        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        parts.append("\(attachment.role.rawValue)|\(asset.path)|\(hash)")
+        guard let asset = allAssets.first(where: { $0.id == attachment.assetID }) else {
+          parts.append("\(attachment.id)|missing"); continue
+        }
+        parts.append("\(attachment.role.rawValue)|\(attachmentDigests.fingerprint(asset.path))")
       }
       return SHA256.hash(data: Data(parts.joined(separator: "\n").utf8))
         .map { String(format: "%02x", $0) }.joined()
@@ -239,7 +239,7 @@ enum ClipState: String {
       items.append(
         ActionItem(
           id: "save", priority: 2, title: "Save project file",
-          detail: "Autosave recovery is current; update your named project too.",
+          detail: "Your working copy has changes to save to the named project file.",
           destination: "save"))
     }
     if !project.clips.isEmpty {

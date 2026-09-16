@@ -287,7 +287,8 @@ def write_image_manifest(root, *, request_id="request-1", image_path="00000000.p
     (root / "manifest.json").write_text(json.dumps(manifest))
 
 
-def test_generate_validates_real_image_manifest_and_reuses_canonical_request(tmp_path):
+@pytest.mark.parametrize("seed", [4, -1])
+def test_generate_validates_real_image_manifest_and_reuses_canonical_request(tmp_path, seed):
     output = tmp_path / "output"
     write_image_manifest(output)
     # Adapter requires ownership of a new directory, so stage helper artifacts during generation.
@@ -309,7 +310,12 @@ def test_generate_validates_real_image_manifest_and_reuses_canonical_request(tmp
         invoke=invoke,
         now=lambda: 100,
     )
-    events = list(selected.generate(request(), output, lambda: False))
+    value = request()
+    value["configuration"]["seed"] = seed
+    events = list(selected.generate(value, output, lambda: False))
+    resolved_seed = events[-1]["value"]["normalizedRequest"]["configuration"]["seed"]
+    assert 0 <= resolved_seed <= 4294967295
+    assert value["configuration"]["seed"] == seed
     assert events[-1]["value"]["media"]["imagePaths"] == [str(output / "00000000.png")]
     assert events[-1]["value"]["fingerprint"]
     assert events[-1]["value"]["normalizedRequest"]["configuration"]["steps"] == 4
@@ -432,3 +438,29 @@ def test_h3_audio_shift_survives_estimate_configuration_adoption():
     result = DrawThingsAdapter._adopt_estimate_configuration(request, request["configuration"])
     assert result is not None
     assert result["configuration"]["audioShift"] == 3
+
+
+def test_random_seed_resolves_per_request_without_mutating_saved_draft(monkeypatch):
+    import secrets
+
+    draws = iter([123, 456])
+    monkeypatch.setattr(secrets, "randbits", lambda bits: next(draws))
+    value = request()
+    value["configuration"]["seed"] = -1
+    selected = adapter(HelperSpy(), account_provider=free_account)
+    first = selected.prepare(value)
+    second = selected.prepare(value)
+    assert first["normalizedRequest"]["configuration"]["seed"] == 123
+    assert second["normalizedRequest"]["configuration"]["seed"] == 456
+    assert first["fingerprint"] != second["fingerprint"]
+    assert value["configuration"]["seed"] == -1
+
+
+@pytest.mark.parametrize("seed", [-2, 4294967296, 1.5, True, "-1"])
+def test_invalid_seed_has_actionable_error_before_contacting_helper(seed):
+    spy = HelperSpy()
+    value = request()
+    value["configuration"]["seed"] = seed
+    with pytest.raises(ValueError, match="seed.*-1.*random"):
+        adapter(spy).prepare(value)
+    assert spy.calls == []

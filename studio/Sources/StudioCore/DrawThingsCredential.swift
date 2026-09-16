@@ -2,6 +2,17 @@ import Foundation
 import Security
 
 public enum DrawThingsCredential {
+  private static let session = SessionCredentialStore(
+    read: readKeychain, save: saveKeychain, remove: removeKeychain)
+
+  public static func read(_ reference: String) throws -> String? { try session.read(reference) }
+  public static func save(_ value: String, reference: String) throws {
+    try session.save(value, reference: reference)
+  }
+  public static func remove(_ reference: String) throws { try session.remove(reference) }
+  /// Forget authorized access for this process. Saved Keychain entries are unchanged.
+  public static func clearSession() { session.clear() }
+
   private static func query(_ reference: String) -> [String: Any] {
     [kSecClass as String: kSecClassGenericPassword,
      kSecAttrService as String: "org.weetodd.studio.drawthings",
@@ -12,7 +23,7 @@ public enum DrawThingsCredential {
       throw StudioError.invalid("macOS Keychain could not access the Draw Things credential (\(status)).")
     }
   }
-  public static func read(_ reference: String) throws -> String? {
+  private static func readKeychain(_ reference: String) throws -> String? {
     var request = query(reference)
     request[kSecMatchLimit as String] = kSecMatchLimitOne
     request[kSecReturnData as String] = true
@@ -25,7 +36,7 @@ public enum DrawThingsCredential {
     }
     return value
   }
-  public static func save(_ value: String, reference: String) throws {
+  private static func saveKeychain(_ value: String, reference: String) throws {
     guard !reference.isEmpty, !value.isEmpty,
       !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
       throw StudioError.invalid("Enter a nonempty credential without control characters.")
@@ -39,7 +50,7 @@ public enum DrawThingsCredential {
       try check(SecItemAdd(item as CFDictionary, nil))
     } else { try check(status) }
   }
-  public static func remove(_ reference: String) throws {
+  private static func removeKeychain(_ reference: String) throws {
     let status = SecItemDelete(query(reference) as CFDictionary)
     if status != errSecItemNotFound { try check(status) }
   }

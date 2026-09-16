@@ -16,6 +16,7 @@ the 13B of `adaln_proj` is then dropped — see :mod:`minimax_h3_mlx.adaln`.
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import math
 import time
@@ -186,6 +187,9 @@ class MiniMaxH3Pipeline:
         self._cache_builds = 0
         self._cache_build_seconds = 0.0
         self._cache_key_digest: str | None = None
+        self._adaln_weights_dropped = False
+        self._transformer_loader = None
+        self._reload_projection_backend = "auto"
 
     @classmethod
     def from_pretrained(
@@ -230,7 +234,9 @@ class MiniMaxH3Pipeline:
         dit = step(f"transformer ({dit_path.name})", lambda: load_dit(dit_path))
         video_vae = step("video vae", lambda: load_video_vae(root / "video_vae"))
         audio_vae = step("audio vae", lambda: load_audio_vae(root / "audio_vae"))
-        return cls(dit, text_encoder, video_vae, audio_vae, config)
+        pipeline = cls(dit, text_encoder, video_vae, audio_vae, config)
+        pipeline._transformer_loader = lambda: load_dit(dit_path)
+        return pipeline
 
     # -- schedule -----------------------------------------------------------------------------
 
@@ -287,6 +293,24 @@ class MiniMaxH3Pipeline:
         if self._cache is not None and self._cache_timesteps == key:
             self._cache_hits += 1
             return
+        if self._adaln_weights_dropped and getattr(self.dit, "paged_blocks", None) is None:
+            if self._transformer_loader is None:
+                raise ValueError(
+                    "H3 AdaLN weights were discarded for the previous schedule. "
+                    "Reload the transformer before changing its schedule."
+                )
+            # Resident AdaLN tensors cannot be reconstructed from the previous table.
+            # Discard the old weighted model before invoking its checkpoint loader.
+            self.dit = None
+            self._cache = None
+            self._cache_timesteps = None
+            gc.collect()
+            mx.clear_cache()
+            self.dit = self._transformer_loader()
+            from .projection import configure_projection_backend
+
+            configure_projection_backend(self.dit, self._reload_projection_backend)
+            self._adaln_weights_dropped = False
         started = time.perf_counter()
         from .lora import prepare_lora_timesteps
 
@@ -305,6 +329,7 @@ class MiniMaxH3Pipeline:
             )
         if drop_adaln:
             freed = drop_adaln_weights(self.dit)
+            self._adaln_weights_dropped = True
             mx.eval(self.dit.parameters())
             if verbose:
                 print(f"  dropped adaln projections, freeing {freed / 1e9:.1f} GB")

@@ -167,6 +167,7 @@ class H3RuntimeCache:
                 )
                 self._spec = spec
                 self._projection_backend = projection_backend
+                self._pipeline._reload_projection_backend = projection_backend
                 report = configure_projection_backend(self._pipeline.dit, projection_backend)
                 self._projection_backend_report = report.to_dict()
             return self._pipeline

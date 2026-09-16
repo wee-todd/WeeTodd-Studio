@@ -100,7 +100,7 @@
       "title": "Setup and model downloads",
       "properties": {},
       "widgets_values": [
-        "## ltx25 768x512 two stage\n\n1. Install WeeTodd Nodes and restart ComfyUI.\n2. Accept the LTX 2.5 license and download the split model components.\n3. Use `ComfyUI/models/` or shared roots from `extra_model_paths.yaml`.\n4. Queue the workflow after **LTX 2.5 Preflight** succeeds.\n\n### Downloads\n\n- [LTX 2.5 model components](https://huggingface.co/Lightricks/LTX-2.5)"
+        "## ltx25 768x512 two stage\n\n1. Install WeeTodd Studio's ComfyUI nodes and restart ComfyUI.\n2. Accept the LTX 2.5 license and download the split model components.\n3. Use `ComfyUI/models/` or shared roots from `extra_model_paths.yaml`.\n4. Queue the workflow after **LTX 2.5 Preflight** succeeds.\n\n### Downloads\n\n- [LTX 2.5 model components](https://huggingface.co/Lightricks/LTX-2.5)"
       ],
       "color": "#243447",
       "bgcolor": "#15202b"

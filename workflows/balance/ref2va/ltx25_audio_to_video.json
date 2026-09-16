@@ -118,7 +118,7 @@
       "title": "Setup and model downloads",
       "properties": {},
       "widgets_values": [
-        "## LTX 2.5 audio-to-video\n\n1. Install WeeTodd Nodes and restart ComfyUI.\n2. Accept the LTX 2.5 license and download the split model components.\n3. Use `ComfyUI/models/` or shared roots from `extra_model_paths.yaml`.\n4. Select one audio file in **Load Audio**.\n5. Describe motion that follows the source audio.\n6. Queue the workflow after **LTX 2.5 Preflight** succeeds.\n\nThe input audio stays frozen during both visual stages. The publisher uses the original source waveform.\n\n### Downloads\n\n- [LTX 2.5 model components](https://huggingface.co/Lightricks/LTX-2.5)"
+        "## LTX 2.5 audio-to-video\n\n1. Install WeeTodd Studio's ComfyUI nodes and restart ComfyUI.\n2. Accept the LTX 2.5 license and download the split model components.\n3. Use `ComfyUI/models/` or shared roots from `extra_model_paths.yaml`.\n4. Select one audio file in **Load Audio**.\n5. Describe motion that follows the source audio.\n6. Queue the workflow after **LTX 2.5 Preflight** succeeds.\n\nThe input audio stays frozen during both visual stages. The publisher uses the original source waveform.\n\n### Downloads\n\n- [LTX 2.5 model components](https://huggingface.co/Lightricks/LTX-2.5)"
       ],
       "color": "#243447",
       "bgcolor": "#15202b"

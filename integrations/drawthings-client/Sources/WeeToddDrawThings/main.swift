@@ -28,6 +28,10 @@ do {
   requestID = id
   let value: [String: Any]
   switch CommandLine.arguments[1] {
+  case "text-preflight": value = try LocalTextGeneration.preflight(request)
+  case "text": value = try LocalTextGeneration.run(request) { progress in
+    try? emit(["type": "progress", "value": progress])
+  }
   case "estimate": value = try ComputeEstimate.evaluate(request)
   case "capabilities": value = try Discovery.fetch(request)
   case "generate": value = try Submission.run(request) { progress in
@@ -37,7 +41,7 @@ do {
   }
   try emit(["type": "result", "value": value])
 } catch {
-  let code = (error as? TransportError)?.rawValue ?? "transport_failed"
+  let code = (error as? LocalTextError)?.code ?? (error as? TransportError)?.rawValue ?? "transport_failed"
   try? emit(["type": "error", "code": code])
   exit(1)
 }

@@ -1,10 +1,54 @@
 # WeeTodd Studio
 
-A native Swift macOS editor around the shared WeeTodd MLX renderer. The app lives in this
-repository; it does not need a running ComfyUI server. This is an initial development build,
-not a notarized consumer release.
+WeeTodd Studio is the project's primary product: a standalone native macOS app for planning,
+generating and editing AI movies and image assets on Apple Silicon. Draw Things is a central
+integration for fast inference; the shared native MLX renderer adds models and advanced features
+beyond the tasks exposed by that integration. The maintained ComfyUI nodes use the same shared
+engines and remain available separately. Studio does not need ComfyUI.
+
+This guide covers the application. Start with the [project overview](../README.md) for product
+direction and backend choices. This is a source-build preview, not a notarized consumer release.
+
+## Start here
+
+| Your goal | Go to |
+| --- | --- |
+| Build and launch the standalone app | [Build and open](#build-and-open) |
+| Generate through a local Draw Things server or Cloud API | [Draw Things setup](#draw-things--experimental) |
+| Reuse supported installed Draw Things weights with native H3 | [Local H3 model reuse](#reuse-local-draw-things-h3-models) |
+| Set up native LTX 2.5, LTX 2.3 or H3 | [Guided model setup](#guided-model-setup) |
+| Choose engine, task and sampling controls | [Clip generation](#clip-generation-controls) |
+| Generate image assets or import Draw Things settings | [Image workspace](#images-clips-and-loras) |
+| Plan a movie with reusable subjects and references | [Guided movie planning](#guided-movie-planning) |
+| Use local Qwen models already installed by Draw Things | [Prompt Assistant](#local-qwen35-prompt-assistant) |
+| Automate a movie or use ComfyUI graphs | [Headless jobs](#headless-movie-and-clip-jobs) / [Nodes](../README.md#comfyui-nodes) |
+
+## Inference and model storage
+
+Choose **Draw Things** as a clip engine to submit generation to a configured Draw Things endpoint.
+Choose **H3**, **LTX 2.3** or **LTX 2.5** for native execution using a compatible recipe. These are
+explicit choices; Studio does not silently substitute one backend for another.
+
+Use the Draw Things route first when it supplies the needed model/task. Native execution is useful
+for features such as audio-driven video, video/reference conditioning and model-specific controls
+where implemented. LTX 2.5 is already a native engine; the current Draw Things adapter covers
+LTX 2/2.3 and selected H3 video tasks. Future Draw Things models should be accessible through the
+existing UI when their capability and configuration mappings are compatible. Advanced native
+features remain useful even after the same model becomes available through Draw Things.
+
+**Sharing weights is a separate choice from selecting the inference engine.** Supported H3 model
+files in a Draw Things installation can feed the native renderer without copying/converting the
+whole checkpoint. That initial direct-weight path is text-to-video with generated audio; it does
+not yet qualify all native conditioning tasks. The local assistant separately reuses supported
+Qwen3.5 files. Other models require compatible native components. Keep model files in a stable,
+readable location, and let setup validate the particular component layout and task.
 
 ## Build and open
+
+Save your work and quit Studio before rebuilding its app bundle. The packager refuses to replace
+a running copy: replacing an ad-hoc-signed bundle while it is open can make macOS reject the file
+picker, causing a beachball followed by no dialog. If this happens after an older build script
+replaced the app, quit normally and reopen the updated app before retrying the picker.
 
 Run these commands from the repository root on Apple Silicon with Xcode 26 or newer.
 The MetalFX frame interpolator uses the macOS 26 SDK:
@@ -497,6 +541,10 @@ canvas and frame rate. Supported outputs are H.264 MP4/MOV, ProRes 422 HQ, or a 
 Current intermediate clips use H.264; ProRes and PNG output are not end-to-end lossless masters.
 
 Finishing order is resize/upscale, then interpolate, then transitions/titles/audio assembly.
+The assembled video is conformed again to the movie frame rate so AAC packet padding and
+transition timestamps cannot leave gaps in its frame cadence. Final validation checks the
+exported streams and timing before reporting success. Set the finished length through clip trims
+and transition overlaps; model frame-count rounding can make generated clips longer than requested.
 RIFE supports integer 2×/3×/4× interpolation with its configured MLX executable and weights.
 MetalFX spatial upscaling uses the native helper. Neither method downloads models silently.
 
@@ -546,6 +594,38 @@ passes through to the active child process. Existing unverified final exports ar
 A clip job retains only that clip's intersecting titles/audio, shifted into clip-local time.
 
 ## Validation and next release work
+
+Run `python scripts/validate_project.py --profile studio` for Swift tests and the Python Studio
+bridge/packaging tests. Add `--profile workflows` or `--profile remote` for those integrations.
+Release packaging can target a separate bundle while the development app stays open:
+
+```bash
+python scripts/build_studio_app.py --configuration release --output /tmp/WeeTodd-Review.app
+```
+
+Separate output preserves the default bundle and saved signing identity. The selected output is
+still protected against replacing a running app; all nested tools and the completed bundle are
+signed and verified.
+
+Opening or creating a project starts a separate undo history. Before leaving an unsaved document,
+Studio writes a per-session project snapshot and its source-file metadata under the application
+data directory's `Recovery` folder. A failed recovery write keeps the current document open.
+These snapshots supplement the working-copy autosave; recovery history browsing remains future work.
+Open/New also replaces the active startup snapshot immediately, so a restart restores that movie.
+Render preparation belongs to its original document and clip. A render that finishes after clip
+edits is retained as a version without replacing those edits; if its document was closed or its
+clip deleted, Studio reports the saved output path instead of attaching it elsewhere.
+New render versions preserve their usable source interval, including extension offsets. Switching
+versions preserves relative trims where that interval permits; selecting the active version keeps
+its existing trim, including older projects without interval metadata.
+When an older appended extension has no recorded context boundary, switching to a newer version
+starts at that version's known usable segment; historical trim offsets cannot be reconstructed.
+Generate reuses a still-valid reviewed preparation and prepares again only when it is missing or stale.
+
+Attachment digests use streamed background reads and are cached by file revision. Preparation
+awaits the digest, and Draw Things generation verifies the file contents again before submission.
+Image thumbnails decode off the UI thread to a bounded pixel size and share a 64 MiB decoded-image
+cache. Movie preview's duration and skip-to-end use the complete movie duration.
 
 The initial validation includes Swift document tests; real FFmpeg movie/transition/title/audio and
 sequence/anchor tests; job locking, integrity and resume tests; a real LTX 2.5 generated job and resume;
@@ -689,9 +769,12 @@ preservation without downloading Python or installing models.
 
 ## Draw Things — experimental
 
-Draw Things is an optional clip provider alongside native H3/LTX and imported movies. The shared
-Python adapter invokes a separately built Swift gRPC helper; it does not import ComfyUI or load
-native MLX generation weights. Native projects and v1/v2 headless jobs remain readable.
+Draw Things is a central image/video inference route in WeeTodd Studio, alongside native engines
+and imported movies. Its helper is an optional build component so native-only installations remain
+possible. The shared Python adapter invokes that separately built Swift gRPC helper; it does not
+import ComfyUI or load native MLX generation weights. Native projects and v1/v2 headless jobs remain
+readable. Connection capabilities determine which models/tasks are available; native feature
+support must not be inferred from a model appearing in the remote catalog.
 
 ### Build the optional connection runtime
 
@@ -766,6 +849,197 @@ identifies how to supply a secret; it does not include that secret. The Python r
 `WEETODD_DT_CREDENTIAL` or a profile `credentialRef` of `env:VARIABLE_NAME`. Treat exported project
 prompts and media paths as private even though credentials are excluded.
 
+### Local workflows
+
+Open **Director** in the toolbar, or **Movie → Workflows…**, to run the built-in movie planner or
+import a user workflow. Director is the name of the planning assistant; versioned workflow files
+remain its execution format. New guided plans organize review around **Brief**, **Subjects** and
+**Shots**. Choose detailed review before starting for separate intermediate approvals. Saved jobs
+retain the exact approval requirements in their saved definitions.
+
+Director saves intake, selected step and unfinished typed review edits separately from approved
+outputs, under its local `Director` data folder. Closing and reopening restores these drafts.
+**Save** and **Approve** include reference additions, removals and ordering without a model call.
+An invalid imported job leaves the current session intact. After a failed or paused run, completed
+outputs remain available. Applying a result checks the originating document session and inputs;
+reopening a different movie cannot silently redirect a late result.
+
+Before loading weights, the helper checks the actual text/image token budget: at most 24,000 UTF-8
+input bytes, 4,096 input tokens including image expansion, and 1,024 output tokens. A task that
+cannot fit stops with guidance to split it; source text remains saved. Large directly relevant
+context is not silently clipped. Repeated interruptions no longer make an unfinished coverage
+review appear ready.
+
+Human review actions retain revision-linked changes and model-turn references in the atomic run
+checkpoint. They are local provenance, **not permission to train on or export your work**. The
+checkpoint remains bounded; when its storage limit is reached, the previous checkpoint is preserved.
+
+**Execution history…** opens a read-only step inspector, including while a workflow is running.
+Select a step for its purpose, recorded elapsed time, saved response count (including child
+records), and chronological execution/reuse entries. New activity records distinguish actual model
+requests, reused responses, step-level retries, cancellations and user-requested reviews. Expand
+**Call and retry details** for timings, task/system-instruction excerpts, errors and request-text
+fingerprints. A returned model response has not necessarily passed output validation; validation
+failures appear separately. Timings include loading and validation; model-call times are nested
+within step times, and human approval waiting is excluded. The panel reads the checkpoint off the
+UI thread every two seconds; live activity elapsed time updates once per second.
+
+**Model turns…** inside a selected step opens every archived model request or reused response,
+with full **System**, **Input**, **Response**, **Images** and **Details** tabs and a copy button.
+Messages load one turn at a time from a read-only SQLite connection; the list loads in pages of
+100 and refreshes during execution. Details include model/runtime identity, decoding settings,
+request fingerprint and recorded JSON/schema validation results. A schema pass is not a semantic
+or human approval. Errors, cancelled calls and malformed responses remain inspectable after retries.
+Older checkpoints expose retained full messages and child responses; missing fields are explicitly
+unavailable, and their checkpoint order is not claimed to be chronological.
+
+New full transcripts are stored in `model-turns.sqlite` beside `run.json`, independently of the
+abbreviated overview. No turns are silently rotated out of this database. It is capped at 16 MiB
+or a smaller share of the workflow's declared disk budget, with room reserved for checkpoint and
+SQLite journal writes. New model calls require at least five artifact slots. If the archive fills,
+the workflow stops explicitly before admitting another request; keep the run folder and start a
+new run. Image files and model weights are never copied into the log. These local records include
+your prompts, responses and referenced paths; inspect them before sharing.
+
+History is bounded to the last 40 activities and 20 detail entries per activity. Older omitted
+entries are disclosed, and counters cover the whole retained activity even when details are trimmed.
+Older runs remain inspectable but only expose their saved timing/responses; missing past retries
+and regenerations are not reconstructed. The history does not modify approvals or trigger generation.
+
+Set movie length, preferred clip length, FPS, idea and optional reference images, then use
+**Run next** to inspect each step or **Run remaining** to continue. Choose a step to inspect
+its output; **Regenerate selected** invalidates its dependent results. **Pause**, **Resume last**
+and **Open job…** preserve completed work. **Export job…** writes a local job executable with
+`python scripts/run_studio_workflow.py /path/to/job.json`, using referenced files in place.
+
+The Prompt Assistant’s **Step-by-step…** button opens staged image observation, edit planning,
+sequential editing and review. It returns a proposal for explicit application. Built-ins require
+Qwen3.5 4B; custom text-only definitions can use 9B. Model-generated reviews may be incorrect.
+You can paste a detailed `[Shot 1]` … script into Movie idea. Matching shot counts preserve
+source order; timestamps are checked against the movie settings. Model output formatting errors
+are distinguished from input-length errors, and one missing outer JSON closer can be recovered
+without changing its values. Your source text remains saved unchanged.
+
+Short authored shots that fit the 300-character beat contract are copied directly in guided
+planning, with validated leading timing metadata removed from the action. Longer shots use a
+bounded summary request. Recognized source speech is copied without normalizing its punctuation;
+invented, changed or duplicated quoted words are rejected before review. Approved clarification
+answers are part of the permitted source. If their dialogue has no safe shot assignment, Director
+stops with guidance instead of silently omitting it. This is a bounded parser for quoted speech,
+speaker labels and H3 dialogue tags, not a universal screenplay or language parser.
+
+The separate legacy **Movie planning** workflow observes references once, writes a structured story, then pauses for
+**Approve step**. After approval it plans one small action with start/end states per clip and pauses
+again. Select **Clips** to edit states, approve individual clips, or **Repair…** a selected clip with a specific correction.
+Approved choices must be unlocked before editing or repair. Changes revalidate dependent clips;
+unaffected approved clips are reused. **Run remaining** builds endpoint descriptions directly
+from approved states and checks timing/links. Structure validity does not certify creative quality.
+Older imported v1 definitions remain supported. Workflows do not generate endpoint images/video
+or insert timeline clips yet.
+Workflow task-LoRA/QLoRA loading and training are not available in the app. A separate small
+text-adapter experiment has demonstrated training/save/reload, but vision compatibility and
+quality gates remain unresolved. It does not qualify a user-facing training feature.
+
+See the [workflow authoring and execution guide](../examples/studio-workflows/README.md) for
+schemas, job bindings, storage limits, cancellation and the remaining milestones.
+The [production evaluation guide](../examples/director-production-evaluation/README.md) describes
+the frozen movie-planning regression cases, explicit local-model execution and measurement limits.
+
+### Local Qwen3.5 Prompt Assistant
+
+Open **Set up assistant…** in Director or the Prompt Assistant. You can reuse an installed model,
+locate one on another drive, or download the supported Qwen3.5 4B checkpoint without installing
+the Draw Things app. The managed renderer and separately linked local helper are still required.
+
+The download is approximately 4.89 GB. Choose Studio's default model folder or an external folder;
+**Download / Resume** continues an interrupted download in that location and verifies the pinned
+SHA-256 before publishing it. Existing files are preserved. **Check text + image inference** makes
+two small local test calls; it is explicit, separate from downloading, and does not certify creative
+quality. A reused split checkpoint needs this check before selection in the setup sheet.
+
+Studio discovers these dedicated text-generation checkpoints in the standard Draw Things and
+Studio-managed model folders:
+
+- `qwen_3.5_4b_i8x.ckpt` — Qwen3.5 4B, with text generation and vision.
+- `qwen_3.5_9b_i5x.ckpt` — Qwen3.5 9B, currently text-only in Studio.
+
+For another model location, use **Locate…** and select the installed checkpoint. Keep any matching
+`-tensordata` sidecar beside it. Studio opens the files in place and does not convert or copy them.
+Other Qwen checkpoints, including H3's truncated Qwen3-VL encoder, are not interchangeable.
+**Rescan** checks the standard model folders. An existing model in an external/custom store
+must be selected with **Locate…**; the absence of a scan result does not mean it needs downloading.
+Studio remembers the selected checkpoint path across restarts.
+
+For headless setup, use the configured project Python environment:
+
+```bash
+python scripts/setup_assistant_model.py catalog
+python scripts/setup_assistant_model.py download --destination /your/model/folder
+python scripts/setup_assistant_model.py health /your/model/folder/qwen_3.5_4b_i8x.ckpt --helper /your/WeeToddDrawThings
+```
+
+The [assistant evaluation probes](../examples/assistant-evaluation/README.md) measure exact content,
+format and latency on synthetic tasks. They are separate from full-movie and hardware qualification.
+
+Draw Things image and video requests accept seed `-1` for a fresh random seed at execution.
+`0` and positive integers through `4294967295` are fixed seeds. Config imports and headless jobs
+preserve `-1`; the shared adapter resolves it once per run before estimation and reuses that
+exact value for generation and result provenance. A separate Check Settings & CU is a preview;
+a later generation gets its own seed. The image editor offers **Random each generation**
+(the default for new drafts) and **Fixed seed**. Existing fixed seeds remain fixed until changed.
+**New fixed seed** chooses a number once; repeated generation then intentionally reuses it.
+
+Enter instructions to draft new text or improve the current prompt, choose the output limit, then
+**Generate text**. Review/edit the proposal and explicitly **Apply to prompt** or **Copy** it.
+Applying changes only prompt text; it does not launch image/video generation or alter settings,
+audio fields, references or LoRAs. Clip changes participate in Studio Undo. If the destination
+or its prompt changed during the request, copy the result and reopen the assistant.
+
+For visual assistance, choose the 4B model. The assistant displays labeled thumbnails of the
+enabled image canvas/mood-board references, or the selected clip's attached images, including
+first, last and keyframe roles. Check/uncheck images individually; **Load images…** adds other
+local images without changing generation conditioning. Up to eight images can be included, in
+the displayed order. The first eight candidates start checked. **Exclude all** selects text-only
+operation. Each image is limited to 64 MiB, EXIF orientation is honored, and analysis uses a
+whole-image RGB view up to 512 pixels per side with dimensions rounded to 32-pixel multiples.
+The original files are unchanged. Smaller analysis images can miss fine text and tiny details.
+Movie files/audio are not sent to the VLM; clip image attachments are still images.
+
+Inference runs locally through the bundled Draw Things helper. Neither Draw Things'
+gRPC server nor DT+/API credentials are required. The input limit is 4,096 tokens including
+image tokens (also at most 24 KB of prompt/instruction text); output is selectable up to 1,024
+tokens, with a warning when the limit is reached. Progress shows model loading, image processing
+and output-token counts. Completion reports the number of images used and
+elapsed time; completion, failure and cancellation end the request-owned process and unload
+the model. There is no persistent KV cache or automatic model download.
+The current SDK path uses greedy decoding; change the instructions for a different draft rather
+than expecting randomized alternatives from an identical request. Each click snapshots the latest
+instructions; the original prompt remains the source until you apply a proposal and reopen the
+assistant. Editing instructions now follow the source draft and explicitly override conflicting
+source/image details. Requested changes to subjects, setting, length and format take precedence
+above preservation. Studio clears the previous proposal while generating and flags a verbatim
+repeat or unchanged source. These checks do not certify that every requested edit was followed;
+the 4B model can still follow only part of a compound instruction.
+
+The helper also accepts a local `text` command for scripts: send a JSON object on stdin containing
+`requestID`, absolute `modelPath`, `systemPrompt`, `prompt`, and integer `maxTokens` (1–1024).
+Optional `images` is an ordered array of objects with absolute `path` and nonempty `label`.
+It returns JSONL progress followed by a result containing `text`, token counts, `truncated`,
+`totalSeconds`, `imagesUsed` and available stage timings. This does not change existing headless movie/clip schemas.
+The optional helper build and distribution requirements below still apply.
+
+Qualification: request validation, token limits, RGB image patch ordering, multimodal token
+alignment, process streaming/cancellation and Studio target protection have automated tests.
+Local M3 Ultra checks used an existing DT 4B checkpoint, including its vision weights. An icon
+description took 5.02 seconds; a two-endpoint comparison took 4.57 seconds. An eight-image test
+correctly identified matching images as numbers 1, 4 and 7 in 5.60 seconds. Process peak footprint
+was about 3.10, 3.14 and 4.12 GB respectively, measured by macOS `time -l` (not the RSS counter).
+These are functional smoke timings with existing OS caches, not cold/warm benchmarks or physical
+36 GB qualification. Text-only inference also completed, and real-process cancellation returned
+in 1.07 seconds. The endpoint comparison recognized the dragon appearing but inferred some
+incorrect pose/setting details; review the proposed text before applying it. Broad text quality,
+small-detail/OCR accuracy and the 9B vision path remain unqualified.
+
 ### Images, clips, and LoRAs
 
 Use the **+ → Generate Image…** action on Global, Project, or Clip Assets. The whole-window prompt
@@ -781,6 +1055,15 @@ sampler, shift, and compatible LoRAs/groups are editable. **Use result as canvas
 another edit; generation never silently replaces the input. Control images and masks are not yet
 enabled. Images are added to the captured destination store without changing the
 timeline. A removed destination clip cannot silently redirect the completed image to another clip.
+
+During Draw Things image generation, **Live preview · approximate** displays streamed latent
+previews when the server supplies a supported format. Sampling step messages accompany the
+preview, and the finished image replaces it after successful generation. This lightweight preview
+does not load a separate VAE and may differ substantially from the final decoded image. Updates
+are limited to twice per second and overwrite one temporary PNG per job, removed on completion,
+failure or cancellation in Studio. Previews are never added to assets or used as conditioning.
+Connections/models that omit previews retain normal progress and final-image delivery. Video
+previews and full-quality intermediate VAE decoding are not part of this initial image feature.
 
 The initial canvas-plus-two-reference route was smoke-tested locally with FLUX.2 Klein 9B KV
 at 512×512, four configured steps, and 65% generation strength. Ordered references and their
@@ -823,9 +1106,36 @@ model choice, LoRA-group saving, and quit/reopen recovery of both references, th
 sampling/LoRA settings. Preparing the recovered request displayed 327 estimated CU for the
 self-hosted route, and generation saved its result in Project Assets.
 
-If macOS requests Keychain access when refreshing or generating, resolve its permission dialog.
-Studio now performs credential reads off the UI thread and reports that wait in the status area.
-Cancelling during that wait prevents job submission after the credential request returns.
+Draw Things credentials remain in macOS Keychain. Studio reuses a successfully authorized read
+in memory for the current app session, including concurrent catalog/estimate/generation requests.
+Editing or removing a credential clears its cached access. **Clear Session Access** in Draw Things
+Connections clears all cached credentials without deleting saved keys; use it after changing a key
+outside Studio. Quitting also ends the cache. Missing credentials and denied reads remain retryable.
+Keychain reads, saves and removals run off the UI thread. Cancelling a job while it waits for Keychain
+prevents submission after the credential request returns.
+
+If macOS asks for Keychain access, **Always Allow** authorizes that app identity to retrieve the
+specific saved item. Development builds signed ad-hoc can acquire a different identity after an
+update and require authorization again. For consistent identity across builds, install an Apple
+Development certificate for local development or a Developer ID Application certificate for direct
+release distribution, then build with the same certificate and bundle identifier:
+
+```bash
+security find-identity -v -p codesigning
+python3 scripts/build_studio_app.py --configuration release \
+  --drawthings-distribution studio/.build/drawthings \
+  --signing-identity "<certificate name or SHA-1 from the list>"
+```
+
+The successful choice is saved locally in ignored `studio/.build/studio-signing.json` and reused
+by later builds. `WEETODD_STUDIO_SIGNING_IDENTITY` overrides that saved choice; an explicit
+`--signing-identity` takes precedence over both. An unavailable selected certificate fails the build
+and preserves the previous bundle; it never silently falls back to ad-hoc signing. Passing `-`
+explicitly selects ad-hoc signing again. A first build without a configured identity still supports
+ad-hoc signing and prints a warning. The build signs nested executables before the bundle and
+verifies the result. This configures signing, not notarization or App Store distribution; it does
+not broaden Keychain access permissions. Switching from ad-hoc to certificate signing may require
+one new authorization.
 
 Use the timeline **+ → Draw Things** to create a video clip. Refresh models, select an exact server
 model, write its prompt, and prepare it. Native MLX recipe files are not needed for this provider.
@@ -937,3 +1247,289 @@ Cloud API jobs do not require the Draw Things app.
 Fixture tests establish software behavior, not output quality or a promise that a particular remote
 model will fit a free-tier allowance. Retail signing/notarization and clean-Mac qualification remain
 separate release work.
+
+
+## Project subjects and shot list
+
+Open **Movie → Shot List…** or the **Shot List** toolbar button. The project stores this optional
+planning document alongside existing media and timeline data; older projects still open unchanged.
+
+1. In **Original script**, paste the complete brief/script, including dialogue, camera and sound.
+   **Identify characters, props and locations…** opens the local Qwen subject workflow. Complete the
+   step and choose **Add to project**. Subjects that you approved retain description approval;
+   the remaining subjects begin as drafts. Review completeness: extraction can miss subjects.
+2. In **Characters, props & locations**, edit each name, kind, aliases and appearance. Source evidence
+   and suggestions are read-only. **Approve description** locks that version. Unlock it before editing. Add
+   subjects manually or merge duplicate subjects of the same kind; both must be unlocked. Merging
+   keeps the selected destination's description and preserves the other description as a review note.
+3. **Import images…** or **Choose project/global image** links existing character sheets, prop views
+   or setting images into Project Assets without copying media. **Approve references** is separate
+   from approving a description. Missing, relinked or modified files require reference review.
+   Images already made in Studio's Draw Things editor can be selected here. Dedicated versioned
+   sheet-generation workflows are not wired to these records yet.
+4. In **Workflows**, choose **Add to project** after movie clip planning to import the detailed shots.
+   Repeating an import adds missing records and preserves existing edits/approvals; it does not
+   refresh an existing shot from a changed workflow result. The original source text is preserved.
+5. In **Shots**, add/reorder/edit shot names, frame counts, action, detailed direction, first/last
+   descriptions, camera, dialogue, sound and subject links. FPS is the shot list's own planning
+   timebase. Approving a shot checks required descriptions, timing, subjects and continuous-shot
+   boundaries. Subject or timing changes make dependent approvals stale. Changes are undoable and
+   autosaved with the project. Timeline clips and movie settings are not changed.
+6. **Export shot list…** writes a planning JSON document for inspection or future automation; it is
+   not an executable generation job. Subject and shot UUIDs remain stable. Explicit subject
+   description approvals carry into newly imported project subjects. Reimports preserve existing
+   project edits and approvals; they do not overwrite them with workflow changes.
+
+Subject workflow results open as a hierarchy of **Characters**, **Environments**, and **Props**,
+with names sorted within each group. The new **Identify and review visual subjects** workflow
+adds an internal description review after extraction. Each subject is checked against five visual
+aspects appropriate to its type (for example, environment layout, materials, lighting and features).
+A drafting call proposes a fuller design, and a separate critique checks only the current candidate.
+There are at most two rounds per subject (four model calls); unresolved or malformed reviews remain
+**Needs attention**. The agent never grants human approval.
+
+**Create reference…** is available in workflow subject review and the project's subject editor.
+It opens the existing Draw Things image workspace with editable character turnaround, portrait,
+prop, environment, set, wardrobe and custom-reference templates. The prompt uses the current
+saved description and linked object definitions. Apply a template to rebuild the prompt, then
+edit it freely. Pose/camera instructions are prompt directions, not a guaranteed pose-control
+adapter. The previous ordinary image workspace is restored when you return to approval.
+
+Choose any image model recognized in the connection's model catalog, including custom checkpoints
+using supported DT image families. **Starting settings** provides the user's Krea Turbo eight-step
+starting point and a Klein four-step/CFG-one starting point; it never switches models or inserts
+LoRAs. Qwen Edit and other models can use editable steps, CFG, sampler, shift, compatible LoRAs and
+groups, or **Import Config…**. Models introduced after the bundled DT client may require a client
+update. Unsupported input combinations are reported instead of silently dropping references.
+
+The image editor loads the selected connection's model catalog automatically when opened or
+when the connection changes. Loading, empty catalogs and failed discovery have separate messages;
+**Retry loading models** / **Refresh** retries discovery. A failed refresh retains the last loaded
+list with a warning. Clearing the model selection does not clear that list. Restoring a draft or
+importing a config preserves its model and LoRAs; explicit connection/model edits apply compatibility
+changes. Models remain listed even when the current canvas/mood-board inputs are incompatible.
+
+The reference editor opens as a larger, resizable window. **Reference setup** expands the template,
+style and pose/camera controls; **Existing references** expands reusable image inputs. The **Mood
+board** button shows or hides that panel (hidden initially when empty). **Tools** contains prompt
+assistance, config import and headless export. Config and connection dialogs open on the current
+editor. The zoomed canvas scrolls within its viewport, without covering surrounding controls;
+**Fit** resets the view and **Inspect image** opens the original-image preview. **Hide prompt**
+gives the viewport additional vertical space without changing the saved prompt.
+
+Existing subject references appear as thumbnails. Choose **Canvas** for an image-to-image input,
+or **Mood board** for supported reference editing. Klein/FLUX.2 and Qwen Edit Plus/2511 expose
+multiple mood-board inputs; Krea and other basic routes retain canvas conditioning. References
+are never silently enabled, and canvas strength remains adjustable. Check Settings & CU before
+generating. No cloud job is submitted by opening the editor.
+
+Click a reference thumbnail to inspect its original image in a large popup. **Fit** shows the
+whole image, **Actual Size** uses one image pixel per display pixel, and the zoom slider allows
+closer inspection with scrolling. **Done** or Escape returns to the same review. This is available
+in workflow approval, project subjects, the reference generator and the mood board.
+References are labeled by subject and reference number, and the Candidates menu numbers each
+result. Preview selection uses the full file path independently of those labels, so files named
+`00000000.png` in different generation folders remain distinct. Removing or reordering a
+reference does not retarget an already selected image. Original files are not renamed.
+
+Generated candidates are new Project Assets, retaining the source description, template and
+generation provenance. **Candidates** recalls earlier results for the same object. **Use as
+reference** links the selected result without copying its file or running Qwen; approval remains
+your decision. Workflow attachment invalidates affected approvals and marks older agent notes as
+outdated. Project reference approval stays separate from description approval. The per-object
+draft is saved for reuse, and an attachment failure leaves the generated asset available.
+
+Select a subject and use **Add reference images…** to attach up to eight existing images.
+**Review & improve description** uses the installed local Qwen3.5 **4B** to inspect those images
+alongside relevant script passages. The 9B text route does not support these visual reviews.
+Image observations appear under **Observed in reference images**; invented additions appear under
+**Proposed design details — approve or revise**. These are model interpretations for you to verify.
+Source-labeled phrases must occur in their cited text; a valid citation number alone is insufficient.
+Unmatched paraphrases or added details are conservatively labeled as proposals for your approval.
+When no images are attached, the writer is explicitly told to use source or proposal details.
+If design proposals are allowed, it writes five plain visual aspects and the app labels the
+result as proposed design details. The separate critic still checks identity and visual coverage.
+The app also flags known inventory names used inside another object's appearance, prompting an
+object-ID reference instead. This prevents a missed named-object conflict from receiving a clean
+agent report; it does not detect every paraphrase or settle ambiguous ownership automatically.
+Any hallucinated image claim is retained only as an unverified design proposal, never as an image
+observation. Zero is not a valid source/image citation and is never reassigned to a real attachment.
+A reference supplements the script; conflicts should be flagged rather than silently settled.
+Images stay referenced in place, and **Add to project** links them into Project Assets for reuse.
+Selecting images alone does not run the model: press the review button to apply them.
+
+Edit the name and description, then choose **Save & approve description**, or use **Save changes**
+followed by **Approve description**. Agent notes are advisory: you can approve your own corrections
+even when the agent flagged issues or reviewed an earlier version. Another model call is optional,
+and approval does not run it. The saved description is locked after approval; unlock it before editing.
+The agent report stays intact and is labeled when it predates your edits or image selection.
+Project-level approval follows the same human decision model; imported notes and warnings remain
+visible. Director also offers one explicit batch approval for the saved subject inventory; save
+unfinished edits first. Individual approval remains available. Unlock a description before changing
+it. IDs are app-controlled, and evidence and
+suggestions are selectable, read-only text. **All outputs (JSON)** is an optional inspection view.
+The project subject list uses the same grouping and read-only source fields. Existing checkpoints
+can be reviewed without regenerating their subject inventory.
+
+Subject extraction reads numbered source passages in bounded sections, selecting evidence IDs.
+Code copies the original passages instead of accepting model-authored quotations. It runs at most
+16 sections across three subject kinds (48 calls per attempt), with one retry, and at most 24 final
+subject proposals. A section that reaches its eight-proposal cap adds a visible completeness warning
+in both the workflow and imported project. Subject IDs are host-assigned, so accented names do not
+break the machine-readable contract. Each request has the existing 1,024-token response ceiling. Files/models stay
+referenced in place; no image generation, cloud CU spending or model download occurs in this stage.
+Evidence selection and descriptions still need human review; exact source text does not certify
+that a model interpretation is correct.
+
+Next: feed the approved project records into versioned DT sheet-generation workflows, generate and
+visually check endpoint candidates, then explicitly apply approved shots to the timeline with engine
+capability/frame-grid validation. Current workflow checkpoints remain available independently.
+
+
+## Production library and object relationships
+
+Open **Movie → Production Library…**, the matching **Media & Assets** button, or the library
+button in **Shot List**. This catalog stores small metadata packages in SQLite using the macOS SDK;
+there is no new Python dependency or media/model copy. Existing projects remain portable JSON and
+open without the global database.
+
+The **Production objects** tab groups Characters, Environments, Sets, Locations (unclassified),
+Props, Clothing and Outfits. Existing locations keep their IDs and meanings until you explicitly
+change their kind. An environment defines shared architecture/design; a set must select its parent
+environment. Day/night, weather and temporary states belong in the shot’s appearance notes rather
+than duplicated environments.
+
+- Edit names, descriptions and comma-separated tags. IDs remain app controlled.
+- Use **Link object…** to reference another definition. Choose Contains, Wears, Holds, Uses,
+  Located in or Part of, and add a placement/state note. Multiple placements can reference the same
+  prop ID; their instance IDs remain separate. Clicking the linked name opens its definition.
+- **Publish from this movie** saves an immutable version with linked dependencies and image metadata.
+  Publishing an environment includes its sets; publishing one set includes its parent and required
+  objects but excludes sibling sets. Unchanged publications reuse the current version.
+- Search global packages by name, kind or tag, then choose **Use in movie**. The movie stores pinned
+  definitions and image links. Existing conflicting IDs cause a clear error and leave the movie
+  unchanged; automatic version replacement/three-way merging is not implemented.
+- Edit an imported object locally to make a movie variation. Its library origin remains visible;
+  publishing creates another package version and never silently updates other movies.
+- Under a shot’s **Resolved objects and references**, add shot-only appearance/state overrides.
+  They do not rewrite the movie or global definition. These are planning data for subsequent
+  generation workflows; they are not yet applied automatically to timeline clips.
+
+Approvals include transitive object-definition revisions. Changing a linked coat or prop makes
+its owners’ description/reference approvals and affected shot approvals stale. Cycles are traversed
+safely; missing IDs, invalid environment parents and excessive relationships fail structural checks.
+Human approval remains independent of optional agent reports. Referenced objects cannot be deleted
+until their uses are removed. Merges remap links transactionally or report a conflict.
+
+**Export package…** writes `weetodd-production-library-v1` metadata for sharing/import into another
+movie. **Export shot list…** writes `weetodd-shot-list-v2`, including planning records, reference asset
+metadata, resolved dependency snapshots, shot appearance overrides and unresolved-link warnings.
+Neither export embeds image bytes. Use the movie’s **Collect Media** feature for portable files;
+missing paths must be relinked before generation. A catalog package is limited to 2,000 objects and
+2 MB of metadata; searches show at most 100 matching packages. SQLite revisions are whole dependency
+snapshots per published root, retaining stable object/placement IDs across versions.
+
+The reviewed inventory workflow v1.2.0 now runs extraction → **Link reusable objects** → description
+review → **Review object coverage**. `project.link_subjects@1` proposes links only to known inventory IDs, keeps source evidence,
+and separates suggested missing objects from the inventory. It is limited to 24 subjects and two
+attempts each, with per-subject checkpoints. Review or edit relationship roles/placements before
+approval. Old saved workflow definitions stay pinned; choose the current builtin for a new run to
+include the new linking step. Runtime-ready local model bindings remain outside portable definitions.
+
+Automatic sheet workflows, endpoint-frame population and shot-list application to the timeline
+remain future work. Use **Create reference…** for explicit reference-sheet generation today.
+Explicit library-version reconciliation, saved appearance
+presets and automatic classification of legacy locations are follow-on work.
+
+Qualification on 2026-09-13: 116 Swift tests (one optional skip), 184 targeted Python tests, native
+package import/publication/search/navigation checks and a local Qwen relationship smoke test.
+The latter completed in 12.01 seconds with three calls: a valid actor→jacket link was retained,
+while a reversed jacket→actor wearing relation was rejected and left for review. Advisory “ready”
+means the proposal passed available checks, not that its meaning has been independently proven.
+
+
+Descriptions in workflow review and the project object editor highlight explicitly linked object
+names, aliases and IDs as native macOS links. Hover to read the target’s current description;
+click in a locked description, or Command-click while editing, to open the object. The text remains
+plain text in project/workflow files. Ambiguous shared names are left unlinked; the target’s explicit
+ID can be used instead. Relationship-row names also show description tooltips.
+
+The final `project.review_object_coverage@1` pass checks the enriched descriptions against the whole
+inventory and a bounded movie/global library shortlist. It adds validated draft relationships and
+exact phrase-to-ID anchors, so wording such as “her jacket” can link to the named clothing object.
+Changing the description invalidates its semantic anchors until it is reviewed again. Invalid
+proposal entries are flagged without discarding independent valid links. Ambiguity and missing
+distinctive objects remain visible for human review; the model cannot invent target IDs or approve
+descriptions. Approved rows and their linked dependencies remain unchanged, with proposed changes
+shown separately. Unlock the relevant descriptions and rerun coverage to apply those proposals.
+
+Use **Find missing object links & reusable matches** on existing completed subject checkpoints to
+run this pass without repeating extraction. Saved execution inputs remain frozen; refreshing the
+review catalog does not invalidate the original job. The pass processes at most 24 objects, with
+two attempts each and saved per-object progress for resume. The catalog contains at most 64 metadata
+records; each model request uses at most eight compatible library candidates.
+
+Library matches show their definition, scope, version and reason. Choose **Use this definition on
+import** to reuse its stable ID when adding the results to the movie. Studio rechecks the source
+proposal and the selected definition/dependencies before import; stale selections need review again.
+**Create draft in movie** adds a suggested missing object for editing and approval. Neither action
+copies images or model weights, and missing-object creation does not silently change the workflow
+inventory. Sheet generation, automatic reference verification and timeline filling remain separate
+future steps.
+
+## Guided movie planning
+
+**Movie → Workflows… → Create a movie** begins with a creative brief. Set the finished movie length,
+look, widescreen/vertical/square framing, camera feel, sound and permission to propose missing
+details. Every preference also accepts your own wording. Frame rate starts from the current movie;
+technical timing controls are under **Advanced timing**. Reference images remain linked files and
+are observed locally. This workflow does not change the movie's render settings by itself.
+
+The agent asks at most six consequential follow-up questions. Save partial answers when needed;
+approval stays unavailable until every required answer is present. Identity questions need an
+explicit answer. Other creative questions can be delegated to the director. The original story,
+question wording and evidence remain read-only. Selected answers are passed downstream without
+the rejected options, and style/camera preferences are kept out of extraction's story evidence.
+
+New guided plans (definition version 1.1.0) have three required review stages:
+
+1. **Brief:** review the source, creative preferences and consequential questions. Identity ambiguities
+   still require your explicit answer. References are observed once and retained as evidence.
+2. **Subjects:** review classification, descriptions, relationships, references and reusable library
+   choices together. Correct object types without changing IDs. Discovery copies checked source
+   phrases; proposed visual details remain separate from evidence. Classification receives each
+   object's established description, rather than guessing from its name alone. Unresolved agent
+   notes remain visible. Save edits, then explicitly approve the saved inventory as a batch or
+   approve individual subjects. **Use this definition** pins a reusable appearance; final import
+   rechecks the actual library version and dependencies.
+3. **Shots:** review the story and timed actions with visible start/end states. Approve the shot plan,
+   then finish the deterministic endpoint checks and prompt compilation before **Add to project**.
+   Approved character descriptions are retained in full rather than silently shortened.
+
+Detailed review adds separate stops for classification, inventory, visual design, treatment and
+prompt preview. Intermediate steps and technical records remain inspectable in either mode; no
+model report grants human approval. Old saved jobs keep their original stops instead of being
+silently migrated.
+
+Shot correction offers an explicit scope: action, states, location/connection, characters or the
+whole shot. The existing shot is supplied as context, and host code retains fields outside the
+selected scope. IDs and timing remain app-controlled. Invalid continuity stops for a correction
+instead of silently changing an unrelated field. Unaffected shots retain their saved choices.
+
+The optional H3 preview shows all three prompt fields, resolved subject IDs and reference asset IDs. It is
+not a render recipe: actual model/task support, dimensions, frame count and image roles still need
+validation when a generation job is created. Image references do not imply first/last-frame binding.
+Speech requires explicit wording and speaker/language assignment; the preview does not silently
+invent or assign dialogue. Music is omitted unless requested. No images, movies or cloud jobs are
+generated by these stages.
+
+App/helper rebuilds, runtime changes and output-token changes do not automatically regenerate
+completed approval-workflow steps. Their saved descriptions and approvals are reused when the
+step definition, story inputs, upstream results and reference-image contents are unchanged.
+The original execution provenance stays with each completed result. To replace completed work,
+explicitly unlock and regenerate it; normal resume continues from the saved review.
+
+Every step must complete and every required approval must remain valid before guided import. Editing prior decisions invalidates
+dependent results. Saved jobs retain their definitions: **Run remaining** on an old extraction-only
+job cannot add missing stages. Its **Start guided workflow…** button starts a separate job using
+the original story. It does not overwrite the old review.

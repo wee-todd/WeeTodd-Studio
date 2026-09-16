@@ -2360,7 +2360,8 @@ class WeeToddLTX25GenerateChained:
     DESCRIPTION = (
         "Generate two to four overlapping LTX 2.5 windows with timeline-aligned latent guides, "
         "causal-aware latent transitions, and one synchronized audio/video decode. Supports "
-        "the two-stage path and full-resolution single-stage Sol configurations."
+        "distilled two-stage and full-resolution single-stage Sol configurations. Guided, "
+        "CFG++, generated-keyframe, DFR, and automatic-duration modes are unsupported."
     )
 
     def generate(
@@ -2378,6 +2379,7 @@ class WeeToddLTX25GenerateChained:
     ):
         from ltx25_mlx.chaining import plan_ltx25_chain
 
+        config.validate_chain_support()
         report = model.validate(
             config.pipeline_mode,
             require_spatial_upscaler=not config.ic_lora_single_stage,

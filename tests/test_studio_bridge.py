@@ -241,6 +241,46 @@ def test_real_export_and_resume_preserve_timing_and_audio(tmp_path):
         jobs.execute(job, tmp_path / "result", resume=True)
 
 
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg required"
+)
+@pytest.mark.parametrize("with_transitions,duration,overlap", [
+    (False, 5, 0.5), (True, 124 / 24, 0.5), (True, 5.17, 0.51),
+])
+def test_six_aac_clips_export_as_exact_constant_frame_rate(
+    tmp_path, with_transitions, duration, overlap
+):
+    """AAC packet timing must not leave gaps in the assembled video cadence."""
+    runtime = dict(ffmpegPath=shutil.which("ffmpeg"), ffprobePath=shutil.which("ffprobe"))
+    source = tmp_path / "h3-shaped-source.mp4"
+    subprocess.run(
+        [
+            runtime["ffmpegPath"], "-v", "error", "-f", "lavfi", "-i",
+            "testsrc2=size=192x128:rate=24", "-f", "lavfi", "-i",
+            "sine=frequency=440:sample_rate=32000", "-t", str(124 / 24),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(source),
+        ],
+        check=True,
+    )
+    project = fixture_project([source] * 6)
+    project["titles"] = []
+    project["audio"] = []
+    for index, clip in enumerate(project["clips"]):
+        clip["duration"] = duration
+        clip["transition"] = "dissolve" if with_transitions and index in {3, 5} else "cut"
+        clip["transitionDuration"] = overlap
+    output = tmp_path / "movie.mp4"
+    bridge.export_movie(dict(project=project, runtime=runtime), output)
+    probe = json.loads(subprocess.check_output([
+        runtime["ffprobePath"], "-v", "error", "-show_streams", "-of", "json", str(output),
+    ]))
+    video = next(stream for stream in probe["streams"] if stream["codec_type"] == "video")
+    assert video["avg_frame_rate"] == "24/1"
+    assert int(video["nb_frames"]) == 720
+    assert float(video["duration"]) == pytest.approx(30, abs=1e-6)
+    assert any(stream["codec_type"] == "audio" for stream in probe["streams"])
+
+
 def test_finishing_preflight_blocks_before_generation(tmp_path, monkeypatch):
     p = fixture_project(["missing.mov"])
     p["settings"].update(interpolation="rife")

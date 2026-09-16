@@ -142,7 +142,7 @@
       "title": "Setup and model downloads",
       "properties": {},
       "widgets_values": [
-        "## LTX 2.5 guided HQ — 768×512\n\n1. Install WeeTodd Nodes and restart ComfyUI.\n2. Accept the LTX 2.5 license and download the split components, development transformer, and official rank-450 distilled LoRA.\n3. Put components under `ComfyUI/models/` or shared roots from `extra_model_paths.yaml`.\n4. Queue the workflow after **LTX 2.5 Preflight** succeeds.\n\nUse **Production guided** for the 30-step Euler recipe or leave **HQ guided** selected for the 15-step res_2s recipe. These sampler iterations require several guided transformer passes and are much slower than fast distilled 8+3.\n\n### Downloads\n\n- [LTX 2.5 model components](https://huggingface.co/Lightricks/LTX-2.5)"
+        "## LTX 2.5 guided HQ — 768×512\n\n1. Install WeeTodd Studio's ComfyUI nodes and restart ComfyUI.\n2. Accept the LTX 2.5 license and download the split components, development transformer, and official rank-450 distilled LoRA.\n3. Put components under `ComfyUI/models/` or shared roots from `extra_model_paths.yaml`.\n4. Queue the workflow after **LTX 2.5 Preflight** succeeds.\n\nUse **Production guided** for the 30-step Euler recipe or leave **HQ guided** selected for the 15-step res_2s recipe. These sampler iterations require several guided transformer passes and are much slower than fast distilled 8+3.\n\n### Downloads\n\n- [LTX 2.5 model components](https://huggingface.co/Lightricks/LTX-2.5)"
       ],
       "color": "#243447",
       "bgcolor": "#15202b"

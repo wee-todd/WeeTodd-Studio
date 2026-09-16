@@ -1,0 +1,140 @@
+{
+  "format": "weetodd-workflow-v1",
+  "id": "weetodd.staged-prompt-editing",
+  "version": "1.0.0",
+  "name": "Staged prompt editing",
+  "description": "Describe references, plan discrete edits, revise sequentially, and check the result. Review the proposed text before applying it to your prompt.",
+  "inputs": {
+    "source": {
+      "type": "text",
+      "label": "Source prompt",
+      "default": "A warrior in a ruined cathedral."
+    },
+    "instructions": {
+      "type": "text",
+      "label": "Requested changes",
+      "default": "Replace the warrior with a red fox. Move the scene to a snowy forest. Use one sentence."
+    },
+    "images": {
+      "type": "image_list",
+      "label": "Optional reference images",
+      "default": []
+    }
+  },
+  "models": {
+    "assistant": {
+      "family": "qwen3.5",
+      "variant": "4b",
+      "runtime": "drawthings-qwen-local",
+      "capabilities": [
+        "text",
+        "vision"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "describe",
+      "name": "Describe",
+      "operation": "vision.describe@1",
+      "inputs": {
+        "images": {
+          "input": "images"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 120,
+      "model": "assistant"
+    },
+    {
+      "id": "plan",
+      "name": "Plan",
+      "operation": "text.plan_edits@1",
+      "inputs": {
+        "source": {
+          "input": "source"
+        },
+        "instructions": {
+          "input": "instructions"
+        }
+      },
+      "parameters": {
+        "maxEdits": 8
+      },
+      "retry": {
+        "maxAttempts": 2
+      },
+      "timeoutSeconds": 120,
+      "model": "assistant"
+    },
+    {
+      "id": "edit",
+      "name": "Edit",
+      "operation": "text.apply_edits@1",
+      "inputs": {
+        "source": {
+          "input": "source"
+        },
+        "edits": {
+          "step": "plan",
+          "output": "edits"
+        },
+        "observations": {
+          "step": "describe",
+          "output": "observations"
+        }
+      },
+      "parameters": {
+        "maxEdits": 8
+      },
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 120,
+      "model": "assistant"
+    },
+    {
+      "id": "check",
+      "name": "Check",
+      "operation": "text.check_edits@1",
+      "inputs": {
+        "source": {
+          "input": "source"
+        },
+        "draft": {
+          "step": "edit",
+          "output": "draft"
+        },
+        "edits": {
+          "step": "plan",
+          "output": "edits"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 2
+      },
+      "timeoutSeconds": 120,
+      "model": "assistant"
+    }
+  ],
+  "outputs": {
+    "prompt": {
+      "step": "edit",
+      "output": "draft"
+    },
+    "review": {
+      "step": "check",
+      "output": "review"
+    }
+  },
+  "limits": {
+    "maxParallelSteps": 1,
+    "maxStepExecutions": 128,
+    "maxArtifacts": 64,
+    "maxWorkingBytes": 536870912
+  }
+}

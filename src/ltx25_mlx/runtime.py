@@ -623,6 +623,22 @@ class LTX25GenerationConfig:
     diffvae_stage4_tile_width: int = 0
     sol_attention_profile: str = "disabled"
 
+    def validate_chain_support(self) -> None:
+        """Reject modes that the pre-encoded, latent-native chain cannot execute."""
+        if self.pipeline_mode != "distilled":
+            raise ValueError("LTX 2.5 chained timelines do not support guided generation.")
+        if self.stage1_sampler != "euler_ancestral" or self.cfg_pp_batched:
+            raise ValueError("LTX 2.5 chained timelines do not support CFG++ sampling.")
+        if self.generated_keyframes:
+            raise ValueError("LTX 2.5 chained timelines do not support generated keyframes.")
+        if self.dfr_enabled or self.dfr_temporal_rounds:
+            raise ValueError("LTX 2.5 chained timelines do not support spatial or temporal DFR.")
+        if self.duration_mode != "manual":
+            raise ValueError(
+                "Automatic duration is only available for one-shot LTX 2.5 generation; "
+                "set an explicit total duration for chained timelines."
+            )
+
     @property
     def num_frames(self) -> int:
         intervals = max(1, round(self.duration_seconds * self.frame_rate / 8.0))
@@ -1344,6 +1360,7 @@ class LTX25RuntimeCache:
         """Generate an exact latent-native LTX 2.5 chained timeline."""
         from .chaining import plan_ltx25_chain
 
+        config.validate_chain_support()
         report = spec.validate(
             config.pipeline_mode,
             require_spatial_upscaler=not config.ic_lora_single_stage,
@@ -1351,13 +1368,6 @@ class LTX25RuntimeCache:
         config, configuration_adjustments = resolve_ltx25_runtime_config(spec, config)
         scales = tuple(int(value) for value in report["video_scale_factors"])
         config.validate(scale_factors=scales)
-        if config.duration_mode != "manual":
-            raise ValueError(
-                "Automatic duration is only available for one-shot LTX 2.5 generation; "
-                "set an explicit total duration for chained timelines."
-            )
-        if config.dfr_temporal_rounds:
-            raise ValueError("LTX 2.5 temporal DFR is not yet available for chained timelines.")
         plan = plan_ltx25_chain(
             total_frames=config.num_frames,
             window_count=window_count,

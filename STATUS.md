@@ -1,6 +1,641 @@
-# WeeTodd implementation status
+# WeeTodd Studio implementation status
+
+Fix 2026-09-16: reimporting a reclassified Director subject now matches its stable workflow source
+and item ID, including older kind-bearing keys and aliases retained by object reuse. Existing
+project UUIDs, reviewed edits and references are preserved. Ambiguous legacy duplicates stop the
+transaction with guidance to merge them first. Regression tests cover reclassification, legacy
+keys, merged aliases, separate workflow sources and preservation on ambiguous import.
+
+Fix and qualification 2026-09-16: constant-frame-rate movie export. Final assembly now conforms
+the completed video stream to the project frame rate after concatenation and transitions. This
+fixes AAC packet-padding/timestamp gaps that could leave a 30-second export with 718 frames
+instead of 720 at 24 fps. Regression cases cover six AAC clips with cuts, dissolves, and the
+rounded clip/transition durations entered through Studio's UI.
+
+A local end-to-end movie exercise used Director's reviewed plan, the image workspace, seven
+accepted endpoint images and six Draw Things H3 first/last-frame clips. The finished export was
+verified at 30.000 seconds, 720 frames, 24 fps, 768×448, with stereo audio; full decoding passed.
+Collect Media produced an editable project with all referenced media present. Planning, image
+review, clip generation and assembly were operated through Studio's front end. This qualifies
+that exercised local route, not automatic movie generation or every backend/model combination.
+
+Feature 2026-09-15: Director first-pass correctness and focused review. New guided movies use three
+explicit reviews: Brief, Subjects and Shots. A detailed eight-review option remains available;
+existing jobs retain their saved approval contracts. Focused cards omit empty groups and collapse
+technical notes and source evidence. Unsaved edits block approval/import, batch approval is explicit,
+and missing-model setup is the primary next action. Execution details remain in the inspector.
+
+Scoped shot corrections merge only the requested fields, retain before/after evidence and cannot
+change host-owned IDs or timing. Successful repairs are consumed so later continuity refreshes
+cannot replay a stale correction. Short authored shots are copied directly, avoiding unnecessary
+summary calls. Longer summaries validate recognized exact speech, speaker attribution and duplicate
+quotes against source and approved answers. Unassigned clarification dialogue stops explicitly.
+Full approved character descriptions reach shot planning. Classification receives source evidence,
+and relationship requests include legal target IDs; final subject kinds remain human-editable.
+
+A frozen two-movie production evaluation now runs the real guided runner, records full local-model
+turns and SQLite checkpoints, and checks exact dialogue, identity, timing and scoped corrections.
+Its default validation makes no model calls and is included in the workflow validation profile.
+The small text-only suite measures specific regressions; scripted structural approvals are not
+human creative acceptance. See `examples/director-production-evaluation/README.md` for limits.
+
+Validation: combined core/Studio/workflow checks passed 2,217 Python tests and 229 Swift tests
+(two optional skips, no failures), plus lint, workflow and catalog checks. A separate release bundle
+built and passed signature verification. Isolated live UI checks covered setup, focused subject and
+shot review, draft guards, manual editing, batch approval, deterministic prompt compilation and
+reviewed-plan import. The normal app executable, Info.plist and image workspace remained unchanged.
+
+The final local Qwen run completed one of two initial plans; its completed plan passed the frozen
+exact-text/identity/timing checks. The other stopped on extra model-generated timeline fields.
+The attempted action correction stopped on changed quotation punctuation and retained saved output.
+Whole buildings were still classified as sets. These measured failures remain open: stronger source
+preservation does not yet establish reliable first-pass completion, successful correction, or a speed
+gain. Separate action/dialogue contracts, more reliable response shapes and broader fresh movie
+evaluation are the next priorities. No native video or low-memory qualification was run.
+
+Feature 2026-09-15: Director foundation and independent assistant setup. Director is now a visible
+toolbar entry; the Workflows menu and portable execution contracts remain. Intake, navigation and
+unfinished typed reviews persist separately from approved output. Opening Director preserves the
+movie's restore snapshot, including a never-saved first movie. Saved reference additions, removals
+and ordering no longer require a model call. Imports validate their definition, effective inputs and
+checkpoint identity before replacing the current session. Failed/cancelled execution retains saved
+results, while document-session and input guards reject late results for changed targets.
+
+Repeated interruption cannot make an unfinished coverage review ready. The local helper checks
+exact text/image token budgets before loading weights, preserves source on overflow and reports
+non-retryable context/model errors. Available preparation/load/prefill/decode metrics reach the
+SQLite turn archive. Human review records preserve exact scoped changes, approval states and
+revision/model evidence in the same atomic checkpoint; they grant no training consent. Scoped
+history avoids repeating the entire inventory for every item approval.
+
+Set up assistant can reuse a configured external checkpoint, locate installed files or download the
+pinned 4.89 GB Qwen3.5 4B checkpoint independently of the Draw Things app. Transfers support resume,
+cancellation, free-space checks, SHA-256 verification and existing-file protection. Explicit local
+text/image health checks are separate from downloading and wait while a Studio job is active.
+
+The new model-free evaluation harness includes 60 synthetic cases across ten task categories,
+independent expected answers, source-group splits and versioned reports. Frozen corpus revision 2
+with concise output templates passed 34/40 development and 15/20 holdout strict contracts on the
+tested 256 GiB Mac. Production prompts differ; these are small-task diagnostic results, not an
+app-wide accuracy or low-memory qualification. Remaining failures include exact text/formatting,
+one taxonomy choice, one relationship ID and one route label.
+
+A separate bounded Qwen3.5 MLX 4-bit experiment trained a language-only adapter, saved it and
+reloaded an identical loss while preserving vision weights. Vision inference failed before training
+in the installed MLX-VLM runtime, so alternate-runtime vision, task adapters and training remain
+unavailable in the app. No dependency patch, embedding service or resident model service shipped.
+
+Validation: combined core/Studio/workflow/remote profiles passed 2,449 Python tests; 25 targeted
+follow-up tests cover subsequent fixture/documentation findings. Final Studio Swift reported 214
+tests with two optional skips and no failures; helper Swift passed 41 tests. A separate
+release bundle with corresponding helper source passed signature verification. Live isolated UI
+checks verified external-model reuse, explicit text/image health, model selection and first-movie
+draft recovery after full relaunch. The running app bundle was preserved. No native video render,
+checkpoint parity, clean-Mac install or low-memory hardware qualification was performed.
+
+Subsequent priorities: broaden production quality evaluation, measure model/cache reuse with shared
+memory coordination, and add a consent-aware SQLite learning data layer. Full generation/timeline
+integration and adapter activation require separate validation.
+
+Product direction 2026-09-15: WeeTodd Studio is the primary standalone macOS app; the maintained
+ComfyUI nodes are a secondary interface to the shared engines. Draw Things is central to fast
+inference and model reuse. Native MLX engines supply additional models and advanced tasks beyond
+the current Draw Things integration, with LTX 2.5 an existing example. Additional native models
+should address useful feature gaps. Future Draw Things model discovery still requires verified
+task/configuration mapping; compatible installed weights are reused only by supported native loaders.
+
+The public project and repository name is WeeTodd Studio / wee-todd/WeeTodd-Studio. The README now
+starts with standalone setup, backend choices, shared-model limits and product workflows, while
+retaining the full node/native reference and workflow catalog. App, headless, authoring and agent
+guidance follow the same direction. Package/import/node IDs, saved projects and existing checkout
+paths remain compatible. This is a positioning/documentation change, not new inference support.
+
+Validation: 1,827 Python tests passed across core and Studio; Swift reported 191 tests with two
+optional skips and no failures. Markdown lint, 133 local documentation links, the generated node
+catalog and portable workflow checks passed. The 33 changed ComfyUI workflow files contain only
+installation-prose changes. A separate release build and signature verification passed; the running
+app was preserved. GitHub repository naming/description and the local origin URL were updated;
+source/documentation edits remain uncommitted. No generation or dependency installation was run.
+
+Fix 2026-09-15: Project review reliability and editor responsiveness pass. Open/New now isolates
+undo and document identity, preserves departing dirty work in per-session Recovery snapshots, and
+updates the active startup snapshot immediately. Native and Draw Things clip preparation capture
+the original document/session and inputs. Late results preserve edited clips as versions and report
+saved artifacts when their destination was closed or deleted. Valid reviewed preparation is reused.
+Render versions retain usable source intervals; known trims and extension offsets survive version
+switches. Ambiguous legacy append offsets cannot be reconstructed and start at the selected known
+usable interval. Movie transport uses the complete movie duration.
+
+Attachment hashing now streams off the UI thread, deduplicates reads and caches by file revision;
+Draw Things submission rechecks contents and explicit preparation retries transient I/O failures.
+ImageIO previews decode to bounded sizes with a shared 64 MiB cache. Main editor controls have
+accessible labels, current-shot empty-state guidance and a readable preparation summary.
+
+H3 convenience generation now reuses staged text/sampler/direct AV publication and unloads on
+success, failure and cancellation. Changed resident AdaLN schedules reload discarded transformer
+weights. LTX sampler wrappers release weighted ownership before component swaps, including DFR;
+unsupported chain modes reject before component inspection or prompt encoding.
+
+Public/local guidance now reflects supported Draw Things and planning scope, narrower skill routing,
+correct workflow cache semantics, expanded staged review coverage and safe worktree hook resolution.
+Tracked validation profiles cover core, Studio, workflows and remote integration without duplicate
+checks within an invocation. CI runs those profiles. The owned installed hook was backed up and
+migrated through the tested installer. Packaging supports a separate output bundle.
+
+Validation: 2,399 Python tests passed across the four profiles (1,745 core, 369 Studio/remote,
+285 workflows); all six shipped Studio definitions validated. Studio Swift reported 191 tests with
+two optional skips and no failures; Draw Things Swift passed 38 tests. Local hook/gate tests passed
+10 cases. Compilation, broad source lint, Markdown lint, catalog checks and portable H3 API preflight
+passed. A separate release bundle built and passed signature verification; the existing app executable
+and Info.plist remained byte-identical. No staging or commit was performed.
+
+No real-model renders, checkpoint parity, peak-memory benchmarks, clean-machine installation or
+remote CI run were performed. Workflow draft/resume and AI-assistant usability/performance redesign
+remain the next review; this pass changes their documentation/validation only.
+
+Feature 2026-09-15: Execution history now includes a full Model turns inspector for each step.
+New model requests and cached-response uses retain exact system/input text, returned text, image
+references, runtime/settings, elapsed time, errors and recorded JSON/schema validation. Rejected,
+cancelled and interrupted attempts remain inspectable; returned text is not treated as approval.
+The separate local SQLite archive is capped at 16 MiB (or less under the job's storage budget),
+reserves response capacity before generation and stops explicitly when full instead of rotating
+away transcripts. Images and weights are not copied. The viewer pages metadata and loads one
+selected transcript off the UI thread, with System, Input, Response, Images and Details tabs.
+Older checkpoints expose retained full messages and label missing fields and chronology honestly.
+
+Validation: 227 Python workflow/review/bridge/packaging tests passed; 160 Swift tests ran with two
+optional skips and no failures. Coverage includes malformed-response retries, cancellation/cache
+reuse, interrupted calls, archive limits and read-only SQLite inspection. Release packaging and
+signature verification passed. The rebuilt app displayed all 22 retained description-review
+responses from the user's current run; full system/input/response text was verified in the UI
+without running generation or changing approvals.
+
+Feature 2026-09-15: Workflow Execution history opens a read-only inspector during and after runs.
+It explains registered operations, displays stored step durations and recursively counts retained
+model responses, including object-level child records. New checkpoints keep bounded activity entries
+for execution, explicit/upstream regeneration, changed-input execution, resumption and saved-step
+reuse. Activities record real model requests, cached responses, outer step retries, call timings,
+short task/system excerpts and errors. Manual description/coverage reviews have separate entries.
+Failed and cancelled steps now retain elapsed time. History remains observational and does not
+participate in approval or cache decisions.
+
+The inspector reads checkpoints off the UI thread every two seconds and updates live elapsed time
+once per second. Retention is capped at 40 activities and 20 details per activity with explicit
+omission notices; no model/media copies or unbounded diagnostic files are introduced. Old checkpoints
+show their actual saved timing/responses and explicitly lack reconstructed retry/regeneration history.
+Returned model text is distinguished from validated step output; outer retries and per-object calls
+are not conflated. Process interruptions disclose incomplete timing.
+
+Validation: 222 Python workflow/review/bridge/packaging tests passed; 157 Swift tests ran with two
+optional skips. Tests cover retry persistence, cancellation timing, zero-model-call resume, history
+bounds, child-record calls, separate manual reviews and backward-compatible decoding. Release app
+packaging and signature verification passed. The live UI loaded the user's existing subject-review
+checkpoint without rerunning or editing it: extraction 14.0 s, linking 35.7 s, description review
+101.6 s (22 retained responses), coverage 70.6 s. New telemetry was exercised with deterministic
+backend fixtures; no new real-model render was required for this change.
+
+Fix 2026-09-15: Draw Things Keychain credentials are reused in memory for the Studio session.
+Concurrent successful reads share one lookup. Credential writes/removals invalidate cached access,
+including failed mutations; denied and missing reads remain retryable. Clear Session Access in
+connection settings forgets cached credentials without deleting saved keys. Saves/removals and
+session clearing run off the UI executor as reads already did. No new credential file or relaxed
+Keychain ACL is introduced.
+
+Packaging accepts --signing-identity or WEETODD_STUDIO_SIGNING_IDENTITY, remembers successful
+choices in ignored build settings, signs nested tools before the app, and verifies signatures.
+An unavailable configured identity fails without replacing the previous app or falling back to
+ad-hoc signing. Ad-hoc builds remain available with an explicit warning. Stable authorization
+across updates still requires a suitable installed signing certificate; this development Mac had
+zero valid signing identities, so the verified local build remains ad-hoc. Certificate-signed
+upgrade authorization and notarization were not tested.
+
+Validation: 154 Swift tests ran with two optional skips; 35 Python Studio bridge/packaging tests
+passed. Regression coverage includes concurrent reads, credential changes/removal, failures,
+missing entries, session clearing, signing order, saved identity precedence and failed signing.
+Release app packaging/signature verification succeeded. Studio reopened and the new Clear Session
+Access control was exercised successfully while the saved credential remained available. No live
+cloud generation or real-Keychain permission lifecycle test was run for this change.
+
+Fix 2026-09-15: resuming an approval workflow preserves completed documents across runtime-only
+changes (including a rebuilt Draw Things helper and changed output-token limits). Previously the
+helper's file timestamp participated in the execution key, causing reviewed subject extraction
+to rerun and overwrite descriptions/approvals after an app rebuild. A separate content key checks
+the saved step definition, resolved inputs, upstream outputs and reference-image contents.
+Legacy checkpoints derive that key from their saved metadata before current runtime metadata is
+applied. Completed-step execution provenance remains attached to its original runtime. Explicit
+regeneration and changes to source content retain normal invalidation behavior.
+
+Validation: 216 Python workflow/review/bridge/packaging tests passed; 151 Swift tests ran with two
+optional skips. Regression cases cover edited and partially approved outputs, legacy migration,
+runtime/token changes, and reference-content invalidation. An isolated copy of the user's legacy
+workflow resumed against the current helper without model calls or lost descriptions. Six lost
+object descriptions were recovered by original IDs from previously observed text and saved
+image provenance; unverifiable historical approvals/reference assignments were not fabricated.
+
+Feature 2026-09-15: Draw Things image generations display streamed, approximate live previews
+and sampling steps in Studio. The helper uses the pinned dependency's lightweight latent
+visualization without loading another VAE. Model/channel validation and throttling keep previews
+best-effort; unsupported or absent previews leave generation and final-image delivery intact.
+One temporary PNG is overwritten per job. Preview revisions refresh the viewport independently
+of saved result paths, and previews never become assets or conditioning. Studio clears preview
+state/files on success, failure and cancellation; only the active job's preview path is accepted.
+
+Validation: 151 Studio tests (two optional skips), 38 Draw Things transport tests and 86 Python
+adapter/client/image/bridge/packaging tests passed. A real local FLUX.2 Klein 9B KV image run at
+1280×768, 8 steps showed live previews while sampling, then replaced them with the finished image.
+Exactly one asset was added; the temporary preview was removed and the saved draft and timeline
+were unchanged. Transport fixtures verify preview delivery before final publication; bridge
+fixtures cover success/failure/cancellation cleanup and rejection of unrelated paths. Local
+preview rendering is qualified; DT+ preview availability and video previews are not qualified.
+
+Fix 2026-09-14: image regeneration now exposes explicit Random each generation / Fixed seed
+modes. The reported duplicate images had identical fixed seeds, requests and file hashes;
+the previous Randomize seed button selected a fixed number once. New image drafts default to
+random mode (-1), while restored/imported fixed seeds are preserved. New fixed seed is explicitly
+a one-time choice. Each generated asset still records the resolved seed for reproduction.
+
+Validation: 149 Swift tests ran with two optional skips; 63 Python adapter/bridge/packaging tests
+passed; release packaging passed. Two consecutive local Z Image Turbo generations at 1280×768,
+8 steps, with identical prompt and non-seed settings produced different seeds, fingerprints and
+image hashes. The saved draft retained -1 and the preview updated to the second image. The active
+reference workspace was left in random mode. No cloud generation was used.
+
+UI fix 2026-09-14: after a reported zoom-related unresponsive state, a process sample showed
+the main thread idle in the event loop and no active generation. The old transformed image was
+visually clipped without explicitly limiting hit testing. It is replaced by a scrollable viewport
+with explicit bounds and non-interactive image content. The reference editor opens larger and
+allows resizing; reference setup, existing references, the mood board and prompt can collapse.
+Tools collects secondary actions. Config and connection dialogs present on the active image
+editor instead of competing with the parent approval sheet. New results reset canvas zoom.
+
+Validation: 147 Swift tests ran with two optional skips; 33 Python bridge/packaging tests passed.
+Native testing reached 300% zoom, scrolled the image and opened the model/Tools menus without
+losing responsiveness. Config and connection dialogs opened above the editor and dismissed cleanly.
+The user's movie and saved image drafts/previews compared equal to their pre-update snapshots.
+The process sample did not demonstrate a CPU deadlock; this qualifies the zoom interaction fix,
+not a claim that every possible source of app unresponsiveness has been eliminated.
+
+Fix 2026-09-14: the image-model picker now discovers its selected connection automatically on
+opening and connection changes. Previously an unloaded catalog showed only the saved model as
+a fallback; clearing that selection made the picker look empty. Loading, failed discovery,
+empty catalogs, missing saved models and incompatible inputs now have distinct messages.
+The image list is independent of selected model and inputs. Failed refreshes retain the last
+successful catalog. Discovery uses a separate lightweight bridge, combines concurrent requests,
+and rejects replies invalidated by connection edits. Restoring/importing drafts no longer runs
+picker-change handlers that clear models or LoRAs; explicit edits retain compatibility checks.
+
+Validation: 147 Swift tests ran with two optional skips; 33 Python bridge/packaging tests passed;
+release packaging passed. Native testing loaded all nine local image models after restart without
+Refresh, selected Klein, cleared the selection and verified all nine remained, reopened Krea with
+its selected LoRA intact, then cleared/reselected the connection. The temporary LoRA was removed;
+the editor remains on the user's local connection with no model selected. Failure retention,
+concurrent discovery and stale replies were tested with injected responses; no cloud or image
+generation was submitted for this fix.
+
+Fix 2026-09-14: reference previews use distinct subject/reference-number labels and path-based
+accessibility identifiers. Workflow thumbnail rows use file identity instead of array indices;
+popup presentation captures an immutable file selection and resets preview state for that file.
+This removes duplicate `00000000.png` / subject-only labels and prevents a removed row from
+retargeting a neighboring preview. The Candidates menu also numbers results. Existing files,
+asset names and reference bindings are preserved. Regression coverage includes duplicate
+filenames, label changes and removing the first reference: 141 Swift tests ran with two optional
+skips; 33 Python bridge/packaging tests passed.
+Native checks opened both numbered subject references, switched to a numbered mood-board
+reference, and verified distinct Candidate 1/2 menu entries. Two existing mood-board entries
+referenced the same original file; they correctly display the same image and were left intact.
+
+UI 2026-09-14: reference thumbnails now open a large original-image preview with Fit,
+Actual Size, zoom (10–400%) and scrolling. Workflow approval, project subjects, reference
+generation and mood-board thumbnails share the same accessible preview button. Loading an
+unavailable file shows an actionable message; opening or closing a preview does not alter
+reference bindings or approval. The original image is loaded only when its preview opens.
+Validation: 138 Swift tests ran with two optional skips; 33 Python bridge/packaging tests passed.
+Release packaging passed. Native testing opened both saved character candidates independently,
+verified original dimensions, Actual Size, zoom and scrolling, and returned with Escape to the
+same unapproved subject. No generation was needed for this UI change.
+
+Feature 2026-09-14: object approval now offers **Create reference…**, opening the existing
+Draw Things image workspace with editable character, portrait, prop, environment, set,
+wardrobe and custom templates. Existing references can be explicitly loaded onto the canvas
+or mood board when supported by the selected model. Krea Turbo and Klein starting settings
+are optional; model, LoRAs, prompt and generation parameters remain editable. The picker
+includes recognized Draw Things image families and registered custom checkpoints. Unknown
+future architectures still require transport support. Qwen Edit Plus/2511 supports mood-board
+inputs; base Qwen Image does not. Structured pose/ControlNet authoring is not part of this change.
+
+Each candidate is saved in Project Assets with source-object/template provenance. **Use as
+reference** attaches it without calling Qwen or approving it. Changed reference bindings invalidate
+dependent approvals and mark older image analysis stale. Per-object drafts resume separately from
+the ordinary image workspace; references attached to reused library objects remain movie-local.
+
+Validation: 276 focused Python workflow/bridge/packaging tests passed; 138 Swift tests ran with
+two optional tests skipped; all 37 Draw Things transport tests passed. Release helper packaging
+and the signed Studio app build passed, along with Ruff, compile and README catalog checks.
+Native validation completed a local Krea 2 Turbo eight-step 1280×768 character sheet, attached
+it during workflow approval, reopened its saved draft, then generated a four-step Klein 9B
+candidate using that sheet as a mood-board reference. Both outputs are saved and attached with
+approval still pending. Source descriptions and all non-asset movie fields remained unchanged.
+The models produced usable three-view layouts but changed appearance details, and ear tips were
+cropped; these are review candidates, not qualified identity-perfect sheets. Qwen Edit and the
+other template/model combinations have contract coverage but were not live-rendered in this pass.
+
+Fix 2026-09-14: a saved character review failed twice because Qwen cited image zero with no
+attached images. No-image design drafting now uses five plain visual fields with host-owned
+proposal labels. Legacy-shaped image claims without attachments become unverified proposals;
+invalid real source/image citations are never rebased. Reference-image reviews retain their
+provenance checks. Initial guided discovery now follows cited-name extraction with a bounded
+per-object source-phrase pass, retaining established visual traits and clarification answers.
+Classification cards distinguish a source summary from a reviewed appearance proposal. A host
+check also flags named inventory objects inserted into another object's appearance, even when
+the model critic misses the conflict; explicit object-ID references remain allowed.
+
+Validation: 275 focused Python workflow/bridge/packaging tests passed; 135 Swift tests ran with
+two optional tests skipped. Release packaging, Ruff, compile checks and README catalog checks
+passed. A real no-image review in the rebuilt app replaced the saved JSON failure with a concrete,
+unapproved character design. Both character reviews completed. The named-object guard triggered
+a second corgi draft that removed the stolen crystal from its body. Source evidence and object IDs
+were preserved, and the autosaved movie compared equal to its pre-test snapshot. Qwen's critic can
+still miss vague or inappropriate choices; these results qualify error recovery and useful draft
+generation, not automatic design correctness. No new image-conditioned review or video render
+was run for this fix.
+
+Follow-up 2026-09-14: Studio now defaults new movie workflows to **Create a movie**. Friendly
+creative inputs and consequential identity questions precede extraction. Human gates separate
+classification, inventory/library reuse, detailed visual design, coverage, treatment, shots and
+H3 prompt drafts. Original source passages and app-issued object/question IDs remain protected.
+Saved extraction-only workflows expose a separate guided entry instead of changing their definitions.
+
+Guided extraction uses compact cited-name selections, classification uses bounded local slots,
+and treatment uses compact action arrays with host-owned cast records. Guided shot planning receives
+approved character/prop/set definitions and creative preferences. Exact approved locations are
+checked. Final structural review precedes deterministic H3 prompt compilation; dynamic inventory
+links do not force future scenes or hidden held props into earlier shots. Import requires all steps
+to complete and all required approvals to remain valid. Compiled subject IDs map to the approved
+inventory, including library replacements, and exact prompt drafts are retained in shot direction.
+
+Local Qwen remains fallible: this qualification required explicit review corrections to object
+links, an edible canapé described as a replica, invented character hardware, and several story/action
+details. Model coverage notes can also be inaccurate. These are human-review gates, not an autonomous
+factual-quality guarantee. No frames, movies, image sheets, cloud jobs, adapter training or timeline
+generation are enabled by the guided planning milestone.
+
+Qualification: the isolated cat-woman/corgi fixture completed every gate with six reviewed objects
+and six five-second shots (720 frames at 24 FPS). The real Python checkpoint passed native Swift
+decoding/import with no duplicate objects; shot references and exact H3 prompt text were retained.
+135 Swift tests ran with one optional vision test skipped; 266 workflow/bridge/packaging Python
+tests and 333 node/runtime/README/workflow regressions passed. Workflow Ruff, compile checks,
+example validation and README catalog checks passed. Release packaging passed. This qualifies the
+reviewed 30-second path; long-form story quality and automatic frame/video generation were not tested.
+Native UI checks verified friendly intake, answer/save/approval gating, the legacy workflow entry,
+completed-job reopening, and the full-width H3 review with import available only after its gates.
+The original indoor-pool review was restored; autosaved movie JSON matched its pre-test snapshot.
+
+Follow-up 2026-09-13: reviewed subject inventory v1.2.0 adds a final whole-inventory coverage pass
+after description enrichment. Validated draft links and exact phrase-to-ID anchors are retained
+even when another proposed component is invalid. Approved rows and their dependency closure remain
+unchanged; proposals are separate. Missing objects can become movie drafts through an explicit
+button. Movie/global library candidates include pinned identity and definition metadata; exact
+same-kind name/alias matches are supplied deterministically and semantic matches remain advisory.
+Explicit reuse on import checks source freshness and target dependencies, then remaps references
+transactionally. Review catalog refresh is separate from frozen execution inputs. No media copies.
+
+Local Qwen3.5 4B qualification: a fresh three-object run completed in 31.49 seconds / six calls,
+retaining Mara → jacket (wears), Mara → compass (holds), two indirect phrase anchors, one missing
+helmet suggestion on Mara, and one exact jacket library match. The model still emitted rejected
+components and inaccurate advisory notes; these remain visible and never authorize reuse or
+approval. Native UI verified semantic link navigation, library preview/choice persistence, review
+catalog refresh preserving execution inputs, and unapproved missing-object draft creation. The test
+draft was undone and the autosaved movie compared equal to its pre-test JSON. Automated qualification: 124 Swift tests
+(one optional skip), 227 root-run workflow/bridge/packaging tests; backend review also ran its
+252-test regression selection. Ruff and whitespace checks passed. Release packaging passed.
+
+Follow-up 2026-09-13: native description editors now decorate linked object names, aliases and IDs
+with inline links and description tooltips. Navigation remains internal to Studio. Presentation does
+not insert markup or change approval signatures; ambiguous names stay unlinked. Workflow drafts
+remain editable, and approved descriptions remain selectable for link navigation.
+Validation: 119 Swift tests ran (one optional skip), including native text-storage tooltip refresh,
+internal navigation and plain-text preservation; 33 Python bridge/packaging tests passed. Release
+build passed. Native UI confirmed inline appearance and navigation on the isolated Mara/jacket
+fixture; the original pool review was reopened without editing its contents.
+
+Follow-up 2026-09-13: production-library foundation is implemented in Studio. Characters,
+environments, sets, legacy locations, props, clothing and outfits have stable IDs, tags, typed
+relationships and distinct placements. Sets select an environment parent. A metadata-only SQLite
+catalog publishes immutable graph packages; movies import pinned snapshots without media copies or
+silent replacement of conflicting definitions. Environment publication includes its sets; set/shot
+resolution excludes siblings. Movie changes and shot-only appearance notes preserve global identity.
+Transitive definition changes invalidate dependent description/reference/shot approvals. Workflow
+imports validate IDs and bounds before transactional mapping to project IDs; merges/deletes preserve
+reference integrity. The native library supports search, publication, package import/export and
+related-object navigation. Shot exports now include linked media metadata and resolved snapshots.
+
+The reviewed builtin v1.1.0 inserts project.link_subjects@1 before description review. It preserves
+identity/evidence, proposes known-ID links and flags missing reusable objects without inserting them.
+Multiple placements can target the same prop. The workflow editor exposes relationship roles and
+placement notes; human approval remains authoritative. Saved old builtin definitions remain pinned.
+Initial native qualification verified package import, environment publication, tag search, separate
+set/prop grouping, parent selection and two placements navigating to one object ID. The temporary
+fixture import was undone and the autosaved movie compared equal to its pre-test JSON; its temporary
+catalog row was removed. The empty SQLite catalog occupies 12 KiB. No media/model copies were made.
+Validation: 116 Swift tests executed with one optional test skipped and no failures; 184 targeted
+Python workflow/bridge/packaging tests passed; Ruff and whitespace checks passed. A local two-subject
+Qwen3.5 smoke test first exposed reversed “jacket wears actor” semantics. The direction check now
+retries once, then preserves the original description with advisory needs_attention. The corrected
+run completed in 12.01 s / three calls, retaining “Mara wears jacket” and rejecting the inverse.
+No descriptions or references were automatically approved. This is assisted graph authoring, not
+proof of semantic correctness; human review remains necessary.
+Automatic sheets, endpoint generation/timeline application, saved appearance presets and explicit
+library version reconciliation remain next milestones.
+
+
+Fix 2026-09-13: corrected the subject approval dead end after a user edits a description.
+Human approval now accepts the exact saved text independently of the optional agent report,
+matching project-level approval. Failed or older agent notes remain visible; no model call or
+rewrite is required. The subject card offers Save & approve description and stops before approval
+if saving fails. Empty names/descriptions, incomplete steps and stale checkpoint revisions remain
+protected. Existing approvals still lock editing until explicitly unlocked.
+Validation: 144 focused Python tests and 106 Swift tests passed (one optional Swift test skipped).
+The rebuilt app passed an isolated native UI edit → Save & approve test, preserving the agent
+report and locking the saved correction without a model call. The original checkpoint was unchanged.
+
+
+Follow-up 2026-09-13: subject descriptions now have a bounded drafting/independent-critique
+operation, a reviewed subject-inventory builtin, and an individual review action for existing
+checkpoints. The workflow UI accepts up to eight reference images, sends them to local Qwen3.5
+4B for both stages, displays image observations separately from proposed additions, and links
+those images into Project Assets on import without media copies. Existing approvals remain locked;
+agent reports remain advisory to explicit human approval (see the approval fix above). Source-labeled visual phrases must
+match their cited text; unmatched paraphrases/additions are conservatively reclassified as proposals,
+so a valid citation ID cannot certify invented details. Project approval remains an explicit human
+decision with the imported report visible. Documentation explains this distinction.
+
+Live qualification on isolated copies of the pool case and an existing warrior portrait confirmed
+image transport and useful visual observations (weathered steel, rivets, dark leather, facial hair).
+It also exposed false-positive critiques, contradictory details and malformed critic JSON from the
+4B model. These remained needs_attention, never automatically approved. The two-round limit is
+intentional; this is an initial assisted review, not a guarantee of visual or factual correctness.
+Native UI qualification verified the image picker, remove/re-add thumbnail controls, retained image
+bindings on job reload, and review execution from Studio. Automated validation: 143 focused Python
+tests and 106 Swift tests passed, with one optional Swift test skipped; release bundle rebuilt.
+No new image generation, downloads or cloud CU use occurred. Original user checkpoints were not
+rewritten by these tests. At that milestone, storage remained portable JSON; the production-library follow-up below adds a separate global SQLite catalog.
+
 
 Reconciled 2026-09-09 against the local source and saved acceptance evidence.
+
+Follow-up 2026-09-13: subject workflow results now default to native grouped review, ordered as
+Characters, Environments and Props, then by name. Names/descriptions can be saved and individually
+approved; IDs and source evidence/suggestions are read-only. The shared review backend protects
+these fields and approved subjects, including older checkpoints without per-item state. Explicit
+approvals transfer to newly imported project subjects; existing project edits remain preserved.
+The project subject browser uses the same grouping. JSON remains an optional inspection view.
+At that milestone, storage used portable project/checkpoint files. The later global catalog does not migrate or replace those files.
+Qualification: 127 focused Python tests and 105 Swift tests passed (one optional Swift test skipped),
+and the signed release app was rebuilt. Live native UI checks on a separate copy of the user's
+21-subject checkpoint verified grouping, retained drafts across selection, name/description save,
+approval locks, approval persistence after reopening and unlock. IDs/evidence/suggestions, other
+subjects and the original checkpoint remained unchanged. The original result is reopened for review.
+
+Follow-up 2026-09-13: investigated the reference-image picker showing a beachball without a dialog.
+macOS logs show its open/save service exiting on `SecCodeCopyGuestWithAttributes` error 100002;
+the running Studio process predates the replaced app bundle. Packaging now checks for the running
+destination app before building and again before replacement, preserving it with a quit/retry
+message. Regression tests cover a running app and an app launched during packaging. After normal
+quit/relaunch, the native file picker opened successfully during subject-review qualification.
+
+Follow-up 2026-09-13: first project-planning milestone adds optional project-owned subjects and
+shots, individual description/reference approvals, source preservation, workflow import, native Shot
+List editing, reference-image links and JSON export. Reimports preserve user edits and stable IDs;
+subject/reference/timing/continuous-ending changes invalidate affected approval signatures. Existing
+projects decode without planning data; no timeline clips are modified. Source extraction uses local
+Qwen in bounded sections, host-assigned IDs and host-copied numbered source evidence. The original
+14,707-character script completed in 78.1 s / 12 calls, producing 21 draft subjects and correctly
+preserving the dog's natural brown eye and sapphire optical eye. Semantic duplicates and some
+classification choices still need review/merge; neither completeness nor identity is automatically
+certified. The checkpoint is about 100 KB. No media/model copies or cloud generation were made.
+Dedicated DT sheet workflows, automatic endpoint generation/visual checks and timeline application
+remain subsequent milestones. Native UI access timed out, so visual interaction qualification is
+still open. The live inventory also passed actual StudioCore import, repeated-import deduplication,
+and project save/reopen checks with all subjects left as drafts. Independent review identified and
+fixed reference-file changes leaving shots approved, and missing completeness warnings at the
+per-section extraction cap. These now have focused regressions.
+
+Follow-up 2026-09-12: reproduced the 14,707-character screenplay failure. Qwen accepted 3,500
+input tokens (4,096 limit), returned 142 output tokens without truncation, but omitted the final
+object brace. This was malformed model output, not an input-length rejection. Parsing now repairs
+only one missing outer closer before normal strict validation; truncated responses and incomplete
+strings/inner containers are rejected. The latest rejected response is retained for diagnostics.
+Explicit sequential `[Shot N]` scripts are summarized shot by shot, with count/timing validation
+before weighted work. The unchanged six-shot script reached story approval in 31.0 s through the
+shared runner. Source text and the original failed run remain preserved; summaries still need
+human review for visual identity and action fidelity.
+
+Follow-up 2026-09-12: movie planning v2 now uses typed story actions and clip states instead
+of splitting prose. It plans exactly one distinct action per clip; longer outlines are expanded
+one story phase at a time in batches of at most four actions. Reference images are observed once.
+The story and clip-state steps pause for explicit human approval. Studio has native story/clip
+editors, approval/unlock controls, and instructed repair of individual clips. The shared CLI
+supports the same revision-checked review mutations. Item caches reuse unaffected approved clips;
+changed ending states revalidate subsequent continuous clips, while independent cuts can reuse
+saved choices. Character IDs, frame layout, JSON types and approvals are checked before saving.
+Endpoint descriptions are assembled from reviewed cast/location/states without another model
+call. Structure validation is distinct from human review; neither cached nor fresh model prose
+is presented as a guarantee of creative correctness. Existing v1 operations/jobs remain supported.
+Checkpoints retain new-call prompts/responses and runtime fingerprints without copying weights,
+media or unbounded histories. See the workflow authoring guide for bounds and review commands.
+
+Qualification found and rejected two weak approaches: stretching a few broad beats across clips
+repeated actions; asking Qwen4B for a large JSON outline produced malformed output. Phase-scoped,
+small batches produced a complete 12-action outline in 19.7 s, and the 12-clip state plan in
+77.7 s total. This is slower than the earlier 54.4 s prose planner and is not a matched sampling
+speed claim. The gain is explicit intermediate control, stricter structure and targeted reuse.
+Some generated states still describe motion and one endpoint incorrectly returned to a dungeon;
+creative review and correction remain necessary. The instructed repair corrected clip 10 to a warm
+cottage interior and revalidated clips 11–12 in 14.5 s / three model calls. Approved clips 1–9
+were byte-identical and retained approval. A manual final-state edit used no model call; unchanged
+resume added no executions. The resulting plan has 12 distinct last states, 1,440 frames, valid
+structure and a ~66 KiB checkpoint. Fixed cast descriptions are excluded from premature-event
+warnings, preventing stable clothing from being misreported as a future story event.
+Validation: 456 selected Python tests pass, including 21 focused structured/review tests; Swift
+ran 93 tests, 92 passed and one opt-in installed-model test skipped. Separate local Qwen runs
+qualified story/clip planning, instructed repair and cached resume. Independent review found and
+verified fixes for stale approvals on Run next, reverting edits, and repair completion reporting.
+Ruff, compileall, portable H3 preflight, README node catalog and the release package pass.
+Native app inspection repeatedly timed out, so interactive testing of the new editors remains
+open; the existing user app session was not force-closed. No model downloads or video renders ran.
+
+Follow-up 2026-09-12: fixed the dungeon movie-planning regression. The allocator no longer
+copies the entire story into every clip. It partitions timed visual/action sections into clip-local
+sentences, keeps camera framing attached to actions, excludes audio-only directions, and validates
+story time coverage. Untimed stories distribute actions in order; sparse plans are flagged rather
+than padded with invented events. Endpoint requests put the assigned action after the starting
+frame context. Review now warns about repeated actions/endpoints, early fades, and possible future
+story phrases; these are bounded heuristics, not a semantic-quality guarantee. The runner version
+invalidates stale cached plans on the next execution. Original user run records remain untouched.
+Qualification: eight focused allocation/review tests and 435 selected Python tests pass;
+Swift has 89 passing tests and one opt-in skip. A matched run using the user's unchanged dungeon
+story and a fresh end-to-end Studio run both restored chronological progression. Studio completed
+in 54.4 s (original 67.3 s), with 12 distinct actions/end descriptions, 1,440 frames at 24 FPS,
+and valid shared endpoints. The old output has only three distinct last descriptions and is now
+flagged for repetition. Live UI verified completion and cached resume without additional calls;
+the corrected test job is left open. This supersedes the earlier UI-timeout qualification limit.
+The review remains heuristic; generated visual identity/motion and movie rendering were not tested.
+
+Follow-up 2026-09-12: portable workflow contracts now have a shared sequential executor and
+handlers for all eight registered operations. Studio exposes built-in/imported definitions,
+editable typed inputs and image thumbnails, step results, Run next/remaining, pause/resume,
+regeneration and executable local job export. Prompt Assistant links to the staged editor.
+The same runner serves the bridge and `scripts/run_studio_workflow.py`, with typed output
+validation, bounded retries/calls/time, atomic small JSON checkpoints, exclusive run locks and
+dependency invalidation. Existing models/media stay referenced in place.
+
+Movie planning provides exact project-frame allocation and endpoint descriptions, with continuous
+clips reusing the preceding last frame. It does not generate images/video or mutate timelines.
+Task-adapter metadata supports LoRA/QLoRA declarations; tensor loading, training and dataset
+export remain unimplemented. Local 4B testing exposed malformed nested endpoint JSON, so endpoint
+writing was split into smaller text tasks and bookkeeping moved into the host. A model-generated
+review incorrectly flagged a valid one-sentence edit; reviews remain advisory. Reference evidence
+is now supplied only to edits explicitly requesting images, preventing old image subjects from
+repeatedly overriding requested changes. See `examples/studio-workflows/README.md`.
+Validation: 502 selected Python tests passed, including 21 executor tests and 38 contract tests.
+Swift ran 90 tests: 89 passed and the opt-in installed-model XCTest was skipped; separate real
+local Qwen text/vision workflow runs were exercised. Ruff, compileall, portable H3 preflight,
+README catalog, wheel-only imports/resources, managed-dependency hash dry-run and release app
+packaging passed. Live native UI inspection still returns a computer-use timeout, so the new
+workflow panel has build/core-test coverage but awaits an interactive smoke test. The running
+user session was not force-closed. No new video renders or tensor-training qualification ran.
+Fresh final-code runs: staged editing with one reference completed in 27.40 s and produced
+“A red fox stands in a snowy forest lit by orange fire.” A two-clip/10-second movie plan
+completed in 21.95 s with 240 frames at 24 FPS and an exact shared endpoint. The story test
+still advanced to its ending too early despite explicit time windows; semantic pacing and
+still-frame prose need human review and further qualification before automated movie generation.
+The structural pass is not a story-quality endorsement. Test records are small external JSON files.
+
+Follow-up 2026-09-12: Draw Things requests now accept seed `-1`, resolving it in the shared
+adapter before estimation and retaining the actual seed through generation/provenance; saved
+Studio drafts and headless jobs keep the sentinel. Invalid seeds produce a specific message.
+Prompt assistance sends the latest instructions on every run. Live reproduction found partial
+instruction following rather than a stale request; revised prompt rules prioritize requested
+edits over source preservation, and unchanged/repeated results are now explicitly identified.
+The saved Klein canvas/LoRA setup passed two real local preflights with distinct resolved seeds
+and the same 1,795 CU estimate. Two consecutive 4B vision requests through StudioCore's request
+builder produced distinct blue-moonlight and golden-sunlight revisions in 10.04 seconds total.
+Compound editing remains imperfect. The rebuilt app awaits live UI requalification because
+computer-use access timed out during the restart attempt; the running process was idle.
+
+Follow-up 2026-09-12: experimental local Qwen3.5 prompt assistance is wired into Studio's clip
+prompt editor and image workspace through the existing optional Draw Things helper. It reads
+installed 4B i8x/9B i5x stores in place, previews editable text, and protects changed destinations
+before applying. It uses no cloud credentials and releases the request-owned
+runtime on completion or cancellation. The 4B path now includes selected images via DT's
+vision encoder and multimodal decoder; the 9B path remains text-only pending separate validation.
+The assistant shows image thumbnails, role labels and inclusion controls. An existing model was
+located in an external DT store, so no new download is required for the live qualification.
+Real 4B inference now passes single-image description, two-image endpoint comparison, eight-image
+numbered-reference identification, text-only generation and cancellation checks. The eight-image
+case selected the correct references (1, 4, 7), took 5.60 seconds and peaked at 4.12 GB physical
+footprint on the M3 Ultra. These are smoke tests; the endpoint prose contained some incorrect
+pose/setting inferences, so explicit review remains necessary and broad quality is not qualified.
 
 Follow-up 2026-09-12: Studio has explicit timeline First/Last Frame slots, task-before-model
 Draw Things selection, and an image workspace with one canvas and separate ordered mood-board
@@ -209,8 +844,9 @@ A real LTX 2.3 cloud response exposed a finalization timing assumption: all 121 
 230,880 stereo samples arrived, but the complete causal audio was shorter than the 24 FPS video.
 The helper and Python bridge now recognize and independently validate the exact LTX causal count.
 Offline recovery produced a verified 768×448 MP4 with all 121 frames and the original 48 kHz audio;
-no cloud resubmission was used. A matching gRPC fixture covers the receipt path. Broader live account
-qualification and a fresh post-fix cloud submission remain pending.
+no cloud resubmission was used. A matching gRPC fixture covers the receipt path. This was an earlier
+recovery qualification; subsequent fresh-cloud results and remaining live-account limits are listed
+in the [current qualification table](studio/README.md#headless-jobs-and-qualification).
 Advanced reference/control/audio conditioning and local LoRA conversion/upload remain unsupported.
 The optional helper distribution includes dependency source and rebuild/replacement instructions.
 See [Draw Things setup and qualification](studio/README.md#draw-things--experimental).

@@ -132,7 +132,10 @@ public struct RenderVersion: Codable, Identifiable, Equatable {
   public var stats: RenderStats?
   public var generationSettings: GenerationDescriptor?
   public var resolvedFingerprint: String?
-  public init(path: String, seed: Int, prompt: String, recipePath: String, stats: RenderStats? = nil, generationSettings: GenerationDescriptor? = nil, resolvedFingerprint: String? = nil) {
+  /// Usable generated segment, excluding extension context. Nil supports older projects.
+  public var usableSourceIn: Double?
+  public var usableDuration: Double?
+  public init(path: String, seed: Int, prompt: String, recipePath: String, stats: RenderStats? = nil, generationSettings: GenerationDescriptor? = nil, resolvedFingerprint: String? = nil, usableSourceIn: Double? = nil, usableDuration: Double? = nil) {
     self.path = path
     self.seed = seed
     self.prompt = prompt
@@ -140,6 +143,8 @@ public struct RenderVersion: Codable, Identifiable, Equatable {
     self.stats = stats
     self.generationSettings = generationSettings
     self.resolvedFingerprint = resolvedFingerprint
+    self.usableSourceIn = usableSourceIn
+    self.usableDuration = usableDuration
   }
 }
 public struct Clip: Codable, Identifiable, Equatable {
@@ -180,6 +185,39 @@ public struct Clip: Codable, Identifiable, Equatable {
   public init(name: String = "Untitled clip", engine: Engine = .ltx25) {
     self.name = name
     self.engine = engine
+  }
+  public mutating func activateVersion(_ version: RenderVersion) throws {
+    guard versions.contains(where: { $0.id == version.id }) else {
+      throw StudioError.invalid("This version does not belong to the selected clip.")
+    }
+    // Reselecting the active source must preserve trims, including legacy extensions.
+    guard sourcePath != version.path else { return }
+    let previous = versions.last(where: { $0.path == sourcePath })
+    let isAppendExtension = extensionDirection == "after" && !extensionSource.isEmpty
+    let hasAmbiguousLegacyStart = isAppendExtension && previous != nil && previous?.usableSourceIn == nil
+    let previousStart = previous?.usableSourceIn ?? 0
+    // Old append versions do not distinguish context frames from a later user trim.
+    // An explicit version choice starts at its known usable segment instead of treating
+    // that unknown context prefix as a trim. Existing duration remains the user's choice.
+    let relativeTrim = hasAmbiguousLegacyStart ? 0 : max(0, sourceIn - previousStart)
+    // A legacy target has no better context boundary than the current append source.
+    let legacyTargetStart = isAppendExtension ? (previous?.usableSourceIn ?? sourceIn) : 0
+    let start = version.usableSourceIn ?? legacyTargetStart
+    guard start.isFinite, start >= 0, relativeTrim.isFinite, duration.isFinite, duration > 0 else {
+      throw StudioError.invalid("This version has an invalid source interval.")
+    }
+    var length = duration
+    if let available = version.usableDuration {
+      guard available.isFinite, available > relativeTrim else {
+        throw StudioError.invalid("This version is shorter than the clip's trim. Adjust the trim before selecting it.")
+      }
+      length = min(length, available - relativeTrim)
+    }
+    sourcePath = version.path
+    sourceIn = start + relativeTrim
+    duration = length
+    renderedSignature = ""
+    motionResult = nil
   }
   public func settings(in project: StudioProject) -> MovieSettings {
     settingsOverride ?? project.settings
@@ -245,6 +283,7 @@ public struct AudioRegion: Codable, Identifiable, Equatable {
   }
 }
 public struct StudioProject: Codable, Equatable {
+  public var planning: ProjectPlanning?
   public var version = 1
   public var id = UUID()
   public var name = "Untitled movie"

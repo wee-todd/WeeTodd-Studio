@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct PromptEditor: View {
   @EnvironmentObject var store: StudioStore
+  @State private var assistant: PromptAssistantContext?
   var body: some View {
     VStack(spacing: 0) {
       HStack(spacing: 14) {
@@ -15,6 +16,9 @@ struct PromptEditor: View {
         }.keyboardShortcut(.escape, modifiers: [])
         Divider().frame(height: 20)
         Text(store.selectedClip?.name ?? "Prompt").font(.headline)
+        Button("Prompt Assistant…") {
+          if let clip = store.selectedClip { assistant = PromptAssistantContext(project: store.project, clip: clip, assets: store.allAssets, documentSessionID: store.documentSessionID) }
+        }.disabled(store.bridge.busy || store.selectedClip == nil)
         Spacer()
         Text(store.selectedClip?.displayTask ?? "").font(.system(size: 11)).foregroundStyle(
           .secondary)
@@ -117,8 +121,9 @@ struct PromptEditor: View {
                 ).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
                   .foregroundStyle(store.preparedPrompt.isEmpty ? .secondary : .primary)
                 if !store.preparedReport.isEmpty {
-                  DisclosureGroup("Resolved settings and validation") {
-                    Text(store.preparedReport).font(.system(size: 9, design: .monospaced))
+                  RenderSettingsSummary(clip: clip, report: store.preparedReport)
+                  DisclosureGroup("Validation details (JSON)") {
+                    Text(store.preparedReport).font(.system(size: 11, design: .monospaced))
                       .textSelection(.enabled)
                   }.font(.caption)
                 }
@@ -135,6 +140,7 @@ struct PromptEditor: View {
         Spacer()
       }
     }.background(Theme.background).frame(maxWidth: .infinity, maxHeight: .infinity)
+      .sheet(item: $assistant) { PromptAssistantView(context: $0).environmentObject(store) }
   }
 }
 struct PromptActions: View {
@@ -142,7 +148,10 @@ struct PromptActions: View {
   @ObservedObject var bridge: Bridge
   var body: some View {
     HStack {
-      if bridge.busy {
+      if store.operationBusy && !bridge.busy {
+        ProgressView().controlSize(.small)
+        Text("Checking render settings…").font(.caption)
+      } else if bridge.busy {
         ProgressView().controlSize(.small)
         Text(bridge.message).font(.caption)
         Button("Cancel") { bridge.cancel() }
@@ -156,12 +165,12 @@ struct PromptActions: View {
       }
       Spacer()
       Button("View log") { store.showLog = true }
-      Button("Prepare clip") { Task { await store.prepareSelected() } }.disabled(bridge.busy)
+      Button("Prepare clip") { Task { await store.prepareSelected() } }.disabled(store.operationBusy)
       Button {
         Task { await store.generateSelected() }
       } label: {
         Label("Generate clip", systemImage: "play.fill")
-      }.buttonStyle(.borderedProminent).disabled(bridge.busy || store.selectedClip?.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false)
+      }.buttonStyle(.borderedProminent).disabled(store.operationBusy || store.selectedClip?.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false)
     }
   }
 }
@@ -269,7 +278,7 @@ struct RuntimeView: View {
               }.frame(height: 120)
             }
           }
-          PathPicker(label: "WeeTodd-Nodes repository", value: $store.runtime.root, directory: true)
+          PathPicker(label: "WeeTodd Studio repository", value: $store.runtime.root, directory: true)
           PathPicker(label: "Python executable", value: $store.runtime.pythonPath)
           PathPicker(
             label: "Model recipes folder", value: $store.runtime.profilesDirectory, directory: true)
@@ -301,5 +310,33 @@ struct RuntimeView: View {
         }
       }
     }.padding(26).frame(width: 690, height: 730)
+  }
+}
+
+struct RenderSettingsSummary: View {
+  let clip: Clip
+  let report: String
+  private var details: [String: Any] {
+    (try? JSONSerialization.jsonObject(with: Data(report.utf8))) as? [String: Any] ?? [:]
+  }
+  var body: some View {
+    let resolved = details
+    let generation = resolved["generation"] as? [String: Any] ?? [:]
+    let acceleration = generation["acceleration"] as? [String: Any] ?? [:]
+    VStack(alignment: .leading, spacing: 7) {
+      Text("Render settings").font(.headline)
+      LabeledContent("Engine", value: clip.engine.label)
+      LabeledContent("Task", value: clip.displayTask)
+      LabeledContent("Model recipe", value: resolved["profile"] as? String ?? "See validation details")
+      LabeledContent("Requested size", value: "\(clip.generationWidth) × \(clip.generationHeight)")
+      LabeledContent("Requested duration", value: String(format: "%.2f s", clip.duration))
+      if let fps = resolved["nativeFPS"] as? Double {
+        LabeledContent("Generation frame rate", value: String(format: "%g fps", fps))
+      }
+      LabeledContent("References", value: String(clip.attachments.count))
+      LabeledContent("Seed", value: String(clip.seed))
+      LabeledContent("Memory policy", value: (acceleration["memoryPolicy"] as? String)
+        .map(AccelerationSettings.memoryPolicyLabel) ?? "See model recipe")
+    }.font(.caption).textSelection(.enabled)
   }
 }

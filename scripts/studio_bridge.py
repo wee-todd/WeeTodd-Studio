@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 
 def emit(**value):
-    print(json.dumps(value), flush=True)
+    print(json.dumps(value, ensure_ascii=False), flush=True)
 
 
 def run(command, *, capture=False, error_result=None):
@@ -1046,6 +1046,10 @@ def export_movie(request, destination, *, cache_directory=None):
                 "alimiter=limit=0.95[mixed]"
             )
             a = "mixed"
+        # AAC packet padding and concat/xfade can leave gaps between otherwise
+        # CFR inputs. Conform the assembled stream, not only the individual clips.
+        filters.append(f"[{v}]fps={fps}[moviev]")
+        v = "moviev"
         filter_file = work / "composition.txt"
         filter_file.write_text(";\n".join(filters))
         args += [
@@ -1263,6 +1267,10 @@ def main():
     parser.add_argument(
         "command",
         choices=[
+            "assistant-model-catalog", "assistant-model-inspect",
+            "assistant-model-download", "assistant-model-health",
+            "assist-prompt",
+            "workflow-catalog", "workflow-validate", "workflow-run", "workflow-review",
             "dt-discover", "dt-estimate", "dt-generate-image",
             "dt-prepare-clip", "dt-generate-clip",
             "setup-catalog",
@@ -1289,12 +1297,35 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     request = json.loads(args.request.read_text())
-    if args.command.startswith("dt-"):
-        from studio_drawthings import dispatch
+    if args.command.startswith("assistant-model-"):
+        from studio_assistant_models import dispatch
+
+        result = dispatch(args.command, request,
+                          progress=lambda message, fraction: emit(
+                              event="progress", message=message, fraction=fraction))
+    elif args.command.startswith("workflow-"):
+        from wee_todd_mlx.workflows.service import dispatch
+
+        stopped = False
+
+        def stop_workflow(_number, _frame):
+            nonlocal stopped
+            stopped = True
+
+        for number in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(number, stop_workflow)
+        result = dispatch(args.command, request, cancelled=lambda: stopped,
+                          progress=lambda event: emit(event="progress", **event))
+    elif args.command == "assist-prompt":
+        from studio_prompt_assist import assist
+
+        result = assist(request, progress=lambda message: emit(event="progress", message=message))
+    elif args.command.startswith("dt-"):
+        from studio_drawthings import bridge_progress_event, dispatch
 
         result = dispatch(
             args.command, request, args.output,
-            progress=lambda event: emit(event="progress", message="Draw Things generating…"),
+            progress=lambda event: emit(event="progress", **bridge_progress_event(event)),
         )
     elif args.command == "setup-catalog":
         from wee_todd_mlx.model_setup import setup_catalog

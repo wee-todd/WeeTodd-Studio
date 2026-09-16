@@ -1,0 +1,126 @@
+{
+  "format": "weetodd-workflow-v1",
+  "id": "weetodd.subject-inventory-reviewed",
+  "version": "1.2.0",
+  "name": "Identify and review visual subjects",
+  "description": "Identify subjects, link reusable objects, enrich visual descriptions, then review whole-inventory object coverage and library reuse suggestions before human approval.",
+  "inputs": {
+    "brief": {
+      "type": "text",
+      "label": "Original story or script",
+      "default": ""
+    },
+    "library": {
+      "type": "object_catalog",
+      "label": "Available reusable objects",
+      "default": []
+    }
+  },
+  "models": {
+    "assistant": {
+      "family": "qwen3.5",
+      "variant": "4b",
+      "runtime": "drawthings-qwen-local",
+      "capabilities": [
+        "text"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "subjects",
+      "name": "Subjects",
+      "operation": "project.identify_subjects@1",
+      "inputs": {
+        "brief": {
+          "input": "brief"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 2
+      },
+      "timeoutSeconds": 1800,
+      "model": "assistant",
+      "requiresApproval": false
+    },
+    {
+      "id": "subjects_links",
+      "name": "Link reusable objects",
+      "operation": "project.link_subjects@1",
+      "inputs": {
+        "brief": {
+          "input": "brief"
+        },
+        "subjects": {
+          "step": "subjects",
+          "output": "subjects"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 1800,
+      "model": "assistant",
+      "requiresApproval": false
+    },
+    {
+      "id": "subjects_review",
+      "name": "Review descriptions",
+      "operation": "project.review_subjects@1",
+      "inputs": {
+        "brief": {
+          "input": "brief"
+        },
+        "subjects": {
+          "step": "subjects_links",
+          "output": "subjects"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 1800,
+      "model": "assistant",
+      "requiresApproval": false
+    },
+    {
+      "id": "subjects_coverage",
+      "name": "Review object coverage",
+      "operation": "project.review_object_coverage@1",
+      "inputs": {
+        "brief": {
+          "input": "brief"
+        },
+        "subjects": {
+          "step": "subjects_review",
+          "output": "subjects"
+        },
+        "library": {
+          "input": "library"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 1800,
+      "model": "assistant",
+      "requiresApproval": true
+    }
+  ],
+  "outputs": {
+    "subjects": {
+      "step": "subjects_coverage",
+      "output": "subjects"
+    }
+  },
+  "limits": {
+    "maxParallelSteps": 1,
+    "maxStepExecutions": 368,
+    "maxArtifacts": 64,
+    "maxWorkingBytes": 20971520
+  }
+}

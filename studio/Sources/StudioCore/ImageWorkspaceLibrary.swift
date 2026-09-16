@@ -17,7 +17,7 @@ public struct ImageWorkspaceLibrary: Codable {
   public var activeKey: String?
   public init() {}
   public mutating func record(_ draft: DrawThingsImageDraft, preview: String?) {
-    let key = draft.destination.storageKey
+    let key = draft.storageKey
     sessions[key] = ImageWorkspaceSession(draft: draft, previewPath: preview)
     activeKey = key
   }

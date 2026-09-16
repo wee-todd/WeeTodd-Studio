@@ -54,12 +54,12 @@ def test_paging_settings_is_opt_in_and_preserves_generation_config():
         node.apply(original, float("nan"))
 
 
-def test_legacy_generate_rejects_paging_cache_before_loading():
-    from wee_todd_nodes.runtime import H3GenerationConfig
+def test_convenience_generate_rejects_unpaged_cache_before_loading(tmp_path):
+    from wee_todd_nodes.runtime import H3GenerationConfig, H3ModelSpec
 
-    with pytest.raises(ValueError, match="H3 Sampler"):
+    with pytest.raises(ValueError, match="requires a paged H3 transformer"):
         NODE_CLASS_MAPPINGS["WeeToddH3Generate"]().generate(
-            None, H3GenerationConfig(paging_cache_gb=4), "test", "test"
+            H3ModelSpec(str(tmp_path)), H3GenerationConfig(paging_cache_gb=4), "test", "test"
         )
 
 

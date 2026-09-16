@@ -7,13 +7,39 @@ permissions:
 
 jobs:
   test:
-    runs-on: macos-14
+    name: ${{ matrix.profile }} validation
+    # Apple Silicon + the macOS 26 SDK required by StudioMetal.
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: core
+            extras: docs,ltx
+          - profile: workflows
+            extras: docs
+          - profile: studio
+            extras: docs
+          - profile: remote
+            extras: docs
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: python -m pip install mlx numpy pytest ruff safetensors PyYAML
-      - run: python -m compileall -q src __init__.py
-      - run: python -m pytest -q tests/test_nodes.py tests/test_runtime.py
-      - run: ruff check src/wee_todd_nodes tests
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Preflight interpreter before dependency installation
+        run: python scripts/preflight_python_environment.py --project . --python python --require-architecture arm64
+      - name: Install declared runtime and validation dependencies
+        run: python -m pip install -e ".[${{ matrix.extras }}]" pytest ruff
+      - name: Verify dependency consistency
+        run: python -m pip check
+      - name: Ensure media test tools
+        run: command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || brew install ffmpeg
+      - name: Validate profile
+        run: python scripts/validate_project.py --profile "${{ matrix.profile }}"
+      - name: Package fresh native Studio application
+        if: matrix.profile == 'studio'
+        run: python scripts/build_studio_app.py --configuration release

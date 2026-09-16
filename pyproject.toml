@@ -5,12 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "comfyui-weetodd-nodes"
 version = "0.1.0"
-description = "Experimental MLX-native MiniMax H3 and LTX video nodes for ComfyUI on Apple Silicon"
+description = "WeeTodd Studio: standalone AI video and image creation with Draw Things, native MLX, and maintained ComfyUI nodes"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [{name = "wee-todd"}]
 dependencies = [
+  "jsonschema>=4.23,<5",
   "mlx>=0.32.2",
   "mlx-vlm>=0.4.4",
   "numpy>=1.26",
@@ -30,8 +31,8 @@ ltx = [
 ]
 
 [project.urls]
-Repository = "https://github.com/wee-todd/WeeTodd-Nodes"
-Issues = "https://github.com/wee-todd/WeeTodd-Nodes/issues"
+Repository = "https://github.com/wee-todd/WeeTodd-Studio"
+Issues = "https://github.com/wee-todd/WeeTodd-Studio/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = [

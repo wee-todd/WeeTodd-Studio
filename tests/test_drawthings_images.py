@@ -9,6 +9,18 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 remote_bridge = importlib.import_module("studio_drawthings")
 
 
+def test_bridge_forwards_preview_metadata_without_tensor_or_credentials():
+    event = {"type": "progress", "value": {
+        "message": "Sampling 2/8", "previewPath": "/tmp/job/live-preview.png",
+        "previewRevision": 2, "tensor": "not forwarded", "credentials": "not forwarded"}}
+    assert remote_bridge.bridge_progress_event(event) == {
+        "message": "Sampling 2/8", "previewPath": "/tmp/job/live-preview.png", "previewRevision": 2}
+    event["value"]["previewRevision"] = True
+    assert remote_bridge.bridge_progress_event(event) == {"message": "Sampling 2/8"}
+    assert remote_bridge.bridge_progress_event({"value": None}) == {
+        "message": "Draw Things generating…"}
+
+
 def request():
     return {
         "drawThingsRequest": {

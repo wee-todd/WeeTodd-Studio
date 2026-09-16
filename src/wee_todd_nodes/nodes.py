@@ -5119,55 +5119,53 @@ class WeeToddH3Generate:
     OUTPUT_NODE = True
     FUNCTION = "generate"
     CATEGORY = "WeeTodd/H3"
-    DESCRIPTION = "Generate synchronized video and audio with MiniMax H3 through MLX."
+    DESCRIPTION = (
+        "Generate synchronized H3 video and audio from text-only prompts through staged "
+        "encoding, sampling, and direct MP4 publication. Every component unloads after use."
+    )
 
     def generate(self, model, config, prompt, filename_prefix):
         config.validate()
-        if config.paging_cache_gb > 0:
-            raise ValueError("Experimental page retention requires the composable H3 Sampler.")
-        prepare_low_memory_stage("pipeline", config.memory_mode)
-        progress = None
-        check_interrupted = None
-        try:
-            import comfy.model_management
-            import comfy.utils
-
-            progress = comfy.utils.ProgressBar(config.steps - 1)
-            check_interrupted = comfy.model_management.throw_exception_if_processing_interrupted
-        except ImportError:
-            pass
-
-        def on_step(completed, total):
-            if check_interrupted is not None:
-                check_interrupted()
-            if progress is not None:
-                progress.update_absolute(completed, total)
-
-        result = RUNTIME.get(model, config.projection_backend)(
-            prompt,
-            duration_seconds=config.duration_seconds,
-            num_inference_steps=config.steps,
-            seed=config.seed,
-            height=config.height,
-            width=config.width,
-            drop_adaln=config.drop_adaln,
-            step_callback=on_step,
+        if not prompt.strip():
+            raise ValueError("H3 generation requires a non-empty prompt.")
+        if model.load_vision:
+            raise ValueError(
+                "H3 Generate is text-only and requires load_vision=False. "
+                "Use the composable conditioning nodes for image or reference inputs."
+            )
+        components = H3ComponentSetSpec(
+            checkpoint=model.checkpoint, transformer=model.transformer, task="t2va",
         )
-        from minimax_h3_mlx.media import save_mp4
-
-        target = _safe_output_target(_output_directory(), filename_prefix, config.seed)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        save_mp4(target, result.video, result.fps, result.audio, result.sample_rate)
-        info = {
-            "prompt": prompt,
-            **asdict(config),
-            "video_path": str(target),
-            "seconds_per_step": result.seconds_per_step,
-            "total_seconds": result.total_seconds,
-            "projection_backend": RUNTIME.projection_backend_report,
-        }
-        target.with_suffix(".json").write_text(json.dumps(info, indent=2) + "\n")
-        return (str(target), json.dumps(info, indent=2))
+        config.validate_paging(components.resolved_paths()["transformer"])
+        preflight_components(components, H3PreflightRequest(
+            duration_seconds=config.duration_seconds, steps=config.steps,
+            width=config.width, height=config.height,
+        ))
+        # This convenience entry point has no keep-warm control. Release prior graph
+        # residents even in normal mode, then reuse the composable stage contracts.
+        runtimes = (RUNTIME, TEXT_ENCODER_RUNTIME, TRANSFORMER_RUNTIME,
+                    VIDEO_VAE_RUNTIME, AUDIO_VAE_RUNTIME)
+        try:
+            for runtime in runtimes:
+                runtime.unload()
+            conditioning, conditioning_info = WeeToddH3TextEncode().encode(
+                components, prompt, True, config=config,
+            )
+            latents, sampling_info = WeeToddH3Sample().sample(
+                components, conditioning, config, True,
+            )
+            publication = WeeToddH3DirectPublishLatents().publish(
+                components=components, latents=latents, filename_prefix=filename_prefix,
+                crf=18, max_av_drift_seconds=0.025,
+                generation_metadata=json.dumps({
+                    "prompt": prompt, "conditioning": json.loads(conditioning_info),
+                }),
+                sampling_info=sampling_info,
+            )
+            return publication["result"]
+        finally:
+            for runtime in runtimes:
+                runtime.unload()
 
 
 class WeeToddH3Unload:

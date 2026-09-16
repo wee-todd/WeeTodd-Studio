@@ -1,0 +1,216 @@
+{
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "weetodd-workflow-v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 24000
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 24000
+    },
+    "inputs": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "text",
+              "number",
+              "integer",
+              "boolean",
+              "image_list",
+              "subject_list",
+              "object_catalog"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 24000
+          },
+          "default": {},
+          "minimum": {
+            "type": "number"
+          },
+          "maximum": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "type",
+          "label"
+        ],
+        "additionalProperties": false
+      },
+      "minProperties": 1,
+      "maxProperties": 32
+    },
+    "models": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+          },
+          "variant": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,127}$"
+          },
+          "revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 24000
+          },
+          "runtime": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "text",
+                "vision"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "family",
+          "variant",
+          "runtime",
+          "capabilities"
+        ],
+        "additionalProperties": false
+      },
+      "minProperties": 0,
+      "maxProperties": 16
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:weetodd:schema:step:1"
+      },
+      "minItems": 1,
+      "maxItems": 128
+    },
+    "outputs": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              }
+            },
+            "required": [
+              "input"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "step": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              },
+              "output": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              }
+            },
+            "required": [
+              "step",
+              "output"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "minProperties": 1,
+      "maxProperties": 32
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "maxParallelSteps": {
+          "const": 1
+        },
+        "maxStepExecutions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "maxArtifacts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "maxWorkingBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1099511627776
+        }
+      },
+      "required": [
+        "maxParallelSteps",
+        "maxStepExecutions",
+        "maxArtifacts",
+        "maxWorkingBytes"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "format",
+    "id",
+    "version",
+    "name",
+    "description",
+    "inputs",
+    "models",
+    "steps",
+    "outputs",
+    "limits"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:weetodd:schema:workflow:1",
+  "title": "WeeTodd workflow v1"
+}

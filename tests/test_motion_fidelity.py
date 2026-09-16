@@ -556,7 +556,12 @@ def test_job_v2_runs_enhancement_before_finishing_and_resumes(
     assert job["format"] == "weetodd-studio-job-v2"
     assert list(job["recipes"]) == (["clip"] if generate_source else [])
     assert job["motionRecipes"]["clip"] == recipe
-    monkeypatch.setattr(jobs, "preflight", lambda *_: {})
+    def preflight(_job, _output, *, prepare_remote):
+        # Execution/resume validates local inputs without authorizing another remote attempt.
+        assert prepare_remote is False
+        return {}
+
+    monkeypatch.setattr(jobs, "preflight", preflight)
     calls = []
 
     def generate(recipe_path, folder):

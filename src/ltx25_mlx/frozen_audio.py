@@ -66,6 +66,12 @@ class DFRFrozenAudioX0Model:
         self.model = transformer  # Preserve the sampler's Sol Attention context lookup.
         self._x0_model = X0Model(transformer)
 
+    def release(self) -> None:
+        """Detach all weighted owners when the pipeline changes transformer stages."""
+        self.transformer = None
+        self.model = None
+        self._x0_model.model = None
+
     def __call__(self, **kwargs):
         if kwargs.get("audio_latent") is None:
             raise ValueError("DFR temporal refinement requires frozen audio conditioning.")

@@ -40,7 +40,7 @@ def invoke_helper(
     """
     from .contracts import validate_event
 
-    if command not in {"capabilities", "estimate", "generate"}:
+    if command not in {"capabilities", "estimate", "generate", "text", "text-preflight"}:
         raise ValueError("Unsupported Draw Things helper command")
     request_id = payload.get("requestID")
     if not isinstance(request_id, str) or not request_id.strip():

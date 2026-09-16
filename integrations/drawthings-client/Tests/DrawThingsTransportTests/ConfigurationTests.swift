@@ -34,6 +34,27 @@ final class ConfigurationTests: XCTestCase {
     XCTAssertEqual(image?["inputRoleCombinations"] as? [[String]], [[], ["canvas"]])
   }
 
+  func testCustomSDXLAndQwenEditReferencesUseDeclaredCapabilities() throws {
+    let custom = "user-custom-sdxl.ckpt", edit = "user-qwen-edit.ckpt"
+    let previousCustom = ModelZoo.overrideMapping[custom], previousEdit = ModelZoo.overrideMapping[edit]
+    defer { ModelZoo.overrideMapping[custom] = previousCustom; ModelZoo.overrideMapping[edit] = previousEdit }
+    ModelZoo.overrideMapping[custom] = ModelZoo.Specification(name: "Custom SDXL", file: custom, prefix: "", version: .sdxlBase)
+    var value = request; value["modelID"] = custom
+    XCTAssertEqual(try Configuration.resolve(value).model, custom)
+    XCTAssertNotNil(Capabilities.rules(for: custom))
+    XCTAssertFalse(Capabilities.supportsMoodboard(custom))
+    var specification = ModelZoo.Specification(name: "Custom Qwen", file: edit, prefix: "", version: .qwenImage)
+    specification.modifier = .qwenimageEdit2511; ModelZoo.overrideMapping[edit] = specification
+    XCTAssertTrue(Capabilities.supportsMoodboard(edit))
+    value["modelID"] = edit
+    value["inputs"] = [["role": "moodboard", "path": "/reference.png", "sha256": String(repeating: "a", count: 64), "strength": 0.6, "fit": "fit"]]
+    XCTAssertEqual(try Configuration.resolve(value).model, edit)
+    value["modelID"] = custom
+    XCTAssertThrowsError(try Configuration.resolve(value))
+    specification.modifier = .none; ModelZoo.overrideMapping[edit] = specification
+    XCTAssertFalse(Capabilities.supportsMoodboard(edit))
+  }
+
   func testRejectsUnrepresentableDimensionsAndBooleans() {
     for width: Any in [513, 0, -64, true, 512.5, 4194304] {
       var value = request

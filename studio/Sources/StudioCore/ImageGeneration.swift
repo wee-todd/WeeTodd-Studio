@@ -10,6 +10,7 @@ public struct ImageGeneration: Codable, Equatable {
   public var configuration: [String: JSONValue]?
   public var inputIDs: [String]?
   public var generatedAt: Date?
+  public var referenceSheet: ReferenceSheetContext?
 
   public init(provider: String, requestFingerprint: String, modelID: String, prompt: String) {
     self.provider = provider

@@ -42,7 +42,7 @@ public struct DrawThingsConfigImport: Identifiable {
       result.negativePrompt = try string("negativePrompt", in: entry) ?? string("negativePrompt", in: values)
       let aliases = ["fpsId": "fps", "shiftForAudio": "audioShift"]
       let integerBounds: [String: ClosedRange<Double>] = ["width": 64...4096, "height": 64...4096,
-        "steps": 1...1000, "seed": 0...Double(UInt32.max), "sampler": 0...19, "fps": 1...240, "numFrames": 1...100000]
+        "steps": 1...1000, "seed": -1...Double(UInt32.max), "sampler": 0...19, "fps": 1...240, "numFrames": 1...100000]
       let realBounds: [String: ClosedRange<Double>] = ["guidanceScale": 0...100, "strength": 0...1,
         "shift": 0...100, "audioShift": 0.1...100]
       for (source, value) in values.sorted(by: { $0.key < $1.key }) {

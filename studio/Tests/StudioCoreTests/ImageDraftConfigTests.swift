@@ -2,6 +2,16 @@ import XCTest
 @testable import StudioCore
 
 final class ImageDraftConfigTests: XCTestCase {
+  func testRandomSeedConfigKeepsSentinelUntilExecution() throws {
+    let config = try DrawThingsConfigImport.parse(Data(#"{"seed":-1}"#.utf8), operation: "image")[0]
+    var draft = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .global, projectID: UUID()))
+    config.apply(to: &draft, includePrompt: false)
+    XCTAssertEqual(draft.seed, -1)
+    let request = try draft.request(id: "random-seed")
+    XCTAssertEqual((request["configuration"] as? [String: Any])?["seed"] as? Int, -1)
+    XCTAssertThrowsError(try DrawThingsConfigImport.parse(Data(#"{"seed":-2}"#.utf8), operation: "image"))
+  }
+
   func testDraftRecoveryKeepsReferencesSettingsAndDestinationSeparate() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

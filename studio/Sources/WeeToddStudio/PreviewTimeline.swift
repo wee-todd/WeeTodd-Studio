@@ -29,10 +29,9 @@ struct PreviewPane: View {
             NativePlayer(player: store.player)
           } else if let clip = store.selectedClip, !clip.sourcePath.isEmpty {
             if ["png", "jpg", "jpeg", "webp", "tif", "tiff", "heic"].contains(
-              URL(fileURLWithPath: clip.sourcePath).pathExtension.lowercased()),
-              let image = NSImage(contentsOfFile: clip.sourcePath)
+              URL(fileURLWithPath: clip.sourcePath).pathExtension.lowercased())
             {
-              Image(nsImage: image).resizable().scaledToFit()
+              CachedImageThumbnail(path: clip.sourcePath, maximumPixelSize: 1600)
             } else {
               NativePlayer(player: store.player)
             }
@@ -43,19 +42,25 @@ struct PreviewPane: View {
                 .foregroundStyle(Theme.mint.opacity(0.7))
               Text(
                 store.selectedClip == nil
-                  ? "Every movie begins with a shot." : "Your next shot starts here."
+                  ? "Every movie begins with a shot." : store.selectedClip?.name ?? "Current shot"
               ).font(.system(size: 23, weight: .light))
               Text(
                 store.selectedClip == nil
                   ? "Drop a movie below, or create a clip with H3 or LTX."
-                  : "Write a prompt. Add references. Make it move."
-              ).font(.system(size: 12)).foregroundStyle(.secondary)
+                  : (store.selectedClip?.prompt.isEmpty == false ? store.selectedClip?.prompt ?? "" : "Describe this shot, then add its reference images.")
+              ).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(4).multilineTextAlignment(.center)
+              if let clip = store.selectedClip {
+                Text("\(clip.attachments.count) references · \(clip.displayTask)").font(.caption)
+                if let blocker = store.issues(for: clip).first {
+                  Text(blocker).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center)
+                }
+              }
               HStack(spacing: 10) {
                 Button {
                   if store.selectedClip == nil { store.addClip() }
                   store.showPrompt = true
                 } label: {
-                  Label("Create a shot", systemImage: "plus")
+                  Label(store.selectedClip == nil ? "Create a shot" : "Edit this shot", systemImage: store.selectedClip == nil ? "plus" : "pencil")
                 }.buttonStyle(.borderedProminent).foregroundStyle(.white)
                 Button("Import movie") { store.chooseImports(addToTimeline: true) }.buttonStyle(
                   .bordered)
@@ -75,29 +80,29 @@ struct PreviewPane: View {
           store.seek(0)
         } label: {
           Image(systemName: "backward.end.fill")
-        }
+        }.accessibilityLabel("Skip to start").help("Skip to start")
         Button {
           store.seek(store.playhead - 1 / store.project.settings.fps)
         } label: {
           Image(systemName: "backward.frame.fill")
-        }
+        }.accessibilityLabel("Previous frame").help("Previous frame")
         Button {
           store.togglePlayback()
         } label: {
           Image(systemName: store.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 16))
-        }
+        }.accessibilityLabel(store.isPlaying ? "Pause" : "Play")
         Button {
           store.seek(store.playhead + 1 / store.project.settings.fps)
         } label: {
           Image(systemName: "forward.frame.fill")
-        }
+        }.accessibilityLabel("Next frame").help("Next frame")
         Button {
-          store.seek(store.selectedClip?.duration ?? 0)
+          store.seekToEnd()
         } label: {
           Image(systemName: "forward.end.fill")
-        }
+        }.accessibilityLabel("Skip to end").help("Skip to end")
         Spacer()
-        Text("\(store.selectedClip?.duration ?? 0,specifier:"%.2f") s").font(
+        Text("\(store.effectivePreviewDuration,specifier:"%.2f") s").font(
           .system(size: 10, design: .monospaced)
         ).foregroundStyle(.secondary).frame(width: 75, alignment: .trailing)
       }.buttonStyle(.borderless).padding(.horizontal, 22).frame(height: 40)
@@ -152,32 +157,32 @@ struct TimelineView: View {
           store.split()
         } label: {
           Image(systemName: "scissors")
-        }.help("Split at playhead · ⌘B")
+        }.help("Split at playhead · ⌘B").accessibilityLabel("Split at playhead")
         Button {
           store.addAudioTrack()
         } label: {
           Image(systemName: "waveform.badge.plus")
-        }.help("Add audio track")
+        }.help("Add audio track").accessibilityLabel("Add audio track")
         Button {
           store.addTitle()
         } label: {
           Image(systemName: "textformat")
-        }.help("Add title")
+        }.help("Add title").accessibilityLabel("Add title")
         Button {
           store.chooseImports(addToTimeline: true)
         } label: {
           Image(systemName: "square.and.arrow.down")
-        }.help("Import movie")
+        }.help("Import movie").accessibilityLabel("Import movie")
         Menu {
           ForEach(Engine.allCases.filter { $0 != .movie }) { e in
             Button(e.label) { store.addClip(e) }
           }
         } label: {
           Image(systemName: "plus")
-        }.help("Add generated clip")
+        }.help("Add generated clip").accessibilityLabel("Add generated clip")
         Divider().frame(height: 14)
         Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
-        Slider(value: $store.zoom, in: 12...100).frame(width: 80)
+        Slider(value: $store.zoom, in: 12...100).frame(width: 80).accessibilityLabel("Timeline zoom")
       }.buttonStyle(.borderless).padding(.horizontal, 16).frame(height: 38)
       Divider().overlay(Theme.line)
       ScrollView(.vertical) {

@@ -71,7 +71,8 @@ def install(source, destination, uv):
         "import mlx.core as mx;"
         "assert mx.metal.is_available(), 'Metal GPU unavailable';"
         "import ltx_core_mlx, ltx_pipelines_mlx, wee_todd_mlx, minimax_h3_mlx, ltx25_mlx;"
-        "print('Native MLX runtime verified')"
+        "from wee_todd_mlx.workflows import validate_document;"
+        "print('Native MLX runtime and workflow validation verified')"
     )
     run([python, "-c", code, runtime_source / "src"])
     result = {

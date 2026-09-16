@@ -1,0 +1,55 @@
+{
+  "format": "weetodd-workflow-v1",
+  "id": "weetodd.subject-inventory",
+  "version": "1.0.0",
+  "name": "Identify characters, props and locations",
+  "description": "Extract factual subject descriptions with literal script evidence. Review each subject in the project before approving it. No images are generated.",
+  "inputs": {
+    "brief": {
+      "type": "text",
+      "label": "Original story or script",
+      "default": ""
+    }
+  },
+  "models": {
+    "assistant": {
+      "family": "qwen3.5",
+      "variant": "4b",
+      "runtime": "drawthings-qwen-local",
+      "capabilities": [
+        "text"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "subjects",
+      "name": "Subjects",
+      "operation": "project.identify_subjects@1",
+      "inputs": {
+        "brief": {
+          "input": "brief"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 2
+      },
+      "timeoutSeconds": 1800,
+      "model": "assistant",
+      "requiresApproval": true
+    }
+  ],
+  "outputs": {
+    "subjects": {
+      "step": "subjects",
+      "output": "subjects"
+    }
+  },
+  "limits": {
+    "maxParallelSteps": 1,
+    "maxStepExecutions": 128,
+    "maxArtifacts": 64,
+    "maxWorkingBytes": 20971520
+  }
+}

@@ -16,6 +16,27 @@ from wee_todd_remote.profiles import DrawThingsProfile
 from wee_todd_remote.studio import compose_drawthings_request, render_drawthings_clip
 
 
+def bridge_progress_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Forward small progress records, never tensors or credentials."""
+    value = event.get("value", {})
+    if not isinstance(value, dict):
+        value = {}
+    message = value.get("message")
+    safe_message = "Draw Things generating…"
+    if isinstance(message, str) and message:
+        safe_message = message[:512]
+    result = {"message": safe_message}
+    revision, path = value.get("previewRevision"), value.get("previewPath")
+    if (
+        isinstance(revision, int)
+        and not isinstance(revision, bool)
+        and revision > 0
+        and isinstance(path, str)
+    ):
+        result.update(previewPath=path, previewRevision=revision)
+    return result
+
+
 def adapter_for(request: dict[str, Any]) -> DrawThingsAdapter:
     connection = dict(request["connection"])
     connection["selfHostedConfirmed"] = connection.get("selfHostedConfirmed") is True

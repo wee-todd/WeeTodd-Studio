@@ -6,11 +6,23 @@ import UniformTypeIdentifiers
 
 struct ImageGenerationEditor: View {
   @EnvironmentObject var store: StudioStore
+  var onClose: (() -> Void)? = nil
+  var onUseReference: ((MediaAsset) -> Void)? = nil
+  var referenceTools: AnyView? = nil
   @State private var showResult = true
   @State private var zoom = 1.0
   @State private var groupName = ""
-  @State private var referencePreview: String?
+  @State private var assistant: PromptAssistantContext?
+  @State private var moodboardVisible = false
+  @State private var configOpen = false
+  @State private var connectionsOpen = false
+  @State private var inspection: ImagePreviewSelection?
+  @State private var promptExpanded = true
   var draft: DrawThingsImageDraft? { store.imageDraft }
+  var livePreview: BridgeProgressEvent? { store.bridge.busy ? store.bridge.livePreview : nil }
+  var connection: DrawThingsConnection? {
+    store.drawThingsConnections.first { $0.id == draft?.profileID }
+  }
   func binding<T>(_ key: WritableKeyPath<DrawThingsImageDraft, T>, fallback: T) -> Binding<T> {
     Binding(get: { store.imageDraft?[keyPath: key] ?? fallback }, set: { value in
       store.imageDraft?[keyPath: key] = value; store.imageEstimate = nil
@@ -19,40 +31,58 @@ struct ImageGenerationEditor: View {
   var body: some View {
     VStack(spacing: 0) {
       HStack {
-        Button { store.imageDraft = nil } label: { Label("Back to movie", systemImage: "arrow.left") }
+        Button { if let onClose { onClose() } else { store.imageDraft = nil } } label: {
+          Label(onClose == nil ? "Back to movie" : "Back to approval", systemImage: "arrow.left")
+        }.disabled(store.bridge.busy)
           .keyboardShortcut(.escape, modifiers: [])
         Divider().frame(height: 20)
-        Text("Image Workspace").font(.headline)
-        Button("Import Config…") { store.configImportClipID = nil; store.showDrawThingsConfigImport = true }
-        Link("Draw Things presets", destination: DrawThingsConfigImport.presetsURL).font(.caption)
-        TextField("Image name", text: binding(\.name, fallback: "Generated image")).frame(maxWidth: 260)
+        TextField("Image name", text: binding(\.name, fallback: "Generated image")).textFieldStyle(.roundedBorder)
+          .frame(minWidth: 180, maxWidth: 380)
         Spacer()
-        Text("\(draft?.destination.scope.rawValue.capitalized ?? "") assets").foregroundStyle(.secondary)
+        Button(moodboardVisible ? "Hide mood board" : "Mood board (\(draft?.moodboard.count ?? 0))") { moodboardVisible.toggle() }
+        Menu("Tools") {
+        Button("Prompt Assistant…") {
+          if let draft { assistant = PromptAssistantContext(projectID: store.project.id, image: draft, documentSessionID: store.documentSessionID) }
+        }.disabled(store.bridge.busy)
+        Button("Import Config…") { store.configImportClipID = nil; configOpen = true }
+        Link("Draw Things presets", destination: DrawThingsConfigImport.presetsURL)
+        Button("Export Headless Job…") { store.exportDrawThingsImageJob() }.disabled(store.bridge.busy || draft?.modelID.isEmpty != false)
+        }
       }.padding(16)
       Divider()
+      if let referenceTools { referenceTools }
       HSplitView {
-        settings.frame(minWidth: 260, idealWidth: 300, maxWidth: 370)
+        settings.frame(minWidth: 260, idealWidth: 300, maxWidth: 330)
         VStack(spacing: 12) {
           HStack {
-            Text(showResult && store.imagePreviewPath != nil ? "RESULT" : "CANVAS").font(.caption.bold())
+            Text(livePreview != nil ? "LIVE PREVIEW · APPROXIMATE" : showResult && store.imagePreviewPath != nil ? "RESULT" : "CANVAS").font(.caption.bold())
             if store.imagePreviewPath != nil {
-              Picker("Display", selection: $showResult) { Text("Input").tag(false); Text("Result").tag(true) }.pickerStyle(.segmented).frame(width: 170)
-              Button("Use result as canvas") {
-                if let path = store.imagePreviewPath { store.loadImageInputs([URL(fileURLWithPath: path)], canvas: true); showResult = false }
-              }
+              Picker("Display", selection: $showResult) { Text("Input").tag(false); Text("Result").tag(true) }.labelsHidden().pickerStyle(.segmented).frame(width: 130)
+                .disabled(livePreview != nil)
             }
             Spacer()
+            Button("Inspect image") {
+              if let path = showResult ? store.imagePreviewPath ?? draft?.canvas?.path : draft?.canvas?.path {
+                inspection = ImagePreviewSelection(path: path, title: draft?.name)
+              }
+            }.disabled(livePreview != nil || (store.imagePreviewPath == nil && draft?.canvas == nil))
             Button("Fit") { zoom = 1 }
-            Slider(value: $zoom, in: 0.5...2).frame(width: 85).help("Canvas zoom")
+            Slider(value: $zoom, in: 0.5...3).frame(width: 100).help("Canvas zoom")
           }.font(.caption)
           GeometryReader { geometry in
-            let path = showResult ? store.imagePreviewPath ?? draft?.canvas?.path : draft?.canvas?.path
+            let path = livePreview?.previewPath ?? (showResult ? store.imagePreviewPath ?? draft?.canvas?.path : draft?.canvas?.path)
             ZStack {
-              Color.black.opacity(0.9)
+              Color.black.opacity(0.9).allowsHitTesting(false)
               if let path {
+                let ratio = CGFloat(max(1, draft?.width ?? 512)) / CGFloat(max(1, draft?.height ?? 512))
+                let width = min(geometry.size.width, geometry.size.height * ratio)
+                ScrollView([.horizontal, .vertical]) {
                 WorkspaceImage(path: path, fill: !(showResult && store.imagePreviewPath != nil) && draft?.canvas?.fit == "fill")
-                  .aspectRatio(CGFloat(draft?.width ?? 512) / CGFloat(draft?.height ?? 512), contentMode: .fit)
-                  .scaleEffect(zoom)
+                  .id(livePreview.map { "live-\($0.previewRevision ?? 0)" } ?? path)
+                  .frame(width: width * zoom, height: width / ratio * zoom).clipped()
+                  .allowsHitTesting(false)
+                  .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
+                }.contentShape(Rectangle()).clipped().accessibilityLabel("Image viewport")
               } else {
                 VStack(spacing: 12) {
                   Image(systemName: "photo.badge.plus").font(.largeTitle)
@@ -61,12 +91,20 @@ struct ImageGenerationEditor: View {
                   Button("Load image…") { store.chooseImageInputs(canvas: true) }
                 }.foregroundStyle(.white)
               }
-            }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
+            }.frame(width: geometry.size.width, height: geometry.size.height).contentShape(Rectangle()).clipped()
               .onDrop(of: [UTType.fileURL.identifier, UTType.text.identifier], isTargeted: nil) { store.dropImageInputs($0, canvas: true) }
           }.frame(minHeight: 220)
           HStack {
             Button("Load canvas…") { store.chooseImageInputs(canvas: true); showResult = false }
             assetsMenu(canvas: true)
+            if showResult, let path = store.imagePreviewPath {
+              Button("Use result as canvas") { store.loadImageInputs([URL(fileURLWithPath: path)], canvas: true); showResult = false }
+                .disabled(store.bridge.busy)
+            }
+            Spacer()
+          }.font(.caption)
+          if draft?.canvas != nil {
+          HStack {
             if draft?.canvas != nil {
               Toggle("Use canvas", isOn: Binding(get: { draft?.canvas?.enabled ?? false }, set: { store.imageDraft?.canvas?.enabled = $0; store.imageEstimate = nil }))
               Picker("Placement", selection: Binding(get: { draft?.canvas?.fit ?? "fit" }, set: { store.imageDraft?.canvas?.fit = $0; store.imageEstimate = nil })) {
@@ -76,13 +114,20 @@ struct ImageGenerationEditor: View {
             }
             Spacer()
           }.font(.caption)
+          }
+          HStack {
+            Text("Prompt").font(.caption.bold()); Spacer()
+            Button(promptExpanded ? "Hide prompt" : "Show prompt") { promptExpanded.toggle() }.font(.caption)
+          }
+          if promptExpanded {
           TextEditor(text: binding(\.prompt, fallback: "")).font(.system(size: 14))
             .scrollContentBackground(.hidden).padding(10).background(Theme.raised, in: RoundedRectangle(cornerRadius: 8))
-            .frame(height: 155).overlay(alignment: .topLeading) {
+            .frame(minHeight: 120, idealHeight: 180, maxHeight: 210).overlay(alignment: .topLeading) {
               if draft?.prompt.isEmpty != false { Text("Describe the image or edit…").foregroundStyle(.secondary).padding(15).allowsHitTesting(false) }
             }
+          }
         }.padding(16).frame(minWidth: 470, maxWidth: .infinity)
-        moodboard.frame(minWidth: 205, idealWidth: 235, maxWidth: 290)
+        if moodboardVisible { moodboard.frame(minWidth: 205, idealWidth: 235, maxWidth: 290) }
       }
       Divider()
       HStack {
@@ -90,49 +135,79 @@ struct ImageGenerationEditor: View {
           ProgressView().controlSize(.small)
           Text(store.bridge.message).font(.caption)
           Button("Cancel") { store.bridge.cancel() }
-        } else { Text("Each generation is saved as a new image asset.").font(.caption).foregroundStyle(.secondary) }
+        } else { Text("Ready · saves to \(draft?.destination.scope.rawValue ?? "project") assets").font(.caption).foregroundStyle(.secondary) }
         Spacer()
-        Button("Export Headless Job…") { store.exportDrawThingsImageJob() }.disabled(store.bridge.busy || draft?.modelID.isEmpty != false)
+        if let onUseReference {
+          Button("Use as reference") {
+            if let asset = store.allAssets.first(where: { $0.path == store.imagePreviewPath && $0.generation?.referenceSheet?.subjectKey == draft?.referenceSheet?.subjectKey }) { onUseReference(asset) }
+          }.disabled(store.bridge.busy || !store.allAssets.contains { $0.path == store.imagePreviewPath && $0.generation?.referenceSheet?.subjectKey == draft?.referenceSheet?.subjectKey })
+        }
         Button("Check Settings & CU") { Task { await store.prepareImageGeneration() } }.disabled(store.bridge.busy || draft?.modelID.isEmpty != false)
         Button("Generate Image") { Task { await store.generateImageAsset() } }.buttonStyle(.borderedProminent)
           .disabled(store.bridge.busy || store.imageEstimate?["eligibility"] as? String != "allowed")
       }.padding(16)
     }.background(Theme.background).frame(maxWidth: .infinity, maxHeight: .infinity)
-      .onChange(of: store.imagePreviewPath) { _, path in if path != nil { showResult = true } }
-      .sheet(isPresented: Binding(get: { referencePreview != nil }, set: { if !$0 { referencePreview = nil } })) {
-        VStack {
-          if let path = referencePreview { WorkspaceImage(path: path).frame(width: 720, height: 580) }
-          Button("Done") { referencePreview = nil }
-        }.padding()
+      .sheet(item: $assistant) { PromptAssistantView(context: $0).environmentObject(store) }
+      .sheet(item: $inspection) { ImagePreview(path: $0.path, title: $0.title) }
+      .sheet(isPresented: $configOpen) { DrawThingsConfigImportView(onClose: { configOpen = false }).environmentObject(store) }
+      .sheet(isPresented: $connectionsOpen) { DrawThingsSettings(onClose: { connectionsOpen = false }).environmentObject(store) }
+      .onAppear { moodboardVisible = draft?.moodboard.isEmpty == false }
+      .onChange(of: draft?.moodboard.count) { _, count in if (count ?? 0) > 0 { moodboardVisible = true } }
+      .onChange(of: showResult) { _, _ in zoom = 1 }
+      .onChange(of: store.imagePreviewPath) { _, path in if path != nil { showResult = true; zoom = 1 } }
+      .onChange(of: connection, initial: true) { _, connection in
+        if let connection { Task { await store.discoverDrawThings(connection) } }
       }
   }
   var settings: some View {
     Form {
       Section("Draw Things") {
-        Picker("Connection", selection: binding(\.profileID, fallback: "")) {
+        Picker("Connection", selection: Binding(get: { draft?.profileID ?? "" }, set: { id in
+          store.imageDraft?.selectConnection(id); store.imageEstimate = nil
+        })) {
           Text("Choose a connection").tag("")
           ForEach(store.drawThingsConnections) { Text($0.name).tag($0.id) }
-        }.onChange(of: draft?.profileID) { _, _ in
-          store.imageDraft?.modelID = ""; store.imageDraft?.loras = []
-        }
+        }.disabled(store.bridge.busy)
         HStack {
-          Button("Connections…") { store.showDrawThings = true }
+          Button("Connections…") { connectionsOpen = true }
           Button("Refresh") {
-            if let connection = store.drawThingsConnections.first(where: { $0.id == draft?.profileID }) { Task { await store.testDrawThings(connection) } }
-          }.disabled(store.bridge.busy)
+            if let connection { Task { await store.discoverDrawThings(connection, force: true) } }
+          }.disabled(connection == nil || store.drawThingsDiscovery.loading.contains(draft?.profileID ?? ""))
         }
-        let models = store.imageModelsForInputs()
-        Picker("Model", selection: binding(\.modelID, fallback: "")) {
+        let models = store.drawThingsModels(draft?.profileID ?? "", operation: "image")
+        let hasCatalog = store.drawThingsCatalogs[draft?.profileID ?? ""] != nil
+        let loading = store.drawThingsDiscovery.loading.contains(draft?.profileID ?? "")
+        let discoveryError = store.drawThingsDiscovery.errors[draft?.profileID ?? ""]
+        if connection == nil {
+          Text("Choose a connection to load its image models.").font(.caption).foregroundStyle(.secondary)
+        } else if loading {
+          HStack { ProgressView().controlSize(.small); Text("Loading image models…").font(.caption) }
+        } else if let discoveryError {
+          Text((hasCatalog ? "Refresh failed; showing the last loaded models. " : "Could not load image models. ") + discoveryError)
+            .font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+          Button("Retry loading models") { if let connection { Task { await store.discoverDrawThings(connection, force: true) } } }
+        } else if hasCatalog {
+          Text(models.isEmpty ? "No supported image models were reported by this connection." : "\(models.count) image models available")
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        Picker("Model", selection: Binding(get: { draft?.modelID ?? "" }, set: { id in
+          let compatible: Set<String>? = hasCatalog
+            ? Set(store.drawThingsLoRAs(profileID: draft?.profileID ?? "", modelID: id).map(\.id)) : nil
+          store.imageDraft?.selectModel(id, compatibleLoRAIDs: compatible); store.imageEstimate = nil
+        })) {
           Text("Choose an image model").tag("")
           if let id = draft?.modelID, !id.isEmpty, !models.contains(where: { $0.id == id }) {
-            Text("\(id) · refresh / check inputs").tag(id).disabled(true)
+            Text("\(id) · \(hasCatalog ? "not in this catalog" : "saved selection; loading catalog")").tag(id).disabled(true)
           }
           ForEach(models, id: \.id) { Text($0.name).tag($0.id) }
-        }.onChange(of: draft?.modelID) { _, _ in
-          let ids = Set(store.drawThingsLoRAs(profileID: draft?.profileID ?? "", modelID: draft?.modelID ?? "").map(\.id))
-          store.imageDraft?.loras.removeAll { !ids.contains($0.modelID) }
+        }.disabled(store.bridge.busy || connection == nil || (loading && models.isEmpty))
+        if hasCatalog, let draft, !draft.modelID.isEmpty, !models.contains(where: { $0.id == draft.modelID }) {
+          Text("The saved model was not reported by this connection. Refresh its inventory or choose another image model.")
+            .font(.caption).foregroundStyle(.orange)
+        } else if hasCatalog, let draft, !draft.modelID.isEmpty, !store.imageModelsForInputs().contains(where: { $0.id == draft.modelID }) {
+          Text("This model does not support the enabled image inputs. Disable them, move one to the canvas, or choose another model.")
+            .font(.caption).foregroundStyle(.orange)
         }
-        Text("Models are filtered by the enabled canvas and mood-board inputs.").font(.caption2).foregroundStyle(.secondary)
       }
       Section("Generation") {
         TextField("Width", value: binding(\.width, fallback: 512), format: .number.grouping(.never))
@@ -145,8 +220,17 @@ struct ImageGenerationEditor: View {
           Slider(value: binding(\.strength, fallback: 1), in: 0...1)
           Text("Higher values allow more regeneration. Editing models also use the canvas as a reference.").font(.caption2).foregroundStyle(.secondary)
         }
-        TextField("Seed", value: binding(\.seed, fallback: 42), format: .number.grouping(.never))
-        Button("Randomize seed") { store.imageDraft?.seed = Int.random(in: 0...Int(UInt32.max)); store.imageEstimate = nil }
+        Picker("Seed mode", selection: binding(\.randomSeedEachGeneration, fallback: true)) {
+          Text("Random each generation").tag(true)
+          Text("Fixed seed").tag(false)
+        }
+        if draft?.randomSeedEachGeneration != false {
+          Text("A fresh seed is chosen for every generation. Saved settings keep −1; each result records its actual seed.").font(.caption2).foregroundStyle(.secondary)
+        } else {
+          TextField("Seed", value: binding(\.seed, fallback: 0), format: .number.grouping(.never))
+          Text("The same seed and settings reproduce the same image. Enter −1 or choose Random each generation for variations.").font(.caption2).foregroundStyle(.secondary)
+          Button("New fixed seed") { store.imageDraft?.seed = Int.random(in: 0...Int(UInt32.max)); store.imageEstimate = nil }
+        }
         Picker("Sampler", selection: binding(\.sampler, fallback: nil)) {
           Text("Server default").tag(nil as Int?)
           ForEach(Array(Self.samplers.enumerated()), id: \.offset) { index, name in Text(name).tag(Optional(index)) }
@@ -174,9 +258,7 @@ struct ImageGenerationEditor: View {
         VStack(spacing: 14) {
           ForEach(Array((draft?.moodboard ?? []).enumerated()), id: \.element.id) { index, item in
             VStack(spacing: 6) {
-              WorkspaceImage(path: item.path).frame(height: 115).background(.black.opacity(0.15)).clipped()
-                .onTapGesture { referencePreview = item.path }
-                .help("Click to inspect this reference")
+              PreviewableImage(path: item.path, title: "Mood board · Reference \(index + 1)").frame(height: 115).background(.black.opacity(0.15)).clipped()
               HStack {
                 Toggle("Reference \(index + 1)", isOn: referenceBinding(item.id, \.enabled, item.enabled))
                 Spacer()

@@ -10,7 +10,9 @@ public enum Capabilities {
       guard ModelZoo.modifierForModel(model) == .fl2va else { return nil }
       operation = "video"
     case .ltx2, .ltx2_3: operation = "video"
-    case .flux1, .flux2, .flux2_4b, .flux2_9b, .qwenImage, .zImage, .krea2: operation = "image"
+    case .v1, .v2, .kandinsky21, .sdxlBase, .sdxlRefiner, .ssd1b, .wurstchenStageC,
+      .wurstchenStageB, .sd3, .sd3Large, .pixart, .auraflow, .hiDreamI1, .hiDreamO1,
+      .ernieImage, .ideogram4, .flux1, .flux2, .flux2_4b, .flux2_9b, .qwenImage, .zImage, .krea2: operation = "image"
     default: return nil
     }
     let dimensions = ["min": 64, "max": 4096, "multipleOf": 64]
@@ -21,7 +23,7 @@ public enum Capabilities {
     ]
     if operation == "image" {
       var combinations: [[String]] = [[], ["canvas"]]
-      if [.flux2, .flux2_4b, .flux2_9b].contains(ModelZoo.versionForModel(model)) {
+      if supportsMoodboard(model) {
         for count in 1...8 {
           let references = Array(repeating: "moodboard", count: count)
           combinations.append(references)
@@ -42,6 +44,15 @@ public enum Capabilities {
     }
     return ["operations": [operation: rule], "confidence": "verified",
             "source": "adapter-rules-intersect-endpoint-files", "revision": ComputeEstimate.revision]
+  }
+
+  static func supportsMoodboard(_ model: String) -> Bool {
+    switch ModelZoo.versionForModel(model) {
+    case .flux2, .flux2_4b, .flux2_9b: return true
+    case .qwenImage:
+      return [.qwenimageEditPlus, .qwenimageEdit2511].contains(ModelZoo.modifierForModel(model))
+    default: return false
+    }
   }
 
   static func catalog(files: [String]) -> [String: Any] {

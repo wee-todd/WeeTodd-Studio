@@ -34,7 +34,14 @@ public struct DrawThingsImageDraft: Codable, Equatable {
   public var width = 512
   public var height = 512
   public var steps = 4
-  public var seed = 42
+  public var seed = -1
+  public var randomSeedEachGeneration: Bool {
+    get { seed == -1 }
+    set {
+      if newValue { seed = -1 }
+      else if seed == -1 { seed = 0 }
+    }
+  }
   public var guidance = 1.0
   public var strength = 1.0
   public var sampler: Int?
@@ -42,7 +49,22 @@ public struct DrawThingsImageDraft: Codable, Equatable {
   public var canvas: ImageWorkspaceInput?
   public var moodboard: [ImageWorkspaceInput] = []
   public var loras: [DrawThingsLoRA] = []
+  public var referenceSheet: ReferenceSheetContext?
+  public var storageKey: String {
+    destination.storageKey + (referenceSheet.map { ":reference:" + $0.subjectKey } ?? "")
+  }
   public init(destination: ImageAssetDestination) { self.destination = destination }
+  /// Call only for an explicit picker edit, never while restoring/importing a draft.
+  public mutating func selectConnection(_ id: String) {
+    guard profileID != id else { return }
+    profileID = id; modelID = ""; loras = []
+  }
+  public mutating func selectModel(_ id: String, compatibleLoRAIDs: Set<String>?) {
+    guard modelID != id else { return }
+    modelID = id
+    if id.isEmpty { loras = [] }
+    else if let compatibleLoRAIDs { loras.removeAll { !compatibleLoRAIDs.contains($0.modelID) } }
+  }
   public var configuration: [String: Any] {
     var value: [String: Any] = ["width": width, "height": height, "steps": steps, "seed": seed,
       "guidanceScale": guidance, "strength": canvas?.enabled == true ? strength : 1]

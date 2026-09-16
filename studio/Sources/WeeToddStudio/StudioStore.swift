@@ -49,6 +49,20 @@ struct ModelProfile: Identifiable, Codable {
   var generation: GenerationDescriptor?
 }
 
+struct BridgeResponseBuffer {
+  private(set) var data = Data()
+  private let maximum: Int
+  private let retained: Int
+  init(workflow: Bool) {
+    maximum = workflow ? 4_500_000 : 2_000_000
+    retained = workflow ? 3_000_000 : 1_000_000
+  }
+  mutating func append(_ part: Data) {
+    data.append(part)
+    if data.count > maximum { data = Data(data.suffix(retained)) }
+  }
+}
+
 @MainActor final class Bridge: ObservableObject {
   @Published var busy = false
   @Published var log = ""
@@ -56,6 +70,11 @@ struct ModelProfile: Identifiable, Codable {
   @Published var fraction: Double = 0
   @Published var startedAt: Date?
   @Published var lastOutputAt: Date?
+  @Published var livePreview: BridgeProgressEvent?
+  typealias Invocation = @MainActor (String, RuntimeSettings, [String: Any], URL?) async throws -> [String: Any]
+  private let invocation: Invocation?
+  init(invocation: Invocation? = nil) { self.invocation = invocation }
+  func independent() -> Bridge { Bridge(invocation: invocation) }
   private var process: Process?
   private var cancellationRequested = false
   func cancel() {
@@ -69,6 +88,11 @@ struct ModelProfile: Identifiable, Codable {
     guard !busy else {
       throw StudioError.invalid("Another job is active. Wait or cancel it first.")
     }
+    if let invocation {
+      busy = true
+      defer { busy = false }
+      return try await invocation(command, runtime, payload, output)
+    }
     guard FileManager.default.isExecutableFile(atPath: runtime.pythonPath),
       FileManager.default.fileExists(atPath: runtime.root + "/scripts/studio_bridge.py")
     else {
@@ -81,7 +105,12 @@ struct ModelProfile: Identifiable, Codable {
     lastOutputAt = startedAt
     fraction = 0
     log = ""
-    defer { busy = false; process = nil }
+    livePreview = nil
+    let previewFile = command == "dt-generate-image" ? output?.appendingPathComponent("live-preview.png") : nil
+    defer {
+      busy = false; process = nil; livePreview = nil
+      if let previewFile { try? FileManager.default.removeItem(at: previewFile) }
+    }
     var env = ProcessInfo.processInfo.environment
     if command == "setup-download" {
       message = "Checking macOS Keychain — respond to its permission dialog if shown…"
@@ -133,13 +162,12 @@ struct ModelProfile: Identifiable, Codable {
     }
     let response: [String: Any] = try await withCheckedThrowingContinuation { continuation in
       DispatchQueue.global(qos: .userInitiated).async {
-        var bytes = Data()
+        var responseBuffer = BridgeResponseBuffer(workflow: command.hasPrefix("workflow-"))
         var progressStream = BridgeProgressStream()
         while true {
           let part = pipe.fileHandleForReading.availableData
           if part.isEmpty { break }
-          bytes.append(part)
-          if bytes.count > 2_000_000 { bytes = Data(bytes.suffix(1_000_000)) }
+          responseBuffer.append(part)
           let text = String(decoding: part, as: UTF8.self)
           let events = progressStream.append(part)
           DispatchQueue.main.async {
@@ -148,11 +176,16 @@ struct ModelProfile: Identifiable, Codable {
             for event in events {
               self.message = event.message
               self.fraction = event.fraction ?? self.fraction
+              if let previewFile, event.previewPath == previewFile.path,
+                let revision = event.previewRevision, revision > (self.livePreview?.previewRevision ?? 0),
+                !self.cancellationRequested {
+                self.livePreview = event
+              }
             }
           }
         }
         task.waitUntilExit()
-        let lines = String(decoding: bytes, as: UTF8.self).split(separator: "\n")
+        let lines = String(decoding: responseBuffer.data, as: UTF8.self).split(separator: "\n")
         let last = lines.reversed().compactMap { line -> [String: Any]? in
           guard let data = String(line).data(using: .utf8),
             let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -206,14 +239,20 @@ extension Encodable {
   @Published var projectURL: URL?
   @Published var showPrompt = false
   @Published var showMotionPrompt = false
+  @Published var showWorkflows = false
+  @Published var showShotList = false
+  @Published var showProductionLibrary = false
   @Published var showRuntime = false
   @Published var showDrawThings = false
   @Published var drawThingsConnections: [DrawThingsConnection] = []
-  @Published var drawThingsCatalogs: [String: [String: Any]] = [:]
+  let drawThingsDiscovery = DrawThingsCatalogDiscovery()
+  let attachmentDigests = AttachmentDigestStore()
+  var drawThingsCatalogs: [String: [String: Any]] { drawThingsDiscovery.catalogs }
   @Published var drawThingsLoRAGroups: [DrawThingsLoRAGroup] = []
   @Published var imageDraft: DrawThingsImageDraft? { didSet { persistImageWorkspace() } }
   @Published var imageEstimate: [String: Any]?
   @Published var imagePreviewPath: String? { didSet { persistImageWorkspace() } }
+  @Published var referenceSheetOpen = false
   var imageWorkspaceLibrary = ImageWorkspaceLibrary()
   var restoringImageWorkspace = true
   @Published var showDrawThingsConfigImport = false
@@ -241,7 +280,13 @@ extension Encodable {
   @Published var isPlaying = false
   @Published var queue: [UUID] = []
   @Published var previewMode = "Clip"
-  let bridge = Bridge()
+  let bridge: Bridge
+  let descriptionBridge: Bridge
+  let dataDirectory: URL
+  @Published private(set) var activeNativeRequest: UUID?
+  private(set) var documentSessionID = UUID()
+  @Published var preparingDrawThings = false
+  var operationBusy: Bool { bridge.busy || activeNativeRequest != nil || preparingDrawThings }
   var preparedFingerprint: String?
   var motionPromptSession: MotionPromptEditorSession?
   private var undoStates: [StudioProject] = []
@@ -250,24 +295,37 @@ extension Encodable {
   private var autosaveTask: Task<Void, Never>?
   private var observer: Any?
   private var bridgeObservation: AnyCancellable?
+  private var catalogObservation: AnyCancellable?
+  private var digestObservation: AnyCancellable?
   var selectedClip: Clip? { project.clips.first { $0.id == selectedClipID } }
   var allAssets: [MediaAsset] { globalAssets + project.assets }
   var selectedAsset: MediaAsset? { allAssets.first { $0.id == selectedAssetID } }
   var canUndo: Bool { !undoStates.isEmpty }
   var canRedo: Bool { !redoStates.isEmpty }
 
-  init() {
+  init(dataDirectory: URL = StudioStore.supportDirectory, restoreSession: Bool = true,
+       invocation: Bridge.Invocation? = nil) {
+    self.dataDirectory = dataDirectory
+    bridge = Bridge(invocation: invocation)
+    descriptionBridge = Bridge(invocation: invocation)
+    digestObservation = attachmentDigests.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
+    catalogObservation = drawThingsDiscovery.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
     bridgeObservation = bridge.objectWillChange.sink { [weak self] _ in
       self?.objectWillChange.send()
     }
+    guard restoreSession else { return }
     try? FileManager.default.createDirectory(
-      at: Self.supportDirectory.appendingPathComponent("Profiles"),
+      at: dataDirectory.appendingPathComponent("Profiles"),
       withIntermediateDirectories: true)
     runtime = RuntimeSettings.restoring(
-      try? Data(contentsOf: Self.supportDirectory.appendingPathComponent("runtime.json")),
+      try? Data(contentsOf: dataDirectory.appendingPathComponent("runtime.json")),
       defaults: runtime)
     if let data = try? Data(
-      contentsOf: Self.supportDirectory.appendingPathComponent("global-assets.json")),
+      contentsOf: dataDirectory.appendingPathComponent("global-assets.json")),
       let value = try? JSONDecoder().decode([MediaAsset].self, from: data)
     {
       globalAssets = value
@@ -278,13 +336,7 @@ extension Encodable {
     let args = CommandLine.arguments
     if let i = args.firstIndex(of: "--project"), args.count > i + 1 {
       load(URL(fileURLWithPath: args[i + 1]))
-    } else if let p = try? ProjectStorage.read(
-      Self.supportDirectory.appendingPathComponent("Autosave.weetodd"))
-    {
-      project = p
-      selectedClipID = p.clips.first?.id
-      notice = "Recovered your autosaved project."
-    }
+    } else { restoreAutosavedProject() }
     restoreImageWorkspaces()
     observer = player.addPeriodicTimeObserver(
       forInterval: CMTime(seconds: 0.05, preferredTimescale: 600), queue: .main
@@ -294,7 +346,7 @@ extension Encodable {
         let local =
           time.seconds - (self.previewMode == "Movie" ? 0 : self.selectedClip?.playbackIn ?? 0)
         let duration =
-          self.previewMode == "Movie" ? self.project.duration : self.selectedClip?.duration ?? 0
+          self.effectivePreviewDuration
         if local >= duration {
           self.player.pause()
           self.isPlaying = false
@@ -307,6 +359,21 @@ extension Encodable {
       await reloadProfiles()
       refreshPreview()
     }
+  }
+  /// Director can hold the first edits in a movie, before any timeline/project change.
+  /// Anchor its UUID in the active restore snapshot before creating UUID-scoped drafts.
+  func directorSessionURL(key: String) throws -> URL {
+    try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+    try preserveRecovery()
+    try ProjectStorage.write(project, to: dataDirectory.appendingPathComponent("Autosave.weetodd"))
+    return dataDirectory.appendingPathComponent("Director/\(project.id.uuidString)/\(key).json")
+  }
+  func restoreAutosavedProject() {
+    guard let recovered = try? ProjectStorage.read(dataDirectory.appendingPathComponent("Autosave.weetodd")) else { return }
+    project = recovered
+    selectedClipID = recovered.clips.first?.id
+    dirty = true
+    notice = "Recovered your autosaved project. Save it to choose a project file."
   }
   func change(undoGroup: UUID? = nil, _ body: (inout StudioProject) -> Void) {
     var updated = project
@@ -340,8 +407,9 @@ extension Encodable {
       try? await Task.sleep(nanoseconds: 600_000_000)
       guard !Task.isCancelled, let self else { return }
       do {
+        try self.preserveRecovery()
         try ProjectStorage.write(
-          self.project, to: Self.supportDirectory.appendingPathComponent("Autosave.weetodd"))
+          self.project, to: self.dataDirectory.appendingPathComponent("Autosave.weetodd"))
       } catch { self.notice = "Autosave needs attention: \(error.localizedDescription)" }
     }
   }
@@ -423,9 +491,11 @@ extension Encodable {
       select(next)
     } catch { self.error = error.localizedDescription }
   }
+  var effectivePreviewDuration: Double { previewMode == "Movie" ? project.duration : selectedClip?.duration ?? 0 }
+  func seekToEnd() { seek(effectivePreviewDuration) }
   func seek(_ seconds: Double) {
     playhead = min(
-      max(0, seconds), previewMode == "Movie" ? project.duration : selectedClip?.duration ?? 0)
+      max(0, seconds), effectivePreviewDuration)
     player.seek(
       to: CMTime(
         seconds: (previewMode == "Movie" ? 0 : selectedClip?.playbackIn ?? 0) + playhead,
@@ -433,7 +503,7 @@ extension Encodable {
   }
   func togglePlayback() {
     guard player.currentItem != nil else { return }
-    let duration = previewMode == "Movie" ? project.duration : selectedClip?.duration ?? 0
+    let duration = effectivePreviewDuration
     if isPlaying {
       player.pause()
     } else {
@@ -477,25 +547,50 @@ extension Encodable {
     guard panel.runModal() == .OK, let url = panel.url else { return }
     load(url)
   }
+  /// Keep recovery separate for each opened document, including copies sharing a project UUID.
+  func preserveRecovery() throws {
+    guard dirty else { return }
+    let folder = dataDirectory.appendingPathComponent("Recovery")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let stem = folder.appendingPathComponent(documentSessionID.uuidString)
+    try ProjectStorage.write(project, to: stem.appendingPathExtension("weetodd"))
+    let provenance = ["name": project.name, "originalPath": projectURL?.path ?? ""]
+    try JSONEncoder().encode(provenance).write(to: stem.appendingPathExtension("json"), options: .atomic)
+  }
+  func replaceDocument(_ value: StudioProject, url: URL?, isDirty: Bool) throws {
+    // Failure leaves the current document and its file association intact.
+    try preserveRecovery()
+    // Startup restores this active snapshot, independently of historical recovery files.
+    // Write before replacing in-memory state so a failed write leaves the old document active.
+    try ProjectStorage.write(value, to: dataDirectory.appendingPathComponent("Autosave.weetodd"))
+    autosaveTask?.cancel()
+    cancelMotionPromptEditor()
+    referenceSheetOpen = false; imageDraft = nil; imagePreviewPath = nil
+    undoStates.removeAll(); redoStates.removeAll(); lastUndoGroup = nil
+    documentSessionID = UUID()
+    project = value
+    projectURL = url
+    selectedClipID = value.clips.first?.id
+    selectedAssetID = nil; selectedTitleID = nil; selectedAudioID = nil; selectedTrackID = nil
+    playhead = 0; queue.removeAll()
+    generationDescriptions.removeAll(); validationErrors.removeAll(); drawThingsClipEstimates.removeAll()
+    preparedDrawThingsClip = nil; preparedRecipe = nil; preparedFingerprint = nil
+    preparedPrompt = ""; preparedReport = ""
+    showPrompt = false; error = nil
+    dirty = isDirty
+    refreshPreview()
+  }
   func load(_ url: URL) {
     do {
-      let p = try ProjectStorage.read(url)
-      cancelMotionPromptEditor()
-      imageDraft = nil; imagePreviewPath = nil
-      change { $0 = p }
-      projectURL = url
-      selectedClipID = p.clips.first?.id
-      dirty = false
-      refreshPreview()
+      try replaceDocument(ProjectStorage.read(url), url: url, isDirty: false)
+      notice = "Opened \(url.lastPathComponent)"
     } catch { self.error = error.localizedDescription }
   }
   func newProject() {
-    cancelMotionPromptEditor()
-    imageDraft = nil; imagePreviewPath = nil
-    change { $0 = StudioProject() }
-    projectURL = nil
-    selectedClipID = nil
-    refreshPreview()
+    do {
+      try replaceDocument(StudioProject(), url: nil, isDirty: false)
+      notice = "New movie. Previous unsaved edits are available in Recovery."
+    } catch { self.error = error.localizedDescription }
   }
   func chooseImports(scope: AssetScope = .project, addToTimeline: Bool = false) {
     let panel = NSOpenPanel()
@@ -555,7 +650,7 @@ extension Encodable {
   func saveGlobals() {
     do {
       try JSONEncoder().encode(globalAssets).write(
-        to: Self.supportDirectory.appendingPathComponent("global-assets.json"), options: .atomic)
+        to: dataDirectory.appendingPathComponent("global-assets.json"), options: .atomic)
     } catch { self.error = error.localizedDescription }
   }
   func useAsset(_ asset: MediaAsset, role: MediaRole, time: Double = 0) {
@@ -698,7 +793,7 @@ extension Encodable {
   func saveRuntime(reloadProfiles: Bool = true) {
     do {
       try JSONEncoder().encode(runtime).write(
-        to: Self.supportDirectory.appendingPathComponent("runtime.json"), options: .atomic)
+        to: dataDirectory.appendingPathComponent("runtime.json"), options: .atomic)
       if reloadProfiles { Task { await self.reloadProfiles() } }
     } catch { self.error = error.localizedDescription }
   }
@@ -770,9 +865,11 @@ extension Encodable {
   func describeGeneration() async {
     guard let clip = selectedClip, clip.engine != .movie, clip.engine != .drawThings else { return }
     let key = generationRequestKey(for: clip)
+    let session = documentSessionID
     do {
-      var result = try await Bridge().invoke("describe-generation", runtime: runtime, payload: try payload())
-      guard selectedClip.map({ generationRequestKey(for: $0) }) == key else { return }
+      var result = try await descriptionBridge.independent().invoke("describe-generation", runtime: runtime, payload: try payload())
+      guard documentSessionID == session, selectedClipID == clip.id,
+        selectedClip.map({ generationRequestKey(for: $0) }) == key else { return }
       result["studioInput"] = key
       result["studioEngine"] = clip.engine.rawValue
       result["studioTask"] = clip.inferredTask
@@ -780,51 +877,77 @@ extension Encodable {
       generationDescriptions[clip.id] = result
       validationErrors[clip.id] = nil
     } catch {
-      guard selectedClip.map({ generationRequestKey(for: $0) }) == key else { return }
+      guard documentSessionID == session, selectedClipID == clip.id,
+        selectedClip.map({ generationRequestKey(for: $0) }) == key else { return }
       validationErrors[clip.id] = error.localizedDescription
     }
   }
   func generateSelected() async {
-    await prepareSelected()
+    guard !operationBusy else { return }
+    if !canGenerateSelected { await prepareSelected() }
     guard canGenerateSelected else { return }
     await renderPrepared()
   }
   func prepareSelected() async {
-    guard selectedClip != nil else { return }
-    if selectedClip?.engine == .drawThings { await prepareDrawThingsClip(); return }
-    preparedRecipe = nil
-    preparedFingerprint = nil
-    await describeGeneration()
+    guard !operationBusy, let clip = selectedClip else { return }
+    if clip.engine == .drawThings { await prepareDrawThingsClip(); return }
+    let requestID = UUID()
+    activeNativeRequest = requestID
+    defer { if activeNativeRequest == requestID { activeNativeRequest = nil } }
+    let session = documentSessionID
+    let projectID = project.id
+    let key = generationRequestKey(for: clip)
+    let settings = runtime
+    func isCurrent() -> Bool {
+      documentSessionID == session && project.id == projectID && selectedClipID == clip.id
+        && selectedClip.map { generationRequestKey(for: $0) == key } == true
+    }
+    preparedRecipe = nil; preparedFingerprint = nil
     do {
-      let snapshot = signature(for: selectedClip!)
-      let destination = Self.supportDirectory.appendingPathComponent(
-        "Jobs/\(UUID().uuidString)/prepared")
-      let r = try await bridge.invoke(
-        "prepare", runtime: runtime, payload: try payload(), output: destination)
-      guard selectedClip.map({ signature(for: $0) }) == snapshot else {
-        throw StudioError.invalid("Clip changed during preflight. Prepare it again.")
+      let body = try payload()
+      var description = try await descriptionBridge.invoke("describe-generation", runtime: settings, payload: body)
+      guard isCurrent() else {
+        notice = "Preflight stopped because its project or clip changed. Prepare the current clip again."
+        return
+      }
+      description["studioInput"] = key
+      description["studioEngine"] = clip.engine.rawValue
+      description["studioTask"] = clip.inferredTask
+      description["studioProfile"] = clip.profileID
+      generationDescriptions[clip.id] = description
+      let snapshot = signature(for: clip)
+      let destination = dataDirectory.appendingPathComponent("Jobs/\(requestID.uuidString)/prepared")
+      let r = try await bridge.invoke("prepare", runtime: settings, payload: body, output: destination)
+      guard isCurrent(), signature(for: clip) == snapshot else {
+        notice = "Clip changed during preflight. Prepare it again."
+        return
       }
       preparedRecipe = r["recipePath"] as? String
       preparedPrompt = r["prompt"] as? String ?? ""
-      preparedReport =
-        String(
-          data: try JSONSerialization.data(
-            withJSONObject: r["report"] ?? [:], options: [.prettyPrinted, .sortedKeys]),
-          encoding: .utf8) ?? ""
-      if let i = project.clips.firstIndex(where: { $0.id == selectedClipID }) {
+      preparedReport = String(decoding: try JSONSerialization.data(withJSONObject: r["report"] ?? [:],
+        options: [.prettyPrinted, .sortedKeys]), as: UTF8.self)
+      if let i = project.clips.firstIndex(where: { $0.id == clip.id }) {
         project.clips[i].validatedSignature = snapshot
       }
-      if let id = selectedClipID { validationErrors[id] = nil }
+      validationErrors[clip.id] = nil
       preparedFingerprint = snapshot
       notice = "Preflight passed. Review the exact prompt, then render."
     } catch {
+      guard isCurrent() else { return }
       self.error = error.localizedDescription
-      if let id = selectedClipID { validationErrors[id] = error.localizedDescription }
+      validationErrors[clip.id] = error.localizedDescription
     }
   }
   func renderPrepared() async {
     if selectedClip?.engine == .drawThings { await renderDrawThingsClip(); return }
-    guard let path = preparedRecipe, let c = selectedClip else { return }
+    guard !operationBusy, let path = preparedRecipe, let c = selectedClip else { return }
+    let session = documentSessionID
+    let projectID = project.id
+    let submittedSignature = signature(for: c)
+    let settings = runtime
+    let requestID = UUID()
+    activeNativeRequest = requestID
+    defer { if activeNativeRequest == requestID { activeNativeRequest = nil } }
     do {
       guard signature(for: c) == preparedFingerprint else {
         throw StudioError.invalid("Clip changed. Prepare it again before rendering.")
@@ -840,16 +963,16 @@ extension Encodable {
       }
       let resolvedFingerprint = prepared?["resolvedFingerprint"] as? String
       let r = try await bridge.invoke(
-        "render", runtime: runtime, payload: ["recipePath": path], output: destination)
+        "render", runtime: settings, payload: ["recipePath": path], output: destination)
       guard let video = r["video"] as? String else {
         throw StudioError.invalid("Renderer did not return a movie.")
       }
-      let info = try await bridge.invoke("inspect", runtime: runtime, payload: ["path": video])
+      let info = try await bridge.invoke("inspect", runtime: settings, payload: ["path": video])
       var renderedDuration = info["duration"] as? Double ?? c.duration
       var renderedStart = 0.0
       if !c.extensionSource.isEmpty {
         let source = try await bridge.invoke(
-          "inspect", runtime: runtime, payload: ["path": c.extensionSource])
+          "inspect", runtime: settings, payload: ["path": c.extensionSource])
         let sourceDuration = source["duration"] as? Double ?? 0
         renderedDuration -= sourceDuration
         if c.extensionDirection == "after" { renderedStart = sourceDuration }
@@ -857,6 +980,11 @@ extension Encodable {
       guard renderedDuration > 0 else {
         throw StudioError.invalid("The extension returned no new frames.")
       }
+      guard documentSessionID == session, project.id == projectID,
+        let current = project.clips.first(where: { $0.id == c.id }) else {
+        throw StudioError.invalid("The destination project or clip changed. The completed video is saved at \(video)")
+      }
+      let stillCurrent = current == c && signature(for: current) == submittedSignature
       var finishedClip = c
       finishedClip.duration = min(c.duration, renderedDuration)
       let finishedSignature = signature(for: finishedClip)
@@ -865,19 +993,25 @@ extension Encodable {
         p.clips[i].versions.append(
           RenderVersion(path: video, seed: c.seed, prompt: prompt, recipePath: path,
                         stats: RenderStats(result: r), generationSettings: generationSettings,
-                        resolvedFingerprint: resolvedFingerprint))
-        p.clips[i].sourcePath = video
-        p.clips[i].sourceIn = renderedStart
-        p.clips[i].duration = min(c.duration, renderedDuration)
-        p.clips[i].renderedSignature = finishedSignature
+                        resolvedFingerprint: resolvedFingerprint, usableSourceIn: renderedStart,
+                        usableDuration: renderedDuration))
+        if stillCurrent {
+          p.clips[i].sourcePath = video
+          p.clips[i].sourceIn = renderedStart
+          p.clips[i].duration = min(c.duration, renderedDuration)
+          p.clips[i].renderedSignature = finishedSignature
+        }
         var asset = MediaAsset(
           name: c.name + " render", kind: .video, path: video, scope: .clip, owner: c.id)
-        asset.duration = p.clips[i].duration
+        asset.duration = min(c.duration, renderedDuration)
         p.assets.append(asset)
       }
-      showPrompt = false
-      refreshPreview()
-      notice = "Render complete. Added to clip versions and Clip Assets."
+      if stillCurrent && selectedClipID == c.id {
+        showPrompt = false
+        refreshPreview()
+      }
+      notice = stillCurrent ? "Render complete. Added to clip versions and Clip Assets."
+        : "Render saved as a version. The clip changed during generation; prepare its new settings."
     } catch { self.error = error.localizedDescription }
   }
   func extend(_ direction: String) {

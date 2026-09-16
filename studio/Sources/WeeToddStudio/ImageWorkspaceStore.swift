@@ -8,13 +8,13 @@ extension StudioStore {
     guard !restoringImageWorkspace else { return }
     if let draft = imageDraft { imageWorkspaceLibrary.record(draft, preview: imagePreviewPath) }
     else { imageWorkspaceLibrary.activeKey = nil }
-    do { try imageWorkspaceLibrary.write(to: Self.supportDirectory.appendingPathComponent("image-workspaces.json")) }
+    do { try imageWorkspaceLibrary.write(to: dataDirectory.appendingPathComponent("image-workspaces.json")) }
     catch { notice = "Image draft could not be saved: \(error.localizedDescription)" }
   }
   func restoreImageWorkspaces() {
     restoringImageWorkspace = true
     defer { restoringImageWorkspace = false }
-    let url = Self.supportDirectory.appendingPathComponent("image-workspaces.json")
+    let url = dataDirectory.appendingPathComponent("image-workspaces.json")
     guard FileManager.default.fileExists(atPath: url.path) else { return }
     do {
       imageWorkspaceLibrary = try ImageWorkspaceLibrary.read(from: url)

@@ -48,7 +48,7 @@ def _model_note(path: Path, workflow: dict) -> str:
     lines = [
         f"## {path.stem.replace('_', ' ')}",
         "",
-        "1. Install WeeTodd Nodes and restart ComfyUI.",
+        "1. Install WeeTodd Studio's ComfyUI nodes and restart ComfyUI.",
     ]
 
     if any(str(node_type).startswith("WeeToddLTX23") for node_type in types):

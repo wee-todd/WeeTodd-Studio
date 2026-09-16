@@ -3,6 +3,8 @@ import StudioCore
 import SwiftUI
 
 struct DrawThingsConfigImportView: View {
+  var onClose: (() -> Void)? = nil
+  private func close() { if let onClose { onClose() } else { store.showDrawThingsConfigImport = false } }
   @EnvironmentObject var store: StudioStore
   @State private var text = ""
   @State private var parsedText = ""
@@ -74,7 +76,7 @@ struct DrawThingsConfigImportView: View {
       HStack {
         Text("Model and LoRA availability are checked against the selected connection.").font(.caption).foregroundStyle(.secondary)
         Spacer()
-        Button("Cancel") { store.showDrawThingsConfigImport = false }.keyboardShortcut(.cancelAction)
+        Button("Cancel") { close() }.keyboardShortcut(.cancelAction)
         Button("Apply Config") { apply() }.buttonStyle(.borderedProminent)
           .disabled(selected == nil || (selected?.warnings.isEmpty == false && !acknowledgeOmissions))
       }
@@ -138,6 +140,6 @@ struct DrawThingsConfigImportView: View {
       store.imageDraft = draft; store.imageEstimate = nil
     }
     store.notice = "Imported \(result.name). Prepare to validate the complete request."
-    store.showDrawThingsConfigImport = false
+    close()
   }
 }

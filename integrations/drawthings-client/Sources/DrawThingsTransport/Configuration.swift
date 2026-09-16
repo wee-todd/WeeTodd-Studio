@@ -46,7 +46,9 @@ public enum Configuration {
       }
     case .ltx2, .ltx2_3:
       guard operation == "video" else { throw TransportError.unsupportedOperation }
-    case .flux1, .flux2, .flux2_4b, .flux2_9b, .qwenImage, .zImage, .krea2:
+    case .v1, .v2, .kandinsky21, .sdxlBase, .sdxlRefiner, .ssd1b, .wurstchenStageC,
+      .wurstchenStageB, .sd3, .sd3Large, .pixart, .auraflow, .hiDreamI1, .hiDreamO1,
+      .ernieImage, .ideogram4, .flux1, .flux2, .flux2_4b, .flux2_9b, .qwenImage, .zImage, .krea2:
       guard operation == "image" else { throw TransportError.unsupportedOperation }
     default: throw TransportError.unsupportedModel
     }
@@ -55,7 +57,7 @@ public enum Configuration {
       throw TransportError.unsupportedConditioning
     }
     if operation == "image", inputs.contains(where: { $0["role"] as? String == "moodboard" }),
-      ![.flux2, .flux2_4b, .flux2_9b].contains(version) {
+      !Capabilities.supportsMoodboard(model) {
       throw TransportError.unsupportedConditioning
     }
     let loras = try Conditioning.loras(request)

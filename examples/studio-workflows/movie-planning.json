@@ -1,0 +1,190 @@
+{
+  "format": "weetodd-workflow-v1",
+  "id": "weetodd.movie-planning",
+  "version": "2.0.0",
+  "name": "Plan a movie",
+  "description": "Plan a movie with structured story beats, exact timing and reusable endpoints. Review and approve the story and clips before continuing. Produces a plan only.",
+  "inputs": {
+    "brief": {
+      "type": "text",
+      "label": "Movie idea",
+      "default": "A fox explores a snowy forest and finds a warm shelter."
+    },
+    "duration_seconds": {
+      "type": "number",
+      "label": "Movie length in seconds",
+      "default": 60,
+      "minimum": 1,
+      "maximum": 3600
+    },
+    "target_clip_seconds": {
+      "type": "number",
+      "label": "Preferred clip length",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 60
+    },
+    "frame_rate": {
+      "type": "integer",
+      "label": "Movie FPS",
+      "default": 24,
+      "minimum": 1,
+      "maximum": 120
+    },
+    "images": {
+      "type": "image_list",
+      "label": "Character and style references",
+      "default": []
+    }
+  },
+  "models": {
+    "assistant": {
+      "family": "qwen3.5",
+      "variant": "4b",
+      "runtime": "drawthings-qwen-local",
+      "capabilities": [
+        "text",
+        "vision"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "describe",
+      "name": "Reference observations",
+      "operation": "vision.describe@1",
+      "inputs": {
+        "images": {
+          "input": "images"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 120,
+      "model": "assistant"
+    },
+    {
+      "id": "story",
+      "name": "Story",
+      "operation": "movie.plan_story@2",
+      "inputs": {
+        "brief": {
+          "input": "brief"
+        },
+        "duration_seconds": {
+          "input": "duration_seconds"
+        },
+        "observations": {
+          "step": "describe",
+          "output": "observations"
+        },
+        "target_clip_seconds": {
+          "input": "target_clip_seconds"
+        },
+        "frame_rate": {
+          "input": "frame_rate"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 2
+      },
+      "timeoutSeconds": 3600,
+      "model": "assistant",
+      "requiresApproval": true
+    },
+    {
+      "id": "clips",
+      "name": "Clips",
+      "operation": "movie.plan_beats@1",
+      "inputs": {
+        "story": {
+          "step": "story",
+          "output": "story"
+        },
+        "duration_seconds": {
+          "input": "duration_seconds"
+        },
+        "target_clip_seconds": {
+          "input": "target_clip_seconds"
+        },
+        "frame_rate": {
+          "input": "frame_rate"
+        }
+      },
+      "parameters": {
+        "maxClips": 200
+      },
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 3600,
+      "requiresApproval": true,
+      "model": "assistant"
+    },
+    {
+      "id": "endpoints",
+      "name": "Endpoints",
+      "operation": "movie.plan_endpoints@2",
+      "inputs": {
+        "clips": {
+          "step": "clips",
+          "output": "clips"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 120
+    },
+    {
+      "id": "check",
+      "name": "Check",
+      "operation": "movie.check_plan@2",
+      "inputs": {
+        "clips": {
+          "step": "clips",
+          "output": "clips"
+        },
+        "endpoints": {
+          "step": "endpoints",
+          "output": "endpoints"
+        },
+        "duration_seconds": {
+          "input": "duration_seconds"
+        },
+        "frame_rate": {
+          "input": "frame_rate"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 120
+    }
+  ],
+  "outputs": {
+    "clips": {
+      "step": "clips",
+      "output": "clips"
+    },
+    "endpoints": {
+      "step": "endpoints",
+      "output": "endpoints"
+    },
+    "review": {
+      "step": "check",
+      "output": "review"
+    }
+  },
+  "limits": {
+    "maxParallelSteps": 1,
+    "maxStepExecutions": 1024,
+    "maxArtifacts": 64,
+    "maxWorkingBytes": 536870912
+  }
+}

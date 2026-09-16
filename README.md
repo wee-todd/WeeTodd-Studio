@@ -1,73 +1,212 @@
-# WeeTodd Nodes
+# WeeTodd Studio
 
-MLX-native MiniMax H3, LTX 2.3, and LTX 2.5 custom nodes for ComfyUI on Apple Silicon.
+**A standalone AI video and image studio for Apple Silicon, built around Draw Things and an
+extensible native MLX renderer.**
 
-WeeTodd keeps each model engine behind a separate ComfyUI adapter. H3 generation preserves video
-and audio as one synchronized latent contract. Weighted components load only when the graph runs
-and can unload between Qwen3-VL, transformer, video VAE, and audio VAE stages.
+Plan a movie, develop reusable characters and locations, create image assets and audiovisual clips,
+and assemble the results in a native macOS editor. WeeTodd Studio is the primary product.
+Our **ComfyUI nodes remain maintained** for users who prefer graphs, automation and reusable pipelines.
+The standalone app runs without ComfyUI.
+
+[Get started](#get-started) · [Studio guide](studio/README.md) ·
+[Make a movie with Director](#make-a-movie-with-director) ·
+[Draw Things setup](studio/README.md#draw-things--experimental) ·
+[Model reuse](#reuse-models-you-already-have) · [ComfyUI nodes](#comfyui-nodes) ·
+[Implementation status](STATUS.md)
+
+**Director** is Studio's local movie-planning assistant. Use the **Director** toolbar button to
+develop a brief, review reusable subjects and prepare shot plans. New guided plans use three review
+stages: **Brief → Subjects → Shots**, with detailed review available. Drafts survive reopening, and
+technical model records remain available on demand. Qwen3.5 4B can reuse a compatible installed
+checkpoint or download through **Set up assistant…**, without the Draw Things app. Planning and
+media generation remain separate steps. See [Director and local workflows](studio/README.md#local-workflows).
+
+## Why WeeTodd Studio?
+
+Draw Things is central to the project. It offers fast, Apple Silicon-focused inference and an
+established model ecosystem. We prioritize it as the first inference option when it supports the
+model and task you need. Its [local/offline and cloud options](https://drawthings.ai/) serve different
+setups; actual speed depends on the model, settings, hardware and execution route.
+
+WeeTodd Studio adds a movie-oriented workspace around those capabilities: planning, references,
+production assets, clip versions, a timeline, synchronized sound, and repeatable jobs. Its native
+MLX engines also provide models and controls beyond the capabilities exposed by the Draw Things
+integration. **Audio-to-video (A2V)** uses audio to drive generation; **video-to-video (V2V)** uses
+source video as conditioning. These and other advanced tasks are available where the selected native
+model and adapter implement them, rather than being assumed from a model name.
+
+**LTX 2.5 illustrates the direction.** Studio already implements it natively, while the current
+Draw Things adapter exposes LTX 2/2.3 and selected H3 video tasks. As Draw Things adds models, we aim
+to make their supported tasks accessible through the same Studio interface with minimal integration
+work. Native engines remain valuable for features that the Draw Things route does not expose.
+New native models will be considered when they fill a meaningful feature gap, not simply to add
+another model to a list. Discovery alone does not guarantee that a new model's settings or advanced
+conditioning are compatible.
+
+## Choose how to generate
+
+Studio is the interface in each case. The engine choice determines where inference runs.
+
+| Route | Best starting point | What to know |
+| --- | --- | --- |
+| **Draw Things inference** | Fast image/video generation with models and tasks supported by your connection. | Studio sends jobs through its Draw Things adapter to a self-hosted gRPC server or supported Cloud API route. Model availability and controls come from that endpoint and the installed helper. |
+| **Native MLX inference** | LTX 2.5, advanced conditioning and other native features beyond the Draw Things integration. | H3, LTX 2.3 and LTX 2.5 have separate adapters. Choose a compatible model recipe and task; components load in stages and can unload between stages. |
+| **Native inference with compatible Draw Things weights** | Use an existing supported model installation without another large checkpoint copy. | Selected H3 components can be read directly from Draw Things files. This runs WeeTodd's native sampler, not Draw Things inference, and has its own task and performance limits. |
+
+ComfyUI and headless jobs use these same shared adapters where supported. Selecting a different
+backend never implies identical timing, output, task support or memory use.
+
+## Get started
+
+The current release is a **source-build preview**. The app supports macOS 14 or later on Apple
+Silicon; building uses Xcode 26 or newer. Some models and MetalFX features require newer macOS or
+specific hardware. Consumer packaging and clean-Mac qualification are still in progress.
+
+### Build the standalone app
+
+```bash
+git clone https://github.com/wee-todd/WeeTodd-Studio.git
+cd WeeTodd-Studio
+python3 scripts/build_studio_app.py --configuration release
+open "studio/.build/WeeTodd Studio.app"
+```
+
+The app bundles the GUI, CLI and renderer source. Building does not install Python dependencies
+or download models. In **Studio Settings**, use **Set Up Managed Renderer** or connect an existing
+compatible runtime. FFmpeg/FFprobe and optional finishing tools still require configuration.
+See the [build and runtime guide](studio/README.md#build-and-open).
+
+### Use Draw Things
+
+For a local development build with the Draw Things connection helper:
+
+```bash
+python3 scripts/build_drawthings_client.py
+python3 scripts/build_studio_app.py --configuration release \
+  --drawthings-distribution studio/.build/drawthings
+```
+
+Quit Studio before replacing its app bundle. Then open **Movie → Draw Things Connections**, add
+and test your connection, and select **Draw Things → Task → Connection → Model** in a clip or open
+the image workspace. A local Draw Things gRPC server must stay running with cloud offload disabled;
+using local model files alone does not start that server. Direct Cloud API jobs use a separate route.
+The present integration enforces its documented free-only allowance policy; DT+ App Bridge
+generation remains unavailable while that policy cannot be verified.
+
+The helper is a separate dependency with its own distribution requirements. Read the
+[helper build, connection and qualification guide](studio/README.md#draw-things--experimental)
+before distributing a bundled app. Local model reuse does not require a Draw Things server.
+
+### Use native features
+
+Open **Studio Settings → Model setup**, choose a model/task preset, and use **Use Existing Models**
+or the model download controls. **Create Recipe** validates the component set; select that recipe
+on a compatible clip. Native H3, LTX 2.3 and LTX 2.5 offer different conditioning and sampling controls.
+Use the [model setup guide](studio/README.md#guided-model-setup) and
+[clip generation controls](studio/README.md#clip-generation-controls) for the supported combinations.
+No ComfyUI installation is needed.
+
+## Make a movie with Director
+
+For a short movie with first/last-frame clips, start with this flow:
+
+1. **Set up local assistance.** Open **Director → Set up assistant…** and reuse or download
+   Qwen3.5 4B. The Draw Things app is optional for planning; the configured renderer and local
+   helper are required. Run **Check text + image inference** to verify your setup.
+2. **Develop the movie.** Choose **Create a movie**, enter your story and target length, then
+   review **Brief → Subjects → Shots**. For a 30-second movie, six short shots are a useful
+   starting point. Edit the proposed actions, identities and start/end states before approving.
+3. **Add the reviewed plan to the project.** Complete the remaining endpoint checks and prompt
+   compilation, then choose **Add to project**. This imports planning material; creating image
+   assets and timeline clips is still an explicit next step.
+4. **Create and review the endpoint images.** Use the image workspace to develop each shot's
+   first and last frame. Reuse the preceding shot's last image as the next shot's first image
+   where the action continues. A six-shot continuous sequence can use seven shared anchors.
+5. **Generate the clips.** Add compatible clips, set **First and last frames**, and assign the
+   images to their **FF** and **LF** timeline slots. For Draw Things, choose a discovered H3 FL2VA
+   model and a compatible configuration. Use **Prepare clip**, review the resolved prompt, then
+   **Generate clip**. Retain and compare takes in Clip Assets.
+6. **Finish and save.** Arrange clips, adjust trims and transition overlaps, and use **Preview
+   movie** to review continuity and sound. Check the finished duration: model frame counts can
+   round up, so six five-second requests do not necessarily total 30 seconds. Choose **Export
+   Movie…**, then **Collect Media…** to save a separate project with its linked media.
+
+Director preserves short authored shot text and checks recognized dialogue against the source.
+Scoped corrections keep unrelated shot fields and app-controlled timing intact. Required reviews
+remain explicit; technical evidence and model turns are available when needed. These checks help
+catch errors, but the plans and generated motion still need creative review.
+
+Movie export conforms the assembled video to the project frame rate, including clips with AAC
+audio and transition overlaps. Export validation checks the finished media before reporting success.
+See the [editing guide](studio/README.md#editing),
+[H3 endpoint controls](studio/README.md#images-clips-and-loras), and
+[finishing guide](studio/README.md#movie-settings-and-finishing) for details. Collected projects
+retain shared model/LoRA paths; model weights are not included.
+
+## Reuse models you already have
+
+Shared model storage is a core design priority: link compatible files in place, preserve originals,
+and avoid duplicate downloads and converted checkpoints when the runtime can read them directly.
+Compatibility is checked per component and task; it is not a promise that every Draw Things model
+can run in the native renderer.
+
+- **Native H3:** reuse supported Draw Things H3 transformer, Qwen3-VL encoder and video/audio VAE
+  files. The current direct-weight route supports text-to-video with generated audio; other
+  conditioning modes need separate implementation and qualification. Setup creates small metadata
+  references, keeps original weights read-only and creates no persistent converted weight copy.
+  See [supported files and measured limits](studio/README.md#reuse-local-draw-things-h3-models).
+- **Local assistance:** Director and the Prompt Assistant can reuse installed Draw Things Qwen3.5
+  checkpoints or download the supported 4B checkpoint independently.
+  The current 4B route supports selected reference images; 9B is text-only. Generated text remains
+  editable before application. See [local assistant setup](studio/README.md#local-qwen35-prompt-assistant).
+- **Other existing libraries:** model setup can scan compatible native MLX and ComfyUI model roots.
+  Recipes and exported jobs refer to those paths; the executing machine must be able to read them.
+
+## What you can do in Studio
+
+| Work | Current tools |
+| --- | --- |
+| **Plan and develop a movie** | Guided creative briefs, subject/shot review, local prompt assistance, editable workflow steps and explicit approvals. [Planning guide](studio/README.md#guided-movie-planning) |
+| **Build reusable assets** | Characters, environments, sets, props, clothing and outfits; reference sheets; a versioned Production Library with linked media. [Library guide](studio/README.md#production-library-and-object-relationships) |
+| **Generate images and clips** | Draw Things canvas/mood-board inputs, config import, model-compatible LoRAs; native H3/LTX recipes and task-specific conditioning. [Image workspace](studio/README.md#images-clips-and-loras) |
+| **Edit and finish** | Generated/imported clips, render versions, titles, transitions, multiple audio tracks and configured interpolation/upscaling. [Studio guide](studio/README.md) |
+| **Run repeatable jobs** | Resumable movie/clip jobs, portable Draw Things requests and shared headless execution. [Headless guide](examples/headless/README.md) |
+
+Planning workflows currently produce reviewed documents and prompt drafts. Full automatic
+frame/video generation from the guided movie plan remains future work. Experimental features,
+model qualification and specific hardware measurements are recorded in [STATUS.md](STATUS.md)
+and the detailed guides.
+
+## ComfyUI nodes
+
+The node collection is a maintained secondary interface to WeeTodd Studio's shared engines and
+media utilities. Existing node IDs, sockets, `WeeTodd/H3` categories and workflow contracts remain
+supported. App-first development does not remove graph execution or its lightweight imports.
 
 - 56 composable nodes under `WeeTodd/H3`
 - 128 registered nodes across all engines and media utilities; 46 shipped UI workflows
 
-See [implementation status](STATUS.md) for current capabilities and qualification limits.
+Use [node installation](#install), [workflow selection](#choose-a-workflow), and the
+[generated node catalog](#node-catalog). The detailed reference below retains model layouts,
+conditioning guides, measured optimizations, qualification limits and all shipped workflow links.
 
-Studio's [clip generation controls](studio/README.md#clip-generation-controls) now separate engine,
-task and preset selection, display supported sampling controls, and validate automatically before
-generation. App-level H3 acceleration preferences have per-clip overrides; old clips retain Custom
-recipe behavior. Headless jobs carry the resolved settings, including explicit resident sampling.
+## Project name and compatibility
 
-Studio now shows native render progress and per-version measurements, with guided LTX 2.5
-control/Ingredients/MSR setup. H3 has an optional retained-page budget shared by Studio, headless
-jobs and the experimental H3 Paging Settings node. It is off by default; full-size 36 GB speed
-qualification remains open. See [progress and paging controls](studio/README.md#progress-measurements-and-h3-page-retention).
+The project and GitHub repository are now **WeeTodd Studio** and
+[`wee-todd/WeeTodd-Studio`](https://github.com/wee-todd/WeeTodd-Studio).
+Existing checkout directories named `WeeTodd-Nodes`, the Python distribution
+`comfyui-weetodd-nodes`, import modules and saved node IDs remain valid. They are compatibility
+identifiers, not the primary product name. Existing Studio projects and runtime paths need no rename.
+For an existing checkout, update the remote without moving its directory:
 
-An optional [Draw Things integration](studio/README.md#draw-things--experimental) adds remote image
-assets and audiovisual clips to Studio, portable headless jobs, and ComfyUI through a shared gRPC
-adapter. It displays estimated CU and verifies free-only eligibility before submission. If cloud CU
-limits are not published, it shows that Draw Things checks the limit on submission; the saved key,
-remaining free requests, and PAYG-disabled status are still verified first. Self-hosted
-transport has also completed a local H3 first/last-frame render. Live Studio Cloud API testing
-verified a saved API key and free allowance, then generated an LTX 2.3 clip with video and stereo
-audio; broader model qualification remains open.
-The pinned remote SDK supports selected image models, LTX 2/2.3 first-frame video, and discovered
-H3 FL2VA models with first/last-frame inputs. Drop images onto the timeline's **First Frame / Last
-Frame** slots, or use **Use in clip**; Studio sends H3's canvas and mood-board inputs directly.
-Choose **Engine → Task → Connection → Model → LoRAs / Groups**, with supported tasks available
-before model selection. H3 uses 24 FPS with editable steps,
-Shift, and Audio Shift. Availability depends on the endpoint's model inventory. Native MLX H3/LTX
-engines remain separate. DT+ App Bridge generation is unavailable until its billing route can be verified.
-Imported compatible H3 Turbo LoRAs appear after **Refresh**, with editable strength and steps.
-The local four-step FL2VA test at 60% strength returned 124 frames and stereo audio; see the
-[Draw Things setup and test notes](studio/README.md#draw-things--experimental).
+```bash
+git remote set-url origin https://github.com/wee-todd/WeeTodd-Studio.git
+```
 
-Studio's image workspace keeps one canvas and separate mood-board thumbnails, with editable
-strengths, sampling settings and compatible LoRAs/groups. Drafts recover across restarts without
-copying linked media. **Import Config…** previews exported or pasted Draw Things JSON, identifies
-unsupported settings, and links to the [official Draw Things presets](https://github.com/drawthingsai/community-models/tree/main/configs).
-See [image and config instructions](studio/README.md#images-clips-and-loras) for tested models and limits.
+## Nodes and native renderer reference
 
-[WeeTodd Studio](studio/README.md) is the native Swift editor in this repository. It combines generated
-and imported clips, titles, transitions and multiple audio tracks, and exports resumable movie/clip
-jobs for the shared headless renderer. Its [LoRA library and groups](studio/README.md#loras-and-groups)
-filter by clip model, support mixed LTX 2.3/2.5 groups for LTX 2.5, and preserve adjustable strengths
-in projects and exported jobs. A managed native Python runtime can be installed from Studio
-Settings. Guided model setup provides built-in presets, existing-model discovery, compatible recipe
-creation and explicit verified downloads/preparation. Finishing tools still need configuration; see
-the Studio guide for build instructions, tested behavior, and consumer-release limitations.
-
-Recent experimental controls include target-frame H3 image, clip, and audio guides; an H3 token
-and attention-workspace estimator; independent MLX attention-head and feed-forward row chunking;
-LTX 2.5 timed input keyframes; learned generated-keyframe slots; lazy ordered LTX 2.5 LoRA stacks;
-and selectable fast-distilled, production-guided, and HQ `res_2s` recipes. An optional modifier
-predicts a one-shot duration from the prompt with the official LTX 2.5 duration head. A separate
-experimental DFR modifier can add learned temporal refinement at 48 or 96 fps. Its stream and
-conditioning contracts pass, but current MLX visual parity is not production-ready.
-Existing modifier and conditioning nodes preserve older Generation Config socket order.
-The H3 projection backend adds a backward-compatible `auto` choice; saved workflows that explicitly
-select `mlx` retain that selection. Eligible projections in paged transformer checkpoints are
-wrapped when each block window loads. On an M3 Ultra q8-paged 384p Turbo control, MPP reduced
-sampling from 113.35 to 108.49 seconds (4.3%) with the same 7.23 GB MLX peak and a byte-identical
-MP4. Add a modifier or conditioning node only when the feature is needed.
+<details>
+<summary>Expand the complete ComfyUI and native renderer reference</summary>
 
 ## Experimental H3 Motion Fidelity
 
@@ -184,8 +323,12 @@ or accepting the final key. The orange rectangle shows the Florence search regio
 
 ## Install
 
+This section installs the maintained ComfyUI integration. Standalone app users can follow
+[Get started](#get-started) above. The legacy checkout folder name below remains supported.
+
 1. Use an arm64 Python 3.11 or later ComfyUI environment.
-2. Install WeeTodd Nodes under `ComfyUI/custom_nodes/WeeTodd-Nodes`.
+2. Clone WeeTodd Studio into the existing node-installation directory (or keep your current checkout):
+   `git clone https://github.com/wee-todd/WeeTodd-Studio.git ComfyUI/custom_nodes/WeeTodd-Nodes`.
 3. Install the package into the active ComfyUI environment.
 4. Restart ComfyUI.
 
@@ -1485,7 +1628,7 @@ or its [API prompt](examples/h3_vdn_8_step_resident_api.json).
 H3 Sample's `block_residency=resident` retains the
 same paged-checkpoint tensors in memory without conversion. `unload_after_sample=false`
 keeps that transformer warm between compatible jobs; set it back to `true` on the last job,
-or use **H3 Unload**. Text encoding and both VAEs still unload after use. The node defaults
+or use **H3 Unload Transformer**. Text encoding and both VAEs still unload after use. The node defaults
 remain checkpoint paging and staged unloading. Resident mode rejects low-memory mode, and
 the base-only paged preflight estimate does **not** represent its larger memory footprint.
 
@@ -1679,7 +1822,7 @@ This table is generated from the registered node contracts. Run
 | H3 Generation Config | Choose a clearly labeled aspect ratio and move the short-edge size slider, or use exact dimensions. The canvas stays on H3's 32-pixel grid. Optional hot-path experiments default off. | H3 — Core and convenience | Recommended |
 | H3 Paging Settings (Experimental) | Experimental bounded raw-page retention trades extra memory for fewer repeated H3 checkpoint loads. Disabled by default; original quantization is preserved. | H3 — Sampling and acceleration | Experimental |
 | H3 Low-Memory Tuning (MLX) | Apply optional MLX attention-head and feed-forward row chunking without invalidating older Generation Config workflows. | H3 — Sampling and acceleration | Supported |
-| H3 Generate Video + Audio | Generate synchronized video and audio with MiniMax H3 through MLX. | H3 — Core and convenience | Legacy/convenience |
+| H3 Generate Video + Audio | Generate synchronized H3 video and audio from text-only prompts through staged encoding, sampling, and direct MP4 publication. Every component unloads after use. | H3 — Core and convenience | Legacy/convenience |
 | H3 Unload MLX Runtime | Release state held by the monolithic H3 runtime. | H3 — Core and convenience | Legacy/convenience |
 | LTX 2.3 IC-LoRA Loader (MLX) | Experimental IC-LoRA with task-aware topology. Union and Motion use resident distilled mode; Ingredients uses Dev two_stage with a validated distilled helper. Declare the trained family; filenames are not used to infer it. | LTX 2.3 — Loaders | Experimental |
 | LTX 2.3 Timed Keyframe | Chain timed keyframes for resident Dev two_stage generation. No post-decode frame insertion. | LTX 2.3 — Conditioning | Experimental |
@@ -1718,7 +1861,7 @@ This table is generated from the registered node contracts. Run
 | LTX 2.5 Ingredients Reference Sheet | Condition LTX 2.5 from one Ingredients reference sheet. The image is repeated internally across the full clip and encoded as IC-LoRA reference context. Quality, balanced, and speed policies control the encoded reference grid independently of the output canvas. | LTX 2.5 — Conditioning | Experimental |
 | LTX 2.5 MSR Reference Stack | Build an ordered one-to-five-image LTX 2.5 MSR stack. Subject and object references stay in connection order; one optional background is always assigned the final slot. Automatic priority gives the first two subjects full density and later references aligned supporting or background density. | LTX 2.5 — Conditioning | Supported |
 | LTX 2.5 Generate Video + Audio | Generate synchronized LTX 2.5 video and audio through the MLX adapter. Connect publication_audio to preserve an original soundtrack without conditioning sampling. | LTX 2.5 — Core | Experimental |
-| LTX 2.5 Generate Chained Timeline | Generate two to four overlapping LTX 2.5 windows with timeline-aligned latent guides, causal-aware latent transitions, and one synchronized audio/video decode. Supports the two-stage path and full-resolution single-stage Sol configurations. | LTX 2.5 — Core | Experimental |
+| LTX 2.5 Generate Chained Timeline | Generate two to four overlapping LTX 2.5 windows with timeline-aligned latent guides, causal-aware latent transitions, and one synchronized audio/video decode. Supports distilled two-stage and full-resolution single-stage Sol configurations. Guided, CFG++, generated-keyframe, DFR, and automatic-duration modes are unsupported. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Video Upscale / Refine | Upscale decoded ComfyUI IMAGE+AUDIO from any movie through LTX 2.5 latent space, optionally adding generative video-only refinement while preserving the source audio. Refinement can invent identity details, logos, and text. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Unload MLX Runtime | Release process-local LTX 2.5 state. | LTX 2.5 — Core | Supported |
 | Canny Preprocessor (MLX) | Create temporally aligned Canny control frames with MLX. The defaults match ComfyUI's current normalized-threshold Canny contract. | MLX preprocessors — Edges | Experimental |
@@ -1806,26 +1949,36 @@ Start a fresh process, choose the speed profile, use paged Qwen3-VL and q8-exten
 components, keep caches disabled, and retain staged unloading. Lower resolution before lowering
 reference density.
 
+</details>
+
 ## Development validation
 
 Run these checks from the repository root using its compatible arm64 development environment:
 
 ```bash
-python scripts/audit_workflow_catalog.py --project .
-python scripts/update_readme_node_catalog.py --check
-python scripts/preflight_python_environment.py --project . --python python --require-architecture arm64
-python scripts/preflight_h3_workflow.py --project . --all-api
-python scripts/lint_docs.py
-python -m compileall -q src __init__.py
-python -m pytest -q tests/test_nodes.py tests/test_runtime.py tests/test_readme.py tests/test_workflows.py
-ruff check src/wee_todd_nodes tests
+python scripts/validate_project.py --profile core
+# Add relevant profiles; overlapping checks run only once within this invocation.
+python scripts/validate_project.py --profile studio --profile workflows --profile remote
 ```
 
 `tests/test_readme.py` and `tests/test_workflows.py` are required by the README/workflow commit gate.
-For Studio changes, also run `swift test --package-path studio` and
-`python -m pytest -q tests/test_studio_bridge.py tests/test_studio_packaging.py tests/test_studio_lora.py`, then build the app
-using the [Studio instructions](studio/README.md). The build verifies its ad-hoc signature before
-replacing the previous bundle.
+The core profile includes node/runtime tests, documentation, workflow catalog, portable API
+preflight, compilation and lint. Studio and remote profiles include their Swift tests; workflows
+validates every shipped Studio definition and its executor tests. Use `--list` to inspect the
+commands without running them. These checks neither install dependencies nor record manual review.
+The underlying documentation checks remain available individually as `scripts/lint_docs.py`,
+`scripts/audit_workflow_catalog.py`, `scripts/update_readme_node_catalog.py --check`, and
+`scripts/preflight_h3_workflow.py --all-api`.
+For Studio changes, also build the release app using the [Studio instructions](studio/README.md).
+To preserve a running development app, select a separate output:
+
+```bash
+python scripts/build_studio_app.py --configuration release --output /tmp/WeeTodd-Review.app
+```
+
+A separate output does not update saved signing settings.
+The build verifies its signature before replacing the selected bundle and refuses to replace a
+running app.
 
 Local `knowledge/`, research reports, and `.agents/` skills are intentionally untracked. If the local
 knowledge bundle is installed, validate it separately with `python scripts/validate_okf.py knowledge`;

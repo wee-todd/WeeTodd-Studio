@@ -1,0 +1,215 @@
+{
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "weetodd-adapter-v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 24000
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 24000
+    },
+    "purpose": {
+      "enum": [
+        "prompt-editing",
+        "movie-planning",
+        "visual-description",
+        "character",
+        "style",
+        "motion"
+      ]
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "baseModel": {
+      "type": "object",
+      "properties": {
+        "family": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+        },
+        "variant": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.-]{0,127}$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 24000
+        }
+      },
+      "required": [
+        "family",
+        "variant",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "weights": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,200}\\.(safetensors|ckpt)$"
+        },
+        "format": {
+          "enum": [
+            "peft-safetensors",
+            "mlx-safetensors",
+            "drawthings-ckpt",
+            "comfy-safetensors"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 68719476736
+        }
+      },
+      "required": [
+        "file",
+        "format",
+        "sha256",
+        "sizeBytes"
+      ],
+      "additionalProperties": false
+    },
+    "training": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": [
+            "lora",
+            "qlora"
+          ]
+        },
+        "basePrecision": {
+          "enum": [
+            "fp32",
+            "bf16",
+            "fp16",
+            "int8",
+            "int4",
+            "nf4"
+          ]
+        },
+        "datasetID": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+        },
+        "datasetRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 24000
+        }
+      },
+      "required": [
+        "method",
+        "basePrecision"
+      ],
+      "additionalProperties": false
+    },
+    "adaptation": {
+      "type": "object",
+      "properties": {
+        "rank": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "alpha": {
+          "type": "number",
+          "minimum": 1e-06,
+          "maximum": 65536
+        },
+        "targetModules": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_.]{0,255}$"
+          },
+          "minItems": 1,
+          "maxItems": 512,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "rank",
+        "alpha",
+        "targetModules"
+      ],
+      "additionalProperties": false
+    },
+    "inference": {
+      "type": "object",
+      "properties": {
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "defaultStrength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "visionSupport": {
+          "enum": [
+            "preserved",
+            "modified",
+            "unverified"
+          ]
+        }
+      },
+      "required": [
+        "runtimes",
+        "defaultStrength",
+        "visionSupport"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "format",
+    "id",
+    "version",
+    "name",
+    "description",
+    "purpose",
+    "license",
+    "baseModel",
+    "weights",
+    "training",
+    "adaptation",
+    "inference"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:weetodd:schema:adapter:1",
+  "title": "WeeTodd adapter v1"
+}

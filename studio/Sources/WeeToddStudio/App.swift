@@ -21,6 +21,11 @@ import SwiftUI
       CommandGroup(replacing: .newItem) {
         Button("New Movie") { store.newProject() }.keyboardShortcut("n")
         Button("Open Project…") { store.openProject() }.keyboardShortcut("o")
+        Button("Show Recovery Files") {
+          let folder = store.dataDirectory.appendingPathComponent("Recovery")
+          try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+          NSWorkspace.shared.open(folder)
+        }
       }
       CommandGroup(replacing: .saveItem) {
         Button("Save Project") { store.save() }.keyboardShortcut("s")
@@ -46,6 +51,9 @@ import SwiftUI
         Button("Delete Clip") { store.deleteClip() }
       }
       CommandMenu("Movie") {
+        Button("Workflows…") { store.showWorkflows = true }
+        Button("Shot List…") { store.showShotList = true }
+        Button("Production Library…") { store.showProductionLibrary = true }
         Button("Export Movie Headless Job…") { store.exportJob(clipOnly: false) }
         Button("Export Clip Headless Job…") { store.exportJob(clipOnly: true) }
         Button("Add Audio Track") { store.addAudioTrack() }
@@ -117,7 +125,7 @@ struct StudioView: View {
         }
       }
       .disabled(store.showPrompt || store.showMotionPrompt || store.imageDraft != nil)
-      if store.imageDraft != nil { ImageGenerationEditor().transition(.opacity).zIndex(10) }
+      if store.imageDraft != nil && !store.referenceSheetOpen { ImageGenerationEditor().transition(.opacity).zIndex(10) }
       if store.showPrompt { PromptEditor().transition(.opacity).zIndex(10) }
       if store.showMotionPrompt {
         MotionPromptEditor().transition(.opacity).zIndex(10)
@@ -139,6 +147,9 @@ struct StudioView: View {
     }
     .sheet(isPresented: $store.showDrawThings) { DrawThingsSettings().environmentObject(store) }
     .sheet(isPresented: $store.showDrawThingsConfigImport) { DrawThingsConfigImportView().environmentObject(store) }
+    .sheet(isPresented: $store.showWorkflows) { WorkflowView().environmentObject(store) }
+    .sheet(isPresented: $store.showProductionLibrary) { ProductionLibraryView().environmentObject(store) }
+    .sheet(isPresented: $store.showShotList) { ProjectPlanningView().environmentObject(store) }
     .sheet(isPresented: $store.showRuntime) { RuntimeView().environmentObject(store) }
     .sheet(isPresented: $store.showLog) {
       VStack(alignment: .leading) {
@@ -189,16 +200,19 @@ struct StudioView: View {
       Text(
         "\(store.project.settings.width) × \(store.project.settings.height)  ·  \(store.project.settings.fps,specifier:"%.0f") FPS"
       ).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+      Button { store.showWorkflows = true } label: { Label("Director", systemImage: "sparkles") }
+        .help("Plan a movie, review production objects and shot plans").disabled(store.operationBusy)
+      Button { store.showShotList = true } label: { Label("Shot List", systemImage: "list.bullet.rectangle") }
       Button {
         store.save()
       } label: {
         Image(systemName: "square.and.arrow.down")
-      }.help("Save project · ⌘S")
+      }.help("Save project · ⌘S").accessibilityLabel("Save project")
       Button {
         store.showRuntime = true
       } label: {
         Image(systemName: "slider.horizontal.3")
-      }.help("Runtime settings")
+      }.help("Runtime settings").accessibilityLabel("Runtime settings")
       Button {
         store.exportMovie()
       } label: {
@@ -220,7 +234,10 @@ struct LiveStatus: View {
   @ObservedObject var bridge: Bridge
   var body: some View {
     HStack(spacing: 9) {
-      if bridge.busy {
+      if store.activeNativeRequest != nil && !bridge.busy {
+        ProgressView().controlSize(.small)
+        Text("Checking render settings…")
+      } else if bridge.busy {
         ProgressView().controlSize(.small)
         Text(bridge.message).lineLimit(1)
         if bridge.fraction > 0 {
@@ -252,7 +269,7 @@ struct LiveStatus: View {
         store.showLog = true
       } label: {
         Image(systemName: "text.alignleft")
-      }.help("Job log")
+      }.help("Job log").accessibilityLabel("Open job log")
       Button {
         store.showPrompt = true
       } label: {

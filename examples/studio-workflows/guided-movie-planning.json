@@ -1,0 +1,498 @@
+{
+  "format": "weetodd-workflow-v1",
+  "id": "weetodd.guided-movie-planning",
+  "version": "1.1.0",
+  "name": "Create a movie",
+  "description": "Review your brief, subjects and shots in three coherent stages. Inspect technical steps and H3 prompt drafts when needed. No generation is submitted.",
+  "inputs": {
+    "brief": {
+      "type": "text",
+      "label": "Movie idea",
+      "default": ""
+    },
+    "duration_seconds": {
+      "type": "number",
+      "label": "Movie length in seconds",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 3600
+    },
+    "target_clip_seconds": {
+      "type": "number",
+      "label": "Preferred clip length",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 60
+    },
+    "frame_rate": {
+      "type": "integer",
+      "label": "Movie FPS",
+      "default": 24,
+      "minimum": 1,
+      "maximum": 120
+    },
+    "images": {
+      "type": "image_list",
+      "label": "Character and style references",
+      "default": []
+    },
+    "visual_style": {
+      "type": "text",
+      "label": "Visual style",
+      "default": "Let the director decide"
+    },
+    "presentation": {
+      "type": "text",
+      "label": "Presentation",
+      "default": "Widescreen"
+    },
+    "camera_style": {
+      "type": "text",
+      "label": "Camera style",
+      "default": "Let the director decide"
+    },
+    "audio_style": {
+      "type": "text",
+      "label": "Sound",
+      "default": "Effects only"
+    },
+    "design_policy": {
+      "type": "text",
+      "label": "Missing visual details",
+      "default": "Propose missing details for approval"
+    },
+    "constraints": {
+      "type": "text",
+      "label": "Must keep or avoid",
+      "default": ""
+    },
+    "library": {
+      "type": "object_catalog",
+      "label": "Available reusable objects",
+      "default": []
+    }
+  },
+  "models": {
+    "assistant": {
+      "family": "qwen3.5",
+      "variant": "4b",
+      "runtime": "drawthings-qwen-local",
+      "capabilities": [
+        "text",
+        "vision"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "describe",
+      "name": "Reference observations",
+      "operation": "vision.describe@1",
+      "inputs": {
+        "images": {
+          "input": "images"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 120,
+      "model": "assistant"
+    },
+    {
+      "id": "creative_brief",
+      "name": "Your creative brief",
+      "operation": "movie.prepare_creative_brief@1",
+      "inputs": {
+        "brief": {
+          "input": "brief"
+        },
+        "duration_seconds": {
+          "input": "duration_seconds"
+        },
+        "target_clip_seconds": {
+          "input": "target_clip_seconds"
+        },
+        "frame_rate": {
+          "input": "frame_rate"
+        },
+        "visual_style": {
+          "input": "visual_style"
+        },
+        "presentation": {
+          "input": "presentation"
+        },
+        "camera_style": {
+          "input": "camera_style"
+        },
+        "audio_style": {
+          "input": "audio_style"
+        },
+        "design_policy": {
+          "input": "design_policy"
+        },
+        "constraints": {
+          "input": "constraints"
+        },
+        "observations": {
+          "step": "describe",
+          "output": "observations"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 2
+      },
+      "timeoutSeconds": 3600,
+      "model": "assistant",
+      "requiresApproval": true
+    },
+    {
+      "id": "resolve",
+      "name": "Apply your choices",
+      "operation": "movie.resolve_creative_brief@1",
+      "inputs": {
+        "creative_brief": {
+          "step": "creative_brief",
+          "output": "creative_brief"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 3600,
+      "requiresApproval": false
+    },
+    {
+      "id": "subjects",
+      "name": "Identify visual subjects",
+      "operation": "project.identify_creative_subjects@1",
+      "inputs": {
+        "brief": {
+          "step": "resolve",
+          "output": "source_brief"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 2
+      },
+      "timeoutSeconds": 3600,
+      "model": "assistant",
+      "requiresApproval": false
+    },
+    {
+      "id": "classify",
+      "name": "Classify subjects",
+      "operation": "project.classify_subjects@1",
+      "inputs": {
+        "subjects": {
+          "step": "subjects",
+          "output": "subjects"
+        },
+        "brief": {
+          "step": "resolve",
+          "output": "source_brief"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 2
+      },
+      "timeoutSeconds": 3600,
+      "model": "assistant",
+      "requiresApproval": false
+    },
+    {
+      "id": "links",
+      "name": "Link reusable objects",
+      "operation": "project.link_subjects@1",
+      "inputs": {
+        "subjects": {
+          "step": "classify",
+          "output": "subjects"
+        },
+        "brief": {
+          "step": "resolve",
+          "output": "source_brief"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 3600,
+      "model": "assistant",
+      "requiresApproval": false
+    },
+    {
+      "id": "inventory",
+      "name": "Review inventory and library matches",
+      "operation": "project.review_object_coverage@1",
+      "inputs": {
+        "subjects": {
+          "step": "links",
+          "output": "subjects"
+        },
+        "brief": {
+          "step": "resolve",
+          "output": "source_brief"
+        },
+        "library": {
+          "input": "library"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 3600,
+      "model": "assistant",
+      "requiresApproval": false
+    },
+    {
+      "id": "design",
+      "name": "Review visual designs",
+      "operation": "project.review_creative_subjects@1",
+      "inputs": {
+        "subjects": {
+          "step": "inventory",
+          "output": "subjects"
+        },
+        "brief": {
+          "step": "resolve",
+          "output": "source_brief"
+        },
+        "creative_brief": {
+          "step": "creative_brief",
+          "output": "creative_brief"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 3600,
+      "model": "assistant",
+      "requiresApproval": false
+    },
+    {
+      "id": "subjects_coverage",
+      "name": "Review final object coverage",
+      "operation": "project.review_object_coverage@1",
+      "inputs": {
+        "subjects": {
+          "step": "design",
+          "output": "subjects"
+        },
+        "brief": {
+          "step": "resolve",
+          "output": "source_brief"
+        },
+        "library": {
+          "input": "library"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 3600,
+      "model": "assistant",
+      "requiresApproval": true
+    },
+    {
+      "id": "story",
+      "name": "Treatment",
+      "operation": "movie.plan_treatment@1",
+      "inputs": {
+        "subjects": {
+          "step": "subjects_coverage",
+          "output": "subjects"
+        },
+        "creative_brief": {
+          "step": "creative_brief",
+          "output": "creative_brief"
+        },
+        "brief": {
+          "step": "resolve",
+          "output": "brief"
+        },
+        "observations": {
+          "step": "describe",
+          "output": "observations"
+        },
+        "duration_seconds": {
+          "step": "resolve",
+          "output": "duration_seconds"
+        },
+        "target_clip_seconds": {
+          "step": "resolve",
+          "output": "target_clip_seconds"
+        },
+        "frame_rate": {
+          "step": "resolve",
+          "output": "frame_rate"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 3600,
+      "model": "assistant",
+      "requiresApproval": false
+    },
+    {
+      "id": "clips",
+      "name": "Clips",
+      "operation": "movie.plan_creative_beats@1",
+      "inputs": {
+        "story": {
+          "step": "story",
+          "output": "story"
+        },
+        "duration_seconds": {
+          "step": "resolve",
+          "output": "duration_seconds"
+        },
+        "target_clip_seconds": {
+          "step": "resolve",
+          "output": "target_clip_seconds"
+        },
+        "frame_rate": {
+          "step": "resolve",
+          "output": "frame_rate"
+        },
+        "subjects": {
+          "step": "subjects_coverage",
+          "output": "subjects"
+        },
+        "creative_brief": {
+          "step": "creative_brief",
+          "output": "creative_brief"
+        }
+      },
+      "parameters": {
+        "maxClips": 200
+      },
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 3600,
+      "requiresApproval": true,
+      "model": "assistant"
+    },
+    {
+      "id": "endpoints",
+      "name": "Endpoints",
+      "operation": "movie.plan_endpoints@2",
+      "inputs": {
+        "clips": {
+          "step": "clips",
+          "output": "clips"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 120
+    },
+    {
+      "id": "check",
+      "name": "Check",
+      "operation": "movie.check_plan@2",
+      "inputs": {
+        "clips": {
+          "step": "clips",
+          "output": "clips"
+        },
+        "endpoints": {
+          "step": "endpoints",
+          "output": "endpoints"
+        },
+        "duration_seconds": {
+          "step": "resolve",
+          "output": "duration_seconds"
+        },
+        "frame_rate": {
+          "step": "resolve",
+          "output": "frame_rate"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 120
+    },
+    {
+      "id": "prompt_preview",
+      "name": "H3 prompt drafts",
+      "operation": "movie.compile_h3_prompts@1",
+      "inputs": {
+        "subjects": {
+          "step": "subjects_coverage",
+          "output": "subjects"
+        },
+        "creative_brief": {
+          "step": "creative_brief",
+          "output": "creative_brief"
+        },
+        "clips": {
+          "step": "clips",
+          "output": "clips"
+        },
+        "planning_review": {
+          "step": "check",
+          "output": "review"
+        }
+      },
+      "parameters": {},
+      "retry": {
+        "maxAttempts": 1
+      },
+      "timeoutSeconds": 3600,
+      "requiresApproval": false
+    }
+  ],
+  "outputs": {
+    "creative_brief": {
+      "step": "creative_brief",
+      "output": "creative_brief"
+    },
+    "subjects": {
+      "step": "subjects_coverage",
+      "output": "subjects"
+    },
+    "story": {
+      "step": "story",
+      "output": "story"
+    },
+    "clips": {
+      "step": "clips",
+      "output": "clips"
+    },
+    "h3_prompts": {
+      "step": "prompt_preview",
+      "output": "h3_prompts"
+    },
+    "endpoints": {
+      "step": "endpoints",
+      "output": "endpoints"
+    },
+    "review": {
+      "step": "check",
+      "output": "review"
+    }
+  },
+  "limits": {
+    "maxParallelSteps": 1,
+    "maxStepExecutions": 2048,
+    "maxArtifacts": 64,
+    "maxWorkingBytes": 536870912
+  }
+}

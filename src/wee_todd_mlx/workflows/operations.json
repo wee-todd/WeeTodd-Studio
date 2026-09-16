@@ -1,0 +1,501 @@
+{
+  "vision.describe@1": {
+    "inputs": {
+      "images": "image_list"
+    },
+    "outputs": {
+      "observations": "observation_list"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "vision",
+    "maxCalls": 8
+  },
+  "text.plan_edits@1": {
+    "inputs": {
+      "source": "text",
+      "instructions": "text"
+    },
+    "outputs": {
+      "edits": "edit_list"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "maxEdits": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      },
+      "required": [
+        "maxEdits"
+      ],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text"
+  },
+  "text.apply_edits@1": {
+    "inputs": {
+      "source": "text",
+      "edits": "edit_list",
+      "observations": "observation_list"
+    },
+    "outputs": {
+      "draft": "text"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "maxEdits": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      },
+      "required": [
+        "maxEdits"
+      ],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "iterationBound": "maxEdits"
+  },
+  "text.check_edits@1": {
+    "inputs": {
+      "source": "text",
+      "draft": "text",
+      "edits": "edit_list"
+    },
+    "outputs": {
+      "review": "review"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text"
+  },
+  "movie.plan_story@1": {
+    "inputs": {
+      "brief": "text",
+      "duration_seconds": "number"
+    },
+    "outputs": {
+      "story": "text"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text"
+  },
+  "movie.allocate_clips@1": {
+    "inputs": {
+      "story": "text",
+      "duration_seconds": "number",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer"
+    },
+    "outputs": {
+      "clips": "clip_plan"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "maxClips": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "maxClips"
+      ],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented"
+  },
+  "movie.plan_endpoints@1": {
+    "inputs": {
+      "clips": "clip_plan",
+      "images": "image_list"
+    },
+    "outputs": {
+      "endpoints": "endpoint_plan"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "maxClips": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "maxClips"
+      ],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "vision",
+    "iterationBound": "maxClips",
+    "callsPerIteration": 2
+  },
+  "movie.check_plan@1": {
+    "inputs": {
+      "clips": "clip_plan",
+      "endpoints": "endpoint_plan",
+      "duration_seconds": "number",
+      "frame_rate": "integer"
+    },
+    "outputs": {
+      "review": "review"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented"
+  },
+  "movie.plan_story@2": {
+    "inputs": {
+      "brief": "text",
+      "duration_seconds": "number",
+      "observations": "observation_list",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer"
+    },
+    "outputs": {
+      "story": "story_outline"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "maxCalls": 201
+  },
+  "movie.plan_beats@1": {
+    "inputs": {
+      "story": "story_outline",
+      "duration_seconds": "number",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer"
+    },
+    "outputs": {
+      "clips": "structured_clip_plan"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "maxClips": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "maxClips"
+      ],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "iterationBound": "maxClips",
+    "callsPerIteration": 2
+  },
+  "movie.plan_endpoints@2": {
+    "inputs": {
+      "clips": "structured_clip_plan"
+    },
+    "outputs": {
+      "endpoints": "endpoint_plan"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented"
+  },
+  "movie.check_plan@2": {
+    "inputs": {
+      "clips": "structured_clip_plan",
+      "endpoints": "endpoint_plan",
+      "duration_seconds": "number",
+      "frame_rate": "integer"
+    },
+    "outputs": {
+      "review": "planning_review"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented"
+  },
+  "project.identify_subjects@1": {
+    "inputs": {
+      "brief": "text"
+    },
+    "outputs": {
+      "subjects": "subject_list"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "maxCalls": 48
+  },
+  "project.review_subjects@1": {
+    "inputs": {
+      "subjects": "subject_list",
+      "brief": "text"
+    },
+    "outputs": {
+      "subjects": "subject_list"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "maxCalls": 96
+  },
+  "project.link_subjects@1": {
+    "inputs": {
+      "subjects": "subject_list",
+      "brief": "text"
+    },
+    "outputs": {
+      "subjects": "subject_list"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "maxCalls": 48
+  },
+  "project.review_object_coverage@1": {
+    "inputs": {
+      "subjects": "subject_list",
+      "brief": "text",
+      "library": "object_catalog"
+    },
+    "outputs": {
+      "subjects": "subject_list"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "maxCalls": 48
+  },
+  "movie.prepare_creative_brief@1": {
+    "inputs": {
+      "brief": "text",
+      "duration_seconds": "number",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer",
+      "visual_style": "text",
+      "presentation": "text",
+      "camera_style": "text",
+      "audio_style": "text",
+      "design_policy": "text",
+      "constraints": "text",
+      "observations": "observation_list"
+    },
+    "outputs": {
+      "creative_brief": "creative_brief"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 1,
+    "modelCapability": "text"
+  },
+  "movie.resolve_creative_brief@1": {
+    "inputs": {
+      "creative_brief": "creative_brief"
+    },
+    "outputs": {
+      "brief": "text",
+      "duration_seconds": "number",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer",
+      "source_brief": "text"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 1
+  },
+  "project.classify_subjects@1": {
+    "inputs": {
+      "subjects": "subject_list",
+      "brief": "text"
+    },
+    "outputs": {
+      "subjects": "subject_list"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 12,
+    "modelCapability": "text"
+  },
+  "project.review_creative_subjects@1": {
+    "inputs": {
+      "subjects": "subject_list",
+      "brief": "text",
+      "creative_brief": "creative_brief"
+    },
+    "outputs": {
+      "subjects": "subject_list"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 96,
+    "modelCapability": "text"
+  },
+  "movie.plan_treatment@1": {
+    "inputs": {
+      "subjects": "subject_list",
+      "creative_brief": "creative_brief",
+      "brief": "text",
+      "duration_seconds": "number",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer",
+      "observations": "observation_list"
+    },
+    "outputs": {
+      "story": "story_outline"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 252,
+    "modelCapability": "text"
+  },
+  "movie.compile_h3_prompts@1": {
+    "inputs": {
+      "subjects": "subject_list",
+      "creative_brief": "creative_brief",
+      "clips": "structured_clip_plan",
+      "planning_review": "planning_review"
+    },
+    "outputs": {
+      "h3_prompts": "h3_prompt_preview"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 1
+  },
+  "project.identify_creative_subjects@1": {
+    "inputs": {
+      "brief": "text"
+    },
+    "outputs": {
+      "subjects": "subject_list"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "maxCalls": 72
+  },
+  "movie.plan_creative_beats@1": {
+    "inputs": {
+      "story": "story_outline",
+      "duration_seconds": "number",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer",
+      "subjects": "subject_list",
+      "creative_brief": "creative_brief"
+    },
+    "outputs": {
+      "clips": "structured_clip_plan"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "maxClips": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "maxClips"
+      ],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "iterationBound": "maxClips",
+    "callsPerIteration": 2
+  }
+}

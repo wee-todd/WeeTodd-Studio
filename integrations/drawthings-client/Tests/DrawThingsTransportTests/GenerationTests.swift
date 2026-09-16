@@ -25,14 +25,19 @@ private final class GenerationFixture: ImageGenerationServiceProvider {
     calls += 1
     var tensor = Tensor<Float>(.CPU, .NHWC(1, 64, 64, 3))
     for y in 0..<64 { for x in 0..<64 { for c in 0..<3 { tensor[0,y,x,c] = 0.25 } } }
+    var preview = Tensor<Float>(.CPU, .NHWC(1, 8, 8, 32))
+    for y in 0..<8 { for x in 0..<8 { for c in 0..<32 { preview[0,y,x,c] = 0 } } }
     var audio = Tensor<Float>(.CPU, .NC(2, 230880))
     for channel in 0..<2 { for sample in 0..<230880 {
       audio[channel, sample] = sin(Float(sample) * 440 * 2 * .pi / 48000) * 0.1
     } }
     return context.sendResponse(ImageGenerationResponse.with {
-      $0.generatedImages = Array(repeating: tensor.data(using: [.zip, .fpzip]), count: video ? 121 : 1)
-      if video && !omitAudio { $0.generatedAudio = [audio.data(using: [.zip, .fpzip])] }
-    }).map { self.failsAfterFrames ? GRPCStatus(code: .unavailable) : GRPCStatus.ok }
+      $0.currentSignpost = ImageGenerationSignpostProto.with { $0.sampling.step = 1 }
+      if !video { $0.previewImage = preview.data(using: [.zip, .fpzip]) }
+    }).flatMap { context.sendResponse(ImageGenerationResponse.with {
+      $0.generatedImages = Array(repeating: tensor.data(using: [.zip, .fpzip]), count: self.video ? 121 : 1)
+      if self.video && !self.omitAudio { $0.generatedAudio = [audio.data(using: [.zip, .fpzip])] }
+    }) }.map { self.failsAfterFrames ? GRPCStatus(code: .unavailable) : GRPCStatus.ok }
   }
   func filesExist(request: FileListRequest, context: StatusOnlyCallContext) -> EventLoopFuture<FileExistenceResponse> {
     context.eventLoop.makeFailedFuture(GRPCStatus(code: .unimplemented))
@@ -104,9 +109,18 @@ final class GenerationTests: XCTestCase {
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("manifest.json").path))
       } else {
-        let result = try Generation.run(request, authorize: { _ in nil }, progress: { _ in })
+        var previews = 0
+        let result = try Generation.run(request, authorize: { _ in nil }, progress: { event in
+          if let path = event["previewPath"] as? String {
+            previews += 1
+            XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("manifest.json").path))
+          }
+        })
+        XCTAssertEqual(previews, 1)
         XCTAssertEqual(result["manifestPath"] as? String, root.appendingPathComponent("manifest.json").path)
       }
+      XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("live-preview.png").path))
       XCTAssertEqual(fixture.calls, 1)
     }
   }

@@ -1,0 +1,60 @@
+{
+  "format": "weetodd-director-production-evaluation-v1",
+  "revision": 1,
+  "qualification": "Fresh production guided sessions; scripted structural review is not human creative acceptance.",
+  "sessions": [
+    {
+      "id": "mara-case-two-shots",
+      "inputs": {
+        "brief": "Mara is an adult human woman with short black hair. Mara wears a green coat. The brass case is a portable hinged case. The observatory is a single empty circular building.\n[Shot 1] At 00:00.000, inside the observatory, Mara opens the brass case and says “It’s still here—don’t touch it.”\n[Shot 2] At 00:05.000, inside the observatory, Mara closes the brass case and says “We’ll return at dawn.”",
+        "duration_seconds": 10,
+        "target_clip_seconds": 5,
+        "frame_rate": 24,
+        "images": [],
+        "visual_style": "Naturalistic live action",
+        "presentation": "Widescreen",
+        "camera_style": "Locked-off",
+        "audio_style": "Supplied English dialogue and physical effects; no music",
+        "design_policy": "Preserve supplied visual details",
+        "constraints": "Keep exact dialogue and shot order. Mara remains human. No additional characters, props, locations or dialogue.",
+        "library": []
+      },
+      "clarificationAnswer": "Mara is an adult human woman with short black hair and a green coat. She opens then closes the brass case inside the observatory; preserve the supplied dialogue and ending.",
+      "expected": {
+        "subjects": [{"name": "Mara", "kind": "character", "terms": ["human", "black"]}],
+        "shots": [
+          {"dialogue": ["It’s still here—don’t touch it."], "actionTerms": ["opens", "brass case"]},
+          {"dialogue": ["We’ll return at dawn."], "actionTerms": ["closes", "brass case"]}
+        ]
+      },
+      "correction": {"clipID": "clip-2", "fieldScope": "action", "action": "Mara gently closes the brass case and says “We’ll return at dawn.”"}
+    },
+    {
+      "id": "ivo-bell-three-shots",
+      "inputs": {
+        "brief": "Ivo is an adult human man with curly brown hair. Ivo wears a blue shirt. The copper bell is a small handheld bell. The lighthouse is an empty white stone building.\n[Shot 1] At 00:00.000, inside the lighthouse, Ivo lifts the copper bell and says “There’s no wind—is there?”\n[Shot 2] At 00:04.000, inside the lighthouse, Ivo rings the copper bell once and says “That’s our signal.”\n[Shot 3] At 00:08.000, inside the lighthouse, Ivo lowers the copper bell and says “I’m ready; let’s go.”",
+        "duration_seconds": 12,
+        "target_clip_seconds": 4,
+        "frame_rate": 24,
+        "images": [],
+        "visual_style": "Naturalistic live action",
+        "presentation": "Widescreen",
+        "camera_style": "Locked-off",
+        "audio_style": "Supplied English dialogue and physical effects; no music",
+        "design_policy": "Preserve supplied visual details",
+        "constraints": "Keep exact dialogue and shot order. Ivo remains human. No additional characters, props, locations or dialogue.",
+        "library": []
+      },
+      "clarificationAnswer": "Ivo is an adult human man with curly brown hair and a blue shirt. He lifts, rings once, then lowers the copper bell inside the lighthouse; preserve the supplied dialogue and ending.",
+      "expected": {
+        "subjects": [{"name": "Ivo", "kind": "character", "terms": ["human", "brown"]}],
+        "shots": [
+          {"dialogue": ["There’s no wind—is there?"], "actionTerms": ["lifts", "copper bell"]},
+          {"dialogue": ["That’s our signal."], "actionTerms": ["rings", "copper bell"]},
+          {"dialogue": ["I’m ready; let’s go."], "actionTerms": ["lowers", "copper bell"]}
+        ]
+      },
+      "correction": {"clipID": "clip-2", "fieldScope": "action", "action": "Ivo slowly rings the copper bell once and says “That’s our signal.”"}
+    }
+  ]
+}

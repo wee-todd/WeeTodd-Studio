@@ -105,6 +105,12 @@ def validate_request(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(configuration, dict):
         raise ValueError("configuration must be an object")
     normalized["configuration"] = _json_value(configuration, "configuration")
+    if "seed" in configuration:
+        seed = configuration["seed"]
+        if type(seed) is not int or not -1 <= seed <= 0xFFFFFFFF:
+            raise ValueError(
+                "Draw Things seed must be -1 for random or an integer from 0 to 4294967295"
+            )
     for key in ("inputs", "loras"):
         collection = normalized.get(key, [])
         if not isinstance(collection, list):

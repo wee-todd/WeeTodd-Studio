@@ -1,4 +1,10 @@
-# Headless recipe examples
+# WeeTodd Studio headless jobs
+
+The standalone app exports movie and clip jobs for the same shared renderer used by Studio and the
+maintained ComfyUI nodes. Choose Draw Things for its supported inference tasks or native H3/LTX for
+additional models and conditioning; an exported job retains that explicit backend choice. Supported
+model files can be shared in place, but every executing machine must have access to the referenced
+components and media. See the [project overview](../../README.md#choose-how-to-generate).
 
 ## Draw Things portable jobs
 
@@ -35,7 +41,7 @@ are portable documentation, not a runtime-ready checkpoint layout.
 
 ## Download and create an LTX 2.5 recipe
 
-Run these commands from WeeTodd-Nodes with its compatible Python environment. Accept access to
+Run these commands from the WeeTodd Studio checkout with its compatible Python environment. Accept access to
 the [prepared model repository](https://huggingface.co/Vayden/LTX-2.5-MLX-Q8-Paged) and sign in with
 `hf auth login` before downloading. Studio can instead store a read token in macOS Keychain for
 its own setup downloads; that saved token is not a general shell login.

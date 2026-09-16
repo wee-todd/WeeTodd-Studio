@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gc
 import time
+import weakref
 from pathlib import Path
 
 import mlx.core as mx
@@ -23,7 +25,12 @@ from .components import (
     load_ltx25_spatial_upsampler,
 )
 from .gemma_encoder import LTX25Gemma4Conditioner, resolve_prompt_context_length
-from .runtime import LTX25_CFG_PP_SCHEDULES, LTX25_DISTILLED_SIGMAS, LTX25_STAGE2_SIGMAS
+from .runtime import (
+    LTX25_CFG_PP_SCHEDULES,
+    LTX25_DISTILLED_SIGMAS,
+    LTX25_STAGE2_SIGMAS,
+    LTX25GenerationConfig,
+)
 from .sampling import (
     euler_ancestral_cfg_pp_denoise_loop,
     euler_ancestral_denoise_loop,
@@ -238,7 +245,34 @@ class LTX25DistilledPipeline:
             self.feed_forward_report = getattr(self.dit, "feed_forward_backend_report", None)
             self.paged_transformer_report = getattr(self.dit, "paged_checkpoint_report", None)
 
+    def _sampling_model(self, *, frozen_audio: bool = False):
+        """Track wrappers so transformer release also severs their weighted references."""
+        if frozen_audio:
+            from .frozen_audio import DFRFrozenAudioX0Model
+
+            wrapper = DFRFrozenAudioX0Model(self.dit)
+        else:
+            from ltx_core_mlx.model.transformer.model import X0Model
+
+            wrapper = X0Model(self.dit)
+        self._sampling_wrappers = [
+            ref for ref in getattr(self, "_sampling_wrappers", ()) if ref() is not None
+        ]
+        self._sampling_wrappers.append(weakref.ref(wrapper))
+        return wrapper
+
     def _release_transformer(self) -> None:
+        # Local sampler wrappers can outlive a stage, including exception tracebacks.
+        # Invalidate every tracked owner before loading another weighted component.
+        for ref in getattr(self, "_sampling_wrappers", ()):
+            wrapper = ref()
+            if wrapper is not None:
+                release = getattr(wrapper, "release", None)
+                if release is not None:
+                    release()
+                else:
+                    wrapper.model = None
+        self._sampling_wrappers = []
         if self.dit is not None:
             streamer = getattr(
                 self.dit,
@@ -260,6 +294,8 @@ class LTX25DistilledPipeline:
         self.dit = None
         self._loaded_loras = None
         self._loaded_transformer_path = None
+        gc.collect()
+        mx.clear_cache()
 
     def _release_sampling(self) -> None:
         self._release_transformer()
@@ -368,9 +404,7 @@ class LTX25DistilledPipeline:
                 timings.setdefault("temporal_transformer_reload_seconds", []).append(
                     time.perf_counter() - reload_started
                 )
-            from .frozen_audio import DFRFrozenAudioX0Model
-
-            joint_model = DFRFrozenAudioX0Model(self.dit)
+            joint_model = self._sampling_model(frozen_audio=True)
             num_frames = 2 * (num_frames - 1) + 1
             current_fps *= 2.0
             seam_frames = tuple(2 * frame for frame in carry_frames)
@@ -747,7 +781,6 @@ class LTX25DistilledPipeline:
             compute_video_latent_shape,
             snap_output_dimensions,
         )
-        from ltx_core_mlx.model.transformer.model import X0Model
         from ltx_core_mlx.utils.memory import aggressive_cleanup
         from ltx_core_mlx.utils.positions import (
             compute_audio_positions,
@@ -1051,7 +1084,7 @@ class LTX25DistilledPipeline:
                 legacy_scalar_blend=continuation is None,
             )
         mx.eval(video_state.latent, video_state.clean_latent, audio_state.latent)
-        model = X0Model(self.dit)
+        model = self._sampling_model()
         if ic_lora_single_stage and self.sol_attention_profile != "disabled":
             from .sol_attention import set_ltx25_sol_context
 
@@ -1456,13 +1489,13 @@ class LTX25DistilledPipeline:
                 ),
                 include_ic_loras=False,
             )
-            model = X0Model(self.dit)
+            model = self._sampling_model()
             timings["ic_lora_stage_scope"] = "stage_1_only"
         elif pipeline_mode != "distilled":
             self._load_transformer(
                 extra_loras=((str(self.distilled_lora_path), 1.0),)
             )
-            model = X0Model(self.dit)
+            model = self._sampling_model()
         if dfr_detailing_lora is not None:
             if self.dfr_stage2_transformer_path is not None:
                 self._load_transformer(
@@ -1470,7 +1503,7 @@ class LTX25DistilledPipeline:
                 )
             else:
                 self.load(extra_loras=(dfr_detailing_lora,))
-            model = X0Model(self.dit)
+            model = self._sampling_model()
         if dfr_enabled:
             set_generated_keyframe_marker(self.dit, stage2_generated_slot_rows)
         set_mpp_feed_forward_enabled(self.dit, self.feed_forward_stage_scope in {"all", "stage2"})
@@ -1620,6 +1653,9 @@ class LTX25DistilledPipeline:
         stage2_steps: int = 3,
     ) -> str:
         """Generate, assemble, decode, and publish an exact latent-native chain."""
+        LTX25GenerationConfig(
+            stage1_sampler=stage1_sampler, cfg_pp_batched=cfg_pp_batched,
+        ).validate_chain_support()
         if len(prompts) != window_count:
             raise ValueError("LTX 2.5 chained prompt count must match the window count.")
         plan = plan_ltx25_chain(

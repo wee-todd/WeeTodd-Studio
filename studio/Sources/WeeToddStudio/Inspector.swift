@@ -233,12 +233,12 @@ struct ClipInspector: View {
         DisclosureGroup("Versions · \(clip.versions.count)") {
           ForEach(clip.versions.reversed()) { v in
             Button {
-              store.editClip {
-                $0.sourcePath = v.path
-                $0.sourceIn = 0
-                $0.renderedSignature = ""
-              }
-              store.refreshPreview()
+              do {
+                var updated = clip
+                try updated.activateVersion(v)
+                store.editClip { $0 = updated }
+                store.refreshPreview()
+              } catch { store.error = error.localizedDescription }
             } label: {
               HStack {
                 Image(systemName: "play.rectangle")

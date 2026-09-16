@@ -44,6 +44,8 @@ public struct RenderStats: Codable, Equatable {
 public struct BridgeProgressEvent: Equatable, Sendable {
   public let message: String
   public let fraction: Double?
+  public var previewPath: String? = nil
+  public var previewRevision: Int? = nil
 }
 
 /// A pipe read is not a line or necessarily a complete UTF-8 character.
@@ -61,7 +63,8 @@ public struct BridgeProgressStream {
           let message = object["message"] as? String, !message.isEmpty {
           let fraction = object["fraction"] as? Double
           if fraction == nil || (fraction!.isFinite && (0...1).contains(fraction!)) {
-            events.append(BridgeProgressEvent(message: String(message.prefix(512)), fraction: fraction))
+            events.append(BridgeProgressEvent(message: String(message.prefix(512)), fraction: fraction,
+              previewPath: object["previewPath"] as? String, previewRevision: object["previewRevision"] as? Int))
           }
         }
         line.removeAll(keepingCapacity: true); dropping = false

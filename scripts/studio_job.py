@@ -284,7 +284,7 @@ def export_job(request, target):
         "Developer Python alternative:\n"
         "You can close WeeTodd Studio before running this job. Use the "
         "existing MLX Python environment.\n"
-        "Run from WeeTodd-Nodes (replace JOB.json and OUTPUT with this "
+        "Run from the WeeTodd Studio checkout (replace JOB.json and OUTPUT with this "
         "job and a new output folder):\n\n"
         "python scripts/render_headless.py --job JOB.json "
         "--output-directory OUTPUT --preflight-only\n"
