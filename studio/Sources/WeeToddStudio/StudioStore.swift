@@ -269,6 +269,10 @@ extension Encodable {
   @Published var preparedPrompt = ""
   @Published var preparedRecipe: String?
   @Published var preparedReport = ""
+  @Published var pendingContinuousScene: PendingContinuousSceneTake?
+  @Published var showContinuousSceneReview = false
+  @Published var acceptingContinuousScene = false
+  @Published var connectingContinuousScene = false
   @Published var motionPromptDraft = ""
   @Published var motionRecipePrompt = ""
   @Published var motionPromptClipName = ""
@@ -286,7 +290,7 @@ extension Encodable {
   @Published private(set) var activeNativeRequest: UUID?
   private(set) var documentSessionID = UUID()
   @Published var preparingDrawThings = false
-  var operationBusy: Bool { bridge.busy || activeNativeRequest != nil || preparingDrawThings }
+  var operationBusy: Bool { bridge.busy || activeNativeRequest != nil || preparingDrawThings || acceptingContinuousScene || connectingContinuousScene }
   var preparedFingerprint: String?
   var motionPromptSession: MotionPromptEditorSession?
   private var undoStates: [StudioProject] = []
@@ -388,7 +392,24 @@ extension Encodable {
   }
   func editClip(undoGroup: UUID? = nil, _ body: (inout Clip) -> Void) {
     guard let i = project.clips.firstIndex(where: { $0.id == selectedClipID }) else { return }
-    change(undoGroup: undoGroup) { body(&$0.clips[i]) }
+    var separated = false
+    change(undoGroup: undoGroup) { project in
+      let previousEngine = project.clips[i].engine
+      body(&project.clips[i])
+      if previousEngine != project.clips[i].engine && project.clips[i].engine != .ltx25 {
+        separated = project.separateContinuousSceneMember(clipID: project.clips[i].id)
+      }
+    }
+    if separated {
+      notice = "Separated this shot from its LTX 2.5 group. It now generates independently; images, takes and edit points are preserved. Undo restores the scene."
+    }
+  }
+  func separateContinuousScene(clipID: UUID) {
+    var separated = false
+    change { separated = $0.separateContinuousSceneMember(clipID: clipID) }
+    if separated {
+      notice = "This shot now generates independently. Images, takes and edit points are preserved. Undo restores the scene."
+    }
   }
   func changed() {
     preparedDrawThingsClip = nil
@@ -576,6 +597,7 @@ extension Encodable {
     generationDescriptions.removeAll(); validationErrors.removeAll(); drawThingsClipEstimates.removeAll()
     preparedDrawThingsClip = nil; preparedRecipe = nil; preparedFingerprint = nil
     preparedPrompt = ""; preparedReport = ""
+    pendingContinuousScene = nil; showContinuousSceneReview = false
     showPrompt = false; error = nil
     dirty = isDirty
     refreshPreview()
@@ -600,7 +622,8 @@ extension Encodable {
     Task { await importURLs(panel.urls, scope: scope, addToTimeline: addToTimeline) }
   }
   func importURLs(
-    _ urls: [URL], scope: AssetScope, addToTimeline: Bool = false, loraModel: LoRAModel? = nil
+    _ urls: [URL], scope: AssetScope, addToTimeline: Bool = false, loraModel: LoRAModel? = nil,
+    loraProfile: String? = nil, loraLayout: String? = nil, loraAdalnInputGrid: String? = nil
   ) async {
     if scope == .clip && selectedClipID == nil && !addToTimeline {
       error = "Select a clip before importing into its asset store."
@@ -608,7 +631,14 @@ extension Encodable {
     }
     for url in urls {
       do {
-        let info = try await bridge.invoke("inspect", runtime: runtime, payload: ["path": url.path])
+        var inspection: [String: Any] = ["path": url.path]
+        if let loraModel { inspection["loraModel"] = loraModel.rawValue }
+        if loraModel == .h3 {
+          if let loraProfile { inspection["loraProfile"] = loraProfile }
+          if let loraLayout { inspection["loraLayout"] = loraLayout }
+          if let loraAdalnInputGrid { inspection["loraAdalnInputGrid"] = loraAdalnInputGrid }
+        }
+        let info = try await bridge.invoke("inspect", runtime: runtime, payload: inspection)
         let kind = AssetKind(rawValue: info["kind"] as? String ?? "video") ?? .video
         var asset = MediaAsset(
           name: url.deletingPathExtension().lastPathComponent, kind: kind, path: url.path,
@@ -621,6 +651,11 @@ extension Encodable {
         if kind == .lora {
           asset.loraModel =
             (info["loraModel"] as? String).flatMap(LoRAModel.init(rawValue:)) ?? loraModel
+          if asset.loraModel == .h3 {
+            asset.loraProfile = info["loraProfile"] as? String ?? (loraModel == .h3 ? loraProfile : nil)
+            asset.loraLayout = info["loraLayout"] as? String ?? (loraModel == .h3 ? loraLayout : nil)
+            asset.loraAdalnInputGrid = info["loraAdalnInputGrid"] as? String ?? (loraModel == .h3 ? loraAdalnInputGrid : nil)
+          }
         }
         if addToTimeline && (kind == .video || kind == .image) {
           var c = Clip(name: asset.name, engine: .movie)
@@ -781,6 +816,17 @@ extension Encodable {
         p.clips[i].motionDirectory = try collect(p.clips[i].motionDirectory)
         for j in p.clips[i].versions.indices {
           p.clips[i].versions[j].path = try collect(p.clips[i].versions[j].path)
+          if let artifact = p.clips[i].versions[j].continuationArtifact {
+            if let known = copied[artifact.manifest] {
+              p.clips[i].versions[j].continuationArtifact?.manifest = known
+            } else {
+              let context = media.appendingPathComponent(UUID().uuidString + "-context")
+              var collected = try ProjectStorage.collectContinuationArtifact(artifact, to: context)
+              collected.manifest = "Media/" + context.lastPathComponent + "/manifest.json"
+              copied[artifact.manifest] = collected.manifest
+              p.clips[i].versions[j].continuationArtifact = collected
+            }
+          }
         }
       }
       for i in p.audio.indices { p.audio[i].path = try collect(p.audio[i].path) }
@@ -857,6 +903,8 @@ extension Encodable {
         + "|" + String(describing: attributes?[.size])
     }.joined(separator: "\n")
     return clip.generationFingerprint + ((try? encoder.encode(runtime).base64EncodedString()) ?? "")
+      + project.continuityDependencyFingerprint(for: clip)
+      + continuousSceneDependencyKey(for: clip)
       + GenerationSelection.assetFingerprint(for: clip, assets: allAssets)
       + ((try? encoder.encode(relevantProfiles).base64EncodedString()) ?? "")
       + ((try? encoder.encode(loraGroups).base64EncodedString()) ?? "")
@@ -875,7 +923,8 @@ extension Encodable {
       result["studioTask"] = clip.inferredTask
       result["studioProfile"] = clip.profileID
       generationDescriptions[clip.id] = result
-      validationErrors[clip.id] = nil
+      let readiness = result["readinessErrors"] as? [String] ?? []
+      validationErrors[clip.id] = readiness.isEmpty ? nil : readiness.joined(separator: "\n")
     } catch {
       guard documentSessionID == session, selectedClipID == clip.id,
         selectedClip.map({ generationRequestKey(for: $0) }) == key else { return }
@@ -962,22 +1011,46 @@ extension Encodable {
           from: JSONSerialization.data(withJSONObject: $0))
       }
       let resolvedFingerprint = prepared?["resolvedFingerprint"] as? String
+      let sceneClips = try project.continuousSceneMembers(for: c)
+      let sceneKey = sceneClips.isEmpty ? "" : continuousSceneDependencyKey(for: c)
+      let sceneReport = try prepared?["scene"].map { try ContinuousSceneRenderReport.decode($0) }
+      if !sceneClips.isEmpty && sceneReport == nil {
+        throw StudioError.invalid("Prepare the complete continuous scene before rendering.")
+      }
+      // Retried scenes share immutable sampling checkpoints, never candidate movies.
+      let renderDestination = sceneClips.isEmpty ? destination
+        : destination.appendingPathComponent(requestID.uuidString)
       let r = try await bridge.invoke(
-        "render", runtime: settings, payload: ["recipePath": path], output: destination)
+        "render", runtime: settings, payload: ["recipePath": path], output: renderDestination)
       guard let video = r["video"] as? String else {
         throw StudioError.invalid("Renderer did not return a movie.")
       }
       let info = try await bridge.invoke("inspect", runtime: settings, payload: ["path": video])
+      if !sceneClips.isEmpty {
+        try receiveContinuousScene(result: r, media: info, prepared: sceneReport!,
+          clips: sceneClips, requestKey: sceneKey, projectID: projectID, session: session,
+          recipePath: path, generation: generationSettings, resolvedFingerprint: resolvedFingerprint)
+        return
+      }
+      if r["scene"] != nil {
+        throw StudioError.invalid("The renderer returned an unexpected scene. Movie saved at \(video)")
+      }
       var renderedDuration = info["duration"] as? Double ?? c.duration
       var renderedStart = 0.0
-      if !c.extensionSource.isEmpty {
+      if let start = r["usable_source_in"] as? Double, let duration = r["usable_duration"] as? Double {
+        renderedStart = start
+        renderedDuration = duration
+      } else if !c.extensionSource.isEmpty {
         let source = try await bridge.invoke(
           "inspect", runtime: settings, payload: ["path": c.extensionSource])
         let sourceDuration = source["duration"] as? Double ?? 0
         renderedDuration -= sourceDuration
         if c.extensionDirection == "after" { renderedStart = sourceDuration }
       }
-      guard renderedDuration > 0 else {
+      let continuationArtifact = try (r["continuation_artifact"] as? [String: Any]).map {
+        try JSONDecoder().decode(ContinuationArtifact.self, from: JSONSerialization.data(withJSONObject: $0))
+      }
+      guard renderedDuration.isFinite, renderedDuration > 0, renderedStart.isFinite, renderedStart >= 0 else {
         throw StudioError.invalid("The extension returned no new frames.")
       }
       guard documentSessionID == session, project.id == projectID,
@@ -994,7 +1067,7 @@ extension Encodable {
           RenderVersion(path: video, seed: c.seed, prompt: prompt, recipePath: path,
                         stats: RenderStats(result: r), generationSettings: generationSettings,
                         resolvedFingerprint: resolvedFingerprint, usableSourceIn: renderedStart,
-                        usableDuration: renderedDuration))
+                        usableDuration: renderedDuration, continuationArtifact: continuationArtifact))
         if stillCurrent {
           p.clips[i].sourcePath = video
           p.clips[i].sourceIn = renderedStart
@@ -1007,6 +1080,21 @@ extension Encodable {
         p.assets.append(asset)
       }
       if stillCurrent && selectedClipID == c.id {
+        if finishedClip.duration != c.duration, let accepted = selectedClip {
+          // Exact frame durations can replace the editor's rounded seconds. Refresh
+          // the resolved input key before recording the completed take's signature.
+          let acceptedKey = generationRequestKey(for: accepted)
+          await describeGeneration()
+          guard documentSessionID == session, project.id == projectID else { return }
+          if let index = project.clips.firstIndex(where: { $0.id == c.id }),
+            project.clips[index] == accepted,
+            generationRequestKey(for: project.clips[index]) == acceptedKey,
+            generationDescriptions[c.id]?["studioInput"] as? String == acceptedKey {
+            project.clips[index].renderedSignature = signature(for: project.clips[index])
+            changed()
+          }
+        }
+        guard selectedClipID == c.id else { return }
         showPrompt = false
         refreshPreview()
       }

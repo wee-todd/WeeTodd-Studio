@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import StudioCore
 import XCTest
 @testable import WeeToddStudio
@@ -137,6 +138,59 @@ final class StudioReliabilityTests: XCTestCase {
     XCTAssertEqual(store.playhead, 3)
   }
 
+  @MainActor func testMoviePreviewAcceptsUnchangedMultiShotProject() async throws {
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false,
+      invocation: { _, _, _, _ in [:] })
+    for index in 1...6 {
+      var clip = Clip(name: "Shot \(index)", engine: .h3)
+      clip.selectLocalModel(.ltx25)
+      clip.duration = 5
+      clip.sourcePath = "/tmp/shot-\(index).mp4"
+      clip.continuity = ClipContinuity(mode: index == 1 ? "independent" : "frame")
+      store.project.clips.append(clip)
+    }
+    let snapshot = store.project
+    await store.previewMovie()
+    XCTAssertEqual(store.project, snapshot)
+    XCTAssertNil(store.error)
+    XCTAssertEqual(store.previewMode, "Movie")
+    XCTAssertEqual(store.effectivePreviewDuration, 30)
+  }
+
+  @MainActor func testMoviePreviewRejectsEditsWhileRendering() async throws {
+    let fake = SuspendedBridge("preview")
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false,
+      invocation: fake.invoke)
+    store.addClip()
+    let entered = expectation(description: "preview suspended")
+    fake.entered = { entered.fulfill() }
+    let task = Task { await store.previewMovie() }
+    await fulfillment(of: [entered], timeout: 2)
+    store.editClip { $0.duration = 7 }
+    fake.continuation?.resume(returning: [:])
+    await task.value
+    XCTAssertNotEqual(store.previewMode, "Movie")
+    XCTAssertNotNil(store.error)
+  }
+
+  @MainActor func testMoviePreviewRejectsReopenedIdenticalDocument() async throws {
+    let directory = try temporaryDirectory()
+    let fake = SuspendedBridge("preview")
+    let store = StudioStore(dataDirectory: directory, restoreSession: false, invocation: fake.invoke)
+    store.addClip()
+    let url = directory.appendingPathComponent("same-project.weetodd")
+    try ProjectStorage.write(store.project, to: url)
+    let entered = expectation(description: "preview suspended")
+    fake.entered = { entered.fulfill() }
+    let task = Task { await store.previewMovie() }
+    await fulfillment(of: [entered], timeout: 2)
+    store.load(url)
+    fake.continuation?.resume(returning: [:])
+    await task.value
+    XCTAssertNotEqual(store.previewMode, "Movie")
+    XCTAssertNotNil(store.error)
+  }
+
   @MainActor func testFailedRecoveryKeepsCurrentDocumentAndURL() throws {
     let directory = try temporaryDirectory()
     try Data("occupied".utf8).write(to: directory.appendingPathComponent("Recovery"))
@@ -218,6 +272,48 @@ final class StudioReliabilityTests: XCTestCase {
     XCTAssertEqual(store.selectedClip?.duration, 4)
     XCTAssertEqual(store.selectedClip?.versions.last?.usableSourceIn, 8)
     XCTAssertEqual(store.selectedClip?.versions.last?.usableDuration, 4)
+  }
+
+  @MainActor func testNativeDurationRoundingKeepsAcceptedRenderCurrent() async throws {
+    let fake = SuspendedBridge("render")
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.addClip(.h3)
+    store.editClip { $0.duration = 5.17; $0.prompt = "A robot lifts a lantern." }
+    await store.prepareSelected()
+    let entered = expectation(description: "render suspended")
+    fake.entered = { entered.fulfill() }
+    let task = Task { await store.renderPrepared() }
+    await fulfillment(of: [entered], timeout: 2)
+    fake.continuation?.resume(returning: ["video": "/tmp/completed.mov",
+      "usable_source_in": 0.0, "usable_duration": 124.0 / 24])
+    await task.value
+    await store.describeGeneration()
+    let clip = try XCTUnwrap(store.selectedClip)
+    XCTAssertEqual(clip.duration, 124.0 / 24)
+    XCTAssertEqual(clip.renderedSignature, store.signature(for: clip))
+  }
+
+  @MainActor func testDurationRefreshCannotMarkAReplacedTakeCurrent() async throws {
+    let fake = SuspendedBridge("render")
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.addClip(.h3)
+    store.editClip { $0.duration = 5.17; $0.prompt = "A robot lifts a lantern." }
+    await store.prepareSelected()
+    let rendered = expectation(description: "render suspended")
+    fake.entered = { rendered.fulfill() }
+    let task = Task { await store.renderPrepared() }
+    await fulfillment(of: [rendered], timeout: 2)
+    let refreshed = expectation(description: "duration refresh suspended")
+    fake.command = "describe-generation"
+    fake.entered = { refreshed.fulfill() }
+    fake.continuation?.resume(returning: ["video": "/tmp/completed.mov",
+      "usable_source_in": 0.0, "usable_duration": 124.0 / 24])
+    await fulfillment(of: [refreshed], timeout: 2)
+    store.editClip { $0.sourcePath = "/tmp/older-take.mov"; $0.renderedSignature = "" }
+    fake.continuation?.resume(returning: [:])
+    await task.value
+    XCTAssertEqual(store.selectedClip?.sourcePath, "/tmp/older-take.mov")
+    XCTAssertEqual(store.selectedClip?.renderedSignature, "")
   }
 
   @MainActor func testLateNativeRenderUsesSubmittedRuntimeToInspectOutput() async throws {
@@ -303,4 +399,72 @@ final class StudioReliabilityTests: XCTestCase {
     XCTAssertEqual(store.selectedClip?.versions.last?.recipePath, "/tmp/prepared/recipe.json")
   }
 
+}
+
+extension StudioReliabilityTests {
+  @MainActor func testPredecessorTrimInvalidatesSuspendedContinuityPreparation() async throws {
+    let fake = SuspendedBridge("prepare")
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.addClip(); store.editClip { $0.sourcePath = "/tmp/source.mov" }
+    store.addClip(); store.editClip { $0.continuity = ClipContinuity(mode: "frame") }
+    let oldKey = store.generationRequestKey(for: store.selectedClip!)
+    let entered = expectation(description: "prepare suspended")
+    fake.entered = { entered.fulfill() }
+    let task = Task { await store.prepareSelected() }
+    await fulfillment(of: [entered], timeout: 2)
+    store.change { $0.clips[0].sourceIn = 1 }
+    XCTAssertNotEqual(oldKey, store.generationRequestKey(for: store.selectedClip!))
+    fake.continuation?.resume(returning: ["recipePath": "/tmp/prepared/recipe.json", "prompt": "prompt", "report": [:]])
+    await task.value
+    XCTAssertNil(store.preparedRecipe)
+  }
+
+  @MainActor func testPredecessorTakeChangeRetainsLateContinuityRenderAsInactiveVersion() async throws {
+    let fake = SuspendedBridge("render")
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.addClip(); store.editClip { $0.sourcePath = "/tmp/source.mov" }
+    store.addClip(); store.editClip { $0.continuity = ClipContinuity(mode: "frame") }
+    store.preparedRecipe = "/tmp/job/prepared/recipe.json"
+    store.preparedFingerprint = store.signature(for: store.selectedClip!)
+    let entered = expectation(description: "render suspended")
+    fake.entered = { entered.fulfill() }
+    let task = Task { await store.renderPrepared() }
+    await fulfillment(of: [entered], timeout: 2)
+    store.change { $0.clips[0].sourcePath = "/tmp/new-accepted.mov" }
+    fake.continuation?.resume(returning: ["video": "/tmp/completed.mov", "usable_source_in": 2.0,
+      "usable_duration": 4.0, "continuation_artifact": ["manifest": "/tmp/context/manifest.json", "manifest_sha256": "a", "payload_sha256": "b"]])
+    await task.value
+    XCTAssertEqual(store.selectedClip?.sourcePath, "")
+    XCTAssertEqual(store.selectedClip?.duration, 5)
+    let version = try XCTUnwrap(store.selectedClip?.versions.last)
+    XCTAssertEqual(version.path, "/tmp/completed.mov")
+    XCTAssertEqual(version.usableSourceIn, 2)
+    XCTAssertEqual(version.usableDuration, 4)
+    XCTAssertEqual(version.continuationArtifact?.manifest, "/tmp/context/manifest.json")
+  }
+}
+
+extension StudioReliabilityTests {
+  @MainActor func testFrameContinuityDoesNotRequireReplacedStoredFirstAttachment() throws {
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false)
+    store.addClip(); store.editClip { $0.sourcePath = "/tmp/source.mov" }
+    store.addClip(); store.editClip {
+      $0.continuity = ClipContinuity(mode: "frame")
+      $0.attachments = [Attachment(assetID: UUID(), role: .first)]
+    }
+    XCTAssertFalse(store.issues(for: store.selectedClip!).contains("Relink a missing attachment"))
+    XCTAssertEqual(store.selectedClip?.attachments.count, 1)
+  }
+}
+
+extension StudioReliabilityTests {
+  @MainActor func testDrawThingsSignaturePreservesLegacyPartsWithoutContinuity() throws {
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false)
+    store.addClip(); store.editClip { $0.engine = .drawThings }
+    let clip = try XCTUnwrap(store.selectedClip)
+    let parts = [clip.generationFingerprint, "generationFPS:\(clip.settings(in: store.project).fps)"]
+    let expected = SHA256.hash(data: Data(parts.joined(separator: "\n").utf8))
+      .map { String(format: "%02x", $0) }.joined()
+    XCTAssertEqual(store.signature(for: clip), expected)
+  }
 }

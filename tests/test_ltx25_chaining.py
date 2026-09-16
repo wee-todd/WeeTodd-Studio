@@ -7,6 +7,7 @@ import pytest
 from ltx25_mlx.chaining import (
     DecodedChainAssembler,
     LatentGuideConditioning,
+    LTX25LatentContinuation,
     assemble_ltx25_latents,
     fit_audio_window,
     mlx_audio_to_numpy,
@@ -14,6 +15,40 @@ from ltx25_mlx.chaining import (
     plan_ltx25_chain,
     splice_audio_windows,
 )
+
+
+def test_sampled_history_excludes_terminal_video_latent_without_shifting_time():
+    low = mx.arange(4 * 2 * 3).reshape(1, 4 * 2, 3)
+    high = mx.arange(4 * 4 * 3).reshape(1, 4 * 4, 3)
+    audio = mx.ones((1, 26, 3))
+    history = LTX25LatentContinuation(low, high, audio, 4, 26)
+
+    assert mx.array_equal(history.video_guide_tokens(stage=1), low[:, :6])
+    assert mx.array_equal(history.video_guide_tokens(stage=2), high[:, :12])
+    # Keep the original tail and overlap span for checkpoint/assembly identity.
+    assert history.video_latent_frames == 4
+    assert history.stage1_video_tokens.shape == (1, 8, 3)
+    assert mx.array_equal(history.audio_tokens, audio)
+
+
+def test_encoded_external_history_keeps_its_complete_video_guide():
+    low, high = mx.ones((1, 8, 3)), mx.ones((1, 16, 3))
+    history = LTX25LatentContinuation(
+        low, high, mx.ones((1, 26, 3)), 4, 26,
+        video_tail_is_terminal=False,
+    )
+    assert mx.array_equal(history.video_guide_tokens(stage=1), low)
+    assert mx.array_equal(history.video_guide_tokens(stage=2), high)
+
+
+@pytest.mark.parametrize("frames,tokens", [(1, 2), (0, 2), (4, 7)])
+def test_invalid_sampled_history_geometry_cannot_form_a_video_guide(frames, tokens):
+    history = LTX25LatentContinuation(
+        mx.ones((1, tokens, 3)), mx.ones((1, tokens, 3)), mx.ones((1, 26, 3)),
+        frames, 26,
+    )
+    with pytest.raises(ValueError):
+        history.video_guide_tokens(stage=1)
 
 
 def test_three_window_15_second_plan_is_exact():
@@ -190,3 +225,12 @@ def test_audio_window_is_padded_to_video_clock_without_moving_leading_audio():
     assert np.array_equal(fitted[:, :6], waveform)
     assert np.array_equal(fitted[:, 6:], np.zeros((2, 2), dtype=np.float32))
     assert adjustment == "zero_padded_2"
+
+
+def test_latent_assembly_rejects_wrong_window_shapes_before_joining():
+    plan = plan_ltx25_chain(total_frames=361, window_count=3, overlap_frames=25, frame_rate=24)
+    videos = [mx.zeros((1, 2, 18, 2, 2)) for _ in range(3)]
+    audios = [mx.zeros((1, 8, 143, 16)) for _ in range(3)]
+    videos[0] = mx.zeros((1, 2, 17, 2, 2))
+    with pytest.raises(ValueError, match="window.*shape"):
+        assemble_ltx25_latents(videos, audios, plan)

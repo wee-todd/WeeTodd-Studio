@@ -7,6 +7,7 @@ struct DrawThingsClipInspector: View {
   var isH3: Bool { clip.drawThings?.modelFamily.lowercased() == "minimaxh3" }
   var hasCatalog: Bool { store.drawThingsCatalogs[clip.drawThings?.profileID ?? ""] != nil }
   @State private var groupName = ""
+  @State private var loraSearch = ""
   func selection<T>(_ key: WritableKeyPath<DrawThingsSelection, T>, fallback: T) -> Binding<T> {
     Binding(get: { store.selectedClip?.drawThings?[keyPath: key] ?? fallback }, set: { value in
       store.editClip {
@@ -141,53 +142,28 @@ struct DrawThingsClipInspector: View {
           .font(.caption2).foregroundStyle(.secondary)
       }
       Divider()
+      loraControls
+      DrawThingsCUStatus(clip: clip)
+    }.font(.caption).textFieldStyle(.roundedBorder)
+  }
+  var loraControls: some View {
+    let available = store.drawThingsLoRAs(
+      profileID: clip.drawThings?.profileID ?? "", modelID: clip.drawThings?.modelID ?? "")
+    let unavailable = clip.drawThings?.unavailableLoRAs(
+      availableIDs: hasCatalog ? Set(available.map(\.id)) : nil) ?? []
+    let saved = hasCatalog ? unavailable : clip.drawThings?.loras ?? []
+    return VStack(alignment: .leading, spacing: 8) {
       Text("Server LoRAs").font(.caption.bold())
-      let available = store.drawThingsLoRAs(
-        profileID: clip.drawThings?.profileID ?? "", modelID: clip.drawThings?.modelID ?? "")
-      ForEach(available, id: \.id) { lora in
-        HStack {
-          Toggle(lora.name, isOn: Binding(get: {
-            store.selectedClip?.drawThings?.loras.contains { $0.modelID == lora.id } == true
-          }, set: { enabled in
-            store.editClip { selected in
-              guard var value = selected.drawThings else { return }
-              value.loras.removeAll { $0.modelID == lora.id }
-              if enabled { value.loras.append(DrawThingsLoRA(modelID: lora.id)) }
-              selected.drawThings = value
-            }
-          }))
-          if let index = clip.drawThings?.loras.firstIndex(where: { $0.modelID == lora.id }) {
-            TextField("Strength", value: Binding(get: {
-              store.selectedClip?.drawThings?.loras[safe: index]?.weight ?? 1
-            }, set: { weight in store.editClip { $0.drawThings?.loras[safe: index]?.weight = weight } }),
-              format: .number).frame(width: 58)
-          }
-        }
+      TextField("Search LoRAs and groups", text: $loraSearch)
+      ForEach(available.filter { matchesSearch($0.name) || matchesSearch($0.id) }, id: \.id) { lora in
+        loraRow(modelID: lora.id, name: lora.name)
       }
-      let unavailable = clip.drawThings?.unavailableLoRAs(
-        availableIDs: hasCatalog ? Set(available.map(\.id)) : nil) ?? []
-      let saved = hasCatalog ? unavailable : clip.drawThings?.loras ?? []
       if !saved.isEmpty {
         VStack(alignment: .leading, spacing: 6) {
           Text(hasCatalog ? "Unavailable for this connection or model" : "Saved LoRAs · connection not verified")
             .font(.caption.bold()).foregroundStyle(hasCatalog ? .orange : .secondary)
-          ForEach(saved) { lora in
-            HStack {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(lora.modelID).lineLimit(1)
-              }
-              Spacer()
-              TextField("Strength", value: Binding(get: {
-                store.selectedClip?.drawThings?.loras.first { $0.modelID == lora.modelID }?.weight ?? lora.weight
-              }, set: { weight in
-                store.editClip { selected in
-                  if let index = selected.drawThings?.loras.firstIndex(where: { $0.modelID == lora.modelID }) {
-                    selected.drawThings?.loras[index].weight = weight
-                  }
-                }
-              }), format: .number).frame(width: 58)
-              Button("Remove") { removeLoRA(lora.modelID) }
-            }
+          ForEach(saved.filter { matchesSearch($0.modelID) }) { lora in
+            loraRow(modelID: lora.modelID, name: lora.modelID)
           }
           if hasCatalog { Button("Remove all unavailable") {
             let ids = Set(unavailable.map(\.modelID))
@@ -198,18 +174,56 @@ struct DrawThingsClipInspector: View {
       if available.isEmpty {
         Text(hasCatalog
           ? "No compatible LoRAs were advertised for this model. Install them in Draw Things, enable Model Browsing for a local server, then Refresh."
-          : "Connect and Refresh to load compatible LoRAs. For a local connection, enable Draw Things’ gRPC API server and Model Browsing. Saved assignments remain editable; generation verifies compatibility.")
+          : "Connect and Refresh to load compatible LoRAs. Saved assignments remain editable; generation verifies compatibility.")
           .font(.caption2).foregroundStyle(.secondary)
       }
       HStack {
         TextField("Group name", text: $groupName)
-        Button("Save") { saveGroup() }.disabled(!hasCatalog || groupName.trimmingCharacters(in: .whitespaces).isEmpty || clip.drawThings?.loras.isEmpty != false)
+        Button("Save group") { saveGroup() }.disabled(!hasCatalog || groupName.trimmingCharacters(in: .whitespaces).isEmpty || clip.drawThings?.loras.isEmpty != false)
       }
       Menu("Apply LoRA group") {
-        ForEach(compatibleGroups) { group in Button(group.name) { apply(group) } }
+        ForEach(compatibleGroups.filter { matchesSearch($0.name) }) { group in
+          Menu(group.name) {
+            ForEach(LoRAGroupApplicationMode.allCases) { mode in
+              Button(mode.label) { apply(group, mode: mode) }
+            }
+          }
+        }
       }.disabled(compatibleGroups.isEmpty)
-      DrawThingsCUStatus(clip: clip)
-    }.font(.caption).textFieldStyle(.roundedBorder)
+    }
+  }
+  func matchesSearch(_ value: String) -> Bool {
+    loraSearch.isEmpty || value.localizedCaseInsensitiveContains(loraSearch)
+  }
+  func loraRow(modelID: String, name: String) -> some View {
+    let assignment = clip.drawThings?.loras.first { $0.modelID == modelID }
+    return VStack(alignment: .leading, spacing: 5) {
+      HStack {
+        Toggle(name, isOn: Binding(get: {
+          store.selectedClip?.drawThings?.loras.first { $0.modelID == modelID }?.isEnabled ?? false
+        }, set: { enabled in
+          store.editClip { selected in
+            if let index = selected.drawThings?.loras.firstIndex(where: { $0.modelID == modelID }) {
+              selected.drawThings?.loras[index].enabled = enabled
+            } else if enabled { selected.drawThings?.loras.append(DrawThingsLoRA(modelID: modelID)) }
+          }
+        }))
+        if assignment != nil {
+          Button { removeLoRA(modelID) } label: { Image(systemName: "xmark") }.help("Remove LoRA")
+        }
+      }
+      if assignment != nil {
+        LoRAStrength(value: Binding(get: {
+          store.selectedClip?.drawThings?.loras.first { $0.modelID == modelID }?.weight ?? 1
+        }, set: { weight in
+          store.editClip { selected in
+            if let index = selected.drawThings?.loras.firstIndex(where: { $0.modelID == modelID }) {
+              selected.drawThings?.loras[index].weight = weight
+            }
+          }
+        }))
+      }
+    }
   }
   var compatibleGroups: [DrawThingsLoRAGroup] {
     guard let selection = clip.drawThings else { return [] }
@@ -230,22 +244,15 @@ struct DrawThingsClipInspector: View {
       family: family, compatibleModelIDs: Array(compatible).sorted(), members: selection.loras))
     store.saveDrawThingsLoRAGroups(); groupName = ""
   }
-  func apply(_ group: DrawThingsLoRAGroup) {
-    store.editClip { selected in
-      guard var selection = selected.drawThings,
-        (try? group.validate(profileID: selection.profileID, family: selection.modelFamily, modelID: selection.modelID)) != nil else { return }
-      selection.apply(group); selected.drawThings = selection
-    }
+  func apply(_ group: DrawThingsLoRAGroup, mode: LoRAGroupApplicationMode) {
+    guard var selection = store.selectedClip?.drawThings else { return }
+    do {
+      try selection.apply(group, mode: mode)
+      store.editClip { $0.drawThings = selection }
+    } catch { store.error = error.localizedDescription }
   }
   func removeLoRA(_ modelID: String) {
     store.editClip { $0.drawThings?.loras.removeAll { $0.modelID == modelID } }
-  }
-}
-
-private extension Array {
-  subscript(safe index: Index) -> Element? {
-    get { indices.contains(index) ? self[index] : nil }
-    set { if indices.contains(index), let value = newValue { self[index] = value } }
   }
 }
 

@@ -174,9 +174,8 @@ struct TimelineView: View {
           Image(systemName: "square.and.arrow.down")
         }.help("Import movie").accessibilityLabel("Import movie")
         Menu {
-          ForEach(Engine.allCases.filter { $0 != .movie }) { e in
-            Button(e.label) { store.addClip(e) }
-          }
+          Button(GenerationProvider.local.label) { store.addClip() }
+          Button(GenerationProvider.drawThings.label) { store.addClip(.drawThings) }
         } label: {
           Image(systemName: "plus")
         }.help("Add generated clip").accessibilityLabel("Add generated clip")

@@ -55,6 +55,27 @@ def test_euler_eta_zero_matches_deterministic_rectified_flow_step():
     assert mx.allclose(result, expected, rtol=0.0, atol=1e-6)
 
 
+def test_noise_free_euler_does_not_apply_fractional_conditioning_twice():
+    # The prediction is conditioned once. A second blend after an ODE step
+    # changes the effective strength and no longer follows that Euler path.
+    state = _State(
+        latent=mx.array([[[2.0]]]),
+        clean_latent=mx.array([[[1.0]]]),
+        denoise_mask=mx.array([[[0.5]]]),
+    )
+
+    def model(**kwargs):
+        return mx.zeros_like(kwargs["video_latent"]), mx.zeros_like(kwargs["audio_latent"])
+
+    result = euler_ancestral_denoise_loop(
+        model, state, state, mx.zeros((1, 1, 1)), mx.zeros((1, 1, 1)),
+        sigmas=(1.0, 0.5), noise_seed=42, eta=0.0,
+    )
+    # x0 = 0 * .5 + clean * .5 = .5; Euler = 2 * .5 + .5 * .5 = 1.25.
+    assert mx.allclose(result.video_latent, mx.array([[[1.25]]]))
+    assert mx.allclose(result.audio_latent, mx.array([[[1.25]]]))
+
+
 def test_euler_ancestral_loop_is_seeded_and_preserves_conditioned_rows():
     mask = mx.array([[[1.0], [0.0]]], dtype=mx.float32)
     clean = mx.array([[[0.0], [0.75]]], dtype=mx.float32)

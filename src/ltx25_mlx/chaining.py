@@ -14,64 +14,11 @@ import numpy as np
 
 from wee_todd_mlx.media_serialization import write_all_contiguous
 
+from .chain_plan import LTX25ChainPlan, LTX25ScenePlan, plan_ltx25_chain  # noqa: F401
+
 LTX25_CHAIN_CONTINUATION_STRENGTH = 0.5
 LTX25_CHAIN_VIDEO_BLEND_FRAMES = 4
 LTX25_CHAIN_AUDIO_CROSSFADE_SECONDS = 0.05
-
-
-@dataclass(frozen=True)
-class LTX25ChainPlan:
-    """An exact, temporally aligned LTX 2.5 chained timeline."""
-
-    total_frames: int
-    window_count: int
-    window_frames: int
-    overlap_frames: int
-    video_overlap_latent_frames: int
-    window_audio_tokens: int
-    join_audio_tokens: tuple[int, ...]
-    frame_rate: float
-
-    @property
-    def expected_audio_tokens(self) -> int:
-        return round(self.total_frames / self.frame_rate * 25.0)
-
-    @property
-    def window_start_frames(self) -> tuple[int, ...]:
-        stride = self.window_frames - self.overlap_frames
-        return tuple(index * stride for index in range(self.window_count))
-
-    @property
-    def assembled_video_seam_frames(self) -> tuple[int, ...]:
-        """Frame indices where the assembled output first switches windows."""
-        stride = self.window_frames - self.overlap_frames
-        return tuple(self.window_frames + index * stride for index in range(self.window_count - 1))
-
-    @property
-    def assembled_audio_seam_tokens(self) -> tuple[int, ...]:
-        """Audio-token indices where the assembled output first switches windows."""
-        seams = []
-        total = self.window_audio_tokens
-        for trim in self.join_audio_tokens:
-            seams.append(total)
-            total += self.window_audio_tokens - trim
-        return tuple(seams)
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "total_frames": self.total_frames,
-            "window_count": self.window_count,
-            "window_frames": self.window_frames,
-            "overlap_frames": self.overlap_frames,
-            "video_overlap_latent_frames": self.video_overlap_latent_frames,
-            "window_audio_tokens": self.window_audio_tokens,
-            "join_audio_tokens": list(self.join_audio_tokens),
-            "window_start_frames": list(self.window_start_frames),
-            "assembled_video_seam_frames": list(self.assembled_video_seam_frames),
-            "assembled_audio_seam_tokens": list(self.assembled_audio_seam_tokens),
-            "frame_rate": self.frame_rate,
-            "delivered_duration_seconds": (self.total_frames - 1) / self.frame_rate,
-        }
 
 
 @dataclass(frozen=True)
@@ -83,6 +30,33 @@ class LTX25LatentContinuation:
     audio_tokens: mx.array
     video_latent_frames: int
     audio_token_count: int
+    video_tail_is_terminal: bool = True
+
+    def video_guide_tokens(self, *, stage: int) -> mx.array:
+        """Carry interior history; regenerate a sampled window's terminal slot.
+
+        The final sampled video latent was generated at a window boundary.
+        Reusing it as an interior guide can imprint a brief exposure dip when
+        the next window leaves that guide. Keep its slot in the overlap and
+        checkpoint, but allow the new window to regenerate it with future
+        context. VAE-encoded external footage does not use this sampled-tail
+        policy and retains its complete guide.
+        """
+        if stage not in (1, 2):
+            raise ValueError("LTX 2.5 video history stage must be one or two.")
+        tokens = self.stage1_video_tokens if stage == 1 else self.stage2_video_tokens
+        frames = self.video_latent_frames
+        if (
+            type(frames) is not int or frames < 1 or tokens.ndim != 3
+            or tokens.shape[1] < frames or tokens.shape[1] % frames
+            or type(self.video_tail_is_terminal) is not bool
+        ):
+            raise ValueError("LTX 2.5 video history has an invalid latent frame layout.")
+        if not self.video_tail_is_terminal:
+            return tokens
+        if frames < 2:
+            raise ValueError("Sampled LTX 2.5 history needs an interior video latent.")
+        return tokens[:, : -(tokens.shape[1] // frames), :]
 
 
 class LatentGuideConditioning:
@@ -131,63 +105,10 @@ class LatentGuideConditioning:
         )
 
 
-def plan_ltx25_chain(
-    *,
-    total_frames: int,
-    window_count: int,
-    overlap_frames: int,
-    frame_rate: float,
-) -> LTX25ChainPlan:
-    """Resolve an exact equal-window chain on the LTX temporal grid."""
-    if window_count < 2 or window_count > 4:
-        raise ValueError("LTX 2.5 chained timelines support two to four windows.")
-    if frame_rate <= 0:
-        raise ValueError("LTX 2.5 chained timeline frame rate must be positive.")
-    if total_frames < 1 or (total_frames - 1) % 8:
-        raise ValueError("LTX 2.5 total frames must equal 8n+1.")
-    if overlap_frames < 1 or (overlap_frames - 1) % 8:
-        raise ValueError("LTX 2.5 overlap frames must equal 8n+1.")
-    numerator = total_frames + (window_count - 1) * overlap_frames
-    if numerator % window_count:
-        raise ValueError(
-            "The selected total, window count, and overlap do not produce equal integer windows."
-        )
-    window_frames = numerator // window_count
-    if window_frames <= overlap_frames:
-        raise ValueError("LTX 2.5 chained windows must be longer than their overlap.")
-    if (window_frames - 1) % 8:
-        raise ValueError("Resolved LTX 2.5 window frames must equal 8n+1.")
-
-    window_audio_tokens = round(window_frames / frame_rate * 25.0)
-    stride = window_frames - overlap_frames
-    previous_total_audio = window_audio_tokens
-    join_audio_tokens: list[int] = []
-    for index in range(1, window_count):
-        cumulative_frames = window_frames + index * stride
-        cumulative_audio = round(cumulative_frames / frame_rate * 25.0)
-        new_audio = cumulative_audio - previous_total_audio
-        trim = window_audio_tokens - new_audio
-        if trim <= 0 or trim >= window_audio_tokens:
-            raise ValueError("Resolved LTX 2.5 audio overlap is invalid.")
-        join_audio_tokens.append(trim)
-        previous_total_audio = cumulative_audio
-
-    return LTX25ChainPlan(
-        total_frames=total_frames,
-        window_count=window_count,
-        window_frames=window_frames,
-        overlap_frames=overlap_frames,
-        video_overlap_latent_frames=(overlap_frames - 1) // 8 + 1,
-        window_audio_tokens=window_audio_tokens,
-        join_audio_tokens=tuple(join_audio_tokens),
-        frame_rate=float(frame_rate),
-    )
-
-
 def assemble_ltx25_latents(
     video_windows: list[mx.array],
     audio_windows: list[mx.array],
-    plan: LTX25ChainPlan,
+    plan: LTX25ChainPlan | LTX25ScenePlan,
 ) -> tuple[mx.array, mx.array]:
     """Assemble synchronized windows using LTX's causal latent transition.
 
@@ -197,6 +118,21 @@ def assemble_ltx25_latents(
     """
     if len(video_windows) != plan.window_count or len(audio_windows) != plan.window_count:
         raise ValueError("LTX 2.5 chain window count does not match its plan.")
+    for index, (video_window, audio_window) in enumerate(
+        zip(video_windows, audio_windows, strict=True)
+    ):
+        expected_frames = (plan.window_frame_counts[index] - 1) // 8 + 1
+        if (
+            video_window.ndim != 5
+            or video_window.shape[2] != expected_frames
+            or video_window.shape[:2] + video_window.shape[3:]
+            != video_windows[0].shape[:2] + video_windows[0].shape[3:]
+            or audio_window.ndim != 4
+            or audio_window.shape[2] != plan.window_audio_token_counts[index]
+            or audio_window.shape[:2] + audio_window.shape[3:]
+            != audio_windows[0].shape[:2] + audio_windows[0].shape[3:]
+        ):
+            raise ValueError(f"LTX 2.5 chain window {index + 1} shape does not match its plan.")
     video = video_windows[0]
     audio_parts = [audio_windows[0]]
     blend_count = plan.video_overlap_latent_frames - 1
@@ -240,7 +176,6 @@ def assemble_ltx25_latents(
             f"{audio.shape[2]} != {plan.expected_audio_tokens}."
         )
     return video, audio
-
 
 def _cosine_ramp(length: int) -> np.ndarray:
     if length < 2:
@@ -530,6 +465,101 @@ def fit_audio_window(waveform: np.ndarray, target_samples: int) -> tuple[np.ndar
     return waveform, "none"
 
 
+def decode_ltx25_chain(
+    video_decoder,
+    audio_decoder,
+    video_latent,
+    audio_latent,
+    output_path,
+    *,
+    frame_rate,
+    low_memory=True,
+    check_interrupted=None,
+):
+    """Decode the assembled video once, release it, then decode audio once.
+
+    Silent video streaming keeps decoded frames bounded. Only the final native
+    waveform is held for fitting to the video clock and final stream-copy mux.
+    """
+    import tempfile
+
+    from ltx_core_mlx.utils.ffmpeg import find_ffmpeg
+
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    frames = (int(video_latent.shape[2]) - 1) * 8 + 1
+    samples = round(frames / frame_rate * 48000)
+    video_freed = audio_freed = False
+    try:
+        with tempfile.TemporaryDirectory(prefix=".ltx25-decode-", dir=target.parent) as directory:
+            silent = Path(directory) / "video.mp4"
+            audio_file = Path(directory) / "audio.wav"
+            if check_interrupted is not None:
+                check_interrupted()
+            scene_decode = getattr(video_decoder, "decode_scene_and_stream", None)
+            if low_memory and scene_decode is not None:
+                scene_decode(video_latent, str(silent), frame_rate=frame_rate,
+                             check_interrupted=check_interrupted)
+            else:
+                video_decoder.decode_and_stream(video_latent, str(silent), frame_rate=frame_rate)
+            if low_memory:
+                video_decoder.free()
+                video_freed = True
+            if check_interrupted is not None:
+                check_interrupted()
+            waveform = audio_decoder(audio_latent)
+            array = mlx_audio_to_numpy(waveform)
+            del waveform
+            if low_memory:
+                audio_decoder.free()
+                audio_freed = True
+            if array.ndim == 3 and array.shape[0] == 1:
+                array = array[0]
+            array, adjustment = fit_audio_window(array, samples)
+            _save_waveform(audio_file, array, 48000)
+            del array
+            if check_interrupted is not None:
+                check_interrupted()
+            completed = subprocess.run(
+                [
+                    find_ffmpeg(),
+                    "-y",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    str(silent),
+                    "-i",
+                    str(audio_file),
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "1:a:0",
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    str(target),
+                ],
+                capture_output=True,
+            )
+            if completed.returncode:
+                raise RuntimeError(f"LTX 2.5 scene mux failed: {completed.stderr.decode()[:500]}")
+            return {
+                "output_frames": frames,
+                "output_audio_samples": samples,
+                "audio_adjustment": adjustment,
+                "weighted_stage_order": "video_decode_then_audio_decode",
+            }
+    finally:
+        if low_memory:
+            if not video_freed:
+                video_decoder.free()
+            if not audio_freed:
+                audio_decoder.free()
+
+
 def publish_decoded_ltx25_chain(
     *,
     output_path: str,
@@ -537,7 +567,7 @@ def publish_decoded_ltx25_chain(
     audio_decoder_block,
     video_windows: list[mx.array],
     audio_windows: list[mx.array],
-    plan: LTX25ChainPlan,
+    plan: LTX25ChainPlan | LTX25ScenePlan,
     width: int,
     height: int,
     check_interrupted=None,
@@ -666,6 +696,7 @@ __all__ = [
     "LatentGuideConditioning",
     "DecodedChainAssembler",
     "assemble_ltx25_latents",
+    "decode_ltx25_chain",
     "fit_audio_window",
     "mlx_audio_to_numpy",
     "motion_matched_overlap",

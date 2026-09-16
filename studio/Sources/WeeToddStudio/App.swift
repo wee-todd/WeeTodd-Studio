@@ -146,6 +146,7 @@ struct StudioView: View {
       }.padding(24).frame(width: 480)
     }
     .sheet(isPresented: $store.showDrawThings) { DrawThingsSettings().environmentObject(store) }
+    .sheet(isPresented: $store.showContinuousSceneReview) { ContinuousSceneReviewView().environmentObject(store) }
     .sheet(isPresented: $store.showDrawThingsConfigImport) { DrawThingsConfigImportView().environmentObject(store) }
     .sheet(isPresented: $store.showWorkflows) { WorkflowView().environmentObject(store) }
     .sheet(isPresented: $store.showProductionLibrary) { ProductionLibraryView().environmentObject(store) }

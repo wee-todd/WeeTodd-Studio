@@ -35,6 +35,8 @@ enum ClipState: String {
 @MainActor extension StudioStore {
   func signature(for clip: Clip) -> String {
     var parts = [clip.generationFingerprint]
+    let continuityDependency = project.continuityDependencyFingerprint(for: clip)
+    if !continuityDependency.isEmpty { parts.append(continuityDependency) }
     if clip.engine == .drawThings {
       if let connection = drawThingsConnections.first(where: { $0.id == clip.drawThings?.profileID }) {
         parts.append("\(connection.route)|\(connection.host)|\(connection.port)|\(connection.useTLS)")
@@ -80,7 +82,7 @@ enum ClipState: String {
       return clip.sourcePath.isEmpty || !FileManager.default.fileExists(atPath: clip.sourcePath)
         ? ["Relink the source movie"] : []
     }
-    var result: [String] = []
+    var result = project.continuityIssues(for: clip)
     if let message = validationErrors[clip.id] { result.append(message) }
     if clip.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       result.append("Add a prompt")
@@ -118,6 +120,8 @@ enum ClipState: String {
       result.append("Validate the selected task and model settings")
     }
     for a in clip.attachments {
+      if clip.continuityMode == "frame" && a.role == .first { continue }
+      if a.role == .lora && !a.isEnabled { continue }
       guard let asset = allAssets.first(where: { $0.id == a.assetID }) else {
         result.append("Relink a missing attachment")
         continue

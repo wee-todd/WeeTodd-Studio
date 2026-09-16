@@ -104,10 +104,22 @@ struct PromptEditor: View {
             Text(
               "\(clip.generationWidth) × \(clip.generationHeight) generation · movie settings applied at finishing"
             ).font(.caption).foregroundStyle(.secondary)
+            if !store.selectedContinuousScene.isEmpty {
+              let members = store.selectedContinuousScene
+              Label("Generation covers all \(members.count) shots · \(members.reduce(0) { $0 + $1.duration }, specifier: "%.2f") seconds", systemImage: "film.stack")
+                .font(.caption).foregroundStyle(.secondary)
+            }
             ScrollView {
               VStack(alignment: .leading, spacing: 10) {
-                ForEach(clip.attachments) { a in AttachmentRow(attachment: a) }
-                if clip.attachments.isEmpty {
+                if clip.reviewUsesContinuityFrame {
+                  Label("First frame: the accepted source clip’s visible ending. Your stored first frame is preserved in the movie inspector.", systemImage: "arrow.right.to.line")
+                    .font(.caption).foregroundStyle(.secondary)
+                } else if clip.engine != .drawThings && clip.continuityMode == "motion" {
+                  Label("Motion and audio continue from the accepted source clip.", systemImage: "film.stack")
+                    .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(clip.reviewAttachments) { a in AttachmentRow(attachment: a) }
+                if clip.reviewMediaCount == 0 && clip.continuityMode != "motion" {
                   Text(
                     "No media conditioning. Add assets in the main window, then choose their role."
                   ).font(.caption).foregroundStyle(.secondary)
@@ -165,11 +177,16 @@ struct PromptActions: View {
       }
       Spacer()
       Button("View log") { store.showLog = true }
-      Button("Prepare clip") { Task { await store.prepareSelected() } }.disabled(store.operationBusy)
+      if store.pendingContinuousScene != nil {
+        Button("Review scene") { store.showContinuousSceneReview = true }
+      }
+      Button(store.selectedContinuousScene.isEmpty ? "Prepare clip" : "Prepare scene") {
+        Task { await store.prepareSelected() }
+      }.disabled(store.operationBusy)
       Button {
         Task { await store.generateSelected() }
       } label: {
-        Label("Generate clip", systemImage: "play.fill")
+        Label(store.selectedContinuousScene.isEmpty ? "Generate clip" : "Generate scene", systemImage: "play.fill")
       }.buttonStyle(.borderedProminent).disabled(store.operationBusy || store.selectedClip?.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false)
     }
   }
@@ -319,24 +336,69 @@ struct RenderSettingsSummary: View {
   private var details: [String: Any] {
     (try? JSONSerialization.jsonObject(with: Data(report.utf8))) as? [String: Any] ?? [:]
   }
+  var sceneReport: ContinuousSceneRenderReport? {
+    details["scene"].flatMap { try? ContinuousSceneRenderReport.decode($0) }
+  }
+  var requestedDuration: Double {
+    guard sceneReport != nil,
+      let plan = details["scenePlan"] as? [String: Any],
+      let durations = plan["requested_durations"] as? [Double] else {
+      return sceneReport?.duration ?? clip.duration
+    }
+    return durations.reduce(0, +)
+  }
   var body: some View {
     let resolved = details
     let generation = resolved["generation"] as? [String: Any] ?? [:]
     let acceleration = generation["acceleration"] as? [String: Any] ?? [:]
     VStack(alignment: .leading, spacing: 7) {
       Text("Render settings").font(.headline)
-      LabeledContent("Engine", value: clip.engine.label)
-      LabeledContent("Task", value: clip.displayTask)
-      LabeledContent("Model recipe", value: resolved["profile"] as? String ?? "See validation details")
+      LabeledContent("Generation", value: clip.generationProvider.label)
+      LabeledContent("Model", value: clip.engine.label)
+      LabeledContent("Task", value: (resolved["task"] as? String)
+        .map(GenerationSelection.taskLabel) ?? clip.displayTask)
+      LabeledContent("Components", value: resolved["profile"] as? String ?? "See validation details")
       LabeledContent("Requested size", value: "\(clip.generationWidth) × \(clip.generationHeight)")
-      LabeledContent("Requested duration", value: String(format: "%.2f s", clip.duration))
+      LabeledContent("Requested duration", value: String(format: "%.2f s", requestedDuration))
+      if let scene = sceneReport {
+        LabeledContent("Resolved scene", value: String(format: "%d shots · %.2f s", scene.members.count, scene.duration))
+      }
+      if let guidance = resolved["sceneImageGuidance"] as? [String: Any] {
+        let balanced = guidance["policy"] as? String == "balanced"
+        let inherited = guidance["inherited_anchors"] as? [[String: Any]] ?? []
+        LabeledContent("Boundary image guidance", value: balanced ? "Automatic" : "Strict")
+        if !inherited.isEmpty {
+          Text("Boundary images guide one window at their requested strength. Later windows inherit them through motion history.")
+            .font(.caption).foregroundStyle(.secondary)
+          DisclosureGroup("Boundary image routing") {
+            ForEach(Array(inherited.enumerated()), id: \.offset) { _, item in
+              if let frame = item["frame_index"] as? Int,
+                let source = item["source_window"] as? Int,
+                let window = item["window"] as? Int,
+                let strength = item["strength"] as? Double {
+                Text(String(format: "Frame %d · strength %.2f in window %d → inherited by window %d", frame, strength, source, window)).font(.caption)
+              }
+            }
+          }
+        }
+      }
+      ForEach(resolved["sceneAnchorWarnings"] as? [String] ?? [], id: \.self) { warning in
+        Label(warning, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+      }
       if let fps = resolved["nativeFPS"] as? Double {
         LabeledContent("Generation frame rate", value: String(format: "%g fps", fps))
       }
-      LabeledContent("References", value: String(clip.attachments.count))
-      LabeledContent("Seed", value: String(clip.seed))
-      LabeledContent("Memory policy", value: (acceleration["memoryPolicy"] as? String)
-        .map(AccelerationSettings.memoryPolicyLabel) ?? "See model recipe")
+      let conditioning = resolved["conditioning"] as? [String: Any]
+      let contract = conditioning?["contract"] as? [String: Any]
+      let inputs = contract?["inputs"] as? [[String: Any]]
+      LabeledContent("Media inputs", value: String(inputs?.count ?? clip.reviewMediaCount))
+      if clip.reviewLoRACount > 0 {
+        LabeledContent("Active LoRAs", value: String(clip.reviewLoRACount))
+      }
+      LabeledContent(sceneReport == nil ? "Seed" : "Selected shot seed", value: String(clip.seed))
+      if let policy = acceleration["memoryPolicy"] as? String {
+        LabeledContent("Memory policy", value: AccelerationSettings.memoryPolicyLabel(policy))
+      }
     }.font(.caption).textSelection(.enabled)
   }
 }

@@ -7,10 +7,11 @@ import StudioCore
   func previewMovie() async {
     do {
       let body = try payload()
-      let snapshot = try JSONEncoder().encode(project)
+      let snapshot = project
+      let session = documentSessionID
       let target = Self.supportDirectory.appendingPathComponent("Previews/\(UUID().uuidString).mp4")
       _ = try await bridge.invoke("preview", runtime: runtime, payload: body, output: target)
-      guard try JSONEncoder().encode(project) == snapshot else {
+      guard documentSessionID == session, project == snapshot else {
         throw StudioError.invalid(
           "The edit changed while preparing its preview. Build the preview again.")
       }

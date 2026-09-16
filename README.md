@@ -10,6 +10,7 @@ The standalone app runs without ComfyUI.
 
 [Get started](#get-started) · [Studio guide](studio/README.md) ·
 [Make a movie with Director](#make-a-movie-with-director) ·
+[Connect shots](#connect-shots-with-continuity) ·
 [Draw Things setup](studio/README.md#draw-things--experimental) ·
 [Model reuse](#reuse-models-you-already-have) · [ComfyUI nodes](#comfyui-nodes) ·
 [Implementation status](STATUS.md)
@@ -50,7 +51,7 @@ Studio is the interface in each case. The engine choice determines where inferen
 | Route | Best starting point | What to know |
 | --- | --- | --- |
 | **Draw Things inference** | Fast image/video generation with models and tasks supported by your connection. | Studio sends jobs through its Draw Things adapter to a self-hosted gRPC server or supported Cloud API route. Model availability and controls come from that endpoint and the installed helper. |
-| **Native MLX inference** | LTX 2.5, advanced conditioning and other native features beyond the Draw Things integration. | H3, LTX 2.3 and LTX 2.5 have separate adapters. Choose a compatible model recipe and task; components load in stages and can unload between stages. |
+| **Native MLX inference** | LTX 2.5, advanced conditioning and other native features beyond the Draw Things integration. | Choose **WeeTodd (local)**, then H3, LTX 2.3 or LTX 2.5 and its task. Compatible components are selected automatically and load in stages. Custom recipes remain available under Advanced generation. |
 | **Native inference with compatible Draw Things weights** | Use an existing supported model installation without another large checkpoint copy. | Selected H3 components can be read directly from Draw Things files. This runs WeeTodd's native sampler, not Draw Things inference, and has its own task and performance limits. |
 
 ComfyUI and headless jobs use these same shared adapters where supported. Selecting a different
@@ -76,6 +77,11 @@ or download models. In **Studio Settings**, use **Set Up Managed Renderer** or c
 compatible runtime. FFmpeg/FFprobe and optional finishing tools still require configuration.
 See the [build and runtime guide](studio/README.md#build-and-open).
 
+In the clip inspector, choose **WeeTodd (local)** or **Draw Things**, then select a model.
+Local H3, LTX 2.3 and LTX 2.5 expose their available tasks, sampling controls and LoRA groups
+directly. Component recipes are selected automatically; optional recipe and execution overrides
+remain under **Advanced generation**. Existing clips retain their saved settings.
+
 ### Use Draw Things
 
 For a local development build with the Draw Things connection helper:
@@ -100,11 +106,47 @@ before distributing a bundled app. Local model reuse does not require a Draw Thi
 ### Use native features
 
 Open **Studio Settings → Model setup**, choose a model/task preset, and use **Use Existing Models**
-or the model download controls. **Create Recipe** validates the component set; select that recipe
-on a compatible clip. Native H3, LTX 2.3 and LTX 2.5 offer different conditioning and sampling controls.
+or the model download controls. **Create Recipe** validates the component set. On a clip, choose
+**WeeTodd (local)** and its **Model**; compatible installed components are selected automatically.
+Native H3, LTX 2.3 and LTX 2.5 offer different conditioning and sampling controls.
 Use the [model setup guide](studio/README.md#guided-model-setup) and
 [clip generation controls](studio/README.md#clip-generation-controls) for the supported combinations.
 No ComfyUI installation is needed.
+
+Native clips expose **Model**, **Task**, sampling controls, render size and seed directly in the
+inspector, without a required template step. Execution presets and custom recipes remain under
+**Advanced generation**.
+LoRA stacks support enable/disable with preserved strengths, reusable groups, and explicit Add or
+Replace actions across native and Draw Things generation. Native H3 four-step Turbo adapters can
+be imported through **LoRAs & Groups…**; enabling one resolves its required schedule and disabling
+it restores standard Steps. See [native H3 Turbo](studio/README.md#native-h3-turbo) for supported
+tasks, auxiliary files and validation limits.
+
+## Connect shots with continuity
+
+In **Clip Continuity → Connection**, choose how a native shot relates to its source:
+
+| Choice | Use it for |
+| --- | --- |
+| **Independent** | Generate a standalone shot with its own prompt and attached inputs. |
+| **Match previous frame** | Start from an accepted take's visible ending while keeping last-frame guidance and compatible LoRAs. |
+| **Continue scene** | Carry motion and sound forward. H3 uses saved context from an accepted H3 take; LTX 2.3 extends an accepted source video; LTX 2.5 renders a connected group as one movie. |
+| **Extend previous take** | Use LTX 2.5's separate source-video extension route to generate the next shot from an accepted take. |
+
+**Continue scene** uses one name across models; the inspector explains the required source and
+what will be rendered. Continuation remains experimental. LTX 2.5 groups support two to six shots,
+up to 30 seconds, with compatible distilled settings and first/last or timed images. Reference/MSR,
+audio-driver and control inputs are not supported in this grouped route.
+
+For LTX 2.5 groups, **Boundary image guidance → Automatic** avoids applying the same image again
+in overlapping generation windows. The join-strobing correction runs during generation; regenerate
+an older movie to apply it. **Strict** remains available for repeated image guidance.
+
+Switching a grouped LTX 2.5 shot to another model separates that shot and preserves its images,
+takes and edit points. **Undo** restores the model and connections together. Saved incompatible
+native connections offer **Separate this shot**. A shared control name does not make internal
+continuation state interchangeable between models. See the [continuity guide](studio/README.md#clip-continuity-in-studio)
+for source requirements, supported inputs and measured limitations.
 
 ## Make a movie with Director
 
@@ -711,7 +753,30 @@ audio at the configured output size, a 4-15 second generation window, and the re
 Ref2VA continuation prompt structure. The whole source video/audio is supplied as a reference
 and its final frame is also placed at target frame zero as an explicit seam anchor. The old
 FL2VA/T2VA latent-overlap route is rejected for external extension because its first render was
-visually unusable; latent-overlap continuation remains an experimental internal node.
+visually unusable. Latent-overlap continuation remains experimental and is available through
+the internal node, native headless contract, and Studio's opt-in **Clip Continuity** controls.
+Studio also supports visible-frame matching and compatible LTX source-tail continuation.
+For a continuous local LTX 2.5 scene, connect following shots with **Continue scene** in
+Studio. This uses the native video/audio latent chain, renders the group as one movie, and
+decodes the assembled timeline once. It supports two to six shots up to 30 seconds, with
+compatible distilled settings and first/last or timed images. Review and accept the entire
+scene together; each editable shot then references its range in that movie. This experimental
+route is distinct from frame matching and decoded-media extension. Reference/MSR plus chaining
+remains unqualified. See [continuous scenes](studio/README.md#continuous-ltx-25-scenes).
+Native chaining carries interior video history and regenerates the previous window's terminal
+video latent with future context. Studio's **Automatic** boundary image guidance applies each image
+once at its requested strength, in the first window covering its timestamp. Following windows inherit
+that guidance through motion history instead of applying the same image again inside the overlap.
+Every image, timestamp and requested strength is retained. **Strict** repeats images in every covering
+window for explicit control; competing image and motion guidance can produce flashes. Preparation
+shows which windows directly use each boundary image and which inherit it.
+These changes act during generation and add no output crossfade. Regenerate an existing scene to
+apply them. Older prepared headless recipes retain Strict behavior unless their scene explicitly
+sets `boundary_image_policy` to `balanced`.
+The local Studio exercise completed a 30-second, six-shot H3 Turbo movie with first/last frames
+and synchronized motion context; export verified 720 frames at 24 fps with stereo audio. Some
+exposure variation remained, so motion continuity stays experimental and opt-in.
+See [Studio clip continuity](studio/README.md#clip-continuity-in-studio) for setup and limitations.
 LTX 2.5 extension similarly accepts a matching constant-rate source with embedded audio,
 an after-only 8n+1 context from 9 through 241 frames, and a multiple-of-eight addition. It
 encodes low- and high-resolution video histories plus synchronized audio through the native
@@ -1861,7 +1926,7 @@ This table is generated from the registered node contracts. Run
 | LTX 2.5 Ingredients Reference Sheet | Condition LTX 2.5 from one Ingredients reference sheet. The image is repeated internally across the full clip and encoded as IC-LoRA reference context. Quality, balanced, and speed policies control the encoded reference grid independently of the output canvas. | LTX 2.5 — Conditioning | Experimental |
 | LTX 2.5 MSR Reference Stack | Build an ordered one-to-five-image LTX 2.5 MSR stack. Subject and object references stay in connection order; one optional background is always assigned the final slot. Automatic priority gives the first two subjects full density and later references aligned supporting or background density. | LTX 2.5 — Conditioning | Supported |
 | LTX 2.5 Generate Video + Audio | Generate synchronized LTX 2.5 video and audio through the MLX adapter. Connect publication_audio to preserve an original soundtrack without conditioning sampling. | LTX 2.5 — Core | Experimental |
-| LTX 2.5 Generate Chained Timeline | Generate two to four overlapping LTX 2.5 windows with timeline-aligned latent guides, causal-aware latent transitions, and one synchronized audio/video decode. Supports distilled two-stage and full-resolution single-stage Sol configurations. Guided, CFG++, generated-keyframe, DFR, and automatic-duration modes are unsupported. | LTX 2.5 — Core | Experimental |
+| LTX 2.5 Generate Chained Timeline | Generate two to four overlapping LTX 2.5 windows with interior video history, regenerated terminal video context, and one synchronized audio/video decode. Supports distilled two-stage and full-resolution single-stage Sol configurations. Guided, CFG++, generated-keyframe, DFR, and automatic-duration modes are unsupported. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Video Upscale / Refine | Upscale decoded ComfyUI IMAGE+AUDIO from any movie through LTX 2.5 latent space, optionally adding generative video-only refinement while preserving the source audio. Refinement can invent identity details, logos, and text. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Unload MLX Runtime | Release process-local LTX 2.5 state. | LTX 2.5 — Core | Supported |
 | Canny Preprocessor (MLX) | Create temporally aligned Canny control frames with MLX. The defaults match ComfyUI's current normalized-threshold Canny contract. | MLX preprocessors — Edges | Experimental |

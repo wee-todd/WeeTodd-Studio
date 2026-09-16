@@ -57,6 +57,10 @@ def _task_audio_policy(engine, task):
 def frame_geometry(recipe):
     config = recipe["config"]
     if recipe["engine"] == "h3":
+        if "continuation" in recipe:
+            from .h3_continuation_artifact import continuation_request
+
+            return continuation_request(recipe)["published_frames"], 24.0
         # Match align_num_frames without importing an MLX engine.
         fps = 24.0
         frames = round(config.get("duration_seconds", 5.0) * fps)
@@ -114,11 +118,21 @@ def normalize_conditioning(recipe, *, check_files=True):
             "publication",
             "cache_directory",
             "block_residency",
+            "continuation",
+            "scene",
         },
         "recipe",
     )
+    if "scene" in recipe:
+        from .studio_scene import validate_scene_recipe
+
+        validate_scene_recipe(recipe)
     if "block_residency" in recipe and recipe.get("engine") != "h3":
         raise ValueError("block_residency is supported for native H3 only")
+    if "continuation" in recipe:
+        from .h3_continuation_artifact import continuation_request
+
+        continuation_request(recipe)
     if "conditioning" in recipe:
         if "reference_images" in recipe:
             raise ValueError("Use conditioning or legacy reference_images, not both")

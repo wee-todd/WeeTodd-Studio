@@ -45,6 +45,35 @@ struct ClipInspector: View {
       get: { store.selectedClip?[keyPath: key] ?? clip[keyPath: key] },
       set: { v in store.editClip { $0[keyPath: key] = v } })
   }
+  var geometryAndSeed: some View {
+    VStack(alignment: .leading, spacing: 10) {
+    HStack {
+      Text("Render size")
+      TextField("Width", value: binding(\.generationWidth), format: .number)
+      Text("×")
+      TextField("Height", value: binding(\.generationHeight), format: .number)
+    }.textFieldStyle(.roundedBorder)
+    HStack {
+      Text("Seed")
+      TextField(
+        "Seed",
+        value: Binding(
+          get: { store.selectedClip?.seed ?? clip.seed },
+          set: { value in
+            store.editClip(undoGroup: seedFocused ? seedUndoGroup : nil) { $0.seed = value }
+          }), format: .number
+      ).focused($seedFocused)
+        .onChange(of: seedFocused) { _, focused in
+          if focused { seedUndoGroup = UUID() }
+        }
+      Button {
+        store.editClip { $0.seed = Int.random(in: 0...Int(Int32.max)) }
+      } label: {
+        Image(systemName: "dice")
+      }
+    }.textFieldStyle(.roundedBorder)
+    }.font(.caption)
+  }
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       TextField("Clip name", text: binding(\.name)).font(.system(size: 16, weight: .semibold))
@@ -54,15 +83,11 @@ struct ClipInspector: View {
         Text(clip.displayTask).font(.system(size: 10)).foregroundStyle(.secondary)
       }
       if clip.engine != .movie {
-        field("ENGINE") {
-          Picker("Engine", selection: Binding(get: { clip.engine }, set: { engine in
-            store.editClip {
-              $0.engine = engine
-              $0.profileID = "auto"
-              $0.generationSelection = engine == .drawThings ? nil : GenerationSelection()
-            }
+        field("GENERATION") {
+          Picker("Generation", selection: Binding(get: { clip.generationProvider }, set: { provider in
+            store.editClip { $0.selectGenerationProvider(provider) }
           })) {
-            ForEach(Engine.allCases.filter { $0 != .movie }) {
+            ForEach(GenerationProvider.allCases) {
               Text($0.label).tag($0)
             }
           }.labelsHidden()
@@ -71,7 +96,9 @@ struct ClipInspector: View {
           DrawThingsClipInspector(clip: clip)
         } else {
           GenerationInspector(clip: clip)
+          ContinuityInspector(clip: clip)
         }
+        geometryAndSeed
         Button {
           store.showPrompt = true
         } label: {
@@ -132,8 +159,8 @@ struct ClipInspector: View {
           clip.engine == .drawThings
             ? "Select an image in Media & Assets, then Use in clip → First frame. H3 FL2VA also supports Last frame: it is sent as Draw Things’ first enabled mood-board image. Both images are center-cropped to the clip dimensions. LTX currently supports First frame only."
             : clip.engine == .ltx25
-              ? "For image to video: import an image in Media & Assets, select it, then choose Use in clip → First frame. Use the LTX 2.5 Image to video recipe. MSR references and Ingredients sheets have separate setup recipes and require their dedicated adapters."
-              : "Use an asset as a first frame, reference, audio driver or control. Compatible task adapters come from the selected recipe."
+              ? "Add a first or last frame from Media & Assets. Reference and control tasks require their compatible model adapters, which can be installed in model setup."
+              : "Use an asset as a first frame, reference, audio driver or control. The selected model exposes compatible tasks and settings."
         ).font(.system(size: 11)).foregroundStyle(.secondary)
       }
       ForEach(clip.attachments.filter { $0.role != .lora }) { a in AttachmentRow(attachment: a) }
@@ -153,6 +180,11 @@ struct ClipInspector: View {
         VStack(alignment: .leading, spacing: 10) {
           if clip.engine != .movie {
             if clip.engine != .drawThings {
+              Picker("Execution preset", selection: Binding(get: { clip.generationSelection?.preset ?? .custom }, set: { preset in
+                store.editClip { $0.selectGenerationPreset(preset) }
+              })) {
+                ForEach(GenerationPreset.allCases) { Text($0.label).tag($0) }
+              }
               Picker("Custom recipe", selection: Binding(get: { clip.profileID }, set: { value in
                 store.editClip {
                   $0.profileID = value
@@ -176,31 +208,6 @@ struct ClipInspector: View {
               Text("Experimental: retains extra weight pages between denoising steps. This is a cache budget, not a total RAM cap. Off is the default.")
                 .font(.caption2).foregroundStyle(.secondary)
             }
-            HStack {
-              Text("Render size")
-              TextField("Width", value: binding(\.generationWidth), format: .number)
-              Text("×")
-              TextField("Height", value: binding(\.generationHeight), format: .number)
-            }.textFieldStyle(.roundedBorder)
-            HStack {
-              Text("Seed")
-              TextField(
-                "Seed",
-                value: Binding(
-                  get: { store.selectedClip?.seed ?? clip.seed },
-                  set: { value in
-                    store.editClip(undoGroup: seedFocused ? seedUndoGroup : nil) { $0.seed = value }
-                  }), format: .number
-              ).focused($seedFocused)
-                .onChange(of: seedFocused) { _, focused in
-                  if focused { seedUndoGroup = UUID() }
-                }
-              Button {
-                store.editClip { $0.seed = Int.random(in: 0...Int(Int32.max)) }
-              } label: {
-                Image(systemName: "dice")
-              }
-            }.textFieldStyle(.roundedBorder)
             Text(
               "Generation stays on the model grid. Finishing applies the movie canvas and frame rate to each clip."
             ).font(.caption2).foregroundStyle(.secondary)
@@ -233,12 +240,7 @@ struct ClipInspector: View {
         DisclosureGroup("Versions · \(clip.versions.count)") {
           ForEach(clip.versions.reversed()) { v in
             Button {
-              do {
-                var updated = clip
-                try updated.activateVersion(v)
-                store.editClip { $0 = updated }
-                store.refreshPreview()
-              } catch { store.error = error.localizedDescription }
+              store.activateRenderVersion(v, for: clip)
             } label: {
               HStack {
                 Image(systemName: "play.rectangle")

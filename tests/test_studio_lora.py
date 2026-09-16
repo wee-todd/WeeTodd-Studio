@@ -194,3 +194,195 @@ def test_exported_jobs_embed_group_strengths_without_library_dependency(tmp_path
     request["project"]["clips"][0]["attachments"][0]["strength"] = 1.9
     assert job["project"]["clips"][0]["attachments"][0]["strength"] == 0.65
     assert "loraGroups" not in job
+
+
+def test_h3_turbo_metadata_enters_library_and_passes_to_native_spec(tmp_path):
+    source = adapter(
+        tmp_path,
+        {
+            "base_model": "MiniMax-H3",
+            "adapter_profile": "turbo",
+            "adapter_role": "turbo",
+            "qkv_layout": "contiguous",
+            "inference_steps": "4",
+        },
+    )
+    inspected = lora.inspect_lora(source)
+    assert inspected["loraProfile"] == "turbo"
+    assert inspected["loraLayout"] == "contiguous_qkv"
+    assert inspected["loraRequiresAdalnGrid"] is False
+    request = lora.clip_lora(inspected, {"strength": 0.8}, "h3")
+    assert request == {
+        "path": str(source),
+        "strength": 0.8,
+        "profile": "turbo",
+        "qkv_layout": "contiguous_qkv",
+    }
+
+
+def test_explicit_turbo_can_classify_metadata_poor_h3_without_filename_inference(tmp_path):
+    source = adapter(tmp_path, {"base_model": "MiniMax-H3"}, "turbo-8step.safetensors")
+    inspected = lora.inspect_lora(source)
+    assert inspected.get("loraProfile") is None
+    inspected.update(loraProfile="turbo", loraLayout="native_interleaved")
+    request = lora.clip_lora(inspected, {}, "h3")
+    assert request["profile"] == "turbo"
+    assert request["qkv_layout"] == "native_interleaved"
+
+
+def test_conversion_metadata_recognizes_h3_and_qkv_without_inventing_turbo(tmp_path):
+    source = adapter(
+        tmp_path,
+        {
+            "converted_layout": "comfyui_minimax_h3",
+            "conversion": "qkv block-diag fused (per-projection ranks); "
+            "mlp.fc1 swiglu halves swapped",
+        },
+    )
+    inspected = lora.inspect_lora(source)
+    assert inspected["loraModel"] == "h3"
+    assert inspected["loraLayout"] == "contiguous_qkv"
+    assert inspected.get("loraProfile") is None
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"adapter_profile": "turbo", "profile": "standard"},
+        {"adapter_profile": "standard", "inference_steps": "4"},
+        {"adapter_profile": "turbo", "inference_steps": "4", "steps": "8"},
+        {"qkv_layout": "interleaved", "qkv_fusion": "concat A; block diagonal B"},
+    ],
+)
+def test_reject_conflicting_h3_metadata(tmp_path, metadata):
+    source = adapter(tmp_path, {"base_model": "MiniMax-H3", **metadata})
+    with pytest.raises(ValueError, match="conflicting"):
+        lora.inspect_lora(source)
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"adapter_role": "reference"},
+        {"adapter_role": "control"},
+        {"adapter_profile": "distilled"},
+        {"adapter_profile": "dmd"},
+        {"reference_type": "character"},
+    ],
+)
+def test_other_specialized_adapters_remain_recipe_owned(tmp_path, metadata):
+    with pytest.raises(ValueError, match="recipe"):
+        lora.inspect_lora(adapter(tmp_path, {"base_model": "MiniMax-H3", **metadata}))
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"loraProfile": True},
+        {"loraProfile": "dmd"},
+        {"loraLayout": 3},
+        {"loraLayout": "contiguous"},
+        {"loraAdalnInputGrid": 6},
+        {"loraAdalnInputGrid": ""},
+    ],
+)
+def test_clip_rejects_invalid_h3_metadata_types(tmp_path, fields):
+    asset = dict(kind="lora", path=str(adapter(tmp_path, {})), loraModel="h3", **fields)
+    with pytest.raises(ValueError, match="LoRA"):
+        lora.clip_lora(asset, {}, "h3")
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"loraProfile": "standard"},
+        {"loraLayout": "native_interleaved"},
+    ],
+)
+def test_asset_cannot_override_declared_h3_profile_or_layout(tmp_path, fields):
+    source = adapter(
+        tmp_path,
+        {"base_model": "MiniMax-H3", "adapter_profile": "turbo", "qkv_layout": "contiguous_qkv"},
+    )
+    asset = dict(kind="lora", path=str(source), loraModel="h3", **fields)
+    with pytest.raises(ValueError, match="declares"):
+        lora.clip_lora(asset, {}, "h3")
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"model_version": "2.5.0", "adapter_profile": "turbo"},
+        {"model_version": "2.3.0", "distillation_profile": "distilled"},
+        {"profile": "control"},
+    ],
+)
+def test_non_h3_specialized_profiles_remain_recipe_owned(tmp_path, metadata):
+    with pytest.raises(ValueError, match="recipe"):
+        lora.inspect_lora(adapter(tmp_path, metadata))
+
+
+def test_clip_transports_h3_adaln_grid_path(tmp_path):
+    source = adapter(tmp_path, {"base_model": "MiniMax-H3"})
+    asset = dict(
+        kind="lora",
+        path=str(source),
+        loraModel="h3",
+        loraProfile="turbo",
+        loraAdalnInputGrid=str(tmp_path / "grid.safetensors"),
+    )
+    result = lora.clip_lora(asset, {"strength": 0.6}, "h3")
+    assert result["adaln_input_grid"] == str(tmp_path / "grid.safetensors")
+    from wee_todd_nodes.lora import H3LoRASpec
+
+    assert H3LoRASpec(**result).adaln_input_grid == str(tmp_path / "grid.safetensors")
+
+
+def test_h3_model_hint_allows_profile_only_turbo_import_and_execution(tmp_path):
+    source = adapter(tmp_path, {"adapter_profile": "turbo", "inference_steps": "4"})
+    inspected = lora.inspect_lora(source, model_hint="h3")
+    assert inspected["loraModel"] == "h3"
+    assert inspected["loraProfile"] == "turbo"
+    request = lora.clip_lora(dict(kind="lora", path=str(source), loraModel="h3"), {}, "h3")
+    assert request["profile"] == "turbo"
+
+
+def test_profile_only_turbo_import_without_model_hint_remains_specialized(tmp_path):
+    source = adapter(tmp_path, {"adapter_profile": "turbo", "inference_steps": "4"})
+    with pytest.raises(ValueError, match="recipe"):
+        lora.inspect_lora(source)
+
+
+def test_model_hint_does_not_override_declared_training_model(tmp_path):
+    source = adapter(tmp_path, {"model_version": "2.5.0"})
+    assert lora.inspect_lora(source, model_hint="h3")["loraModel"] == "ltx25"
+    with pytest.raises(ValueError, match="declares"):
+        lora.clip_lora(dict(kind="lora", path=str(source), loraModel="h3"), {}, "h3")
+
+
+def test_model_hint_cannot_resolve_conflicting_training_metadata(tmp_path):
+    source = adapter(tmp_path, {"base_model": "MiniMax-H3", "model_version": "2.5.0"})
+    with pytest.raises(ValueError, match="conflicting"):
+        lora.inspect_lora(source, model_hint="h3")
+
+
+@pytest.mark.parametrize("model_hint", [True, 3, {}, [], "", "movie", "ltx24"])
+def test_invalid_import_model_hint_is_rejected(tmp_path, model_hint):
+    with pytest.raises(ValueError, match="model"):
+        lora.inspect_lora(adapter(tmp_path, {}), model_hint=model_hint)
+
+
+@pytest.mark.parametrize(
+    "schedule",
+    [
+        {"inference_steps": "8"},
+        {"num_inference_steps": "8"},
+        {"steps": "8"},
+        {"transformer_evaluations": "8"},
+        {"schedule_points": "9"},
+    ],
+)
+def test_declared_eight_step_turbo_import_requires_dedicated_recipe(tmp_path, schedule):
+    source = adapter(tmp_path, {"base_model": "MiniMax-H3", "adapter_profile": "turbo", **schedule})
+    with pytest.raises(ValueError, match="dedicated.*recipe"):
+        lora.inspect_lora(source)

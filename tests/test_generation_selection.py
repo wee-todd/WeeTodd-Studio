@@ -185,8 +185,8 @@ def test_ltx23_distilled_refinement_has_fixed_schedule():
         resolve({"task": "t2v", "refinementSteps": 100}, item, engine="ltx23")
 
 
-def test_attached_turbo_disables_steps_before_composition():
-    with pytest.raises(ValueError, match="steps"):
+def test_attached_turbo_validates_file_before_resolving_its_schedule():
+    with pytest.raises(FileNotFoundError):
         selection.resolve_generation_selection(
             {"task": "t2v", "steps": 12},
             {"engine": "h3"},
@@ -374,3 +374,49 @@ def test_app_paged_normal_applies_to_balanced_but_not_low_memory():
 def test_paged_normal_rejects_non_h3():
     with pytest.raises(ValueError, match="H3 only"):
         resolve({"task": "t2v", "memoryPolicy": "pagedNormal"}, profile("ltx25"), engine="ltx25")
+def test_h3_text_only_paged_encoder_does_not_advertise_image_tasks(tmp_path):
+    import json
+
+    from wee_todd_mlx.generation_selection import supported_tasks
+
+    encoder = tmp_path / "encoder"
+    encoder.mkdir()
+    (encoder / "paged_text_encoder_manifest.json").write_text(json.dumps({
+        "format": "weetodd-h3-qwen-paged-v1", "skipped_visual_bytes": 762559840}))
+    recipe = {"engine": "h3", "config": {},
+              "components": {"task": "t2va", "text_encoder": str(encoder)}}
+    assert supported_tasks(recipe) == ["t2v"]
+
+
+def test_h3_approximate_attention_and_ltx_guided_do_not_advertise_unsupported_continuity():
+    from wee_todd_mlx.generation_selection import supported_tasks
+
+    assert supported_tasks({"engine": "h3", "components": {"task": "t2va"},
+                            "attention": {"mode": "vsa"}}) == ["t2v"]
+    assert "extension" not in supported_tasks({"engine": "ltx25", "components": {},
+                                               "config": {"pipeline_mode": "guided"}})
+
+
+def test_task_switch_does_not_keep_previous_audio_policy():
+    from wee_todd_mlx.generation_selection import resolve_generation_selection
+
+    recipe = {"engine": "ltx23", "config": {"pipeline_mode": "two_stage"},
+              "components": {}, "conditioning": {"task": "a2v", "audio_policy": "source"}}
+    clip = {"engine": "ltx23", "profileID": "test", "attachments": [
+        {"role": "first"}, {"role": "last"}]}
+    result = resolve_generation_selection({"task": "fflf"}, clip,
+                                          [{"id": "test", "recipe": recipe}], {})
+    assert "audio_policy" not in result["recipe"]["conditioning"]
+
+
+def test_automatic_balanced_ltx_prefers_matching_distilled_profile_without_overriding_explicit():
+    from wee_todd_mlx.generation_selection import resolve_generation_selection
+
+    profiles = [{"id": mode, "recipe": {
+        "engine": "ltx25", "components": {}, "config": {"pipeline_mode": mode},
+        "conditioning": {"task": "t2v"}}} for mode in ("guided", "distilled")]
+    clip = {"engine": "ltx25", "profileID": "auto", "attachments": []}
+    selection = {"task": "t2v", "preset": "balanced"}
+    assert resolve_generation_selection(selection, clip, profiles, {})["profileID"] == "distilled"
+    clip["profileID"] = "guided"
+    assert resolve_generation_selection(selection, clip, profiles, {})["profileID"] == "guided"

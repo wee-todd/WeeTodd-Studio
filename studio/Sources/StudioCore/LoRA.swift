@@ -10,13 +10,24 @@ public enum LoRAModel: String, Codable, CaseIterable, Identifiable {
   }
 }
 
+public enum LoRAGroupApplicationMode: String, CaseIterable, Identifiable {
+  case add, replace
+  public var id: String { rawValue }
+  public var label: String {
+    self == .add ? "Add to current stack" : "Replace current stack"
+  }
+}
+
 public struct LoRAMember: Codable, Identifiable, Equatable {
   public var id = UUID()
   public var asset: MediaAsset
   public var strength: Double
-  public init(asset: MediaAsset, strength: Double = 1) {
+  public var enabled: Bool?
+  public var isEnabled: Bool { enabled ?? true }
+  public init(asset: MediaAsset, strength: Double = 1, enabled: Bool? = nil) {
     self.asset = asset
     self.strength = strength
+    self.enabled = enabled
   }
   public var fileKey: String {
     URL(fileURLWithPath: asset.path).standardizedFileURL.resolvingSymlinksInPath().path
@@ -65,7 +76,8 @@ public struct LoRAGroup: Codable, Identifiable, Equatable {
 extension StudioProject {
   /// Applying a library item creates clip-owned descriptors, independent of future library edits.
   public mutating func applyLoRAs(
-    _ members: [LoRAMember], to clipID: UUID, groupName: String? = nil
+    _ members: [LoRAMember], to clipID: UUID, groupName: String? = nil,
+    mode: LoRAGroupApplicationMode = .add
   ) throws {
     guard let index = clips.firstIndex(where: { $0.id == clipID }) else {
       throw StudioError.invalid("Select a clip first.")
@@ -77,12 +89,14 @@ extension StudioProject {
         assets.first { $0.id == attachment.assetID }.map { LoRAMember(asset: $0).fileKey }
       })
     let incoming = members.map(\.fileKey)
-    guard Set(incoming).count == incoming.count, existing.isDisjoint(with: incoming) else {
+    guard Set(incoming).count == incoming.count,
+      mode == .replace || existing.isDisjoint(with: incoming) else {
       throw StudioError.invalid(
-        "This clip already uses a LoRA in this selection. Remove its existing entry before applying it again."
+        "The selection repeats a LoRA file or overlaps the current stack. Remove duplicates or choose Replace current stack."
       )
     }
     let applicationID = groupName == nil ? nil : UUID()
+    if mode == .replace { clips[index].attachments.removeAll { $0.role == .lora } }
     for member in members {
       var asset = member.asset
       asset.id = UUID()
@@ -91,9 +105,28 @@ extension StudioProject {
       assets.append(asset)
       var attachment = Attachment(assetID: asset.id, role: .lora)
       attachment.strength = member.strength
+      attachment.enabled = member.enabled
       attachment.loraGroupName = groupName
       attachment.loraGroupID = applicationID
       clips[index].attachments.append(attachment)
     }
+  }
+
+  public func loraGroupSnapshot(
+    for clipID: UUID, name: String, additionalAssets: [MediaAsset] = []
+  ) throws -> LoRAGroup {
+    guard let clip = clips.first(where: { $0.id == clipID }) else {
+      throw StudioError.invalid("Select a clip first.")
+    }
+    let sources = assets + additionalAssets
+    let members = try clip.attachments.filter { $0.role == .lora }.map { attachment in
+      guard let asset = sources.first(where: { $0.id == attachment.assetID }) else {
+        throw StudioError.invalid("Relink the missing LoRA before saving this stack.")
+      }
+      return LoRAMember(asset: asset, strength: attachment.strength, enabled: attachment.enabled)
+    }
+    let group = LoRAGroup(name: name, engine: clip.engine, members: members)
+    try group.validate()
+    return group
   }
 }

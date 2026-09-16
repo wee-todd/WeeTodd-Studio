@@ -30,6 +30,17 @@ def supported_tasks(recipe):
         }.get(components.get("task"), [])
         if recipe.get("conditioning", {}).get("task") == "control":
             tasks = ["control"]
+        if any(recipe.get(key) for key in ("attention", "fastvideo", "vdn")):
+            tasks = [task for task in tasks if task == "t2v"]
+        encoder = components.get("text_encoder")
+        if encoder:
+            manifest = Path(encoder).expanduser() / "paged_text_encoder_manifest.json"
+            if manifest.is_file():
+                if manifest.stat().st_size > 4 * 1024 * 1024:
+                    raise ValueError("Text encoder provenance exceeds the 4 MiB inspection limit.")
+                document = json.loads(manifest.read_text())
+                if document.get("format") == "weetodd-h3-qwen-paged-v1":
+                    tasks = [task for task in tasks if task == "t2v"]
         return tasks
     if engine == "ltx23":
         ic = components.get("ic_loras", [])
@@ -50,7 +61,9 @@ def supported_tasks(recipe):
             or task in {"control", "ref2va"}
         ):
             return [task]
-        return ["t2v", "i2v", "fflf", "a2v", "extension"]
+        return ["t2v", "i2v", "fflf", "a2v"] + (
+            ["extension"] if config.get("pipeline_mode", "distilled") == "distilled" else []
+        )
     return []
 
 
@@ -132,6 +145,12 @@ def generation_descriptor(recipe):
     )
     steps = config.get("steps", 16) - 1 if ordinary else None
     checkpoint_sampling = h3_checkpoint_sampling(recipe)
+    turbo_schedule = h3 and any(
+        adapter.get("profile") == "turbo"
+        for adapter in recipe.get("loras", {}).get("adapters", [])
+    ) and config.get("sampling_method", "euler") == "euler"
+    if turbo_schedule:
+        steps = config.get("steps", 16) - 1
     if h3 and checkpoint_sampling.get("transformer_evaluations"):
         steps = checkpoint_sampling["transformer_evaluations"]
     refinement = None
@@ -175,7 +194,11 @@ def generation_descriptor(recipe):
         and not ic,
         "cfgEditable": cfg_editable,
         "shiftEditable": single,
-        "stepsExplanation": "Actual Euler evaluations; the recipe stores one extra schedule point."
+        "stepsExplanation": (
+            f"Turbo sampling · {steps} evaluations. Disable Turbo to restore standard Steps."
+        )
+        if turbo_schedule
+        else "Actual Euler evaluations; the recipe stores one extra schedule point."
         if ordinary
         else "Actual full-resolution evaluations; the tested setting is 8."
         if single
@@ -225,7 +248,7 @@ def fingerprint(recipe):
     ).hexdigest()
 
 
-def resolve_generation_selection(selection, clip, profiles, capabilities):
+def resolve_generation_selection(selection, clip, profiles, capabilities, *, validate_inputs=True):
     """Resolve recipe content, never filename hints; leave caller-owned objects untouched."""
     selection = dict(selection or {})
     unknown = set(selection) - {
@@ -260,6 +283,7 @@ def resolve_generation_selection(selection, clip, profiles, capabilities):
         "control": ["control"],
         "extension": ["source"],
     }.get(task, [])
+    readiness_errors = []
     if explicit:
         roles = {a["role"] for a in clip.get("attachments", [])} - {"lora"}
         labels = {
@@ -288,7 +312,7 @@ def resolve_generation_selection(selection, clip, profiles, capabilities):
             if not present:
                 missing.append(input_labels[role])
         if missing:
-            raise ValueError(f"{labels.get(task, task)} requires {' and '.join(missing)}.")
+            readiness_errors.append(f"{labels.get(task, task)} requires {' and '.join(missing)}.")
         allowed = {
             "t2v": set(),
             "i2v": {"first"},
@@ -300,10 +324,12 @@ def resolve_generation_selection(selection, clip, profiles, capabilities):
         }.get(task, set())
         conflicts = roles - allowed
         if conflicts:
-            raise ValueError(
+            readiness_errors.append(
                 f"{task} conflicts with attached {', '.join(sorted(conflicts))}; "
                 "attachments are preserved. Remove them or select their task."
             )
+    if validate_inputs and readiness_errors:
+        raise ValueError(readiness_errors[0])
     candidates = []
     for profile in profiles:
         recipe = profile.get("recipe")
@@ -353,7 +379,19 @@ def resolve_generation_selection(selection, clip, profiles, capabilities):
             "Import a compatible recipe or select Automatic. No inputs were discarded."
         )
     if explicit and selected == "auto":
-        compatible.sort(key=lambda pair: special_h3_sampling(pair[1]))
+        def preference(pair):
+            content = pair[1]
+            native_task = "fflf" if task == "i2v" else task
+            familiar = selection.get("preset", "custom") != "custom"
+            return (
+                special_h3_sampling(content),
+                familiar and content.get("conditioning", {}).get("task", "t2v") != native_task,
+                familiar and clip["engine"] in {"ltx23", "ltx25"}
+                and content.get("config", {}).get("pipeline_mode")
+                not in {"distilled", "distilled_single_stage"},
+            )
+
+        compatible.sort(key=preference)
         if selection.get("preset", "custom") != "custom" and special_h3_sampling(compatible[0][1]):
             raise ValueError("Import a standard native recipe for this preset, or select Custom.")
     profile, original = compatible[0]
@@ -361,7 +399,18 @@ def resolve_generation_selection(selection, clip, profiles, capabilities):
     if explicit and clip["engine"] == "h3" and task in {"t2v", "i2v", "fflf"}:
         recipe["components"]["task"] = "t2va" if task == "t2v" else "fl2va"
     if explicit:
-        recipe.setdefault("conditioning", {})["task"] = "fflf" if task == "i2v" else task
+        contract = recipe.setdefault("conditioning", {})
+        resolved_task = "fflf" if task == "i2v" else task
+        if contract.get("task") != resolved_task:
+            contract.pop("audio_policy", None)
+        contract["task"] = resolved_task
+    turbo_warnings = []
+    if clip["engine"] == "h3" and capabilities.get("attached_loras"):
+        from wee_todd_mlx.studio_h3_turbo import resolve_studio_h3_turbo
+
+        recipe, turbo_warnings = resolve_studio_h3_turbo(
+            recipe, capabilities["attached_loras"], task
+        )
     config = recipe.setdefault("config", {})
     checkpoint_sampling = h3_checkpoint_sampling(recipe)
     fixed_points = checkpoint_sampling.get("schedule_points")
@@ -384,6 +433,10 @@ def resolve_generation_selection(selection, clip, profiles, capabilities):
     for key in ("steps", "refinementSteps", "cfg", "shift"):
         value = selection.get(key)
         if value is None:
+            continue
+        if key == "steps" and turbo_warnings:
+            # Preserve the saved standard override so disabling Turbo restores it.
+            # The effective Turbo count is validated and reported by its resolver.
             continue
         if not controls[key + "Editable"]:
             raise ValueError(
@@ -434,14 +487,16 @@ def resolve_generation_selection(selection, clip, profiles, capabilities):
         )
     warnings = (
         ["Speed keeps the recipe sampling settings pending measured qualification."]
-        if preset == "speed"
+        if preset == "speed" and not turbo_warnings
         else []
     )
+    warnings.extend(turbo_warnings)
     return {
         "recipe": recipe,
         "resolved_controls": descriptor["controls"],
         "generation": descriptor,
         "required_inputs": required,
+        "readiness_errors": readiness_errors,
         "warnings": warnings,
         "fingerprint": fingerprint(recipe),
         "profileID": profile["id"],

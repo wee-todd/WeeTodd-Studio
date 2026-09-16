@@ -225,6 +225,37 @@ def test_compose_includes_verified_first_frame_and_server_loras(tmp_path):
     assert result["loras"] == [{"modelID": "style-a", "weight": 0.75}]
 
 
+def test_saved_disabled_loras_are_not_submitted_and_keep_their_strength():
+    value = project()
+    value["clips"][0]["drawThings"]["loras"] = [
+        {"modelID": "disabled-style", "weight": 0.7, "enabled": False},
+        {"modelID": "active-style", "weight": 0.4, "enabled": True},
+    ]
+    result = compose_drawthings_request(value, "clip-uuid", [], request_id="x")
+    assert result["loras"] == [{"modelID": "active-style", "weight": 0.4}]
+    assert value["clips"][0]["drawThings"]["loras"][0]["weight"] == 0.7
+
+
+def test_disabled_native_lora_is_retained_when_switching_to_drawthings():
+    value = project()
+    clip = value["clips"][0]
+    clip["generationSelection"] = {"task": "t2v", "preset": "custom"}
+    clip["attachments"] = [{"role": "lora", "assetID": "unavailable", "enabled": False}]
+    result = compose_drawthings_request(value, "clip-uuid", [], request_id="x")
+    assert result["inputs"] == []
+    assert len(clip["attachments"]) == 1
+
+
+@pytest.mark.parametrize("enabled", ["false", 0, 1])
+def test_saved_lora_enabled_rejects_non_boolean(enabled):
+    value = project()
+    value["clips"][0]["drawThings"]["loras"] = [
+        {"modelID": "style", "weight": 0.7, "enabled": enabled},
+    ]
+    with pytest.raises(ValueError, match="enabled.*boolean"):
+        compose_drawthings_request(value, "clip-uuid", [], request_id="x")
+
+
 def test_active_motion_fidelity_is_rejected_before_remote_generation():
     value = project()
     value["clips"][0]["motionFidelity"] = {"enabled": True}

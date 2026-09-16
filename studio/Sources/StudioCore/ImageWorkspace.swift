@@ -57,13 +57,12 @@ public struct DrawThingsImageDraft: Codable, Equatable {
   /// Call only for an explicit picker edit, never while restoring/importing a draft.
   public mutating func selectConnection(_ id: String) {
     guard profileID != id else { return }
-    profileID = id; modelID = ""; loras = []
+    profileID = id; modelID = ""
   }
   public mutating func selectModel(_ id: String, compatibleLoRAIDs: Set<String>?) {
     guard modelID != id else { return }
     modelID = id
-    if id.isEmpty { loras = [] }
-    else if let compatibleLoRAIDs { loras.removeAll { !compatibleLoRAIDs.contains($0.modelID) } }
+    // Keep assignments for review; request preflight validates the new model's compatibility.
   }
   public var configuration: [String: Any] {
     var value: [String: Any] = ["width": width, "height": height, "steps": steps, "seed": seed,
@@ -84,10 +83,11 @@ public struct DrawThingsImageDraft: Codable, Equatable {
       }
       if item.strength > 0 { inputs.append(try item.canonical(role: "moodboard")) }
     }
-    for lora in loras { try lora.validate() }
+    let activeLoRAs = loras.filter(\.isEnabled)
+    for lora in activeLoRAs { try lora.validate() }
     return ["schema": "weetodd-drawthings-request-v1", "requestID": id, "operation": "image",
       "profileID": profileID, "modelID": modelID, "prompt": prompt, "negativePrompt": negativePrompt,
       "configuration": configuration, "inputs": inputs,
-      "loras": loras.map { ["modelID": $0.modelID, "weight": $0.weight] }, "billingPolicy": "freeOnly"]
+      "loras": activeLoRAs.map { ["modelID": $0.modelID, "weight": $0.weight] }, "billingPolicy": "freeOnly"]
   }
 }

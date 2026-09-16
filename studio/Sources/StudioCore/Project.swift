@@ -47,6 +47,9 @@ public struct MediaAsset: Codable, Identifiable, Equatable {
   public var thumbnail: String = ""
   public var text: String = ""
   public var loraModel: LoRAModel?
+  public var loraProfile: String?
+  public var loraLayout: String?
+  public var loraAdalnInputGrid: String?
   public var generation: ImageGeneration?
   public init(
     name: String, kind: AssetKind, path: String = "", scope: AssetScope = .project,
@@ -65,6 +68,9 @@ public struct Attachment: Codable, Identifiable, Equatable {
   public var role: MediaRole
   public var time: Double = 0
   public var strength: Double = 1
+  /// Missing in legacy projects means enabled. Disabling keeps the saved strength.
+  public var enabled: Bool?
+  public var isEnabled: Bool { enabled ?? true }
   public var loraGroupID: UUID?
   public var loraGroupName: String?
   public var controlType = "canny_edges"
@@ -135,7 +141,13 @@ public struct RenderVersion: Codable, Identifiable, Equatable {
   /// Usable generated segment, excluding extension context. Nil supports older projects.
   public var usableSourceIn: Double?
   public var usableDuration: Double?
-  public init(path: String, seed: Int, prompt: String, recipePath: String, stats: RenderStats? = nil, generationSettings: GenerationDescriptor? = nil, resolvedFingerprint: String? = nil, usableSourceIn: Double? = nil, usableDuration: Double? = nil) {
+  public var continuationArtifact: ContinuationArtifact?
+  /// All member takes point into one movie and must be activated together.
+  public var sceneMembers: [ContinuousSceneMember]?
+  public var sceneTakeID: UUID?
+  public var sceneInputFingerprint: String?
+  public var sceneFrameRate: Double?
+  public init(path: String, seed: Int, prompt: String, recipePath: String, stats: RenderStats? = nil, generationSettings: GenerationDescriptor? = nil, resolvedFingerprint: String? = nil, usableSourceIn: Double? = nil, usableDuration: Double? = nil, continuationArtifact: ContinuationArtifact? = nil, sceneMembers: [ContinuousSceneMember]? = nil, sceneTakeID: UUID? = nil, sceneInputFingerprint: String? = nil, sceneFrameRate: Double? = nil) {
     self.path = path
     self.seed = seed
     self.prompt = prompt
@@ -145,6 +157,11 @@ public struct RenderVersion: Codable, Identifiable, Equatable {
     self.resolvedFingerprint = resolvedFingerprint
     self.usableSourceIn = usableSourceIn
     self.usableDuration = usableDuration
+    self.continuationArtifact = continuationArtifact
+    self.sceneMembers = sceneMembers
+    self.sceneTakeID = sceneTakeID
+    self.sceneInputFingerprint = sceneInputFingerprint
+    self.sceneFrameRate = sceneFrameRate
   }
 }
 public struct Clip: Codable, Identifiable, Equatable {
@@ -180,13 +197,19 @@ public struct Clip: Codable, Identifiable, Equatable {
   public var renderedSignature = ""
   public var validatedSignature = ""
   public var extensionClipID: UUID?
+  public var continuity: ClipContinuity?
   public var generationSelection: GenerationSelection?
+  public var savedNativeGenerations: [String: SavedNativeGenerationSettings]?
+  public var lastLocalEngine: Engine?
   public var drawThings: DrawThingsSelection?
   public init(name: String = "Untitled clip", engine: Engine = .ltx25) {
     self.name = name
     self.engine = engine
   }
   public mutating func activateVersion(_ version: RenderVersion) throws {
+    guard version.sceneMembers == nil, version.sceneTakeID == nil else {
+      throw StudioError.invalid("Select this continuous scene take for all member shots together.")
+    }
     guard versions.contains(where: { $0.id == version.id }) else {
       throw StudioError.invalid("This version does not belong to the selected clip.")
     }
@@ -238,6 +261,7 @@ public struct Clip: Codable, Identifiable, Equatable {
   }
   public var displayTask: String {
     if engine == .movie { return "Imported media" }
+    if reviewUsesSourceVideo { return "Video extension" }
     switch inferredTask {
     case "i2v": return "Image to video"
     case "fflf": return "First and last frames"
@@ -396,6 +420,9 @@ public enum ProjectStorage {
   public static func mapPaths(_ project: inout StudioProject, transform: (String) -> String) {
     for i in project.assets.indices {
       project.assets[i].path = transform(project.assets[i].path)
+      if let grid = project.assets[i].loraAdalnInputGrid {
+        project.assets[i].loraAdalnInputGrid = transform(grid)
+      }
       if project.assets[i].kind == .sequence {
         project.assets[i].text = transform(project.assets[i].text)
       }
@@ -417,6 +444,9 @@ public enum ProjectStorage {
       for j in project.clips[i].versions.indices {
         project.clips[i].versions[j].path = transform(project.clips[i].versions[j].path)
         project.clips[i].versions[j].recipePath = transform(project.clips[i].versions[j].recipePath)
+        if let manifest = project.clips[i].versions[j].continuationArtifact?.manifest {
+          project.clips[i].versions[j].continuationArtifact?.manifest = transform(manifest)
+        }
       }
     }
     for i in project.audio.indices { project.audio[i].path = transform(project.audio[i].path) }
@@ -433,6 +463,8 @@ extension Clip {
   public var generationFingerprint: String {
     var c = self
     c.motionFidelity = nil
+    c.savedNativeGenerations = nil
+    c.lastLocalEngine = nil
     c.motionResult = nil
     c.motionRecipeID = nil
     c.motionPrompt = nil

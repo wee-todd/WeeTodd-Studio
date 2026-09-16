@@ -5,21 +5,29 @@ from __future__ import annotations
 
 def preflight_recipe(recipe):
     from .conditioning_media import inspect_media
+    from .studio_scene import validate_scene_recipe
     from .task_conditioning import validate_conditioning, validate_ltx25_control_families
 
+    scene_report = validate_scene_recipe(recipe)
     task_report = validate_conditioning(recipe)
     media_report = inspect_media(recipe, task_report["contract"])
     engine = recipe["engine"]
     adapters = []
+    continuation_report = None
     if engine == "h3":
+        from dataclasses import replace
+
         from wee_todd_nodes.lora import H3LoRAStack
         from wee_todd_nodes.preflight import (
             H3ComponentSetSpec,
             H3PreflightRequest,
+            estimate_h3_token_budget,
             preflight_components,
         )
         from wee_todd_nodes.preview import H3PreviewConfig
         from wee_todd_nodes.runtime import H3GenerationConfig
+
+        from .h3_continuation_artifact import continuation_request
 
         fields = dict(recipe["components"])
         preview = fields.pop("preview_override", None)
@@ -28,19 +36,41 @@ def preflight_recipe(recipe):
         )
         config = H3GenerationConfig(**recipe["config"])
         config.validate()
+        continuation = continuation_request(recipe)
+        if continuation and continuation.get("source_context"):
+            config = replace(config, duration_seconds=continuation["sample_duration_seconds"])
+            config.validate()
         config.validate_paging(
             spec.resolved_paths()["transformer"],
             recipe.get("block_residency", "checkpoint_default"),
         )
-        report = preflight_components(
-            spec,
-            H3PreflightRequest(
-                duration_seconds=config.duration_seconds,
-                steps=config.steps,
-                width=config.width,
-                height=config.height,
-            ),
-        ).to_dict()
+        request = H3PreflightRequest(
+            duration_seconds=config.duration_seconds,
+            steps=config.steps,
+            width=config.width,
+            height=config.height,
+        )
+        report = preflight_components(spec, request).to_dict()
+        if continuation:
+            overlap = continuation["overlap_frames"]
+            spatial_rows = (config.width // 32) * (config.height // 32)
+            context_video_frames = (overlap - 5) // 17 * 5 + 2 if overlap else 0
+            keyframes = sum(
+                item["role"] == "keyframe" for item in task_report["contract"]["inputs"]
+            )
+            continuation_report = {
+                "request": continuation,
+                "token_budget": estimate_h3_token_budget(
+                    request,
+                    condition_video_rows=(context_video_frames + keyframes) * spatial_rows,
+                    condition_audio_rows=round(overlap / 24 * 40) * 2,
+                ),
+                "memory_estimate_scope": (
+                    "Engine memory uses the complete native generated window, but excludes "
+                    "additional conditioning-prefix and vision workspaces. The separate token "
+                    "budget includes continuation and keyframe rows with an estimated text length."
+                ),
+            }
         if task_report["contract"]["task"] == "extension":
             from wee_todd_nodes.conditioning_inputs import H3ReferenceInput, H3ReferenceStack
 
@@ -163,6 +193,9 @@ def preflight_recipe(recipe):
         report = spec.validate(
             config.pipeline_mode, require_spatial_upscaler=not config.ic_lora_single_stage
         )
+        if scene_report and any(item.get("adapter_role") == "ic_lora"
+                                for item in report.get("transformer_baked_loras", ())):
+            raise ValueError("Continuous scenes do not support baked IC-LoRA adapters.")
         validate_ltx25_control_families(task_report["contract"], report)
         config.validate(
             scale_factors=tuple(report["video_scale_factors"]),
@@ -192,6 +225,11 @@ def preflight_recipe(recipe):
             adapters = []
             for path, _strength in spec.loras:
                 adapter = inspect_ltx25_lora(path)
+                if scene_report and adapter["adapter_role"] != "transformer_lora":
+                    raise ValueError(
+                        "Continuous scenes do not support IC-LoRA or MSR adapters, "
+                        "including entries in components.loras."
+                    )
                 adapters.append({**adapter, "path": str(adapter["path"])})
     else:
         raise ValueError(f"Unsupported engine: {engine}")
@@ -205,4 +243,7 @@ def preflight_recipe(recipe):
         "media": media_report,
         "render_qualification": "not_evaluated",
         "weights_loaded": False,
+        **({"continuation": continuation_report} if continuation_report else {}),
+        **({"scene": scene_report["scene"], "scenePlan": scene_report["plan"]}
+           if scene_report else {}),
     }

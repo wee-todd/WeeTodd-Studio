@@ -8,6 +8,7 @@ import copy
 import json
 import math
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -70,7 +71,7 @@ def executable(name, settings):
     return str(Path(resolved).resolve())
 
 
-def inspect_media(value, settings):
+def inspect_media(value, settings, *, lora_model=None):
     source = Path(value).expanduser().resolve()
     if not source.is_file():
         raise ValueError(f"Media is missing: {source.name}. Relink it in Assets.")
@@ -80,7 +81,7 @@ def inspect_media(value, settings):
     if suffix == ".safetensors":
         from studio_lora import inspect_lora
 
-        return inspect_lora(source)
+        return inspect_lora(source, model_hint=lora_model)
     probe = json.loads(
         run(
             [
@@ -164,7 +165,21 @@ def infer_task(clip):
     return shared_infer_task(clip)
 
 
-def resolve_clip_generation(request, clip):
+def active_attachments(clip):
+    """Disabled LoRAs retain their saved settings but are not execution dependencies."""
+    result = []
+    for attachment in clip.get("attachments", []):
+        if attachment.get("role") == "lora":
+            enabled = attachment.get("enabled")
+            if enabled is not None and type(enabled) is not bool:
+                raise ValueError("LoRA enabled must be a boolean.")
+            if enabled is False:
+                continue
+        result.append(attachment)
+    return result
+
+
+def resolve_clip_generation(request, clip, *, validate_inputs=True):
     from wee_todd_mlx.generation_selection import resolve_generation_selection
 
     attached_loras = []
@@ -173,7 +188,7 @@ def resolve_clip_generation(request, clip):
 
         assets = {a["id"]: a for a in request["project"]["assets"]
                   + request.get("globalAssets", [])}
-        for attachment in clip.get("attachments", []):
+        for attachment in active_attachments(clip):
             if attachment["role"] == "lora":
                 asset = assets.get(attachment["assetID"])
                 if asset is None:
@@ -184,19 +199,42 @@ def resolve_clip_generation(request, clip):
         profiles(request["runtime"]["profilesDirectory"]),
         {"acceleration": request["runtime"].get("acceleration"),
          "attached_loras": attached_loras},
+        validate_inputs=validate_inputs,
     )
 
 
 def describe_generation(request):
     clip = next(c for c in request["project"]["clips"] if c["id"] == request["clipID"])
-    result = resolve_clip_generation(request, clip)
+    from wee_todd_mlx.studio_continuity import continuity_state, effective_clip
+
+    continuity_errors = []
+    try:
+        continuity = continuity_state(request)
+        effective = effective_clip(clip, continuity)
+        if continuity["mode"] == "frame":
+            # Describe controls without decoding or persisting a frame on every edit.
+            effective["attachments"] = [*effective.get("attachments", []),
+                                        {"role": "first", "assetID": "continuity-preview"}]
+    except (ValueError, OSError) as error:
+        continuity = {"mode": "independent"}
+        effective = clip
+        continuity_errors.append(str(error))
+    result = resolve_clip_generation(request, effective, validate_inputs=False)
     recipe = result["recipe"]
     resolved_fingerprint = ""
     generation = result["generation"]
-    if clip.get("prompt", "").strip():
-        recipe, report = compose_recipe(request)
-        resolved_fingerprint = report["resolvedFingerprint"]
-        generation = report["generation"]
+    readiness_errors = [*result["readiness_errors"], *continuity_errors]
+    if not clip.get("prompt", "").strip():
+        readiness_errors.append("Write a prompt before preparing the render.")
+    if not readiness_errors and continuity["mode"] in {"independent", "scene"}:
+        try:
+            recipe, report = compose_recipe(request)
+            resolved_fingerprint = report["resolvedFingerprint"]
+            generation = report["generation"]
+        except (ValueError, OSError) as error:
+            # Missing media must not hide otherwise valid sampling controls. Actual
+            # preparation always executes the strict composition/preflight path.
+            readiness_errors.append(str(error))
 
     def source_paths(value):
         if isinstance(value, dict):
@@ -210,6 +248,7 @@ def describe_generation(request):
     dependencies = source_paths(recipe.get("components", {}))
     dependencies += source_paths(recipe.get("loras", {}))
     dependencies += source_paths(recipe.get("conditioning", {}).get("inputs", []))
+    dependencies += source_paths(continuity)
     for dependency in list(dependencies):
         for name in ("paged_manifest.json", "model_identity.json", "conversion_provenance.json"):
             provenance = Path(dependency) / name
@@ -221,11 +260,38 @@ def describe_generation(request):
         "selectionFingerprint": result["fingerprint"],
         "sourcePaths": sorted(set([result["profileID"], *dependencies])),
         "warnings": result["warnings"],
+        "readinessErrors": readiness_errors,
     }
 
 
 def compose_recipe(request):
     """Map explicit editorial roles to the existing fail-closed renderer contract."""
+    from wee_todd_mlx.studio_continuity import (
+        configure_recipe,
+        continuity_state,
+        effective_clip,
+        prepare_request,
+    )
+
+    if not request.get("_sceneResolved"):
+        from wee_todd_mlx.studio_scene import compose_scene_recipe, scene_members
+
+        if scene_members(request):
+            return compose_scene_recipe(request, compose_recipe)
+    continuity = request.get("_continuityResolved")
+    if continuity is None:
+        continuity = continuity_state(request)
+        if continuity["mode"] != "independent" or continuity["saveContext"]:
+            original = next(c for c in request["project"]["clips"] if c["id"] == request["clipID"])
+            selection = resolve_clip_generation(
+                request, effective_clip(original, continuity), validate_inputs=False)
+            fps = selection["recipe"]["config"].get("frame_rate", 24)
+            directory = request.get("_continuityDirectory") or tempfile.mkdtemp(
+                prefix="weetodd-continuity-")
+            current, continuity = prepare_request(
+                request, directory, sys.modules[__name__], fps=fps)
+            current["_continuityResolved"] = continuity
+            return compose_recipe(current)
     project, settings = request["project"], request["runtime"]
     clip = next(c for c in project["clips"] if c["id"] == request["clipID"])
     from wee_todd_mlx.generation_selection import (
@@ -238,6 +304,8 @@ def compose_recipe(request):
         raise ValueError("Imported movies need finishing/export, not model generation.")
     resolved = resolve_clip_generation(request, clip)
     selected, recipe = resolved["profileID"], resolved["recipe"]
+    # Context belongs to this clip's accepted source, never a preset.
+    recipe.pop("continuation", None)
     task = "fflf" if resolved["task"] == "i2v" else resolved["task"]
     recipe.pop("reference_images", None)
     # Media belongs to the clip. Preserve imported contract options, never hidden paths.
@@ -257,7 +325,7 @@ def compose_recipe(request):
     assets = {a["id"]: a for a in project["assets"] + request.get("globalAssets", [])}
     inputs, loras = [], []
     fps = 24 if engine == "h3" else config.get("frame_rate", 24)
-    for attachment in clip.get("attachments", []):
+    for attachment in active_attachments(clip):
         asset = assets.get(attachment["assetID"])
         if asset is None:
             raise ValueError("A clip attachment is missing from its asset store.")
@@ -379,7 +447,9 @@ def compose_recipe(request):
                     "H3 Ref2VA needs its native reference prompt. "
                     "Paste the complete six-section prompt in the full-window editor."
                 )
-        else:
+        elif not all(re.search(rf"(?m)^\s*{section}:", prompt) for section in (
+            "integrated_multimodal_description", "overall_soundscape", "non_diegetic_music"
+        )):
             prompt = (
                 f"integrated_multimodal_description: [Shot 1] {prompt}\n\n"
                 f"overall_soundscape: {clip.get('soundscape', 'Natural location sound.')}\n\n"
@@ -400,13 +470,16 @@ def compose_recipe(request):
         ffmpeg=executable("ffmpeg", settings),
         ffprobe=executable("ffprobe", settings),
     )
+    configure_recipe(recipe, continuity)
     from wee_todd_mlx.task_conditioning import validate_conditioning
 
     report = validate_conditioning(recipe)
     generation = generation_descriptor(recipe)
     if "acceleration" in resolved["generation"]:
         generation["acceleration"] = resolved["generation"]["acceleration"]
-    if (clip.get("generationSelection") or {}).get("steps") is not None:
+    if (clip.get("generationSelection") or {}).get("steps") is not None and not any(
+        adapter.get("profile") == "turbo" for adapter in loras
+    ):
         if not generation["controls"]["stepsEditable"]:
             raise ValueError("steps override is unsupported by the attached adapter schedule.")
     return recipe, {
@@ -419,6 +492,8 @@ def compose_recipe(request):
         "conditioning": report,
         "nativeFPS": fps,
         "movieSettings": clip.get("settingsOverride") or project["settings"],
+        **({"continuity": continuity} if continuity["mode"] != "independent"
+           or continuity["saveContext"] else {}),
     }
 
 
@@ -426,12 +501,40 @@ def write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2) + "\n")
 
 
+
+def freeze_continuity_frame(request, destination):
+    """Keep the current frame-matched anchor as immutable media without loading models."""
+    from wee_todd_mlx.studio_continuity import (
+        continuity_state,
+        prepare_request,
+        verify_source,
+    )
+
+    clip = next((c for c in request["project"]["clips"] if c["id"] == request["clipID"]), None)
+    if clip is None or (clip.get("continuity") or {}).get("mode") != "frame":
+        raise ValueError("Select a clip using Match previous frame before freezing its anchor.")
+    state = continuity_state(request)
+    verify_source(state)
+    media = inspect_media(state["sourcePath"], request["runtime"])
+    verify_source(state)
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=False)
+    updated, prepared = prepare_request(
+        request, destination, sys.modules[__name__], fps=media["fps"])
+    verify_source(state)
+    verify_source(prepared)
+    return {"path": updated["project"]["assets"][-1]["path"],
+            "sourceClipID": state["sourceClipID"], "sourceTakeID": state["sourceTakeID"]}
+
 def prepare(request, destination):
     destination.mkdir(parents=True, exist_ok=False)
-    recipe, report = compose_recipe(request)
+    recipe, report = compose_recipe(
+        dict(request, _continuityDirectory=str(destination / "continuity")))
     recipe_path = destination / "recipe.json"
     write_json(recipe_path, recipe)
     write_json(destination / "editor-request.json", request)
+    if report.get("continuity"):
+        write_json(destination / "continuity.json", report["continuity"])
     run(
         [
             sys.executable,
@@ -447,9 +550,17 @@ def prepare(request, destination):
     return {"recipePath": str(recipe_path), "prompt": recipe["prompt"], "report": report}
 
 
-def render(prepared, destination):
+def render(prepared, destination, *, checkpoint_directory=None):
     if not Path(prepared).is_file():
         raise ValueError("Prepare and review this clip before rendering.")
+    if checkpoint_directory is None and "scene" in json.loads(Path(prepared).read_text()):
+        checkpoint_directory = Path(prepared).with_name("scene-checkpoints")
+    continuity_file = Path(prepared).with_name("continuity.json")
+    continuity = json.loads(continuity_file.read_text()) if continuity_file.is_file() else {}
+    if continuity:
+        from wee_todd_mlx.studio_continuity import verify_source
+
+        verify_source(continuity)
     run(
         [
             sys.executable,
@@ -458,12 +569,17 @@ def render(prepared, destination):
             prepared,
             "--output-directory",
             str(destination),
+            *(["--checkpoint-directory", str(checkpoint_directory)]
+              if checkpoint_directory is not None else []),
         ],
         error_result=destination / "result.json",
     )
     result = json.loads((destination / "result.json").read_text())
     if result.get("status") != "success":
         raise RuntimeError(result.get("error", "Renderer did not complete."))
+    if "usableSourceIn" in continuity:
+        result.update(usable_source_in=continuity["usableSourceIn"],
+                      usable_duration=continuity["usableDuration"])
     return result
 
 
@@ -1288,6 +1404,7 @@ def main():
             "preview",
             "sequence",
             "bridge-frames",
+            "freeze-continuity-frame",
             "motion-analyze",
             "motion-enhance",
             "motion-prepare",
@@ -1359,7 +1476,9 @@ def main():
     elif args.command == "catalog":
         result = {"profiles": profiles(request["runtime"]["profilesDirectory"])}
     elif args.command == "inspect":
-        result = inspect_media(request["path"], request["runtime"])
+        result = inspect_media(
+            request["path"], request["runtime"], lora_model=request.get("loraModel")
+        )
     elif args.command == "export-job":
         from studio_job import export_job
 
@@ -1370,6 +1489,8 @@ def main():
         result = import_sequence(request, args.output.resolve())
     elif args.command == "bridge-frames":
         result = bridge_frames(request, args.output.resolve())
+    elif args.command == "freeze-continuity-frame":
+        result = freeze_continuity_frame(request, args.output.resolve())
     elif args.command in {"motion-analyze", "motion-enhance"}:
         result = motion_enhance(
             request, args.output.resolve(), analyze=args.command == "motion-analyze"

@@ -18,6 +18,13 @@ struct GenerationInspector: View {
       .flatMap { $0.generation?.supportedTasks ?? [] }
     return Array(Set(supported + [clip.inferredTask])).sorted()
   }
+  var needsAutomaticComponents: Bool {
+    guard clip.profileID != "auto" else { return false }
+    guard let profile = store.profiles.first(where: {
+      $0.id == clip.profileID && $0.engine == clip.engine.rawValue
+    }) else { return true }
+    return profile.generation.map { !$0.supportedTasks.contains(clip.inferredTask) } ?? false
+  }
   func edit(_ body: @escaping (inout GenerationSelection) -> Void) {
     store.editClip {
       var value = $0.generationSelection ?? GenerationSelection(task: $0.inferredTask, preset: .custom)
@@ -31,22 +38,21 @@ struct GenerationInspector: View {
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Picker("Task", selection: Binding(get: { clip.inferredTask }, set: { task in
-        store.editClip {
-          let preset = $0.generationSelection?.preset ?? .balanced
-          $0.generationSelection = GenerationSelection(task: task, preset: preset)
-          if preset != .custom { $0.profileID = "auto" }
-        }
+      Picker("Model", selection: Binding(get: { clip.engine }, set: { model in
+        store.editClip { $0.selectLocalModel(model) }
       })) {
-        ForEach(tasks, id: \.self) { Text(GenerationSelection.taskLabel($0)).tag($0) }
+        ForEach([Engine.h3, .ltx23, .ltx25]) {
+          Text($0.label).tag($0)
+        }
       }
-      Picker("Preset", selection: Binding(get: { clip.generationSelection?.preset ?? .custom }, set: { preset in
-        store.editClip {
-          $0.generationSelection = GenerationSelection(task: $0.inferredTask, preset: preset)
-          if preset != .custom { $0.profileID = "auto" }
+      if clip.reviewUsesSourceVideo {
+        LabeledContent("Task", value: clip.displayTask)
+      } else {
+        Picker("Task", selection: Binding(get: { clip.inferredTask }, set: { task in
+          store.editClip { $0.selectGenerationTask(task) }
+        })) {
+          ForEach(tasks, id: \.self) { Text(GenerationSelection.taskLabel($0)).tag($0) }
         }
-      })) {
-        ForEach(GenerationPreset.allCases) { Text($0.label).tag($0) }
       }
       if clip.generationSelection?.isModified == true {
         HStack {
@@ -56,24 +62,22 @@ struct GenerationInspector: View {
         }
       }
       if let descriptor {
-        if let preset = descriptor.presets.first(where: { $0.id == clip.generationSelection?.preset.rawValue }) {
-          Text(preset.description).font(.caption2).foregroundStyle(.secondary)
-        }
         controls(descriptor.controls)
       } else {
-        Text(store.validationErrors[clip.id] == nil ? "Resolving task and sampling controls…" : "Configure required inputs to view controls").font(.caption2).foregroundStyle(.secondary)
+        Text(store.validationErrors[clip.id] == nil ? "Loading model settings…" : "Choose a compatible model to view settings").font(.caption2).foregroundStyle(.secondary)
       }
       ForEach(store.generationDescriptions[clip.id]?["warnings"] as? [String] ?? [], id: \.self) { warning in
         Text(warning).font(.caption2).foregroundStyle(.secondary)
+      }
+      if needsAutomaticComponents {
+        Button("Use automatic model components") {
+          store.editClip { $0.selectAutomaticModelComponents() }
+        }
       }
       if let error = store.validationErrors[clip.id] {
         Text(error).font(.caption2).foregroundStyle(.red).textSelection(.enabled)
       }
       Button("Set up or repair models…") { store.showRuntime = true }
-      if clip.generationSelection == nil {
-        Text("Custom · saved recipe behavior preserved. Choose a preset to use explicit task controls.")
-          .font(.caption2).foregroundStyle(.secondary)
-      }
       if clip.engine == .h3 {
         DisclosureGroup("Memory and execution") {
           Picker("Sampling weights", selection: Binding(get: {
@@ -112,8 +116,8 @@ struct GenerationInspector: View {
   @ViewBuilder func controls(_ controls: GenerationControls) -> some View {
     if let steps = controls.evaluations {
       HStack {
-        Text(controls.refinementSteps == nil ? "Steps · evaluations" : "Stage one · evaluations")
-        TextField("Steps", value: integer(\.steps, default: steps), format: .number.grouping(.never))
+        Text(controls.refinementSteps == nil ? "Steps" : "Stage one steps")
+        TextField("Steps", value: controls.stepsEditable ? integer(\.steps, default: steps) : .constant(steps), format: .number.grouping(.never))
           .disabled(!controls.stepsEditable)
       }
     }
@@ -124,22 +128,28 @@ struct GenerationInspector: View {
           .disabled(!controls.refinementStepsEditable)
       }
     }
-    if !controls.stepsExplanation.isEmpty { Text(controls.stepsExplanation).font(.caption2).foregroundStyle(.secondary) }
-    HStack {
+    if !controls.stepsEditable && !controls.stepsExplanation.isEmpty {
+      Text(controls.stepsExplanation).font(.caption2).foregroundStyle(.secondary)
+    }
+    if controls.cfg != nil {
+      HStack {
       Text("CFG")
       if controls.cfgEditable, let cfg = controls.cfg {
         TextField("CFG", value: Binding(get: { clip.generationSelection?.cfg ?? cfg },
           set: { value in edit { $0.cfg = value } }), format: .number)
       } else { Spacer(); Text(controls.cfg.map { String($0) } ?? "Unavailable").foregroundStyle(.secondary) }
+      }.help(controls.cfgExplanation)
+    } else if clip.engine == .h3 {
+      Text("Guidance is built into H3.").font(.caption2).foregroundStyle(.secondary)
     }
-    Text(controls.cfgExplanation).font(.caption2).foregroundStyle(.secondary)
-    HStack {
+    if controls.shift != nil {
+      HStack {
       Text("Shift")
       if controls.shiftEditable, let shift = controls.shift {
         TextField("Shift", value: Binding(get: { clip.generationSelection?.shift ?? shift },
           set: { value in edit { $0.shift = value } }), format: .number)
       } else { Spacer(); Text(controls.shift.map { String($0) } ?? "Unavailable").foregroundStyle(.secondary) }
+      }.help(controls.shiftExplanation)
     }
-    Text(controls.shiftExplanation).font(.caption2).foregroundStyle(.secondary)
   }
 }

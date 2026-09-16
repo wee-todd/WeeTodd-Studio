@@ -12,18 +12,19 @@ final class ImageModelSelectionTests: XCTestCase {
     XCTAssertEqual(restored, draft)
     restored.selectConnection("cloud")
     XCTAssertEqual(restored.modelID, "")
-    XCTAssertTrue(restored.loras.isEmpty)
+    XCTAssertEqual(restored.loras, draft.loras)
   }
-  func testExplicitModelChangesUseKnownCompatibilityAndClearingKeepsInputs() {
+  func testExplicitModelChangesKeepIncompatibleLoRAsForReviewAndPreserveInputs() {
     var draft = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: UUID()))
     draft.loras = [DrawThingsLoRA(modelID: "detail", weight: 0.7)]
     draft.moodboard = [ImageWorkspaceInput(path: "/reference.png")]
     draft.selectModel("klein", compatibleLoRAIDs: nil)
     XCTAssertEqual(draft.loras.count, 1)
     draft.selectModel("krea", compatibleLoRAIDs: [])
-    XCTAssertTrue(draft.loras.isEmpty)
+    XCTAssertEqual(draft.loras, [DrawThingsLoRA(modelID: "detail", weight: 0.7)])
     draft.selectModel("", compatibleLoRAIDs: nil)
     XCTAssertEqual(draft.modelID, "")
+    XCTAssertEqual(draft.loras, [DrawThingsLoRA(modelID: "detail", weight: 0.7)])
     XCTAssertEqual(draft.moodboard.count, 1)
   }
 }

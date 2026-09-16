@@ -22,6 +22,15 @@ assets belong to the same product.
 - New Draw Things models should fit the existing discovery/interface where possible. Verify their
   capability mapping, settings and transport before claiming support; model discovery alone is
   insufficient. Keep model/backend limitations visible to users and retain useful native features.
+- Make native generation feel familiar to Draw Things users: expose model/task selection, supported
+  sampling parameters, seeds, conditioning, LoRAs and reusable LoRA groups through consistent Studio
+  controls. Routine generation should not require editing or importing a JSON recipe.
+- Give native and Draw Things LoRA stacks consistent strength, enable/disable and group-application
+  interactions while preserving backend-specific file formats, model/task compatibility and sampling
+  requirements. Show which settings a specialized adapter such as Turbo requires before applying it.
+- Keep advanced execution details available without crowding ordinary generation controls. Director
+  and manual generation must resolve through the same validated settings and retain reproducible takes;
+  a familiar control must never silently accept a setting the selected engine cannot execute.
 - Product/repository name: WeeTodd Studio / `wee-todd/WeeTodd-Studio`. Keep existing package names,
   import modules, node IDs, document formats and saved local paths compatible unless a task
   explicitly includes a tested migration. Do not rename a user's checkout or model library as a

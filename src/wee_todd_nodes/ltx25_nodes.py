@@ -2358,8 +2358,8 @@ class WeeToddLTX25GenerateChained:
     FUNCTION = "generate"
     CATEGORY = "WeeTodd/LTX 2.5"
     DESCRIPTION = (
-        "Generate two to four overlapping LTX 2.5 windows with timeline-aligned latent guides, "
-        "causal-aware latent transitions, and one synchronized audio/video decode. Supports "
+        "Generate two to four overlapping LTX 2.5 windows with interior video history, "
+        "regenerated terminal video context, and one synchronized audio/video decode. Supports "
         "distilled two-stage and full-resolution single-stage Sol configurations. Guided, "
         "CFG++, generated-keyframe, DFR, and automatic-duration modes are unsupported."
     )

@@ -212,11 +212,52 @@ def renderer_fingerprint():
 
 
 def export_job(request, target):
+    import shutil
+    import uuid
+
+    input_directory = target.with_name(target.name + ".inputs-" + uuid.uuid4().hex)
+    try:
+        return _export_job(request, target, input_directory)
+    except BaseException:
+        # Only this attempt's inputs are disposable, never an existing job's inputs.
+        if not target.exists() and input_directory.exists():
+            shutil.rmtree(input_directory)
+        raise
+
+
+def _export_job(request, target, input_directory):
     if target.exists():
         raise ValueError("Choose a new job filename. Existing jobs are not overwritten.")
     request = copy.deepcopy(request)
+    source_project = copy.deepcopy(request["project"])
+    from wee_todd_mlx.studio_scene import scene_members
+
     if request.get("clipOnly"):
+        if scene_members(request):
+            raise ValueError("Export the complete scene in a movie job; clip-only export "
+                             "cannot split a continuous scene.")
         request["project"] = clip_project(request["project"], request["clipID"])
+    from wee_todd_mlx.studio_continuity import continuity_state
+
+    generating = set(request.get("generateIDs", [])) & {
+        clip["id"] for clip in request["project"]["clips"]}
+    scene_owners = {}
+    for clip_id in list(generating):
+        members = scene_members(dict(request, project=source_project, clipID=clip_id))
+        if members:
+            for member in members:
+                generating.add(member["id"])
+                scene_owners[member["id"]] = members[0]["id"]
+    request["generateIDs"] = sorted(generating)
+    # Jobs freeze accepted source takes. A queued replacement must be reviewed before
+    # it can become another clip's source; do not render against an older accepted take.
+    for clip in request["project"]["clips"]:
+        if (clip["id"] in generating and clip["id"] not in scene_owners
+                and clip["engine"] in {"h3", "ltx23", "ltx25"}):
+            continuity = continuity_state(dict(request, project=source_project, clipID=clip["id"]))
+            if continuity.get("sourceClipID") in generating:
+                raise ValueError("Render and accept the continuity source first, "
+                                 "then export the dependent clip's job.")
     image_jobs = copy.deepcopy(request.get("drawThingsImageJobs", []))
     if not request["project"]["clips"] and not image_jobs:
         raise ValueError("Add a clip before exporting a job.")
@@ -228,6 +269,8 @@ def export_job(request, target):
     }
     for clip in request["project"]["clips"]:
         if clip["engine"] == "movie" or clip["id"] not in request.get("generateIDs", []):
+            continue
+        if scene_owners.get(clip["id"], clip["id"]) != clip["id"]:
             continue
         if clip["engine"] == "drawThings":
             from wee_todd_remote.studio import compose_drawthings_request
@@ -243,7 +286,8 @@ def export_job(request, target):
                                 "clipID": clip["id"], "request": canonical,
                                 "connection": copy.deepcopy(connection), "dependsOn": []})
             continue
-        current = dict(request, clipID=clip["id"])
+        current = dict(request, project=source_project, clipID=clip["id"],
+                       _continuityDirectory=str(input_directory / digest(clip["id"])))
         recipe, report = bridge.compose_recipe(current)
         recipes[clip["id"]] = {"recipe": recipe, "report": report}
     motion_recipes = {}
@@ -331,6 +375,8 @@ def inputs_fingerprint(job):
         "rifeWeights",
         "rifePath",
         "metalPath",
+        "manifest",
+        "source_context",
     }
 
     def walk(value, key=""):
@@ -360,6 +406,28 @@ def inputs_fingerprint(job):
     return digest(observations)
 
 
+
+def scene_recipe_owners(job):
+    """Every grouped clip belongs to exactly one complete scene recipe."""
+    from wee_todd_mlx.studio_scene import scene_members, validate_scene_recipe
+
+    owners = {}
+    for owner, record in job["recipes"].items():
+        recipe = record["recipe"]
+        if "scene" not in recipe:
+            continue
+        validate_scene_recipe(recipe)
+        members = scene_members({"project": job["project"], "clipID": owner})
+        ids = [member["id"] for member in members]
+        declared = [member["clip_id"] for member in recipe["scene"]["segments"]]
+        if not ids or owner != ids[0] or ids != declared:
+            raise ValueError("A job must contain one recipe for the complete scene.")
+        for clip_id in ids:
+            if clip_id in owners or (clip_id != owner and clip_id in job["recipes"]):
+                raise ValueError("A scene member cannot render independently in the same job.")
+            owners[clip_id] = owner
+    return owners
+
 def preflight(job, output, *, prepare_remote=True):
     expected = job.get("execution", {}).get("rendererSHA256")
     if expected and expected != renderer_fingerprint():
@@ -367,6 +435,7 @@ def preflight(job, output, *, prepare_remote=True):
             "The renderer version changed. Run this job with its original runtime or re-export it."
         )
     output.mkdir(parents=True, exist_ok=True)
+    scene_owners = scene_recipe_owners(job)
     remote_jobs = validate_remote_jobs(job.get("remoteJobs", []), job["project"])
     remote_clip_ids = {
         remote.get("clipID") for remote in remote_jobs if remote.get("kind") == "clip"
@@ -388,6 +457,9 @@ def preflight(job, output, *, prepare_remote=True):
         bridge.preflight_finishing(job["project"], clip, job["runtime"])
         record = job["recipes"].get(clip["id"])
         if record:
+            from wee_todd_mlx.studio_continuity import verify_source
+
+            verify_source(record.get("report", {}).get("continuity", {}))
             root = output / clip["id"]
             # Preflight outputs are disposable evidence; give each attempt its own directory.
             import uuid
@@ -407,7 +479,7 @@ def preflight(job, output, *, prepare_remote=True):
                     "--preflight-only",
                 ]
             )
-        elif clip["id"] not in remote_clip_ids:
+        elif clip["id"] not in remote_clip_ids and clip["id"] not in scene_owners:
             media = bridge.inspect_media(clip["sourcePath"], job["runtime"])
             if (
                 media["kind"] != "image"
@@ -420,7 +492,7 @@ def preflight(job, output, *, prepare_remote=True):
 
             MotionSettings(**clip["motionFidelity"]).validate()
             validate_recipe(job.get("motionRecipes", {}).get(clip["id"], {}))
-            if clip["id"] not in job["recipes"]:
+            if clip["id"] not in job["recipes"] and clip["id"] not in scene_owners:
                 from motion_fidelity import preflight as motion_preflight
 
                 motion_preflight(
@@ -593,20 +665,46 @@ def _execute_locked(job, output, resume):
                 recipe = copy.deepcopy(record["recipe"])
                 recipe_path = folder / "recipe.json"
                 bridge.write_json(recipe_path, recipe)
+                if record.get("report", {}).get("continuity"):
+                    bridge.write_json(folder / "continuity.json", record["report"]["continuity"])
                 bridge.emit(
                     event="progress",
                     message=f"Generating clip {i + 1}/{len(project['clips'])}: {clip['name']}",
                 )
-                result = bridge.render(str(recipe_path), folder / "result")
-                result = {"video": result["video"], "sha256": file_hash(result["video"])}
+                render_options = {}
+                if "scene" in recipe:
+                    render_options["checkpoint_directory"] = (
+                        output / "renders" / clip["id"] / "checkpoints")
+                result = bridge.render(str(recipe_path), folder / "result", **render_options)
+                result = {"video": result["video"], "sha256": file_hash(result["video"]),
+                          **{name: result[name] for name in (
+                              "usable_source_in", "usable_duration",
+                              "continuation_artifact", "scene"
+                          ) if name in result}}
                 state["completed"][key] = result
                 atomic_json(state_path, state)
+            if "scene" in record["recipe"]:
+                from wee_todd_mlx.studio_scene import validate_scene_recipe
+
+                expected_scene = validate_scene_recipe(record["recipe"])["scene"]
+                if result.get("scene") != expected_scene:
+                    raise ValueError(
+                        "Scene render result does not match its complete member ranges.")
+                clips_by_id = {member["id"]: member for member in project["clips"]}
+                for member in expected_scene["members"]:
+                    clips_by_id[member["clip_id"]].update(
+                        sourcePath=result["video"], sourceIn=member["source_in"],
+                        duration=member["duration"])
+                continue
             clip["sourcePath"] = result["video"]
             clip["sourceIn"] = 0
             info = bridge.inspect_media(result["video"], job["runtime"])
             requested_duration = clip["duration"]
             clip["duration"] = info["duration"]
-            if clip.get("extensionSource"):
+            if "usable_source_in" in result:
+                clip["sourceIn"] = result["usable_source_in"]
+                clip["duration"] = result["usable_duration"]
+            elif clip.get("extensionSource"):
                 source = bridge.inspect_media(clip["extensionSource"], job["runtime"])
                 if clip.get("extensionDirection") == "after":
                     clip["sourceIn"] = source["duration"]

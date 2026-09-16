@@ -155,7 +155,12 @@ def euler_ancestral_denoise_loop(
                     eta=eta,
                     s_noise=s_noise,
                 )
-                next_latent = _masked_clean(next_latent, state).astype(state.latent.dtype)
+                # Only ancestral re-noising needs a second conditioning blend.
+                # Applying it to deterministic Euler changes fractional guide
+                # strengths a second time and moves the state off its ODE path.
+                if eta > 0.0:
+                    next_latent = _masked_clean(next_latent, state)
+                next_latent = next_latent.astype(state.latent.dtype)
             states[modality] = replace(state, latent=next_latent)
 
         mx.async_eval(

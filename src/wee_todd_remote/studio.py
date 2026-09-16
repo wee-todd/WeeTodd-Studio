@@ -18,6 +18,23 @@ _REMOTE_SETTINGS = frozenset(
 _LTX_FRAME_CLOCK_FAMILIES = frozenset({"ltx2", "ltx2.3", "ltx23", "ltx2_3"})
 
 
+def _active_studio_loras(loras: Any) -> list[dict[str, Any]]:
+    if loras is None:
+        return []
+    if not isinstance(loras, list):
+        raise ValueError("Draw Things loras must be an array")
+    active = []
+    for item in loras:
+        if not isinstance(item, dict) or set(item) - {"modelID", "weight", "enabled"}:
+            raise ValueError("Invalid saved Draw Things LoRA fields")
+        enabled = item.get("enabled")
+        if enabled is not None and type(enabled) is not bool:
+            raise ValueError("LoRA enabled must be a boolean")
+        if enabled is not False:
+            active.append({key: value for key, value in item.items() if key != "enabled"})
+    return canonical_loras(active)
+
+
 def _object(value: Any, name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be an object")
@@ -127,7 +144,20 @@ def compose_drawthings_request(
     ]
     if len(matches) != 1:
         raise ValueError("clip_id must identify exactly one Studio clip")
-    clip = matches[0]
+    clip = copy.deepcopy(matches[0])
+    attachments = clip.get("attachments", [])
+    if not isinstance(attachments, list):
+        raise ValueError("Draw Things attachments must be an array")
+    active = []
+    for item in attachments:
+        if isinstance(item, dict) and item.get("role") == "lora":
+            enabled = item.get("enabled")
+            if enabled is not None and type(enabled) is not bool:
+                raise ValueError("LoRA enabled must be a boolean")
+            if enabled is False:
+                continue
+        active.append(item)
+    clip["attachments"] = active
     if clip.get("engine") != "drawThings":
         raise ValueError("The selected clip is not a Draw Things clip")
     selection = clip.get("drawThings")
@@ -211,7 +241,7 @@ def compose_drawthings_request(
         "negativePrompt": clip.get("negativePrompt", ""),
         "configuration": configuration,
         "inputs": inputs,
-        "loras": canonical_loras(selection.get("loras", [])),
+        "loras": _active_studio_loras(selection.get("loras", [])),
         "billingPolicy": "freeOnly",
     }
     return validate_request(result)

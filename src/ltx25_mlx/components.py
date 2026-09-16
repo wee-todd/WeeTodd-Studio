@@ -199,6 +199,91 @@ class LTX25VideoDecoder:
         self._decoder = None
         _cleanup()
 
+    def decode_scene_and_stream(
+        self,
+        video_latent,
+        output_path: str,
+        *,
+        frame_rate: float = 24.0,
+        check_interrupted=None,
+    ) -> str:
+        """Bound long convolutional scene decode without changing ordinary clips.
+
+        The default upstream heuristic counts one intermediate activation, not
+        the full working set. Use its existing temporal tiler explicitly for
+        an assembled scene longer than 121 frames, with 80-frame tiles and
+        24-frame overlap. This is one assembled timeline, not per-shot decode.
+        """
+        import numpy as np
+        from ltx_core_mlx.model.video_vae.tiling import TemporalTilingConfig, TilingConfig
+        from ltx_core_mlx.utils.ffmpeg import find_ffmpeg
+
+        from .chaining import _RawVideoEncoder
+        from .conv_vae_acceleration import bounded_conv_workspace
+
+        decoder = self.load()
+        frames = (int(video_latent.shape[2]) - 1) * 8 + 1
+        is_diffusion = decoder.__class__.__name__ == "MLXDiffusionVideoDecoder"
+        if is_diffusion or frames <= 121:
+            result = self.decode_and_stream(video_latent, output_path, frame_rate=frame_rate)
+            self.last_decode_report["scene_decode_policy"] = (
+                "existing_diffusion" if is_diffusion else "existing_short_clip"
+            )
+            return result
+        tiling = TilingConfig(
+            temporal_config=TemporalTilingConfig(tile_size_in_frames=80, tile_overlap_in_frames=24)
+        )
+        height, width = int(video_latent.shape[3]) * 32, int(video_latent.shape[4]) * 32
+        self.last_decode_report = {
+            "publication": "direct_ffmpeg_stream",
+            "decoder": "convolutional",
+            "scene_decode_policy": "bounded_temporal_scene",
+            "temporal_tiling": True,
+            "tile_frames": 80,
+            "overlap_frames": 24,
+            "input_latent_frames": int(video_latent.shape[2]),
+            "output_frames": frames,
+            "conv3d_acceleration": (
+                self._conv_acceleration.as_dict() if self._conv_acceleration is not None else None
+            ),
+        }
+        target = Path(output_path)
+        writer = _RawVideoEncoder(target, width, height, frame_rate, find_ffmpeg())
+        try:
+            with bounded_conv_workspace(self._conv_acceleration):
+                for chunk in decoder.tiled_decode(video_latent, tiling):
+                    if tuple(chunk.shape[:2]) != (1, 3) or tuple(chunk.shape[3:]) != (
+                        height,
+                        width,
+                    ):
+                        raise ValueError(
+                            "LTX 2.5 scene decoder returned an invalid RGB chunk shape."
+                        )
+                    for index in range(int(chunk.shape[2])):
+                        if check_interrupted is not None:
+                            check_interrupted()
+                        if writer.frames >= frames:
+                            raise RuntimeError(f"LTX 2.5 scene decoder exceeded {frames} frames.")
+                        frame = mx.clip(chunk[0, :, index], -1.0, 1.0)
+                        frame = mx.contiguous(
+                            ((frame + 1.0) * 127.5).astype(mx.uint8).transpose(1, 2, 0)
+                        )
+                        mx.eval(frame)
+                        writer.write(np.asarray(frame)[None])
+                    del chunk
+                    mx.clear_cache()
+            if writer.frames != frames:
+                raise RuntimeError(
+                    f"LTX 2.5 scene decoder produced {writer.frames} frames; expected {frames}."
+                )
+            writer.close()
+        except BaseException:
+            writer.abort()
+            target.unlink(missing_ok=True)
+            self.free()
+            raise
+        return output_path
+
     def decode_and_stream(
         self,
         video_latent,

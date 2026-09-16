@@ -4,14 +4,17 @@ import StudioCore
 @MainActor extension StudioStore {
   func compatibleLoRAs(for engine: Engine) -> [MediaAsset] {
     var seen = Set<String>()
-    return allAssets.filter {
-      $0.kind == .lora && $0.loraModel?.supports(engine) == true
+    // Reimported library metadata wins; existing clip-owned snapshots remain untouched.
+    let candidates = Array(globalAssets.reversed()) + project.assets
+    return candidates.filter {
+      $0.kind == .lora
         && ($0.scope != .clip || $0.owner == selectedClipID)
         && seen.insert(LoRAMember(asset: $0).fileKey).inserted
+        && $0.loraModel?.supports(engine) == true
     }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
   }
   func loadLoRAGroups() {
-    let file = Self.supportDirectory.appendingPathComponent("lora-groups.json")
+    let file = dataDirectory.appendingPathComponent("lora-groups.json")
     guard FileManager.default.fileExists(atPath: file.path) else { return }
     do {
       loraGroups = try JSONDecoder().decode([LoRAGroup].self, from: Data(contentsOf: file))
@@ -36,19 +39,21 @@ import StudioCore
   }
   private func writeLoRAGroups(_ groups: [LoRAGroup]) throws {
     try JSONEncoder().encode(groups).write(
-      to: Self.supportDirectory.appendingPathComponent("lora-groups.json"), options: .atomic)
+      to: dataDirectory.appendingPathComponent("lora-groups.json"), options: .atomic)
     loraGroups = groups
   }
-  func applyLoRAGroup(_ group: LoRAGroup) {
+  func applyLoRAGroup(_ group: LoRAGroup, mode: LoRAGroupApplicationMode = .add) {
     do {
       try group.validate()
       guard let clip = selectedClip, group.supports(clip.engine) else {
         throw StudioError.invalid("Select a clip matching this group's model.")
       }
-      applyLoRAMembers(group.members, groupName: group.name)
+      applyLoRAMembers(group.members, groupName: group.name, mode: mode)
     } catch { self.error = error.localizedDescription }
   }
-  func applyLoRAMembers(_ members: [LoRAMember], groupName: String? = nil) {
+  func applyLoRAMembers(
+    _ members: [LoRAMember], groupName: String? = nil, mode: LoRAGroupApplicationMode = .add
+  ) {
     guard let clip = selectedClip else {
       error = "Select a clip first."
       return
@@ -58,16 +63,22 @@ import StudioCore
         clip.attachments.filter { $0.role == .lora }.compactMap { a in
           allAssets.first { $0.id == a.assetID }.map { LoRAMember(asset: $0).fileKey }
         })
-      guard existing.isDisjoint(with: members.map(\.fileKey)) else {
+      guard mode == .replace || existing.isDisjoint(with: members.map(\.fileKey)) else {
         throw StudioError.invalid(
-          "This clip already uses a LoRA in this selection. Remove its existing entry before applying it again."
+          "This clip already uses a LoRA in this selection. Choose Replace current stack or remove its existing entry."
         )
       }
       var updated = project
-      try updated.applyLoRAs(members, to: clip.id, groupName: groupName)
+      try updated.applyLoRAs(members, to: clip.id, groupName: groupName, mode: mode)
       change { $0 = updated }
       notice = "Applied \(groupName ?? members.first?.asset.name ?? "LoRAs") to \(clip.name)."
     } catch { self.error = error.localizedDescription }
+  }
+  func currentLoRAGroup() -> LoRAGroup? {
+    guard let clip = selectedClip else { return nil }
+    do {
+      return try project.loraGroupSnapshot(for: clip.id, name: clip.name + " LoRAs", additionalAssets: globalAssets)
+    } catch { self.error = error.localizedDescription; return nil }
   }
   func setLoRAModel(_ model: LoRAModel, for asset: MediaAsset) {
     if let index = globalAssets.firstIndex(where: { $0.id == asset.id }) {
@@ -81,7 +92,7 @@ import StudioCore
       }
     }
   }
-  func chooseLoRAImports(model: LoRAModel) {
+  func chooseLoRAImports(model: LoRAModel, profile: String = "standard", layout: String = "auto", adalnInputGrid: String? = nil) {
     let panel = NSOpenPanel()
     panel.title = "Link \(model.label) LoRAs"
     panel.message =
@@ -90,6 +101,9 @@ import StudioCore
     panel.canChooseDirectories = false
     panel.allowedContentTypes = [.init(filenameExtension: "safetensors") ?? .data]
     guard panel.runModal() == .OK else { return }
-    Task { await importURLs(panel.urls, scope: .global, loraModel: model) }
+    Task { await importURLs(panel.urls, scope: .global, loraModel: model,
+      loraProfile: model == .h3 ? profile : nil,
+      loraLayout: model == .h3 ? layout : nil,
+      loraAdalnInputGrid: model == .h3 ? adalnInputGrid : nil) }
   }
 }

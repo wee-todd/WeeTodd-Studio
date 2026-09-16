@@ -123,6 +123,30 @@ def render_h3(recipe, target):
     )
     config = H3GenerationConfig(**recipe["config"])
     config.validate()
+    continuation_plan = None
+    continuation_report = None
+    if "continuation" in recipe:
+        from wee_todd_mlx.h3_continuation_artifact import prepare_continuation
+        from wee_todd_nodes.continuation import validate_continuation_for_sample
+
+        continuation_plan = prepare_continuation(recipe, task=contract["task"])
+        continuation_report = continuation_plan["request"]
+        identity = continuation_plan["identity"]
+        components = replace(
+            components,
+            checkpoint=identity["checkpoint"],
+            **{name: value["path"] for name, value in identity["components"].items()},
+        )
+        if continuation_plan["context"] is not None:
+            config = replace(
+                config, duration_seconds=continuation_report["sample_duration_seconds"]
+            )
+            config.validate()
+            validate_continuation_for_sample(
+                continuation_plan["context"], H3TransformerSpec.from_components(components), config
+            )
+        if continuation_report["save_context"] and target.with_suffix(".continuation").exists():
+            raise FileExistsError("Continuation output already exists; choose a new output take")
     block_residency = recipe.get("block_residency", "checkpoint_default")
     config.validate_paging(components.resolved_paths()["transformer"], block_residency)
     preflight_components(
@@ -187,7 +211,7 @@ def render_h3(recipe, target):
         prepared = None
         images = None
         anchors = None
-        continuation = None
+        continuation = continuation_plan["context"] if continuation_plan else None
         fun_control_spec = None
         fun_control_latent = None
         extension_source = None
@@ -277,7 +301,8 @@ def render_h3(recipe, target):
             from minimax_h3_mlx.packing import prepare_keyframe_image
 
             ordered = sorted(contract["inputs"], key=lambda item: item["frame_index"])
-            anchors = tuple(item["frame_index"] for item in ordered)
+            overlap = continuation_report["overlap_frames"] if continuation_report else 0
+            anchors = tuple(item["frame_index"] + overlap for item in ordered)
             images = []
             for item in ordered:
                 with Image.open(item["path"]) as source:
@@ -371,6 +396,23 @@ def render_h3(recipe, target):
         # Enforce the stage boundary even for a resident sampling policy.
         TRANSFORMER_RUNTIME.unload()
         sampling_finished = True
+        publication = dict(recipe.get("publication", {}))
+        if continuation_report:
+            if latents.num_frames != continuation_report["generated_frames"]:
+                raise ValueError("H3 sampler returned a different continuation frame window")
+            publication["metadata_updates"] = lambda: {"continuation": continuation_report}
+            if continuation_report["overlap_frames"]:
+                from wee_todd_mlx.h3_continuation_artifact import (
+                    ContinuationAudioDecoder,
+                    ContinuationVideoDecoder,
+                )
+
+                publication["video_cache"] = ContinuationVideoDecoder(
+                    VIDEO_VAE_RUNTIME, continuation_report
+                )
+                publication["audio_cache"] = ContinuationAudioDecoder(
+                    AUDIO_VAE_RUNTIME, continuation_report
+                )
         publish_target = (
             target if extension_source is None else target.with_name("generated-window.mp4")
         )
@@ -378,13 +420,38 @@ def render_h3(recipe, target):
             publish_target,
             components,
             latents,
-            **recipe.get("publication", {}),
+            **publication,
             ffmpeg_path=recipe["ffmpeg"],
             prepare_video_stage=lambda: prepare("video_vae"),
             prepare_audio_stage=lambda: prepare("audio_vae"),
         )
         extension_metadata = None
         video_path = result.video_path
+        continuation_artifact = None
+        if continuation_report and continuation_report["save_context"]:
+            from wee_todd_mlx.h3_continuation_artifact import save_continuation_artifact
+            from wee_todd_nodes.continuation import continuation_context_from_latents
+
+            context = continuation_context_from_latents(
+                latents, continuation_report["context_frames"]
+            )
+            with Path(result.video_path).open("rb") as stream:
+                movie_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+            continuation_artifact = save_continuation_artifact(
+                context,
+                Path(result.video_path).with_suffix(".continuation"),
+                identity=continuation_plan["identity"],
+                provenance={
+                    "output_take_id": continuation_report.get("output_take_id"),
+                    "video": str(result.video_path),
+                    "video_sha256": movie_sha256,
+                    "source_manifest_sha256": continuation_report.get("source_manifest_sha256"),
+                    "generated_frames": continuation_report["generated_frames"],
+                    "published_frames": continuation_report["published_frames"],
+                    "overlap_frames": continuation_report["overlap_frames"],
+                    "tail_trim_frames": continuation_report["tail_trim_frames"],
+                },
+            )
         if extension_source is not None:
             assert extension_source is not None and extension_report is not None
             assemble_h3_extension(
@@ -436,6 +503,7 @@ def render_h3(recipe, target):
             },
             "conditioning": task_report,
             "consumed_input_ids": task_report["input_ids"],
+            **({"continuation_artifact": continuation_artifact} if continuation_report else {}),
             "runtime_loaded": [runtime.loaded for runtime in runtimes],
         }
     finally:
@@ -443,7 +511,30 @@ def render_h3(recipe, target):
             runtime.unload()
 
 
-def render_ltx(recipe, target):
+
+def publish_scene_movie(source, target, *, frames, fps, ffmpeg):
+    """Trim the native extra frame/audio and atomically publish the delivered scene."""
+    import os
+    import subprocess
+
+    target = Path(target)
+    if target.exists():
+        raise ValueError("Scene output already exists; choose a new output location.")
+    duration = frames / fps
+    with tempfile.TemporaryDirectory(prefix=".scene-publish-", dir=target.parent) as work:
+        temporary = Path(work) / "scene.mp4"
+        subprocess.run([
+            ffmpeg, "-v", "error", "-i", str(source), "-filter_complex",
+            f"[0:v:0]trim=end_frame={frames},setpts=PTS-STARTPTS[v];"
+            f"[0:a:0]atrim=end={duration:.12f},asetpts=PTS-STARTPTS[a]",
+            "-map", "[v]", "-map", "[a]", "-r", str(fps), "-fps_mode", "cfr",
+            "-c:v", "libx264", "-crf", "15", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-t", f"{duration:.12f}", "-movflags", "+faststart",
+            "-n", str(temporary),
+        ], check=True)
+        os.replace(temporary, target)
+
+def render_ltx(recipe, target, *, checkpoint_directory=None):
     from wee_todd_mlx.progress import render_progress
     if recipe.get("loras") and (
         recipe["engine"] == "ltx25" or not isinstance(recipe["loras"], dict)
@@ -452,12 +543,14 @@ def render_ltx(recipe, target):
             "Invalid adapter declaration; refusing to render without requested adapters"
         )
     from wee_todd_mlx.conditioning_media import inspect_media, ltx_conditioning_kwargs
+    from wee_todd_mlx.studio_scene import validate_scene_recipe
     from wee_todd_mlx.task_conditioning import (
         apply_ltx25_msr_prompt_guide,
         validate_conditioning,
         validate_ltx25_control_families,
     )
 
+    scene_report = validate_scene_recipe(recipe)
     task_report = validate_conditioning(recipe)
     contract = task_report["contract"]
     media_report = inspect_media(recipe, contract)
@@ -518,17 +611,58 @@ def render_ltx(recipe, target):
         ] == "extension"
         generation_target = target.with_name("generated-window.mp4") if extension else target
         render_progress("encoding", "Loading models and encoding conditioning")
-        result = RUNTIME.generate_to_file(
-            spec,
-            config,
-            effective_prompt,
-            generation_target,
-            unload_after=True,
-            step_callback=lambda done, total: render_progress(
-                "sampling", "Sampling", completed=done, total=total
-            ),
-            **conditioning_kwargs,
-        )
+        if scene_report:
+            from wee_todd_mlx.conditioning_media import media_binary
+            from wee_todd_mlx.studio_scene import scene_window_prompts
+
+            images = None
+            if conditioning_kwargs.get("image_inputs"):
+                from ltx_pipelines_mlx.utils.args import ImageConditioningInput
+
+                images = [ImageConditioningInput(path=item["path"],
+                                                 frame_idx=item["frame_index"],
+                                                 strength=item["strength"])
+                          for item in conditioning_kwargs["image_inputs"]]
+            native_target = target.with_name("scene-native.mp4")
+
+            def scene_progress(done, total):
+                if done == total:
+                    render_progress("decoding", "Decoding the complete scene and shared audio")
+                else:
+                    render_progress("sampling", "Sampling continuous scene",
+                                    completed=done, total=total)
+
+            result = RUNTIME.generate_chain_to_file(
+                spec, config, scene_window_prompts(recipe), native_target,
+                window_count=len(recipe["scene"]["segments"]),
+                overlap_frames=recipe["scene"]["overlap_frames"],
+                boundary_image_policy=recipe["scene"].get("boundary_image_policy", "strict"),
+                window_frame_counts=scene_report["plan"]["window_frame_counts"],
+                images=images, seeds=[item["seed"] for item in recipe["scene"]["segments"]],
+                checkpoint_dir=checkpoint_directory or target.parent / "checkpoints",
+                unload_after=True,
+                step_callback=scene_progress,
+            )
+            frames = scene_report["plan"]["total_frames"] - 1
+            render_progress("publishing", "Trimming scene to its delivered timeline")
+            publish_scene_movie(Path(result["video_path"]), target, frames=frames,
+                                fps=config.frame_rate, ffmpeg=media_binary(recipe, "ffmpeg"))
+            result.update(native_video_path=result["video_path"], video_path=str(target),
+                          delivered_frames=frames,
+                          delivered_duration_seconds=frames / config.frame_rate,
+                          publication_mode=scene_report["scene"]["publication_mode"])
+        else:
+            result = RUNTIME.generate_to_file(
+                spec,
+                config,
+                effective_prompt,
+                generation_target,
+                unload_after=True,
+                step_callback=lambda done, total: render_progress(
+                    "sampling", "Sampling", completed=done, total=total
+                ),
+                **conditioning_kwargs,
+            )
         if extension:
             source_report = media_report[0]
             context_frames = (
@@ -562,6 +696,7 @@ def render_ltx(recipe, target):
             result["audio_policy"] = contract["audio_policy"]
         return {
             "video": result["video_path"],
+            **({"scene": scene_report["scene"]} if scene_report else {}),
             "metadata": result,
             "conditioning": task_report,
             "consumed_input_ids": task_report["input_ids"],
@@ -583,6 +718,8 @@ def main():
     parser.add_argument("--output-directory", type=Path, required=True)
     parser.add_argument("--model-library", type=Path, help="Registry for local asset references")
     parser.add_argument("--preflight-only", action="store_true", help="Validate without rendering")
+    parser.add_argument("--checkpoint-directory", type=Path,
+                        help="Persistent native scene windows for an exported job resume")
     args = parser.parse_args()
     recipe = json.loads(args.recipe.read_text())
     if recipe.get("format") != "weetodd-headless-v2" or recipe.get("engine") not in {
@@ -620,6 +757,16 @@ def main():
             json.dumps(record["preflight"]["conditioning"]["contract"], indent=2) + "\n"
         )
         if args.preflight_only:
+            if "continuation" in recipe:
+                from wee_todd_mlx.h3_continuation_artifact import prepare_continuation
+
+                prepared = prepare_continuation(recipe, load_arrays=False)
+                record["preflight"]["continuation"] = {
+                    **record["preflight"].get("continuation", {}),
+                    "request": prepared["request"],
+                    "identity": prepared["identity"],
+                    "source": prepared["source"],
+                }
             record.update(
                 status="preflight_passed",
                 seconds=time.perf_counter() - started,
@@ -627,9 +774,11 @@ def main():
             )
             print(json.dumps({"status": record["status"], "output": str(output)}), flush=True)
             return
-        record.update(
-            (render_h3 if recipe["engine"] == "h3" else render_ltx)(recipe, output / "render.mp4")
-        )
+        if recipe["engine"] == "h3":
+            record.update(render_h3(recipe, output / "render.mp4"))
+        else:
+            record.update(render_ltx(recipe, output / "render.mp4",
+                                     checkpoint_directory=args.checkpoint_directory))
         record["seconds"] = time.perf_counter() - started
         if any(record["runtime_loaded"]):
             raise RuntimeError("A weighted runtime was not released")

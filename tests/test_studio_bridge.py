@@ -378,6 +378,27 @@ def test_describe_and_compose_share_selection_and_recipe_fingerprint(tmp_path):
     assert '/models/transformer' in described['sourcePaths']
 
 
+def test_h3_keyframe_alignment_prefix_preserves_complete_native_prompt(tmp_path):
+    request = generation_request(tmp_path)
+    clip = request['project']['clips'][0]
+    clip['generationSelection']['task'] = 'fflf'
+    for role in ('first', 'last'):
+        image = tmp_path / f'{role}.png'
+        image.touch()
+        request['project']['assets'].append(
+            {'id': role, 'kind': 'image', 'path': str(image), 'name': role})
+        clip['attachments'].append({'id': role, 'assetID': role, 'role': role})
+    clip['prompt'] = (
+        'Picture 1 is fully referenced at 0.00 seconds. '
+        'Picture 2 is fully referenced at 5.125 seconds.\n'
+        'integrated_multimodal_description: [Shot 1] The bird unfolds its wings.\n'
+        'overall_soundscape: Gentle wingbeats.\n'
+        'non_diegetic_music: N/A'
+    )
+    recipe, _ = bridge.compose_recipe(request)
+    assert recipe['prompt'] == clip['prompt']
+
+
 def test_catalog_descriptor_and_repeated_composition_track_recipe_content(tmp_path):
     request = generation_request(tmp_path)
     catalog = bridge.profiles(tmp_path)
@@ -398,3 +419,43 @@ def test_describe_final_fingerprint_changes_with_prompt_and_seed(tmp_path):
     assert changed_prompt != original
     request['project']['clips'][0]['seed'] = 77
     assert bridge.describe_generation(request)['fingerprint'] != changed_prompt
+
+
+def test_describe_incomplete_conditioning_keeps_sampling_controls(tmp_path):
+    request = generation_request(tmp_path)
+    clip = request['project']['clips'][0]
+    clip['generationSelection']['task'] = 'fflf'
+    described = bridge.describe_generation(request)
+    assert described['generation']['controls']['evaluations'] == 12
+    assert 'Last frame image' in ' '.join(described['readinessErrors'])
+    assert described['fingerprint'] == ''
+    with pytest.raises(ValueError, match='Last frame image'):
+        bridge.compose_recipe(request)
+
+
+def test_describe_missing_prompt_retains_controls_and_reports_readiness(tmp_path):
+    request = generation_request(tmp_path)
+    request['project']['clips'][0]['prompt'] = ''
+    described = bridge.describe_generation(request)
+    assert described['generation']['controls']['evaluations'] == 12
+    assert any('prompt' in error for error in described['readinessErrors'])
+
+
+def test_disabled_missing_lora_is_ignored_by_description_and_composition(tmp_path):
+    request = generation_request(tmp_path)
+    request['project']['clips'][0]['attachments'] = [
+        {'id': 'disabled', 'assetID': 'missing', 'role': 'lora', 'enabled': False}
+    ]
+    described = bridge.describe_generation(request)
+    recipe, _ = bridge.compose_recipe(request)
+    assert not described['readinessErrors']
+    assert not recipe.get('loras')
+
+
+def test_disabled_lora_flag_must_be_boolean(tmp_path):
+    request = generation_request(tmp_path)
+    request['project']['clips'][0]['attachments'] = [
+        {'id': 'disabled', 'assetID': 'missing', 'role': 'lora', 'enabled': 'false'}
+    ]
+    with pytest.raises(ValueError, match='enabled.*boolean'):
+        bridge.compose_recipe(request)

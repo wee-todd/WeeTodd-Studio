@@ -1,5 +1,157 @@
 # WeeTodd Studio implementation status
 
+Release validation 2026-09-16: the combined core, Studio, workflow and remote profiles passed
+2,815 Python tests, 308 Studio Swift tests (two optional skips) and 41 Draw Things transport Swift
+tests, plus lint, public-document links, the generated node catalog and portable workflow checks.
+The README now introduces the shared continuity controls alongside setup; the Studio guide adds
+model-switch, saved-context and boundary-flash troubleshooting. The release app was built and its
+H3/LTX 2.5 connection menus verified during the continuity-naming check below. This final audit did
+not rerun inference, full checkpoint parity or low-memory hardware qualification.
+
+Continuity naming 2026-09-16: the native connection picker uses **Continue scene** for H3,
+LTX 2.3 and LTX 2.5. Help text distinguishes continuation from an accepted take from LTX 2.5's
+grouped render. LTX 2.5's separate source-video extension is **Extend previous take**. Experimental
+status remains in the help text. Saved mode IDs, render routing and model-switch behavior are
+unchanged; this is a presentation update, not cross-model continuation support.
+Core/Studio validation passed 2,149 Python tests and 308 Swift tests (two optional skips), plus
+release packaging. The rebuilt app's H3 and LTX 2.5 menus both verified **Continue scene**;
+project settings were preserved. No inference or full checkpoint parity was run for the rename.
+
+Model-switch scene repair 2026-09-16: changing a continuous-scene member to H3, LTX 2.3 or
+Draw Things now separates that shot in the same undoable edit. Remaining LTX 2.5 groups retain
+their effective shared sound and boundary-image policy. Images, takes and timeline ranges stay
+intact. Saved incompatible native scene connections offer **Separate this shot**, and the picker
+explicitly identifies the LTX 2.5-only scene route. Ordinary per-clip continuity is unchanged.
+Regression tests cover every shot position, provider restoration, Undo/Redo, saved invalid groups
+and unrelated parameter edits. Core/Studio validation passed 2,149 Python tests and 308 Swift tests
+(two optional skips), plus lint/docs/catalog/workflows and release packaging. Live Studio repair
+cleared the H3 shot's error and retained the preceding five-shot LTX scene. No inference was run
+for this UI/state fix; native sampling and model support are unchanged.
+
+LTX 2.5 strobe correction 2026-09-16: the dark pulses at native scene joins were already
+present inside sampled continuation windows. Two interacting causes were reproduced: reusing a
+sampled terminal video latent as interior history, and applying overlap images again alongside the
+history they had already influenced. Both sampling stages now reuse interior history and regenerate
+the terminal overlap slot. Studio's default **Automatic** boundary guidance applies each image once
+at its requested strength; later windows inherit its influence through motion history. **Strict**
+retains repeated overlap guidance. Preparation exposes image ownership without changing attachments,
+timestamps or requested strengths. A separate fractional-mask error in noise-free Euler is also fixed.
+
+A complete rerender of the original six-shot scene retained prompts, seeds, all 12 images and native
+8+3 sampling. The five original join dips measured 6.91%, 10.39%, 29.72%, 32.80% and 29.02% below
+both surrounding brightness medians; all five were absent by that metric after the correction.
+Dense frame inspection confirmed removal of the dark pulses without added timeline crossfades or
+output brightness correction. Natural motion and gradual exposure variation remain. Export fully
+decoded at 30.000 seconds, 720 frames, 24 fps, 768×448 with synchronized stereo 48 kHz audio; the
+runtime unloaded. Generation took 700.66 seconds (11:41) with concurrent validation/build activity,
+so this is not an isolated speed benchmark or a universal continuity guarantee.
+
+Validation passed 2,149 Python tests plus lint/docs/catalog/workflows and 303 Swift tests (two
+optional skips). Release packaging passed and the updated app verified all boundary routing during
+scene preparation. Existing user takes and crossfade edits were preserved. Full upstream checkpoint
+parity, low-memory hardware and combined MSR scene generation remain unqualified.
+
+Continuous scenes 2026-09-16: Studio now sends a connected group of two to six compatible native
+LTX 2.5 shots (up to 30 seconds) through the existing audiovisual latent chain. Variable windows,
+per-shot seeds, global first/last/timed images, shared sound, validated window checkpoints, grouped
+job export and atomic whole-scene review are implemented. Frame-match conversion can freeze the
+previous take's visible ending as an explicit image. Changed documents or inputs cannot accept a
+stale candidate; retries preserve earlier candidate files. Preparation flags distinct image files
+on consecutive boundary frames. MSR/reference, audio drivers and control adapters remain excluded
+from this combined route, including control adapters hidden in ordinary LoRA slots.
+
+A front-end Rill qualification rendered six five-second shots as one scene and accepted all six
+source ranges together. Export fully decoded: 30.000 seconds, 720 frames at 24 fps, 768×448,
+stereo 48 kHz audio. Models unloaded after publication. The initial full generation took 12:57,
+versus 8:55 summed across the earlier independent frame-matched clips; overlapping sampling makes
+these different workloads. Story and identity persisted, but framing/appearance changes remain at
+several joins. Inspection found those changes already in incoming sampled windows, with distinct
+full-strength LF/FF images one frame apart. The controlled conditioning ablations and strobe correction are recorded above. This initial
+result did not establish seamless output or music suppression.
+
+That run exposed an unbounded full-volume convolutional-VAE decode: peak MLX allocation was
+29.43 GB (27.41 GiB). Staged long scenes now use the existing temporal decoder with bounded
+80-frame tiles and 24-frame overlap, then release it before audio decoding. A real decode-only
+check using the same saved latents took 102.46 seconds and peaked at 6.87 GB (6.40 GiB) of MLX
+allocation. It retained all 720 delivered frames and exact audio duration. Mean frame SSIM against
+the full-volume output was 0.9873, with final-frame SSIM 0.9811: visually similar, not bit-identical.
+This measures decode memory, not a new complete-generation peak. Ordinary short-clip and diffusion
+VAE paths retain their existing behavior. Low-memory hardware and combined MSR scene generation
+have not been qualified. Audio timing is verified; listening feedback remains pending.
+
+Final core/Studio validation passed 2,113 Python tests and 302 Swift tests (two optional skips),
+plus lint, documentation, catalog and workflow checks. Release packaging passed after saving and
+quitting the app. The rebuilt app reopened the saved scene and verified the whole-scene duration
+and boundary-image warnings during preparation. Full upstream checkpoint parity was not run.
+
+Fix 2026-09-16: full-movie preview now compares the captured project value and document session,
+not independently encoded JSON bytes. Unordered JSON keys could falsely report an edit in an
+unchanged six-shot movie. Regression checks preserve rejection of real edits and reopened documents.
+Validation passed 274 Swift tests (two optional skips), 55 Python bridge/packaging/README checks,
+catalog and release packaging. Live Studio preview of the complete 30-second LTX 2.5 movie passed.
+
+UI and render qualification 2026-09-16: generation now starts with **WeeTodd (local)** or
+**Draw Things**. Local users choose H3, LTX 2.3 or LTX 2.5 and adjust task, sampling and LoRA
+controls directly. Compatible components are selected automatically; custom recipes and execution
+presets remain in Advanced generation. Returning to a provider restores its saved model settings.
+Prompt review identifies the effective continuity source, excludes disabled LoRAs and distinguishes
+media inputs from active adapters. LTX motion continuation is labelled as video extension.
+
+A Studio-front-end exercise recreated the six-shot Rill movie with local H3 Q8 FL2VA, the
+LightX2V Turbo adapter at strength 1, four evaluations, first/last frames and 22-frame synchronized
+motion context. The exported movie decoded successfully: 30.000 seconds, 720 frames at 24 fps,
+768×448, stereo 48 kHz audio. Each weighted stage unloaded after generation. Visual review found
+recognizable action and scene continuity, with some mid-shot exposure variation still visible.
+
+On the tested 256 GiB M3 Ultra, the first shot took 8:59 with lower-memory paging and 4:06 with
+larger-workspace paging; sampling took 7:23 and 3:15 respectively. The larger-workspace take was
+not byte-identical (whole-video SSIM 0.9741). Other continuing shots took 5:19–5:58. These are
+single-scene observations, not Draw Things parity or a low-memory hardware qualification.
+Total time also benefited from a new bounded model-checksum cache; warm continuation identity
+verification took 0.35 seconds and matched the original full-hash identity. Payloads and manifests
+remain fully checked. H3 prompt assembly now preserves native prompts with leading Picture
+alignment clauses and shifts continuation anchors into the sampled window. Accepted frame-rounded
+durations no longer immediately mark the finished take stale; document/result races remain guarded.
+
+LTX 2.5 comparison on the same Approach shot completed through Studio with Q8 distilled 8+3
+evaluations and no H3 adapter: frame matching plus last-frame guidance took 1:38; motion/audio
+continuation took 1:59. The latter published 169 frames (49 source + 120 new), and Studio selected
+the new five seconds with source-in 49/24 seconds. Both outputs included stereo 48 kHz audio and
+decoded without errors. The motion take retained the scene but crouched more than requested.
+These comparisons used the accepted H3 predecessor; they do not qualify LTX-to-LTX movie chaining.
+Reference + endpoints + motion remains unsupported as one combined route. Final validation passed
+271 Swift tests (two optional skips); core Python checks passed 333 tests, focused Studio/packaging
+checks passed 117 tests, and cache/continuation checks passed 62 tests. Checkpoint parity and
+physical low-memory hardware suites were not run.
+
+Feature 2026-09-16: familiar native generation controls and LoRA stack parity. Native model,
+render size and seed are directly accessible, and missing conditioning no longer hides valid
+sampling controls. Native and Draw Things LoRA controls retain disabled strengths and expose
+explicit Add/Replace group actions. Disabled entries are excluded from renderer requests.
+Native H3 Turbo import records profile/layout/auxiliary-grid metadata and resolves a supported
+four-evaluation schedule while retaining the user's standard step override for restoration.
+Switching backends retains each native engine's selected model and sampling settings. An opt-in
+headless H3 continuation contract saves bounded synchronized latent tails with verified provenance
+and trims the repeated video/audio prefix. Studio now exposes native **Clip Continuity**: independent,
+visible-frame matching, and experimental motion/audio continuation. H3 uses saved native context;
+LTX 2.3/2.5 use their compatible source-tail extension adapters. Source take/trim changes invalidate
+preparation and late results remain inactive versions. Export retries preserve accepted source
+snapshots. Known text-only H3 and LTX model/task limitations are filtered before selection.
+Automatic non-Custom model selection prefers matching tasks and compatible distilled LTX profiles.
+
+Earlier continuity validation: combined core/Studio/workflows/remote checks passed 2,677 Python tests,
+Studio and Draw Things Swift suites, lint, workflow and catalog checks. Installed-model preflight
+passed for H3 four-step Turbo context saving and both frame/motion modes on LTX 2.3 and LTX 2.5.
+Live Studio inspection verified context saving, successful preflight and preservation of the movie.
+That initial increment did not include native generations; the subsequent exercise is recorded above.
+
+Earlier controls validation: combined core/Studio/remote checks passed 2,285 Python tests and 292 Swift tests
+(two optional skips), plus lint, workflow and catalog checks. Final continuation preflight changes
+also passed focused regression checks. Release packaging and isolated live UI checks covered four-step
+Turbo, restoration of standard Steps, retained strengths, group save/replacement, and controls for
+incomplete first/last-frame inputs. Native Turbo render quality, continuity seams, actual performance
+and memory fit were not measured in this increment.
+
 Fix 2026-09-16: reimporting a reclassified Director subject now matches its stable workflow source
 and item ID, including older kind-bearing keys and aliases retained by object reuse. Existing
 project UUIDs, reviewed edits and references are preserved. Ambiguous legacy duplicates stop the

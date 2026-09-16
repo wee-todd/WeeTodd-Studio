@@ -1,3 +1,4 @@
+import AppKit
 import StudioCore
 import SwiftUI
 
@@ -6,6 +7,9 @@ struct LoRALibrary: View {
   @Environment(\.dismiss) private var dismiss
   @State private var browsingEngine: Engine = .ltx25
   @State private var importModel: LoRAModel = .ltx25
+  @State private var importProfile = "standard"
+  @State private var importLayout = "auto"
+  @State private var importGrid: String?
   @State private var draft: LoRAGroup?
   @State private var search = ""
   var engine: Engine { store.selectedClip?.engine ?? browsingEngine }
@@ -67,8 +71,39 @@ struct LoRALibrary: View {
         Picker("Trained model", selection: $importModel) {
           ForEach(LoRAModel.allCases.filter { $0.supports(engine) }) { Text($0.label).tag($0) }
         }
-        Button("Import…") { store.chooseLoRAImports(model: importModel) }
+        Button("Import…") {
+          store.chooseLoRAImports(model: importModel,
+            profile: importModel == .h3 ? importProfile : "standard",
+            layout: importModel == .h3 ? importLayout : "auto",
+            adalnInputGrid: importModel == .h3 && importProfile == "turbo" ? importGrid : nil)
+        }
       }.controlSize(.small)
+      if importModel == .h3 {
+        Picker("Adapter", selection: $importProfile) {
+          Text("Standard").tag("standard")
+          Text("H3 Turbo (4 steps)").tag("turbo")
+        }
+        if importProfile == "turbo" {
+          Text("Turbo requires its four-step schedule. Validation checks task compatibility and any auxiliary weights before generation.")
+            .font(.caption).foregroundStyle(.secondary)
+          DisclosureGroup("Adapter file details") {
+            Picker("Tensor layout", selection: $importLayout) {
+              Text("Auto").tag("auto")
+              Text("Native interleaved").tag("native_interleaved")
+              Text("Contiguous QKV").tag("contiguous_qkv")
+            }
+            HStack {
+              Button("Link AdaLN grid…") { chooseImportGrid() }
+              if let importGrid {
+                Text(URL(fileURLWithPath: importGrid).lastPathComponent).lineLimit(1).help(importGrid)
+                Button("Clear") { self.importGrid = nil }
+              }
+            }
+            Text("Link the adapter's AdaLN input grid when its training format requires a separate file.")
+              .font(.caption2).foregroundStyle(.secondary)
+          }.controlSize(.small)
+        }
+      }
       TextField("Search LoRAs", text: $search).textFieldStyle(.roundedBorder)
       ScrollView {
         VStack(alignment: .leading, spacing: 10) {
@@ -81,8 +116,11 @@ struct LoRALibrary: View {
               Text(asset.name).font(.subheadline.bold()).lineLimit(2)
               Text(asset.loraModel?.label ?? "Choose trained model").font(.caption).foregroundStyle(
                 .secondary)
+              if asset.loraProfile == "turbo" {
+                Text("H3 Turbo · requires 4 steps").font(.caption).foregroundStyle(.orange)
+              }
               HStack {
-                Button("Apply to clip") { store.applyLoRAMembers([LoRAMember(asset: asset)]) }
+                Button("Add to current stack") { store.applyLoRAMembers([LoRAMember(asset: asset)]) }
                   .disabled(store.selectedClip == nil)
                 if draft != nil {
                   Button("Add to group") { draft?.members.append(LoRAMember(asset: asset)) }
@@ -136,6 +174,8 @@ struct LoRALibrary: View {
         Button("New group") { draft = LoRAGroup(name: "New group", engine: engine) }.disabled(
           draft != nil)
       }
+      Button("Save current stack as group") { draft = store.currentLoRAGroup() }
+        .disabled(draft != nil || store.selectedClip?.attachments.contains { $0.role == .lora } != true)
       if let value = draft {
         TextField(
           "Group name", text: Binding(get: { draft?.name ?? "" }, set: { draft?.name = $0 })
@@ -148,7 +188,13 @@ struct LoRALibrary: View {
             ForEach(value.members) { member in
               VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                  Text(member.asset.name).lineLimit(2)
+                  Toggle(member.asset.name, isOn: Binding(get: {
+                    draft?.members.first { $0.id == member.id }?.isEnabled ?? member.isEnabled
+                  }, set: { enabled in
+                    if let index = draft?.members.firstIndex(where: { $0.id == member.id }) {
+                      draft?.members[index].enabled = enabled
+                    }
+                  })).lineLimit(2)
                   Spacer()
                   Button {
                     draft?.members.removeAll { $0.id == member.id }
@@ -181,17 +227,23 @@ struct LoRALibrary: View {
       } else {
         ScrollView {
           VStack(alignment: .leading, spacing: 12) {
-            ForEach(store.loraGroups.filter { $0.engine == engine }) { group in
+            ForEach(store.loraGroups.filter {
+              $0.engine == engine && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
+                || $0.members.contains { $0.asset.name.localizedCaseInsensitiveContains(search) })
+            }) { group in
               VStack(alignment: .leading, spacing: 6) {
                 Text(group.name).font(.subheadline.bold())
                 Text(
-                  group.members.map { "\($0.asset.name) · \(String(format: "%.2f", $0.strength))" }
+                  group.members.map { "\($0.asset.name) · \(String(format: "%.2f", $0.strength))\($0.isEnabled ? "" : " · disabled")" }
                     .joined(separator: "\n")
                 )
                 .font(.caption).foregroundStyle(.secondary)
                 HStack {
-                  Button("Apply group") { store.applyLoRAGroup(group) }.disabled(
-                    store.selectedClip == nil)
+                  Menu("Apply group") {
+                    ForEach(LoRAGroupApplicationMode.allCases) { mode in
+                      Button(mode.label) { store.applyLoRAGroup(group, mode: mode) }
+                    }
+                  }.disabled(store.selectedClip == nil)
                   Button("Edit") { draft = group }
                   Spacer()
                   Button {
@@ -207,6 +259,13 @@ struct LoRALibrary: View {
         }
       }
     }
+  }
+  func chooseImportGrid() {
+    let panel = NSOpenPanel()
+    panel.title = "Link H3 Turbo AdaLN input grid"
+    panel.canChooseDirectories = false
+    panel.allowedContentTypes = [.init(filenameExtension: "safetensors") ?? .data]
+    if panel.runModal() == .OK { importGrid = panel.url?.path }
   }
   func removeLibraryAsset(_ asset: MediaAsset) {
     if store.project.clips.contains(where: { $0.attachments.contains { $0.assetID == asset.id } }) {
@@ -246,13 +305,25 @@ struct ClipLoRAInspector: View {
         let asset = store.allAssets.first { $0.id == attachment.assetID }
         VStack(alignment: .leading, spacing: 6) {
           HStack {
-            Text(asset?.name ?? "Missing LoRA").font(.caption.bold()).lineLimit(2)
+            Toggle(asset?.name ?? "Missing LoRA", isOn: Binding(get: {
+              store.selectedClip?.attachments.first { $0.id == attachment.id }?.isEnabled ?? attachment.isEnabled
+            }, set: { enabled in
+              store.editClip { selected in
+                if let index = selected.attachments.firstIndex(where: { $0.id == attachment.id }) {
+                  selected.attachments[index].enabled = enabled
+                }
+              }
+            })).font(.caption.bold()).lineLimit(2)
             Spacer()
             Button {
               store.editClip { $0.attachments.removeAll { $0.id == attachment.id } }
             } label: {
               Image(systemName: "xmark")
             }.help("Remove LoRA")
+          }
+          if asset?.loraProfile == "turbo" {
+            Text(attachment.isEnabled ? "H3 Turbo · requires 4 steps" : "H3 Turbo · disabled")
+              .font(.caption2).foregroundStyle(.secondary)
           }
           if let group = attachment.loraGroupName, let groupID = attachment.loraGroupID {
             HStack {

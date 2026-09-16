@@ -24,6 +24,7 @@ extension Clip {
       issues.append("Choose an H3 FL2VA model for First and last frames; the selected Draw Things model does not support this task. Your images are preserved.")
     }
     for attachment in attachments where attachment.role != .first && attachment.role != .last {
+      if attachment.role == .lora && !attachment.isEnabled { continue }
       let name = assets.first { $0.id == attachment.assetID }?.name ?? "Missing asset"
       issues.append("Remove \(attachment.role.label) input ‘\(name)’: this Draw Things task does not support it. Keep the media in Clip Assets.")
     }
@@ -83,9 +84,11 @@ public enum JSONValue: Codable, Equatable {
 public struct DrawThingsLoRA: Codable, Equatable, Identifiable {
   public var modelID: String
   public var weight: Double
+  public var enabled: Bool?
+  public var isEnabled: Bool { enabled ?? true }
   public var id: String { modelID }
-  public init(modelID: String, weight: Double = 1) {
-    self.modelID = modelID; self.weight = weight
+  public init(modelID: String, weight: Double = 1, enabled: Bool? = nil) {
+    self.modelID = modelID; self.weight = weight; self.enabled = enabled
   }
   public func validate() throws {
     guard !modelID.isEmpty, weight.isFinite, (0...2).contains(weight) else {
@@ -146,6 +149,17 @@ public struct DrawThingsSelection: Codable, Equatable {
     loras = try c.decodeIfPresent([DrawThingsLoRA].self, forKey: .loras) ?? []
   }
   public mutating func apply(_ group: DrawThingsLoRAGroup) { loras = group.members }
+  public mutating func apply(_ group: DrawThingsLoRAGroup, mode: LoRAGroupApplicationMode) throws {
+    try group.validate(profileID: profileID, family: modelFamily, modelID: modelID)
+    let updated = mode == .replace ? group.members : loras + group.members
+    guard Set(updated.map(\.modelID)).count == updated.count else {
+      throw StudioError.invalid("This group repeats a LoRA in the current stack. Choose Replace current stack or remove its existing entry.")
+    }
+    guard updated.filter(\.isEnabled).count <= 16 else {
+      throw StudioError.invalid("Enable up to 16 server LoRAs in one stack.")
+    }
+    loras = updated
+  }
   public func unavailableLoRAs(availableIDs: Set<String>?) -> [DrawThingsLoRA] {
     guard let availableIDs else { return [] }
     return loras.filter { !availableIDs.contains($0.modelID) }

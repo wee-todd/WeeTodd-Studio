@@ -18,6 +18,7 @@ direction and backend choices. This is a source-build preview, not a notarized c
 | Reuse supported installed Draw Things weights with native H3 | [Local H3 model reuse](#reuse-local-draw-things-h3-models) |
 | Set up native LTX 2.5, LTX 2.3 or H3 | [Guided model setup](#guided-model-setup) |
 | Choose engine, task and sampling controls | [Clip generation](#clip-generation-controls) |
+| Continue motion across clips or render an LTX 2.5 scene | [Clip continuity](#clip-continuity-in-studio) |
 | Generate image assets or import Draw Things settings | [Image workspace](#images-clips-and-loras) |
 | Plan a movie with reusable subjects and references | [Guided movie planning](#guided-movie-planning) |
 | Use local Qwen models already installed by Draw Things | [Prompt Assistant](#local-qwen35-prompt-assistant) |
@@ -25,8 +26,9 @@ direction and backend choices. This is a source-build preview, not a notarized c
 
 ## Inference and model storage
 
-Choose **Draw Things** as a clip engine to submit generation to a configured Draw Things endpoint.
-Choose **H3**, **LTX 2.3** or **LTX 2.5** for native execution using a compatible recipe. These are
+Choose **Draw Things** in the **Generation** menu to submit to a configured Draw Things endpoint.
+Choose **WeeTodd (local)**, then **H3**, **LTX 2.3** or **LTX 2.5** in the **Model** menu for native
+execution. Compatible installed components are selected automatically, with no template step. These are
 explicit choices; Studio does not silently substitute one backend for another.
 
 Use the Draw Things route first when it supplies the needed model/task. Native execution is useful
@@ -78,7 +80,8 @@ The bootstrap uses a pinned, checksum-verified uv release from Astral.
 
 Advanced users can connect an existing compatible WeeTodd repository and Python environment.
 Use guided model setup below, or import existing `weetodd-headless-v2` recipes to identify model
-component sets. New clips select an engine, task and preset; automatic recipe selection inspects
+component sets. New clips select **WeeTodd (local)** or **Draw Things**, then a model and task;
+automatic component selection inspects
 compatible recipe contents. FFmpeg/FFprobe and
 optional RIFE remain separately configured tools; a retail installer must package these tools
 with their licenses and complete clean-Mac qualification.
@@ -224,8 +227,9 @@ configure the native MLX engines.
    enforce a hard limit. Clip size/duration and other resident applications still matter.
 4. **Create Recipe** runs the shared component/configuration preflight and writes a new recipe.
    Image/reference presets still need media attached to a clip before full render preflight can pass.
-   Existing recipes and model files are preserved. Use the new recipe for a compatible selected clip,
-   or choose it in the clip inspector. **Set Up Models…** is also available from missing-model actions.
+   Existing recipes and model files are preserved. Automatic selection can use the new compatible
+   components; a specific recipe can be pinned under **Advanced generation**. **Set Up Models…**
+   is also available from missing-model actions.
 
 **Download or prepare a model** shows compatible catalog items with source terms, download size and
 required space before an explicit download. Prefer the
@@ -291,22 +295,37 @@ For a complete CLI walkthrough, see [download and create an LTX 2.5 recipe](../e
 
 ## Clip generation controls
 
-Choose **Engine → Task → Preset** in the clip inspector. Tasks come from the installed compatible
+Choose **Generation → WeeTodd (local) / Draw Things → Model** in the clip inspector. Local models
+include MiniMax H3, LTX 2.3 and LTX 2.5. Available tasks and controls appear directly, without a
+required template or preset step. Tasks come from the installed compatible
 model recipes. Image to video requires a first image; First + last frame requires both endpoints.
 Changing tasks preserves attachments and names any conflicting or missing input. A reference-only
-H3 recipe cannot make a text-only clip appear ready. Model filenames remain available in Advanced
-for deliberate custom selection.
+H3 recipe cannot make a text-only clip appear ready. Model, render size and seed are available in
+the ordinary generation flow. Switching providers restores the last local model and its saved
+settings. Choosing a task retains the selected model; incompatible
+combinations explain what needs changing. Missing prompts or frame inputs do not hide valid sampling
+controls. Complete media and model preflight still runs before generation.
+An older clip with a missing or task-incompatible pinned recipe offers **Use automatic model
+components**, preserving its media and explicit parameter edits.
+
+Changing a shot in a continuous LTX 2.5 scene to H3, LTX 2.3 or Draw Things separates that shot
+for independent generation. Remaining LTX scene groups keep their shared sound and boundary-image
+settings. Images, accepted takes and timeline edit points are preserved; **Undo** restores the model
+and scene connections together. An older saved project with an incompatible scene connection offers
+**Separate this shot** in Clip Continuity. Native continuation state cannot be shared across models.
 
 The inspector displays sampling controls and compatible LoRAs/groups with editable strengths.
 Ordinary native H3 Euler **Steps** means actual evaluations: 19 evaluations correspond to 20 stored
 schedule points. Specialized or fixed schedules explain their restrictions. LTX stage-one and
 refinement controls are separate; fixed distilled schedules remain fixed. Native H3 uses distilled
-guidance and fixed video/audio shifts, so CFG and Shift are visibly unavailable. Supported native
+guidance and fixed video/audio shifts; the panel explains built-in guidance without offering inactive
+CFG or Shift fields. Supported native
 LTX CFG and Draw Things configuration values remain editable. Unsupported submitted overrides fail
 validation instead of being ignored.
 
-Edited preset controls show **Modified**; **Reset** removes those overrides. Existing clips open as
-**Custom**, preserving their imported recipe settings. Choosing a preset opts into the new explicit
+Edited controls show **Modified**; **Reset** removes those overrides. Optional execution presets and
+custom recipes live in **Advanced generation**. Existing clips preserve their imported recipe
+settings. Choosing an advanced preset opts into the new explicit
 selection. **Generate** prepares and validates the clip automatically. The separate preparation and
 prompt/settings review remain available. Clip/movie headless export uses the same resolved recipe.
 
@@ -399,9 +418,10 @@ a speedup claim. Query chunking and the retained-page budget are separate contro
 
 ## LTX 2.5 images, controls, and references
 
-For ordinary image-to-video, select the **LTX 2.5 Image to video** recipe, import/select an image,
-and choose **Use in clip → First frame · Image to video**. Prepare the clip after attaching it.
-The Reference role selects MSR conditioning and requires its separate adapter recipe.
+For ordinary image-to-video, choose **WeeTodd (local) → LTX 2.5**, import/select an image,
+and choose **Use in clip → First frame · Image to video**. Prepare the clip after attaching it;
+compatible installed components are selected automatically. The Reference role selects MSR
+conditioning and requires its dedicated compatible adapter components.
 
 Guided setup now also offers **IC-LoRA control**, **Ingredients reference sheet**, and **MSR image
 references**. Import the corresponding dedicated adapter in addition to the existing model
@@ -423,8 +443,10 @@ First-frame success on 36 GB does not establish MSR/control memory fit or refere
 
 ## H3 reference clips with paged Q8 models
 
-Import a recipe produced by `scripts/prepare_h3_reference_recipe.py`, select **H3 Reference Q8
-Paged** for the clip, and attach images with the **Reference** role. The shared renderer uses genuine
+Import a recipe produced by `scripts/prepare_h3_reference_recipe.py`, choose **WeeTodd (local) → H3**
+and the reference task, and attach images with the **Reference** role. Compatible components are
+selected automatically; pin the imported recipe under **Advanced generation** if needed.
+The shared renderer uses genuine
 Ref2VA Q8 transformer pages and vision-capable Qwen v2 pages. Start with one image, five seconds,
 640×384 and the recipe's 19 dense evaluations; add a second reference only after checking memory.
 The existing text-only Qwen page export cannot encode reference images.
@@ -495,14 +517,17 @@ never used to infer the training model.
 | LTX 2.5 | LTX 2.3 and LTX 2.5, including mixed groups |
 | Movie / Still | None |
 
-Use **New group**, name it, add members from the filtered library, and set each strength. Groups can
-be edited or deleted. **Apply to clip** adds an individual LoRA; **Apply group** adds the group's
-ordered members. Each clip entry has a slider and exact numeric strength field from 0 to 2.
+Use **New group**, or **Save current stack as group**, name it, and set each member's strength.
+Groups can be edited or deleted. **Add to current stack** preserves existing LoRAs and rejects
+duplicates atomically; **Replace current stack** explicitly replaces them. Draw Things image and
+video group actions use the same Add/Replace choices. Each entry has an enable toggle, a slider,
+and an exact numeric strength field from 0 to 2. Disabling retains the strength and saved assignment;
+disabled entries are excluded from generation, including missing files or unavailable server LoRAs.
 Remove individual entries or an entire applied group from the inspector. Duplicate file application
 is rejected, including overlap between an individual entry and a group.
 
 Groups are reusable templates stored beside Global assets. Application creates independent linked
-Clip Assets and copies the strengths and group label into the clip. Editing/deleting the template
+Clip Assets and copies strengths, enabled states, adapter details and group labels into the clip. Editing/deleting the template
 does not change existing clips, and clip strength edits do not change the template. Project saves,
 autosave, undo/redo, duplication and splitting preserve applied settings. Movie and clip job exports
 embed the flattened renderer stack, so headless execution does not need the group library.
@@ -510,14 +535,213 @@ Collect Media preserves shared LoRA file paths; it does not copy model weights.
 
 Training versions identify candidates, not a guarantee of compatibility or quality. The shared
 renderer still checks actual projection targets, dimensions, scaling and recipe restrictions before
-weighted work. Specialized IC/control/reference and schedule adapters remain in their task recipes.
+weighted work. Specialized IC/control/reference adapters remain in their task recipes. Native H3
+four-step Turbo adapters can be selected through the library as described below; other specialized
+sampling recipes keep their existing contracts.
 Switching a clip to an incompatible engine retains its settings and marks the clip as needing
-attention until incompatible LoRAs are removed. Rebuild the app and use an updated managed renderer
+attention until incompatible LoRAs are disabled or removed. Rebuild the app and use an updated managed renderer
 source snapshot when upgrading; existing private runtimes retain their installed source.
 
 Validation covers model filtering, mixed groups, independent clip strengths, serialization, duplicate
 rejection, split asset ownership and movie/clip recipe export. The native app was exercised with
 small synthetic header fixtures; these checks do not qualify LoRA visual quality or every adapter.
+
+### Native H3 Turbo
+
+1. Choose a standard native H3 model and Text to video, Image to video, or First and last frames.
+2. Open **LoRAs & Groups…**, select **H3 Turbo (4 steps)** under Adapter, and import a compatible
+   SafeTensors LoRA. For files without reliable profile metadata, this is an explicit declaration
+   that the adapter is intended for four-step inference; its filename is not evidence.
+3. Add it to the clip or a group and set its strength. **Steps** displays four actual transformer
+   evaluations; the renderer stores five schedule points. Disabling Turbo restores the saved
+   standard Steps override. The saved value is retained while Turbo controls the effective schedule.
+
+**Adapter file details** exposes layout and the optional linked AdaLN input grid. Adapters with
+AdaLN targets need that grid; the validator reports missing or incompatible auxiliary data before
+weighted work. A stack may contain one enabled Turbo adapter. Unsupported reference/control tasks,
+conflicting acceleration recipes, explicitly incompatible step metadata and invalid layouts are
+rejected. Existing custom recipes containing their own Turbo stack retain their saved schedule.
+
+Header checks and regression tests verify parameter transport and compatibility checks. They do not
+establish visual quality, timing, memory fit, or Turbo plus motion-continuation quality for every file.
+
+### Clip continuity in Studio
+
+Native H3, LTX 2.3 and LTX 2.5 clips have a **Clip Continuity** section:
+
+- **Independent** preserves ordinary generation and is the default for existing clips.
+- **Match previous frame** extracts the accepted source take's last visible frame, including
+  trims and variable-frame-rate footage. It becomes the effective first image; stored first-frame
+  attachments remain available when continuity is disabled. Last-frame guidance and LoRAs remain.
+- **Continue scene** carries motion and sound using the selected model's supported route.
+  H3 continues an accepted take using saved motion context; LTX 2.3 extends an accepted source video.
+  Select the immediately previous clip or another earlier clip for these routes. LTX 2.5 connects
+  neighboring shots and renders the complete group together, as described below. These routes are
+  experimental; the inspector explains the required source and what will be generated.
+- **Extend previous take** is LTX 2.5's separate source-video extension option. It generates only
+  the new shot from an accepted take. A changed source take, trim or file invalidates preparation;
+  late renders remain inactive takes.
+
+For H3 motion continuation, enable **Save motion context** on the source, render it, and accept
+that take. Saving is also inferred when a later H3 clip explicitly depends on it. The visible endpoint
+must match the generated endpoint within half a frame; Prepare suggests compatible durations.
+The target must use matching model components, dimensions, sampling and LoRA settings.
+
+LTX motion continuation needs a visible source with audio, at least 49 native frames long. Studio
+prepares that bounded tail, preserves synchronized timing, and adds only the new segment to the
+timeline. New durations must be multiples of eight native frames. LTX 2.3 requires compatible
+Dev one-stage or original distilled weights; LTX 2.5 requires distilled two-stage generation.
+Endpoint/audio/reference attachments and unsupported IC/MSR or single-stage combinations are
+rejected without discarding settings. Use **Match previous frame** for endpoint-guided generation.
+LTX already-distilled models do not need an H3 Turbo adapter.
+
+### Continuity troubleshooting
+
+| Symptom | Next action |
+| --- | --- |
+| A saved H3 shot says the scene requires LTX 2.5 | It still belongs to an LTX 2.5 group. Use **Separate this shot**, or switch it back to LTX 2.5. Updated model switching separates incompatible shots automatically and supports Undo. |
+| H3 **Continue scene** needs saved context | Render and accept a compatible H3 source with **Save motion context** enabled. Keep its visible ending at the original endpoint. An LTX take cannot supply H3's internal motion context. |
+| **Continue scene** renders every LTX 2.5 shot in the group | This is the grouped route. Review and accept the complete movie together. Choose **Extend previous take** when you want source-video extension of only the next shot, subject to its input restrictions. |
+| An older LTX 2.5 scene flashes at joins | Regenerate with the updated renderer and **Automatic** boundary image guidance. The correction changes generation; opening an old take does not repair its pixels. Inspect the new take before replacing your edit. |
+
+### Continuous LTX 2.5 scenes
+
+Use **Continue scene** (experimental) for connected local LTX 2.5 shots that should play as
+one continuous scene. The native engine carries original video and audio latents between
+overlapping sampling windows and decodes the assembled timeline once. Frame matching and
+source-video extension remain separate choices for other workflows.
+
+Continuing windows reuse interior video history while regenerating the previous window's final
+sampled video latent with future context. **Boundary image guidance → Automatic** applies every image
+once, at its requested strength, in the first window covering its timestamp. Later windows inherit
+its influence through motion history. Reapplying the image in that overlap can compete with the
+history it already influenced and produce a dark pulse. **Strict** repeats image guidance in every
+covering window for explicit control. All attachments, timestamps and requested strengths remain
+unchanged, including the scene's first and last images. Preparation's **Boundary image routing**
+shows the window using each boundary image and the windows inheriting it. These are generation
+changes, with no added output crossfade. Overlap duration and native audio history remain intact.
+VAE-encoded source-video extension retains its complete history; it does not reuse a sampled
+window's terminal state. Regenerate an existing scene to apply the fix to its movie.
+
+1. Set the first shot's connection to **Independent**.
+2. Set each following shot to **Continue scene**. It joins its immediately preceding shot.
+   When converting a frame-matched shot, choose **Keep current frame match** to save its current
+   predecessor frame as an explicit first-image anchor, or **Use attached images** to use the
+   shot's existing image attachments. The original assets remain available.
+3. Use compatible LTX 2.5 components, sampling settings and ordered LoRA stacks for every member.
+   Prompts, durations and seeds can differ. Keep the complete scene within two to six shots and
+   30 seconds. Native timing resolves on eight-frame intervals; preflight reports resolved ranges.
+4. Review the shared sound and music instructions in **Clip Continuity**. These belong to the first
+   shot and appear when any scene member is selected.
+5. Select any member and choose **Prepare scene** or **Generate scene**. Preparation covers the
+   entire group and includes every member prompt, image anchor and resolved duration.
+6. Review the complete generated movie, including sound and each join, then choose **Accept entire
+   scene**. All member shots use ranges in the same movie; their earlier takes remain available.
+
+First, last and timed images are mapped onto the full scene timeline, including the last visible
+frame. Review these images when changing an existing project to a continuous scene. Frozen frame
+matches become ordinary image anchors and remain stable when an older source take changes.
+Preparation flags joins where different files guide consecutive end/start frames. Review those
+pairs: competing full-strength images can cause a sudden change even with native motion context.
+Automatic uses every guide once and avoids repeating it in incoming overlaps. Review boundary
+images together; contradictory poses or lighting can still produce a sudden change.
+Conflicting anchors and unsupported combinations fail before model loading. MSR/reference inputs,
+audio drivers, control adapters, CFG++ and DFR are not qualified together with continuous scenes.
+
+The shared sound description and native audio context reduce independent audio restarts. A prompt
+such as “no music” remains probabilistic. For exact soundtrack control, switch off **Use generated
+scene sound in movie** and add an audio track. The scene review plays the generated audiovisual
+movie; final movie playback/export also applies the timeline's source volume and audio tracks.
+
+Changing any member's generation inputs invalidates preparation. A late result remains a review
+artifact and cannot replace changed shots or another document. Scene versions restore together;
+disconnect a shot before selecting an older individual take. One acceptance is one undo operation.
+
+Completed native sampling windows are retained as validated job-local checkpoints for retries.
+Reusing the same prepared recipe can resume those windows after cancellation or decode failure;
+changed input identities and corrupt checkpoints are rejected. Exported movie jobs generate a scene
+once and apply its ranges to every member. Clip-only job export requires disconnecting the shot or
+exporting the whole movie so the group is not silently split.
+Each interactive retry writes a separate candidate movie while sharing the prepared recipe's
+validated checkpoints. Acceptance waits until the active attempt finishes.
+
+Timing limits apply after native-grid resolution. For example, 30 seconds at 25 fps rounds beyond
+the current 30-second qualification limit; choose a supported shorter duration. Six five-second
+shots at 24 fps resolve to 30 seconds exactly. Unit tests establish contracts and lifecycle behavior,
+not seamless output or guaranteed sound instructions; inspect the generated scene before delivery.
+
+With staged memory enabled, long convolutional-VAE scenes decode the assembled timeline in bounded
+temporal tiles before decoding audio. This reduces peak decode memory at an additional time cost;
+ordinary clip decoding and the diffusion VAE retain their existing behavior.
+The first six-shot Rill qualification produced an exact 30-second movie with retained first/last
+images and shared audio state. Some joins still showed framing/appearance changes, so the feature
+remains experimental. See [implementation status](../STATUS.md) for measured timings and limits.
+
+In the 2026-09-16 Studio comparison, LTX 2.5 Q8 distilled (8+3 evaluations) completed the same
+Approach shot from an accepted H3 predecessor in 1:38 with frame matching + last-frame guidance,
+and 1:59 with motion/audio continuation. The motion render contained 49 source and 120 new frames;
+Studio correctly selected only the five new seconds. Both outputs had stereo 48 kHz audio and
+decoded successfully. Scene appearance persisted, but the motion take crouched more than the
+prompt requested. This checks the exercised source-tail route, not LTX-to-LTX chaining or a combined
+reference + first/last frames + motion mode; that combination remains unsupported.
+
+Automatic native model selection filters known task limitations, including text-only H3 encoders
+and LTX 2.3 Single-pass 1.1. Non-Custom automatic presets prefer matching tasks and compatible
+distilled LTX profiles. Explicit model selections remain authoritative.
+
+Prepared media belongs to its job; exported jobs freeze accepted source takes and support safe
+retry. Render and accept a queued predecessor before exporting its dependent clip. Collect Media
+keeps H3 manifests and latent payloads together. These controls are native-engine features;
+Draw Things retains its existing conditioning and generation controls.
+
+### Experimental native H3 continuation
+
+The shared headless renderer can save and reload a bounded synchronized video/audio latent tail.
+Studio's motion continuity controls use this same opt-in contract. It remains available directly
+to headless clients; the app does not maintain a second sampler.
+
+Add this to an H3 headless recipe to save context from its completed take:
+
+```json
+"continuation": {
+  "version": 1,
+  "context_frames": 22,
+  "save_context": true
+}
+```
+
+The result reports a `.continuation/manifest.json` path and SHA-256 digest. A subsequent recipe
+supplies both as `source_context` and `source_manifest_sha256`. Loading context makes the requested
+duration describe **new visible footage**: publication removes the repeated video/audio prefix and
+any extra alignment frames. Saving context again is rejected if the generated tail was trimmed,
+because that tail would describe footage outside the visible take. The error offers eligible nearby
+durations. With 22 context frames, a continuing take that saves its tail needs a multiple of 17 new
+frames. Save-only first takes retain the ordinary H3 aligned output duration.
+
+Only text-to-video and first/last-frame tasks are accepted initially. Context checks cover canvas,
+timing, model components, adapters and sampling settings. Checksums detect changed manifests and
+payloads before weighted work. Context export is bounded and atomic; existing contexts are not
+overwritten. Components retain staged unloading. The first identity verification reads model files
+to hash their contents. A bounded local SQLite cache reuses those checksums while each resolved
+file's device, inode, size, modification time and change time remain unchanged. Unavailable or
+corrupt caches fall back to full hashing; `WEETODD_DISABLE_MODEL_HASH_CACHE=1` forces re-verification.
+Generated context manifests and payloads always receive complete checksum checks.
+For first/last-frame motion continuation, Studio's resolved prompt replaces the standard leading
+Picture alignment times with the actual sampled-window anchor times, including reused context.
+The shot direction stays intact and the exact resolved prompt remains available before generation.
+
+The 2026-09-16 Studio exercise completed a six-shot, 30-second H3 movie with Q8 FL2VA, first/last
+frames, LightX2V Turbo at strength 1, four evaluations and 22-frame motion context. Export verified
+720 frames at 24 fps with stereo 48 kHz audio and no decode errors. Scene/action continuity was
+recognizable; some mid-shot exposure variation remained. This is scoped visual qualification,
+not a guarantee of seamless results, reference-plus-endpoint support or fit on lower-memory Macs.
+
+On the tested 256 GiB M3 Ultra, switching the first shot from lower-memory to larger-workspace
+paging reduced sampling from 7:23 to 3:15 (whole job 8:59 to 4:06). Outputs were similar rather
+than identical: whole-video SSIM 0.9741. Continuing shots took 5:19–5:58. Whole-job comparison also
+includes the benefit of cached model checksums. Motion continuity stays opt-in pending broader
+scene, audio and memory qualification; these results do not establish performance parity with
+Draw Things.
 
 ## Status and actions
 
@@ -1139,7 +1363,7 @@ one new authorization.
 
 Use the timeline **+ → Draw Things** to create a video clip. Refresh models, select an exact server
 model, write its prompt, and prepare it. Native MLX recipe files are not needed for this provider.
-Setup follows **Engine → Task → Connection → Model → LoRAs / Groups**. Tasks narrow verified
+Setup follows **Generation → Draw Things → Task → Connection → Model → LoRAs / Groups**. Tasks narrow verified
 connections and models using their advertised input combinations. Unverified connections remain
 available with **refresh to verify** until Studio has their catalog. Changing the task clears a
 verified incompatible model selection; changing the connection clears the model selection.

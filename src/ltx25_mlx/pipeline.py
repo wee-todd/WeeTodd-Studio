@@ -692,6 +692,70 @@ class LTX25DistilledPipeline:
             "unique_prompt_encodes": unique_encodes,
         }
 
+    def _image_conditionings(self, images, *, spatial_dims, frame_rate, preencoded=None):
+        """Build image anchors, or copy already encoded scene anchors for this pass."""
+        if preencoded is not None:
+            return list(preencoded)
+        from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings
+
+        return combined_image_conditionings(
+            images,
+            enc_h=spatial_dims[1] * 32,
+            enc_w=spatial_dims[2] * 32,
+            spatial_dims=spatial_dims,
+            video_encoder=self.image_conditioner.load(),
+            frame_rate=frame_rate,
+        )
+
+    def _preencode_chain_images(
+        self,
+        window_images,
+        window_counts,
+        *,
+        height,
+        width,
+        frame_rate,
+        single_stage,
+        check_interrupted=None,
+    ):
+        """Finish both image scales while the encoder is the only weighted stage."""
+        encoded = []
+        try:
+            for images, count in zip(window_images, window_counts, strict=True):
+                if check_interrupted is not None:
+                    check_interrupted()
+                if not images:
+                    encoded.append(([], []))
+                    continue
+                frames = (count - 1) // 8 + 1
+                full = self._image_conditionings(
+                    images, spatial_dims=(frames, height // 32, width // 32), frame_rate=frame_rate
+                )
+                low = (
+                    full
+                    if single_stage
+                    else self._image_conditionings(
+                        images,
+                        spatial_dims=(frames, height // 64, width // 64),
+                        frame_rate=frame_rate,
+                    )
+                )
+                # Force lazy encoder work to finish before dropping its weights.
+                mx.eval(
+                    *(
+                        value
+                        for condition in (*low, *full)
+                        for value in vars(condition).values()
+                        if isinstance(value, mx.array)
+                    )
+                )
+                encoded.append((low, full))
+            return encoded
+        finally:
+            if self.low_memory and any(window_images):
+                self.image_conditioner.free()
+                mx.clear_cache()
+
     def generate_two_stage(
         self,
         prompt: str,
@@ -703,6 +767,7 @@ class LTX25DistilledPipeline:
         seed: int = 0,
         image: str | None = None,
         images=None,
+        _preencoded_image_conditionings=None,
         video_references=None,
         msr_references=None,
         audio_reference=None,
@@ -787,7 +852,6 @@ class LTX25DistilledPipeline:
             compute_audio_token_count,
             compute_video_positions,
         )
-        from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings
         from ltx_pipelines_mlx.utils.args import ImageConditioningInput
         from ltx_pipelines_mlx.utils.helpers import create_noised_state
 
@@ -914,14 +978,11 @@ class LTX25DistilledPipeline:
             resolved_images = [ImageConditioningInput(path=image, frame_idx=0, strength=1.0)]
         conditionings = []
         if resolved_images:
-            encoder = self.image_conditioner.load()
-            conditionings = combined_image_conditionings(
-                resolved_images,
-                enc_h=latent_h * 32,
-                enc_w=latent_w * 32,
-                spatial_dims=(latent_f, latent_h, latent_w),
-                video_encoder=encoder,
+            conditionings = self._image_conditionings(
+                resolved_images, spatial_dims=(latent_f, latent_h, latent_w),
                 frame_rate=frame_rate,
+                preencoded=(_preencoded_image_conditionings[0]
+                            if _preencoded_image_conditionings is not None else None),
             )
         ic_reference_reports = []
         msr_group_rows: tuple[int, ...] = ()
@@ -1041,10 +1102,20 @@ class LTX25DistilledPipeline:
             conditionings.insert(
                 0,
                 LatentGuideConditioning(
-                    continuation.stage1_video_tokens,
+                    continuation.video_guide_tokens(stage=1),
                     strength=continuation_strength,
                 ),
             )
+            timings["continuation_video_history"] = {
+                "policy": (
+                    "regenerate_sampled_terminal_latent"
+                    if continuation.video_tail_is_terminal else "complete_encoded_tail"
+                ),
+                "overlap_latent_frames": continuation.video_latent_frames,
+                "guided_latent_frames": (
+                    continuation.video_latent_frames - int(continuation.video_tail_is_terminal)
+                ),
+            }
             if continuation.audio_tokens.shape[1] != continuation.audio_token_count:
                 raise ValueError("LTX 2.5 audio continuation metadata is inconsistent.")
             audio_conditionings.append(
@@ -1348,14 +1419,11 @@ class LTX25DistilledPipeline:
         full_conditionings = []
         temporal_image_anchors = ()
         if resolved_images:
-            encoder = self.image_conditioner.load()
-            full_conditionings = combined_image_conditionings(
-                resolved_images,
-                enc_h=full_h * 32,
-                enc_w=full_w * 32,
-                spatial_dims=(latent_f, full_h, full_w),
-                video_encoder=encoder,
+            full_conditionings = self._image_conditionings(
+                resolved_images, spatial_dims=(latent_f, full_h, full_w),
                 frame_rate=frame_rate,
+                preencoded=(_preencoded_image_conditionings[1]
+                            if _preencoded_image_conditionings is not None else None),
             )
             if temporal_upsample_rounds:
                 from .dfr import extract_dfr_temporal_image_anchors
@@ -1411,7 +1479,7 @@ class LTX25DistilledPipeline:
             full_conditionings.insert(
                 0,
                 LatentGuideConditioning(
-                    continuation.stage2_video_tokens,
+                    continuation.video_guide_tokens(stage=2),
                     strength=continuation_strength,
                 ),
             )
@@ -1651,132 +1719,345 @@ class LTX25DistilledPipeline:
         cfg_pp_schedule: str = "full",
         stage1_steps: int = 8,
         stage2_steps: int = 3,
+        stage1_eta: float = 1.0,
+        stage1_s_noise: float = 1.0,
+        ancestral_seed_offset: int = 10000,
+        stage2_sampler: str = "euler",
+        window_frame_counts=None,
+        images=None,
+        seeds=None,
+        checkpoint_dir=None,
+        checkpoint_identity: str | None = None,
+        boundary_image_policy: str = "strict",
     ) -> str:
-        """Generate, assemble, decode, and publish an exact latent-native chain."""
+        """Sample native windows and decode their assembled AV latents once.
+
+        Completed original windows and continuation tails survive failed decode
+        or cancellation. Only a matching, validated prefix can be reused.
+        """
+        import os
+        import uuid
+
+        from .chain_checkpoints import (
+            ChainCheckpointStore,
+            content_identity,
+            file_state,
+            prefix_identity,
+            validate_checkpoint_shapes,
+        )
+        from .chain_plan import (
+            boundary_image_guidance_report,
+            plan_ltx25_windows,
+            route_scene_images,
+            scene_image_conditioning_bytes,
+        )
+
         LTX25GenerationConfig(
-            stage1_sampler=stage1_sampler, cfg_pp_batched=cfg_pp_batched,
+            stage1_sampler=stage1_sampler,
+            cfg_pp_batched=cfg_pp_batched,
         ).validate_chain_support()
-        if len(prompts) != window_count:
-            raise ValueError("LTX 2.5 chained prompt count must match the window count.")
-        plan = plan_ltx25_chain(
-            total_frames=total_frames,
-            window_count=window_count,
-            overlap_frames=overlap_frames,
-            frame_rate=frame_rate,
+        if (
+            getattr(self, "ic_loras", ())
+            or getattr(self, "msr_lora_path", None)
+            or getattr(self, "baked_ic_loras", ())
+        ):
+            raise ValueError("Native LTX 2.5 chaining does not support IC-LoRA or MSR adapters.")
+        if len(prompts) != window_count or any(not prompt.strip() for prompt in prompts):
+            raise ValueError("Every LTX 2.5 chained window requires a non-empty prompt.")
+        if window_frame_counts is None:
+            plan = plan_ltx25_chain(
+                total_frames=total_frames,
+                window_count=window_count,
+                overlap_frames=overlap_frames,
+                frame_rate=frame_rate,
+            )
+        else:
+            plan = plan_ltx25_windows(
+                window_frame_counts, overlap_frames=overlap_frames, frame_rate=frame_rate
+            )
+            if plan.total_frames != total_frames or plan.window_count != window_count:
+                raise ValueError("LTX 2.5 scene windows do not match the total timeline.")
+        window_images = route_scene_images(
+            images, plan, boundary_image_policy=boundary_image_policy
         )
+        image_guidance = boundary_image_guidance_report(images, plan, boundary_image_policy)
+        image_bytes = scene_image_conditioning_bytes(
+            window_images, height=height, width=width, single_stage=ic_lora_single_stage
+        )
+        window_seeds = (
+            tuple(seeds) if seeds is not None else tuple(seed + i for i in range(window_count))
+        )
+        if len(window_seeds) != window_count or any(
+            type(value) is not int or value < 0 for value in window_seeds
+        ):
+            raise ValueError(
+                "LTX 2.5 chained seeds must provide one nonnegative integer per window."
+            )
+        if checkpoint_dir is not None and not checkpoint_identity:
+            raise ValueError(
+                "Native scene checkpoint reuse requires a validated component identity."
+            )
+        store = ChainCheckpointStore(checkpoint_dir) if checkpoint_dir is not None else None
+        full_h, full_w = height // 32, width // 32
+        stage1_h, stage1_w = (
+            (full_h, full_w) if ic_lora_single_stage else (full_h // 2, full_w // 2)
+        )
+        prefix = prefix_identity(
+            checkpoint_identity or "uncached",
+            {
+                "height": height,
+                "width": width,
+                "frame_rate": frame_rate,
+                "prompt_context": prompt_context,
+                "single_stage": ic_lora_single_stage,
+                "stage1_sampler": stage1_sampler,
+                "stage2_sampler": stage2_sampler,
+                "stage1_steps": stage1_steps,
+                "stage2_steps": stage2_steps,
+                "stage1_eta": stage1_eta,
+                "stage1_s_noise": stage1_s_noise,
+                "ancestral_seed_offset": ancestral_seed_offset,
+                "continuation_strength": LTX25_CHAIN_CONTINUATION_STRENGTH,
+                "boundary_image_policy": boundary_image_policy,
+            },
+        )
+        image_hashes = {image.path: content_identity(image.path) for image in images or ()}
+        image_stats = {filename: file_state(filename) for filename in image_hashes}
+        identities, expected_shapes = [], []
+        for index, count in enumerate(plan.window_frame_counts):
+            next_audio = plan.join_audio_tokens[index] if index < window_count - 1 else 0
+            shapes = {
+                "video": (1, 128, (count - 1) // 8 + 1, full_h, full_w),
+                "audio": (1, 8, plan.window_audio_token_counts[index], 16),
+            }
+            if next_audio:
+                shapes.update(
+                    {
+                        "stage1": (1, plan.video_overlap_latent_frames * stage1_h * stage1_w, 128),
+                        "stage2": (1, plan.video_overlap_latent_frames * full_h * full_w, 128),
+                        "audio_tail": (1, next_audio, 128),
+                    }
+                )
+            if store:
+                validate_checkpoint_shapes(shapes)
+            expected_shapes.append(shapes)
+            prefix = prefix_identity(
+                prefix,
+                {
+                    "prompt": prompts[index],
+                    "seed": window_seeds[index],
+                    "frames": count,
+                    "start": plan.window_start_frames[index],
+                    "shapes": shapes,
+                    "images": [
+                        {
+                            "sha256": image_hashes[image.path],
+                            "frame_idx": image.frame_idx,
+                            "strength": image.strength,
+                            "crf": getattr(image, "crf", 33),
+                        }
+                        for image in window_images[index]
+                    ]
+                    if store
+                    else [],
+                },
+            )
+            identities.append(prefix)
         chain_started = time.perf_counter()
-        encoded_prompts, prompt_timings = self.encode_prompt_batch(
-            prompts,
-            prompt_context=prompt_context,
-            check_interrupted=check_interrupted,
-        )
-        video_windows = []
-        audio_windows = []
-        continuation = None
-        window_timings = []
-        stage1_forwards = (
-            stage1_steps
-            if stage1_sampler != "euler_ancestral_cfg_pp"
-            else stage1_steps + len(LTX25_CFG_PP_SCHEDULES[cfg_pp_schedule])
-        )
-        forwards_per_window = stage1_forwards + stage2_steps
-        total_evaluations = window_count * forwards_per_window
-        for index, (prompt, encoded) in enumerate(zip(prompts, encoded_prompts, strict=True)):
-            if check_interrupted is not None:
-                check_interrupted()
-            next_audio_context = plan.join_audio_tokens[index] if index < window_count - 1 else 0
-            window_started = time.perf_counter()
-            result = self.generate_two_stage(
-                prompt,
+        completed = []
+        sampling_released = False
+        temporary_output = None
+        try:
+            if store:
+                for index in range(window_count):
+                    if check_interrupted is not None:
+                        check_interrupted()
+                    cached = store.load(index, identities[index], expected_shapes[index])
+                    if cached is None:
+                        break
+                    completed.append(cached)
+            resumed_count = len(completed)
+            if self.low_memory and resumed_count < window_count:
+                self._release_sampling()
+            if resumed_count < window_count:
+                encoded_prompts, prompt_timings = self.encode_prompt_batch(
+                    prompts[resumed_count:],
+                    prompt_context=prompt_context,
+                    check_interrupted=check_interrupted,
+                )
+            else:
+                encoded_prompts, prompt_timings = [], {}
+            image_encode_started = time.perf_counter()
+            encoded_images = self._preencode_chain_images(
+                window_images[resumed_count:],
+                plan.window_frame_counts[resumed_count:],
                 height=height,
                 width=width,
-                num_frames=plan.window_frames,
                 frame_rate=frame_rate,
-                seed=seed + index,
-                ancestral_noise_seed=seed + index + 10000,
+                single_stage=ic_lora_single_stage,
                 check_interrupted=check_interrupted,
-                step_callback=(
-                    (
-                        lambda completed, _total, offset=index * forwards_per_window: step_callback(
-                            offset + completed, total_evaluations
+            )
+            for filename, original_hash in image_hashes.items():
+                if (
+                    file_state(filename) != image_stats[filename]
+                    or content_identity(filename) != original_hash
+                ):
+                    raise ValueError("LTX 2.5 scene image changed during conditioning preparation.")
+            image_encode_seconds = time.perf_counter() - image_encode_started
+            video_windows, audio_windows, window_timings = [], [], []
+            continuation = None
+            forwards_per_window = stage1_steps + stage2_steps
+            total_evaluations = window_count * forwards_per_window
+            for index, prompt in enumerate(prompts):
+                if check_interrupted is not None:
+                    check_interrupted()
+                next_audio = plan.join_audio_tokens[index] if index < window_count - 1 else 0
+                window_started = time.perf_counter()
+                if index < resumed_count:
+                    arrays = completed[index]
+                    video_latent, audio_latent = arrays["video"], arrays["audio"]
+                    continuation = (
+                        LTX25LatentContinuation(
+                            arrays["stage1"],
+                            arrays["stage2"],
+                            arrays["audio_tail"],
+                            plan.video_overlap_latent_frames,
+                            next_audio,
                         )
+                        if next_audio
+                        else None
                     )
-                    if step_callback is not None
-                    else None
-                ),
-                prompt_context=prompt_context,
-                encoded_prompt=encoded,
-                ic_lora_single_stage=ic_lora_single_stage,
-                stage1_sampler=stage1_sampler,
-                cfg_pp_batched=cfg_pp_batched,
-                cfg_pp_schedule=cfg_pp_schedule,
-                stage1_steps=stage1_steps,
-                stage2_steps=stage2_steps,
-                continuation=continuation,
-                continuation_strength=LTX25_CHAIN_CONTINUATION_STRENGTH,
-                output_video_context_frames=plan.video_overlap_latent_frames,
-                output_audio_context_tokens=next_audio_context,
-                return_continuation=index < window_count - 1,
-            )
-            if index < window_count - 1:
-                video_latent, audio_latent, continuation = result
-            else:
-                video_latent, audio_latent = result
-                continuation = None
-            video_windows.append(video_latent)
-            audio_windows.append(audio_latent)
-            window_timings.append(
-                {
-                    "window": index + 1,
-                    "seed": seed + index,
-                    "seconds": time.perf_counter() - window_started,
-                    "stage_timings": self.last_timings,
-                }
-            )
-
-        del encoded_prompts, continuation
-        if self.low_memory:
+                else:
+                    result = self.generate_two_stage(
+                        prompt,
+                        height=height,
+                        width=width,
+                        num_frames=plan.window_frame_counts[index],
+                        frame_rate=frame_rate,
+                        seed=window_seeds[index],
+                        images=list(window_images[index]),
+                        _preencoded_image_conditionings=encoded_images[index - resumed_count],
+                        ancestral_noise_seed=window_seeds[index] + ancestral_seed_offset,
+                        check_interrupted=check_interrupted,
+                        step_callback=(
+                            (
+                                lambda completed, _total, offset=index * forwards_per_window: (
+                                    step_callback(offset + completed, total_evaluations)
+                                )
+                            )
+                            if step_callback is not None
+                            else None
+                        ),
+                        prompt_context=prompt_context,
+                        encoded_prompt=encoded_prompts[index - resumed_count],
+                        ic_lora_single_stage=ic_lora_single_stage,
+                        stage1_sampler=stage1_sampler,
+                        cfg_pp_batched=cfg_pp_batched,
+                        cfg_pp_schedule=cfg_pp_schedule,
+                        stage1_steps=stage1_steps,
+                        stage2_steps=stage2_steps,
+                        stage1_eta=stage1_eta,
+                        stage1_s_noise=stage1_s_noise,
+                        stage2_sampler=stage2_sampler,
+                        continuation=continuation,
+                        continuation_strength=LTX25_CHAIN_CONTINUATION_STRENGTH,
+                        output_video_context_frames=plan.video_overlap_latent_frames,
+                        output_audio_context_tokens=next_audio,
+                        return_continuation=bool(next_audio),
+                    )
+                    if next_audio:
+                        video_latent, audio_latent, continuation = result
+                    else:
+                        video_latent, audio_latent = result
+                        continuation = None
+                    arrays = {"video": video_latent, "audio": audio_latent}
+                    if continuation is not None:
+                        arrays.update(
+                            stage1=continuation.stage1_video_tokens,
+                            stage2=continuation.stage2_video_tokens,
+                            audio_tail=continuation.audio_tokens,
+                        )
+                    if any(
+                        tuple(arrays[key].shape) != shape
+                        for key, shape in expected_shapes[index].items()
+                    ):
+                        raise ValueError("LTX 2.5 generated window shape does not match its plan.")
+                    if store:
+                        store.save(index, identities[index], arrays, expected_shapes[index])
+                video_windows.append(video_latent)
+                audio_windows.append(audio_latent)
+                window_timings.append(
+                    {
+                        "window": index + 1,
+                        "seed": window_seeds[index],
+                        "resumed": index < resumed_count,
+                        "seconds": time.perf_counter() - window_started,
+                        "stage_timings": {} if index < resumed_count else self.last_timings,
+                    }
+                )
+            del encoded_prompts, encoded_images, completed, continuation, arrays
             release_started = time.perf_counter()
-            self._release_sampling()
+            if self.low_memory:
+                self._release_sampling()
+                sampling_released = True
             release_seconds = time.perf_counter() - release_started
-        else:
-            release_seconds = 0.0
-        assembly_started = time.perf_counter()
-        video_latent, audio_latent = assemble_ltx25_latents(video_windows, audio_windows, plan)
-        mx.eval(video_latent, audio_latent)
-        assembly_seconds = time.perf_counter() - assembly_started
-        del video_windows, audio_windows
-        decode_started = time.perf_counter()
-        from ltx_pipelines_mlx.utils._orchestration import decode_and_save_video
+            if check_interrupted is not None:
+                check_interrupted()
+            assembly_started = time.perf_counter()
+            video_latent, audio_latent = assemble_ltx25_latents(video_windows, audio_windows, plan)
+            mx.eval(video_latent, audio_latent)
+            assembly_seconds = time.perf_counter() - assembly_started
+            del video_windows, audio_windows
+            decode_started = time.perf_counter()
+            from .chaining import decode_ltx25_chain
 
-        decode_and_save_video(
-            self.video_decoder_block,
-            self.audio_decoder_block,
-            video_latent,
-            audio_latent,
-            output_path,
-            frame_rate=frame_rate,
-            low_memory=self.low_memory,
-        )
-        decode_seconds = time.perf_counter() - decode_started
-        del video_latent, audio_latent
-        if self.low_memory:
-            self.video_decoder_block.free()
-            self.audio_decoder_block.free()
-        self.last_timings = {
-            **prompt_timings,
-            "windows": window_timings,
-            "latent_assembly_seconds": assembly_seconds,
-            "sampling_release_seconds": release_seconds,
-            "decode_publish_seconds": decode_seconds,
-            "chain_total_seconds": time.perf_counter() - chain_started,
-            "chain_plan": plan.as_dict(),
-            "continuation_strength": LTX25_CHAIN_CONTINUATION_STRENGTH,
-            "publication_mode": "single_decode_native_latent_chain",
-            "video_join_mode": "causal_drop_plus_linear_latent_overlap",
-            "audio_join_mode": "joint_latent_trim_then_single_decode",
-        }
-        return output_path
+            destination = Path(output_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary_output = destination.with_name(
+                f".{destination.stem}-{uuid.uuid4().hex}{destination.suffix}"
+            )
+            publication = decode_ltx25_chain(
+                self.video_decoder_block,
+                self.audio_decoder_block,
+                video_latent,
+                audio_latent,
+                str(temporary_output),
+                frame_rate=frame_rate,
+                low_memory=self.low_memory,
+                check_interrupted=check_interrupted,
+            )
+            if check_interrupted is not None:
+                check_interrupted()
+            os.replace(temporary_output, destination)
+            decode_seconds = time.perf_counter() - decode_started
+            self.last_timings = {
+                **prompt_timings,
+                "windows": window_timings,
+                "checkpoint_resumed_windows": resumed_count,
+                "scene_image_encode_seconds": image_encode_seconds,
+                "scene_image_conditioning_bytes_bound": image_bytes,
+                "boundary_image_guidance": image_guidance,
+                "latent_assembly_seconds": assembly_seconds,
+                "sampling_release_seconds": release_seconds,
+                "decode_publish_seconds": decode_seconds,
+                "chain_total_seconds": time.perf_counter() - chain_started,
+                "chain_plan": plan.as_dict(),
+                "continuation_strength": LTX25_CHAIN_CONTINUATION_STRENGTH,
+                "publication_mode": "single_decode_native_latent_chain",
+                "publication": publication,
+                "video_join_mode": "causal_drop_plus_linear_latent_overlap",
+                "audio_join_mode": "joint_latent_trim_then_single_decode",
+            }
+            return output_path
+        finally:
+            if temporary_output is not None:
+                temporary_output.unlink(missing_ok=True)
+            if self.low_memory:
+                if not sampling_released:
+                    self._release_sampling()
+                self.prompt_encoder.free()
+                self.video_decoder_block.free()
+                self.audio_decoder_block.free()
 
     def encode_external_continuation(
         self,
@@ -1853,6 +2134,7 @@ class LTX25DistilledPipeline:
             audio_tokens=audio_tokens,
             video_latent_frames=expected_latent_frames,
             audio_token_count=audio_token_count,
+            video_tail_is_terminal=False,
         )
         return continuation, {
             "context_frames": context_frames,

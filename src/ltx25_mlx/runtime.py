@@ -1353,29 +1353,116 @@ class LTX25RuntimeCache:
         *,
         window_count: int,
         overlap_frames: int,
+        window_frame_counts=None,
+        images=None,
+        seeds=None,
+        checkpoint_dir: str | Path | None = None,
+        boundary_image_policy: str = "strict",
         unload_after: bool = True,
         check_interrupted=None,
         step_callback=None,
     ) -> dict[str, object]:
         """Generate an exact latent-native LTX 2.5 chained timeline."""
-        from .chaining import plan_ltx25_chain
+        from .chain_plan import (
+            plan_ltx25_chain,
+            plan_ltx25_windows,
+            route_scene_images,
+            scene_image_conditioning_bytes,
+        )
 
         config.validate_chain_support()
+        if spec.ic_loras or spec.msr_lora_path:
+            raise ValueError("LTX 2.5 chained scenes do not support IC-LoRA or MSR adapters.")
         report = spec.validate(
             config.pipeline_mode,
             require_spatial_upscaler=not config.ic_lora_single_stage,
         )
+        if any(
+            item.get("adapter_role") == "ic_lora"
+            for item in report.get("transformer_baked_loras", ())
+        ):
+            raise ValueError("LTX 2.5 chained scenes do not support baked IC-LoRA adapters.")
+        if any(item.get("adapter_role") not in (None, "transformer_lora")
+               for item in report.get("components", ())):
+            raise ValueError("LTX 2.5 scene LoRA stacks cannot contain IC-LoRA or MSR adapters.")
         config, configuration_adjustments = resolve_ltx25_runtime_config(spec, config)
         scales = tuple(int(value) for value in report["video_scale_factors"])
         config.validate(scale_factors=scales)
-        plan = plan_ltx25_chain(
-            total_frames=config.num_frames,
-            window_count=window_count,
-            overlap_frames=overlap_frames,
-            frame_rate=config.frame_rate,
-        )
+        if window_frame_counts is None:
+            plan = plan_ltx25_chain(
+                total_frames=config.num_frames,
+                window_count=window_count,
+                overlap_frames=overlap_frames,
+                frame_rate=config.frame_rate,
+            )
+        else:
+            window_frame_counts = tuple(window_frame_counts)
+            plan = plan_ltx25_windows(
+                window_frame_counts, overlap_frames=overlap_frames, frame_rate=config.frame_rate
+            )
+            if plan.window_count != window_count or plan.total_frames != config.num_frames:
+                raise ValueError("LTX 2.5 scene windows do not match the configured timeline.")
         if len(prompts) != window_count or any(not prompt.strip() for prompt in prompts):
             raise ValueError("Every LTX 2.5 chained window requires a non-empty prompt.")
+        images = list(images or ())
+        window_images = route_scene_images(
+            images, plan, boundary_image_policy=boundary_image_policy
+        )
+        scene_image_conditioning_bytes(
+            window_images,
+            height=config.height,
+            width=config.width,
+            single_stage=config.ic_lora_single_stage,
+        )
+        if any(not Path(image.path).expanduser().is_file() for image in images):
+            raise ValueError("LTX 2.5 scene images must reference existing files.")
+        seeds = (
+            tuple(seeds)
+            if seeds is not None
+            else tuple(config.seed + index for index in range(window_count))
+        )
+        if len(seeds) != window_count or any(
+            type(value) is not int or value < 0 for value in seeds
+        ):
+            raise ValueError(
+                "LTX 2.5 chained seeds must provide one nonnegative integer per window."
+            )
+        checkpoint_identity = None
+        if checkpoint_dir is not None:
+            from importlib.metadata import PackageNotFoundError, version
+
+            from .chain_checkpoints import content_identity, prefix_identity
+
+            effective_config = asdict(config)
+            # Prompt, geometry and seed are hashed window by window so later
+            # edits retain the unchanged ancestor prefix.
+            effective_config.pop("duration_seconds")
+            effective_config.pop("seed")
+            packages = {}
+            for package in ("mlx", "ltx-core-mlx", "ltx-pipelines-mlx"):
+                try:
+                    packages[package] = version(package)
+                except PackageNotFoundError:
+                    packages[package] = "unversioned"
+            checkpoint_identity = prefix_identity(
+                "native-ltx25-scene",
+                {
+                    "config": effective_config,
+                    "components": {
+                        name: content_identity(filename, model_file=True)
+                        for name, filename in spec.paths().items()
+                    },
+                    "loras": [
+                        (content_identity(filename, model_file=True), strength)
+                        for filename, strength in spec.loras
+                    ],
+                    "runtime": {
+                        filename.name: content_identity(filename)
+                        for filename in Path(__file__).parent.glob("*.py")
+                    },
+                    "packages": packages,
+                },
+            )
         if check_interrupted is not None:
             check_interrupted()
         try:
@@ -1385,7 +1472,15 @@ class LTX25RuntimeCache:
         except (ImportError, AttributeError):
             mx = None
         started = time.perf_counter()
-        pipeline = self.get(spec, config)
+        with self._lock:
+            if checkpoint_identity is not None and checkpoint_identity != getattr(
+                self, "_chain_checkpoint_identity", None
+            ):
+                # A path-identical model can be replaced while its old weights
+                # remain resident. Never label that old pipeline with a new hash.
+                self._release_locked()
+            pipeline = self.get(spec, config)
+            self._chain_checkpoint_identity = checkpoint_identity
         try:
             from .feed_forward import reset_feed_forward_runtime_status
 
@@ -1414,6 +1509,16 @@ class LTX25RuntimeCache:
                     cfg_pp_schedule=config.cfg_pp_schedule,
                     stage1_steps=config.stage1_steps,
                     stage2_steps=config.stage2_steps,
+                    stage1_eta=config.stage1_eta,
+                    stage1_s_noise=config.stage1_s_noise,
+                    ancestral_seed_offset=config.ancestral_seed_offset,
+                    stage2_sampler=config.stage2_sampler,
+                    window_frame_counts=window_frame_counts,
+                    images=images,
+                    boundary_image_policy=boundary_image_policy,
+                    seeds=seeds,
+                    checkpoint_dir=checkpoint_dir,
+                    checkpoint_identity=checkpoint_identity,
                 )
             if check_interrupted is not None:
                 check_interrupted()
@@ -1472,6 +1577,7 @@ class LTX25RuntimeCache:
             self._release_locked()
 
     def _release_locked(self) -> None:
+        self._chain_checkpoint_identity = None
         self._pipeline = None
         self._key = None
         gc.collect()

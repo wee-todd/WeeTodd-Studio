@@ -12,6 +12,7 @@ struct ImageGenerationEditor: View {
   @State private var showResult = true
   @State private var zoom = 1.0
   @State private var groupName = ""
+  @State private var loraSearch = ""
   @State private var assistant: PromptAssistantContext?
   @State private var moodboardVisible = false
   @State private var configOpen = false
@@ -314,34 +315,70 @@ struct ImageGenerationEditor: View {
   }
   var loraControls: some View {
     let available = store.drawThingsLoRAs(profileID: draft?.profileID ?? "", modelID: draft?.modelID ?? "")
-    let groups = store.drawThingsLoRAGroups.filter { $0.profileID == draft?.profileID && $0.compatibleModelIDs.contains(draft?.modelID ?? "") }
-    return VStack(alignment: .leading) {
-      ForEach(available, id: \.id) { lora in
-        Toggle(lora.name, isOn: Binding(get: { draft?.loras.contains { $0.modelID == lora.id } == true }, set: { enabled in
-          store.imageDraft?.loras.removeAll { $0.modelID == lora.id }
-          if enabled { store.imageDraft?.loras.append(DrawThingsLoRA(modelID: lora.id)) }; store.imageEstimate = nil
-        }))
+    let groups = store.drawThingsLoRAGroups.filter {
+      $0.profileID == draft?.profileID && $0.compatibleModelIDs.contains(draft?.modelID ?? "")
+        && $0.family == store.drawThingsModelFamily(profileID: draft?.profileID ?? "", modelID: draft?.modelID ?? "")
+    }
+    let hasCatalog = store.drawThingsCatalogs[draft?.profileID ?? ""] != nil
+    return VStack(alignment: .leading, spacing: 8) {
+      TextField("Search LoRAs and groups", text: $loraSearch)
+      ForEach(available.filter { matchesLoRASearch($0.name) || matchesLoRASearch($0.id) }, id: \.id) { lora in
+        Toggle(lora.name, isOn: loraEnabled(lora.id))
       }
-      ForEach(draft?.loras ?? []) { lora in
-        HStack {
-          Text(lora.modelID).lineLimit(1).help(lora.modelID)
-          TextField("Weight", value: Binding(get: { draft?.loras.first { $0.modelID == lora.id }?.weight ?? 1 }, set: { value in
-            if let index = store.imageDraft?.loras.firstIndex(where: { $0.modelID == lora.id }) { store.imageDraft?.loras[index].weight = value; store.imageEstimate = nil }
-          }), format: .number).frame(width: 55)
-          Button { store.imageDraft?.loras.removeAll { $0.modelID == lora.id }; store.imageEstimate = nil } label: { Image(systemName: "xmark") }
+      ForEach((draft?.loras ?? []).filter { matchesLoRASearch($0.modelID) }) { lora in
+        VStack(alignment: .leading, spacing: 5) {
+          HStack {
+            Toggle(lora.modelID, isOn: loraEnabled(lora.id)).lineLimit(1).help(lora.modelID)
+            Button { store.imageDraft?.loras.removeAll { $0.modelID == lora.id }; store.imageEstimate = nil }
+              label: { Image(systemName: "xmark") }.help("Remove LoRA")
+          }
+          if !available.contains(where: { $0.id == lora.id }) {
+            Text(hasCatalog ? "Unavailable for this connection or model. Disable or remove before generation."
+              : "Saved LoRA · connection not verified")
+              .font(.caption2).foregroundStyle(.orange)
+          }
+          LoRAStrength(value: Binding(get: { draft?.loras.first { $0.modelID == lora.id }?.weight ?? 1 }, set: { value in
+            if let index = store.imageDraft?.loras.firstIndex(where: { $0.modelID == lora.id }) {
+              store.imageDraft?.loras[index].weight = value; store.imageEstimate = nil
+            }
+          }))
         }.font(.caption)
       }
-      Menu("Apply group") {
-        ForEach(groups) { group in storeGroupButton(group) }
+      Menu("Apply LoRA group") {
+        ForEach(groups.filter { matchesLoRASearch($0.name) }) { group in
+          Menu(group.name) {
+            ForEach(LoRAGroupApplicationMode.allCases) { mode in
+              Button(mode.label) { applyLoRAGroup(group, mode: mode) }
+            }
+          }
+        }
       }.disabled(groups.isEmpty)
       HStack {
         TextField("Group name", text: $groupName)
-        Button("Save") { saveGroup(available) }.disabled(groupName.trimmingCharacters(in: .whitespaces).isEmpty || draft?.loras.isEmpty != false)
+        Button("Save group") { saveGroup(available) }
+          .disabled(!hasCatalog || groupName.trimmingCharacters(in: .whitespaces).isEmpty || draft?.loras.isEmpty != false)
       }
     }
   }
-  func storeGroupButton(_ group: DrawThingsLoRAGroup) -> some View {
-    Button(group.name) { store.imageDraft?.loras = group.members; store.imageEstimate = nil }
+  func matchesLoRASearch(_ value: String) -> Bool {
+    loraSearch.isEmpty || value.localizedCaseInsensitiveContains(loraSearch)
+  }
+  func loraEnabled(_ modelID: String) -> Binding<Bool> {
+    Binding(get: { draft?.loras.first { $0.modelID == modelID }?.isEnabled ?? false }, set: { enabled in
+      if let index = store.imageDraft?.loras.firstIndex(where: { $0.modelID == modelID }) {
+        store.imageDraft?.loras[index].enabled = enabled
+      } else if enabled { store.imageDraft?.loras.append(DrawThingsLoRA(modelID: modelID)) }
+      store.imageEstimate = nil
+    })
+  }
+  func applyLoRAGroup(_ group: DrawThingsLoRAGroup, mode: LoRAGroupApplicationMode) {
+    guard let draft else { return }
+    var selection = DrawThingsSelection(profileID: draft.profileID, modelID: draft.modelID,
+      modelFamily: store.drawThingsModelFamily(profileID: draft.profileID, modelID: draft.modelID), loras: draft.loras)
+    do {
+      try selection.apply(group, mode: mode)
+      store.imageDraft?.loras = selection.loras; store.imageEstimate = nil
+    } catch { store.error = error.localizedDescription }
   }
   func saveGroup(_ available: [StudioStore.DiscoveredDrawThingsLoRA]) {
     guard let draft else { return }
