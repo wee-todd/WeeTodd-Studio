@@ -12,7 +12,10 @@ from .conditioning import canonical_inputs, canonical_loras, validate_endpoint_r
 from .contracts import validate_request
 from .media import finish_video
 
-_REMOTE_SETTINGS = frozenset(
+_LTX_HIRES_SETTINGS = frozenset(
+    {"hiresFix", "hiresFixWidth", "hiresFixHeight", "hiresFixStrength"}
+)
+_REMOTE_SETTINGS = _LTX_HIRES_SETTINGS | frozenset(
     {"steps", "guidanceScale", "strength", "shift", "audioShift", "sampler", "numFrames", "fps"}
 )
 _LTX_FRAME_CLOCK_FAMILIES = frozenset({"ltx2", "ltx2.3", "ltx23", "ltx2_3"})
@@ -98,13 +101,18 @@ def _validate_generation_selection(clip: dict[str, Any]) -> None:
     if selection.get("preset") != "custom":
         raise ValueError("Draw Things generation selection currently requires the Custom preset")
     task = selection.get("task")
-    if task not in {"t2v", "i2v", "fflf"}:
+    if task not in {"t2v", "i2v", "fflf", "ref2va"}:
         raise ValueError(
-            "Draw Things supports Text to video, Image to video and H3 First/last frames"
+            "Draw Things supports Text to video, Image to video, "
+            "H3 First/last frames and H3 image references"
         )
     attachments = clip.get("attachments", [])
     if not isinstance(attachments, list):
         raise ValueError("Draw Things attachments must be an array")
+    if task == "ref2va" and (not 1 <= len(attachments) <= 9 or not all(
+        isinstance(item, dict) and item.get("role") == "reference" for item in attachments
+    )):
+        raise ValueError("Draw Things H3 Ref2VA requires 1–9 image reference attachments")
     if task == "t2v" and attachments:
         raise ValueError(
             "Draw Things Text to video conflicts with attached media; "
@@ -187,6 +195,8 @@ def compose_drawthings_request(
     unknown = set(supplied) - (_REMOTE_SETTINGS | {"width", "height", "seed"})
     if unknown:
         raise ValueError(f"Unsupported Draw Things configuration setting: {sorted(unknown)[0]}")
+    if is_h3 and set(supplied) & _LTX_HIRES_SETTINGS:
+        raise ValueError("Draw Things HighResFix controls are supported only for LTX video")
     configuration = {
         key: copy.deepcopy(value) for key, value in supplied.items() if key in _REMOTE_SETTINGS
     }

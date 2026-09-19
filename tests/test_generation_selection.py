@@ -101,6 +101,18 @@ def test_no_filename_capability_inference():
     assert result["recipe"]["conditioning"]["task"] == "fflf"
 
 
+def test_ltx23_control_auto_selects_matching_ic_family():
+    motion = profile("ltx23", pipeline_mode="distilled")
+    motion["recipe"]["components"] = {"ic_loras": [{"family": "motion_track"}]}
+    union = copy.deepcopy(motion)
+    union["id"] = "union.json"
+    union["recipe"]["components"]["ic_loras"][0]["family"] = "union_control"
+    result = selection.resolve_generation_selection(
+        {"task": "control"}, {"engine": "ltx23", "attachments": [
+            {"role": "control", "controlType": "canny_edges"}]}, [motion, union], {})
+    assert result["profileID"] == "union.json"
+
+
 def test_runtime_acceleration_applies_only_to_explicit_selection():
     capabilities = {"acceleration": {"h3ProjectionBackend": "auto", "h3MemoryPolicy": "paged"}}
     clip = {"engine": "h3", "attachments": []}

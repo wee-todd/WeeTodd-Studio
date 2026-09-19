@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "wav2vec2-base-960h",
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/facebook/wav2vec2-base-960h",
+      "files": [
+        {
+          "repo": "facebook/wav2vec2-base-960h",
+          "revision": "22aad52d435eb6dbaf354bdad9b0da84ce7d6156",
+          "filename": "config.json",
+          "size": 1596,
+          "sha256": "d3ec255c063d9f95057b553b19c20135b259875834a4fe9deb218a6be25b4cf3",
+          "target": "wav2vec2-base-960h/config.json",
+          "provider": "huggingface"
+        },
+        {
+          "repo": "facebook/wav2vec2-base-960h",
+          "revision": "22aad52d435eb6dbaf354bdad9b0da84ce7d6156",
+          "filename": "vocab.json",
+          "size": 291,
+          "sha256": "19727f8944fe6459fc3f240ae2c198395b740f6a029bd23e06656266b83bcf64",
+          "target": "wav2vec2-base-960h/vocab.json",
+          "provider": "huggingface"
+        },
+        {
+          "repo": "facebook/wav2vec2-base-960h",
+          "revision": "22aad52d435eb6dbaf354bdad9b0da84ce7d6156",
+          "filename": "preprocessor_config.json",
+          "size": 159,
+          "sha256": "b225d617c025463b9e157e06afea8b90dc7078fc70b013c533328423e0486b4a",
+          "target": "wav2vec2-base-960h/preprocessor_config.json",
+          "provider": "huggingface"
+        },
+        {
+          "repo": "facebook/wav2vec2-base-960h",
+          "revision": "22aad52d435eb6dbaf354bdad9b0da84ce7d6156",
+          "filename": "model.safetensors",
+          "size": 377607901,
+          "sha256": "8aa76ab2243c81747a1f832954586bc566090c83a0ac167df6f31f0fa917d74a",
+          "target": "wav2vec2-base-960h/model.safetensors",
+          "provider": "huggingface"
+        },
+        {
+          "repo": "facebook/wav2vec2-base-960h",
+          "revision": "22aad52d435eb6dbaf354bdad9b0da84ce7d6156",
+          "filename": "README.md",
+          "target": "wav2vec2-base-960h/README.md",
+          "size": 4431,
+          "sha256": "fc52a0adfa64e446800f9944c6cf9b90da3127aba548860ea5714516ec8c18c7",
+          "provider": "huggingface"
+        }
+      ]
+    },
+    {
+      "id": "beat-this-small0",
+      "license": "MIT",
+      "source": "https://github.com/CPJKU/beat_this",
+      "files": [
+        {
+          "repo": "CPJKU/beat_this",
+          "revision": "b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c",
+          "filename": "small0.ckpt",
+          "size": 8451101,
+          "sha256": "6074be2c4d490c5f6101fcc374a1ec72ae93456e23bb6019783b849f5dc7d47b",
+          "target": "beat-this-small0/small0.ckpt",
+          "provider": "cpjku"
+        },
+        {
+          "repo": "CPJKU/beat_this",
+          "revision": "b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c",
+          "filename": "LICENSE",
+          "target": "beat-this-small0/LICENSE",
+          "provider": "github",
+          "size": 1113,
+          "sha256": "909ab6549794a18e9bb243aacfadda4a5f308436fc2846f350755c53c4f06ae1"
+        }
+      ]
+    },
+    {
+      "id": "umxhq-vocals",
+      "optional": true,
+      "license": "MIT",
+      "source": "https://zenodo.org/records/3370489",
+      "files": [
+        {
+          "repo": "sigsep/open-unmix-pytorch",
+          "revision": "fb672c9584997c2b05e148eeaa65b4c23ed4693b",
+          "filename": "vocals-b62c91ce.pth",
+          "size": 35637796,
+          "sha256": "b62c91cedbc7a066f1778ead5b5cecb377aa3a46a31af1cce7c5c8769339d083",
+          "target": "umxhq-vocals/vocals-b62c91ce.pth",
+          "provider": "zenodo"
+        },
+        {
+          "repo": "sigsep/open-unmix-pytorch",
+          "revision": "fb672c9584997c2b05e148eeaa65b4c23ed4693b",
+          "filename": "LICENSE",
+          "target": "umxhq-vocals/LICENSE",
+          "provider": "github",
+          "size": 1103,
+          "sha256": "4f7b047ffafb9fbb39a40d605bab961b9b030711addce6e9d23886c2ae3b105e"
+        }
+      ]
+    }
+  ]
+}

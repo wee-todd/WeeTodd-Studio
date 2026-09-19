@@ -1,5 +1,128 @@
 # WeeTodd Studio implementation status
 
+Timeline and export reliability 2026-09-18: native playback now quantizes shared composition
+boundaries consistently, preventing black video from sub-frame instruction gaps. Playback ticks
+update the playhead without rebuilding the full editor; FF/LF controls seek in movie time, including
+transition offsets. Reopening a project refreshes generation descriptions and revalidates saved
+takes before production reuse. Movie assembly trims AAC packet padding before concatenation so
+cuts retain their planned timing. Fractional-cut, decoded-pixel and frame-order regressions cover
+these fixes; live long-movie playback and seeking were also checked.
+
+Lyric-assisted verification 2026-09-17: supplied lyrics now guide short phrase-boundary repairs
+and acoustically checked corrections between matching context words. Studio retains raw recognition
+and separate lyric-assisted wording, with per-word agreement/assistance/unresolved labels. Missing
+or unsupported lyrics remain untimed and are not inserted into the transcript. Acoustic caches
+remain reusable when lyrics change. In a small three-excerpt annotated English check (210 words),
+word-edit errors dropped from 192 to 177 with the original mix and 166 to 157 after isolation;
+mixed-audio words timed within 200 ms rose from 52 to 54, with no additional >1 s onset errors.
+The generated song still supported 61/174 words; this is a conservative verification improvement,
+not reliable automatic singing alignment. Cached-evidence comparison added roughly 1–4 ms per
+excerpt and about 4 ms for that generated song on the test machine.
+
+Resumable production 2026-09-17: Movie → Produce movie and the approved Shot List handoff capture
+an immutable edit, render native units serially, prepare predecessor-dependent continuity in order,
+and assemble through the existing movie mixer. Complete LTX2.5 scenes are one unit. Local retries
+are bounded to 0–3; pause/resume retains verified takes and scene checkpoints. Final publication has
+a recoverable journal. Applying takes verifies artifact/source receipts plus the unchanged project
+and execution context; prior versions and Music track data remain intact. Self-hosted Draw Things
+is explicit with no uncertain resubmission; Cloud API shots retain individual cost confirmation.
+Real stereo assembly, failure/cancellation/resume and identity regression tests cover orchestration.
+
+Native audio analysis 2026-09-17: independent MLX Beat This small0 and wav2vec2-base-960h
+provide learned beat/downbeat events and English acoustic word evidence. Music-video intake
+adds model setup, analysis preview, word/line support and omission/repetition flags, editable
+frame-snapped cut markers and locks. Optional native UMX-HQ vocal isolation feeds only word
+evidence; original audio remains the beat-analysis source and movie soundtrack. Stem and acoustic
+caches are independent of supplied lyrics. Reviewed lyric cuts use explicit source seconds.
+Song sections/repetition groups and vocal gaps are provisional programmatic suggestions.
+
+Qualification: model numerical parity, all 16 words of a known spoken sentence aligned, inserted
+words/absent lines left untimed. A 159.8-second song took 2.124 seconds cold and 0.184 seconds
+cached on the test machine. Beat stage detected 283 beats/71 downbeats. On the same song with
+its recovered generation-request lyrics, isolated vocals increased acoustic word coverage from
+29/174 to 61/174; neither mode fully timed a line. Full-service timings were 2.09s mixed and 4.38s
+isolated on the test machine. This is agreement/support against intended text, without independent
+performed-lyric transcription or hand-timed boundaries. Sung timing remains unreliable; no claim
+of accurate automatic song lyrics or semantic chorus detection.
+
+Music-video planning and audio-driven scenes 2026-09-16: the new Movie action accepts songs,
+supplied/unknown/instrumental lyrics, reference images and reusable production objects. Native
+DSP onset/dynamics analysis is cached; bounded frame planning replaces a user-selected fixed clip
+length. Shot List combining retains original shots and frame references, and approved shots can
+be added to the timeline with the original Music track. LTX 2.5 continuous scenes now support
+one shared, contiguous source-audio interval with endpoint/keyframe images. Both stages freeze
+source audio; checkpoint resumes include source identity. The native chain intermediate uses ALAC
+(up to 24-bit PCM); Studio/headless scene delivery restores the original interval as PCM32.
+
+Real qualification: two shots/two image anchors, four seconds, 384×256/24 FPS, 43.8-second render
+and 3.4-second resume. The source interval matched all 192,000 stereo samples exactly, and macOS
+AVFoundation decoded it successfully. Scene members require the eight-frame grid and existing
+2–6-member/30-second limits. English word alignment and learned beat/downbeat analysis are now available as described above;
+singing accuracy, semantic chorus detection and music-video lip-sync quality remain unqualified. Workflow planning retains human reviews and
+supports ordinary clip generation or the resumable production handoff after timeline application.
+
+Native YuE2 music 2026-09-16: Studio's Music workspace uses an independently implemented MLX
+score/semantic/acoustic/stereo-decoder engine, shared with headless music commands. No external
+YuE inference package is installed. Guided musical tags, lyrics/instrumental mode, seed and quality
+presets sit alongside explicit advanced samplers, ABC composition, guidance and precision controls.
+Takes retain verified tokens/noise/latents and checkpoint content provenance for acoustic resynthesis
+and decoder-only replay. Staged unloading covers success, failure and cancellation, including
+weights retained by exception frames. PCM export applies global gain only when needed to avoid
+clipping. The verified optional download uses the merged npario 8-bit layout; split layouts are
+rejected. Weight licensing remains CC BY-NC 4.0, separate from the original engine code.
+
+Generated music can be auditioned and placed on a stereo Music track under source audio, or
+prepared as an exact, nonzero-offset excerpt for an existing native A2V clip. Default placement
+avoids source-replacement tracks. Async results protect changed documents/drafts; Collect Media
+preserves stage artifacts. Guided music-video planning now uses the existing reviewed Director and Shot List workflow; see the music-video qualification above.
+
+Qualification: a real 8-bit, 32-step song ended naturally at 159.8 seconds, generated in 123.2
+seconds on M3 Ultra / 256 GiB (approximately 45.2 GB process peak footprint). This single run
+predates the final integrity-hashing overhead and is not a general hardware benchmark. Verified
+decoder-only replay took 4.26 seconds including 2.14 seconds of source/checkpoint hashing and
+2.03 seconds of decoding. A three-second excerpt drove a real LTX 2.5 A2V render; output was
+384×256 at 24 FPS with stereo audio. A separate additive Music-track export retained the main
+audio and stereo separation; comparison accounted for the existing limiter's 239-sample lookahead.
+Native app checks exercised model inspection, generation, truncation labels, decoder replay and
+Music-track placement in an isolated app/data directory. Core + Studio validation and release
+packaging passed, with focused final regressions for the new controls. M5 attention, lower-memory
+hardware, real BF16/4-bit generations and full-model PyTorch parity remain unqualified; measured
+audio validity is not a claim of subjective musical quality acceptance.
+
+LoRA library 2026-09-16: Runtime Settings supports multiple linked LoRA folders, enabled/subfolder
+controls, an optional training-model fallback and a default app-managed location. Header-only scans
+deduplicate linked files, cache unchanged metadata and report missing drives or unsupported adapters.
+One searchable library shows local files and Draw Things catalogs with explicit source/compatibility
+labels. Clip and image inspectors show applied stacks; Draw Things group management moves into
+the library. Image edits target the draft, and folder preferences do not invalidate render inputs.
+Folder discovery does not mutate saved clips or groups. Draw Things stores remain connection-owned;
+native use requires supported SafeTensors adapters. No conversion/upload or new sampler is introduced.
+
+Reference inputs 2026-09-16: Studio exposes distinct appearance/story, motion/composition and
+audio purposes. Local movie preparation creates visible Ingredients sheets or Canny guides with
+verified cache reuse. LTX 2.3 setup includes dedicated Ingredients/Union adapters, and automatic
+control selection matches the guide family. Draw Things H3 Ref2VA maps ordered image references
+through the separate helper; movie/audio references and LTX IC-LoRAs remain native-only in this
+integration. Original assets and incompatible attachments are preserved. New software checks use
+synthetic media and a local transport fixture; no new real-model visual qualification is claimed.
+
+Timeline playback 2026-09-16: the viewport now plays all timeline clips using movie time, with
+click/drag seeking on the ruler and a draggable playhead triangle and vertical line. Blank-area
+ruler clicks are ignored; handle drags clamp to the timeline. Scrubbing preserves the previous
+playing/paused state and does not change inspector selection. Split uses the shot under the playhead;
+keyframe attachment times remain local to the selected shot.
+
+Native playback references trimmed source ranges in an AVFoundation composition, with bounded
+preview dimensions, asynchronous metadata loading, still/unfinished-shot timing and active audio
+regions. The editing view previews transitions as cuts at incoming shot starts; rendered movie
+preview remains the check for actual transitions and the finishing mix. No preview movie needs
+encoding for ordinary playback. New tests decode colored source ranges, exercise real playback
+across cuts and empty intervals, and cover scrubbing, cancellation, frame offsets and audio fades.
+Core/Studio validation passed 2,149 Python tests and 322 Swift tests (two optional skips), plus
+release packaging. Live Studio verified ruler clicks, dragging both parts of the playhead,
+ignored out-of-bounds clicks and a complete six-shot playback to the edited 28.75-second ending.
+Existing movie content was preserved. No model generation or checkpoint parity was run.
+
 Release validation 2026-09-16: the combined core, Studio, workflow and remote profiles passed
 2,815 Python tests, 308 Studio Swift tests (two optional skips) and 41 Draw Things transport Swift
 tests, plus lint, public-document links, the generated node catalog and portable workflow checks.
@@ -57,8 +180,9 @@ per-shot seeds, global first/last/timed images, shared sound, validated window c
 job export and atomic whole-scene review are implemented. Frame-match conversion can freeze the
 previous take's visible ending as an explicit image. Changed documents or inputs cannot accept a
 stale candidate; retries preserve earlier candidate files. Preparation flags distinct image files
-on consecutive boundary frames. MSR/reference, audio drivers and control adapters remain excluded
-from this combined route, including control adapters hidden in ordinary LoRA slots.
+on consecutive boundary frames. This initial milestone excluded MSR/reference, audio drivers and
+control adapters, including control adapters hidden in ordinary LoRA slots. The later music-video
+increment above adds shared source audio; MSR/reference and control adapters remain excluded.
 
 A front-end Rill qualification rendered six five-second shots as one scene and accepted all six
 source ranges together. Export fully decoded: 30.000 seconds, 720 frames at 24 fps, 768×448,
@@ -999,7 +1123,9 @@ Offline recovery produced a verified 768×448 MP4 with all 121 frames and the or
 no cloud resubmission was used. A matching gRPC fixture covers the receipt path. This was an earlier
 recovery qualification; subsequent fresh-cloud results and remaining live-account limits are listed
 in the [current qualification table](studio/README.md#headless-jobs-and-qualification).
-Advanced reference/control/audio conditioning and local LoRA conversion/upload remain unsupported.
+Ordered H3 image references and supported image-model mood-board inputs are now available.
+Movie/audio references, LTX IC-LoRA conditioning and local LoRA conversion/upload remain unsupported
+through this remote integration; see the current Studio guide for supported model/task combinations.
 The optional helper distribution includes dependency source and rebuild/replacement instructions.
 See [Draw Things setup and qualification](studio/README.md#draw-things--experimental).
 

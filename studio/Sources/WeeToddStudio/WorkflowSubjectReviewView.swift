@@ -177,10 +177,9 @@ private struct WorkflowSubjectCard: View {
       Text("Reference images").font(.subheadline.bold())
       if onReferenceSave != nil {
         Button("Create reference…") {
-          let linked = Set((relationships ?? []).map(\.targetID))
           sheetContext = ReferenceSheetContext(subjectKey: subjectScope + ":" + subject.id,
             name: name, kind: kind, description: description,
-            linkedDefinitions: inventory.filter { linked.contains($0.id) }.map { "\($0.id) · \($0.name): \($0.description)" }.joined(separator: "\n"))
+            linkedDefinitions: ReferenceSheetLinks.definitions(relationships: relationships ?? [], inventory: inventory))
         }.disabled(changed || !editable || imagePaths.count >= 8)
         Text("Using a new reference requires renewed review; your saved description is preserved.")
           .font(.caption2).foregroundStyle(.secondary)

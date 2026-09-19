@@ -136,9 +136,30 @@ extension StudioProject {
         return ["Remove separate video extension settings before generating a continuous scene."]
       }
       if members.contains(where: { member in
-        member.attachments.contains { ![.first, .last, .keyframe, .lora].contains($0.role) }
+        member.attachments.contains { ![.first, .last, .keyframe, .lora, .audioDriver].contains($0.role) }
       }) {
-        return ["Continuous scenes support first, last and keyframe images plus ordinary LoRAs. Remove reference, audio-driver and control inputs."]
+        return ["Continuous scenes support first, last and keyframe images, source audio and ordinary LoRAs. Remove reference and control inputs."]
+      }
+      let drivers = members.map { $0.attachments.filter { $0.role == .audioDriver } }
+      if drivers.contains(where: { !$0.isEmpty }) {
+        guard drivers.allSatisfy({ $0.count == 1 }) else { return ["Attach one interval of the same song to every scene shot."] }
+        var expected = drivers[0][0].audioSourceStart ?? 0
+        let firstID = drivers[0][0].assetID
+        let firstPath = assets.first { $0.id == firstID }?.path
+        for (member, entries) in zip(members, drivers) {
+          let driver = entries[0]
+          let sameSource = driver.assetID == firstID || (firstPath != nil && assets.first { $0.id == driver.assetID }?.path == firstPath)
+          guard sameSource, let start = driver.audioSourceStart, let duration = driver.audioSourceDuration,
+            start.isFinite, start >= 0, duration.isFinite, duration > 0,
+            abs(start - expected) < 0.000001, abs(duration - member.duration) < 0.000001 else {
+            return ["Scene audio must use consecutive source intervals from one song. Attach the original song with a start time and duration to each shot."]
+          }
+          let frames = duration * member.settings(in: self).fps
+          guard frames.isFinite, abs(frames / 8 - (frames / 8).rounded()) < 0.000001 else {
+            return ["Audio-driven scene shots must use multiples of eight video frames. Keep other shot lengths independent to preserve song timing."]
+          }
+          expected += duration
+        }
       }
       return []
     } catch { return [error.localizedDescription] }

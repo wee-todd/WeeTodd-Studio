@@ -6,6 +6,7 @@ extension Clip {
     switch engine {
     case .movie: return false
     case .drawThings:
+      if usesDrawThingsImageReferences { return false }
       // Draft clips may collect endpoint images before choosing their renderer model.
       if drawThings?.modelID.isEmpty != false { return true }
       switch drawThings?.modelFamily.lowercased() {

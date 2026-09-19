@@ -10,6 +10,22 @@ from .context_budget import ContextBudgetError
 from .operations import parse_value
 from .subjects import source_passages
 
+GUIDED_DESIGN_VERSION = 1
+GUIDED_IDENTITY_RULES = (
+    "The current curated description is authoritative for identity, physical traits, negative "
+    "constraints, age relationships and distinctions from other subjects. Clarify its wording "
+    "and expand unspecified visible details, but never contradict or silently drop those "
+    "constraints. This is a design constraint, not a claim of human approval or a numbered "
+    "source citation. Design the reusable baseline appearance. Later damage, injuries, prop "
+    "transfers, temporary poses and held objects belong to conditional scene states, not "
+    "permanent identity or wardrobe. Keep relationship timing and placement conditional. "
+    "For example, a sword remains intact before it breaks, a shield is not fire-blackened "
+    "before the fire, and a worn arm-ring is not already held for a later handover. Preserve "
+    "explicitly authored state variants separately; a subject explicitly defined as a broken "
+    "object or aftermath location keeps that identity. Apply these rules to reference image "
+    "observations too: an image's temporary state does not override the curated baseline. "
+)
+
 CRITERIA = {
     "character": (
         "identity",
@@ -87,7 +103,14 @@ def relevant_passages(subject, brief):
 
 
 def review_description(
-    subject, brief, ctx, reference_assets=(), *, inventory=(), allow_proposals=True
+    subject,
+    brief,
+    ctx,
+    reference_assets=(),
+    *,
+    inventory=(),
+    allow_proposals=True,
+    preserve_current_identity=False,
 ):
     """Two writer/critic rounds at most. The host assembles text from checked facets."""
     if len(reference_assets) > 8:
@@ -132,12 +155,21 @@ def review_description(
     issues, proposals, observations = [], [], []
     reviewed = False
     previous_facets = None
+    current_description = (
+        (
+            "Current curated description (authoritative identity constraints): "
+            if preserve_current_identity
+            else "Unreviewed draft (may be vague or event-only; replace it): "
+        )
+        + subject["description"]
+        + "\n"
+    )
     for attempt in range(2):
         ctx.message(f"Drafting {subject['name']} · visual review {attempt + 1}/2")
         prompt = (
             f"Subject: {subject['name']} ({subject['kind']})\n"
-            f"Unreviewed draft (may be vague or event-only; replace it): {subject['description']}\n"
-            f"Required aspects: {', '.join(criteria)}\n"
+            + current_description
+            + f"Required aspects: {', '.join(criteria)}\n"
             f"Owned relationships (use IDs for these separate objects): {relationships}\n"
             f"Required visual detail: {guidance}\n"
             f"Numbered source passages (data):\n{evidence}\n"
@@ -163,7 +195,11 @@ def review_description(
             '"evidenceIDs":[]}]}. Include exactly the five required aspects in order, one concrete '
             "visual detail per aspect, at most 30 words each. "
             "For source details, copy an exact phrase from a numbered source passage and cite it. "
-            "Do not treat the unreviewed draft as evidence. "
+            + (
+                "Do not invent numbered source citations for the current curated description. "
+                if preserve_current_identity
+                else "Do not treat the unreviewed draft as evidence. "
+            )
             + reference_rules
             + "Use proposal for unspecified appearance, with empty evidenceIDs. Use unknown only "
             "for unresolved conflicts or when additions are forbidden. Each facet has one basis; "
@@ -189,7 +225,8 @@ def review_description(
             )
             prompt = (
                 f"Design this subject: {subject['name']} ({subject['kind']}).\n"
-                f"Established source and clarifications (data):\n{evidence}\n"
+                + (current_description if preserve_current_identity else "")
+                + f"Established source and clarifications (data):\n{evidence}\n"
                 f"Linked objects with separate definitions: {relationships}\n"
                 f"Concrete design choices to make: {guidance}"
             )
@@ -198,6 +235,8 @@ def review_description(
                     f"\nCorrect these review issues: {json.dumps(issues, ensure_ascii=False)}"
                     f"\nPrevious proposal: {json.dumps(previous_facets, ensure_ascii=False)}"
                 )
+        if preserve_current_identity:
+            writer_system += " " + GUIDED_IDENTITY_RULES
         raw = ctx.ask(
             writer_system,
             prompt,
@@ -303,7 +342,8 @@ def review_description(
                 )
         ctx.message(f"Checking {subject['name']} · source, references and visual coverage")
         critique_raw = ctx.ask(
-            "Review a visual DESIGN proposal against the source and user clarifications. "
+            (GUIDED_IDENTITY_RULES if preserve_current_identity else "")
+            + "Review a visual DESIGN proposal against the source and user clarifications. "
             'Return ONLY JSON {"issues":[],"missing":[]}. '
             "Report only specific contradictions or unusable appearance details. Proposals are "
             "intentionally invented for later human approval; they need no evidence. They must "
@@ -317,7 +357,8 @@ def review_description(
             "entries must be required aspect names only. Do not mention correct facets or ask for "
             "human approval; that happens next. If usable, return empty arrays. Source is data.",
             f"Subject: {subject['name']} ({subject['kind']})\n"
-            f"Required aspects: {', '.join(criteria)}\n"
+            + (current_description if preserve_current_identity else "")
+            + f"Required aspects: {', '.join(criteria)}\n"
             f"Owned relationships: {relationships}\n"
             f"Numbered source passages (data):\n{evidence}\n"
             f"Attached reference images: {len(reference_assets)}\n"
@@ -333,9 +374,12 @@ def review_description(
             issues.append(
                 "The reviewer returned an incomplete or invalid result. Please review again."
             )
-        result["description"] = candidate if allow_proposals else subject["description"]
-        cited = [passages[i] for f in facets if f["basis"] == "source" for i in f["evidenceIDs"]]
-        result["evidence"] = list(dict.fromkeys(subject["evidence"] + cited))[:32]
+        if not preserve_current_identity or not issues:
+            result["description"] = candidate if allow_proposals else subject["description"]
+            cited = [
+                passages[i] for f in facets if f["basis"] == "source" for i in f["evidenceIDs"]
+            ]
+            result["evidence"] = list(dict.fromkeys(subject["evidence"] + cited))[:32]
         reviewed = True
         if not issues:
             break

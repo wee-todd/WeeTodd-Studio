@@ -150,3 +150,31 @@ __all__ = [
     "prepare_audio_driven_conditioning",
     "prepare_publication_audio",
 ]
+
+
+def scene_audio_token_windows(tokens, plan):
+    """Slice one global token clock; every overlap reuses identical source tokens.
+
+    The plan's rounded 25 Hz join counts define a single shared clock, avoiding
+    independent per-window rounding or audio encoder boundary differences.
+    """
+    if tuple(tokens.shape) != (1, plan.expected_audio_tokens, 128):
+        raise ValueError("Scene source audio tokens do not match the global timeline.")
+    windows = []
+    end = 0
+    for index, count in enumerate(plan.window_audio_token_counts):
+        start = end - plan.join_audio_tokens[index - 1] if index else 0
+        end = start + count
+        windows.append(mx.contiguous(tokens[:, start:end, :]))
+    if end != plan.expected_audio_tokens:
+        raise ValueError("Scene audio windows do not cover their exact source timeline.")
+    return windows
+
+
+def source_audio_identity(audio):
+    """Hash the exact normalized PCM input before checkpoint lookup or loading weights."""
+    import hashlib
+
+    waveform, sample_rate = _host_audio(audio)
+    return {"sample_rate": sample_rate, "shape": list(waveform.shape),
+            "sha256": hashlib.sha256(waveform.tobytes()).hexdigest()}

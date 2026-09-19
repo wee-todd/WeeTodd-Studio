@@ -31,9 +31,10 @@ enum Conditioning {
       return inputs
     }
     guard let inputs = request["inputs"] as? [[String: Any]] ?? (request["inputs"] == nil ? [] : nil),
-      inputs.count <= 2 else { throw TransportError.unsupportedConditioning }
+      inputs.count <= 9 else { throw TransportError.unsupportedConditioning }
     let roles = inputs.compactMap { $0["role"] as? String }
-    guard inputs.isEmpty || roles == ["first"] || roles == ["first", "last"] else {
+    let references = !inputs.isEmpty && roles == Array(repeating: "reference", count: inputs.count)
+    guard references || inputs.isEmpty || roles == ["first"] || roles == ["first", "last"] else {
       throw TransportError.unsupportedConditioning
     }
     for input in inputs {
@@ -41,11 +42,11 @@ enum Conditioning {
       let index = isLast ? try Configuration.number(
         (request["configuration"] as? [String: Any])?["numFrames"], min: 2, max: 100000, integer: true) - 1 : 0
       guard request["operation"] as? String == "video",
-        Set(input.keys) == ["role", "path", "sha256", "frameIndex", "strength"],
+        Set(input.keys) == (references ? ["role", "path", "sha256", "strength"] : ["role", "path", "sha256", "frameIndex", "strength"]),
         let path = input["path"] as? String, path.hasPrefix("/"),
         let digest = input["sha256"] as? String, digest.count == 64,
         digest.allSatisfy({ "0123456789abcdef".contains($0) }),
-        try Configuration.number(input["frameIndex"], min: index, max: index, integer: true) == index,
+        try (references || Configuration.number(input["frameIndex"], min: index, max: index, integer: true) == index),
         try Configuration.number(input["strength"], min: 1, max: 1) == 1 else {
         throw TransportError.unsupportedConditioning
       }
@@ -104,11 +105,14 @@ enum Conditioning {
     if let first = values.first {
       payload.image = try encodeImage(first, width: width, height: height)
     }
-    if values.count == 2 {
-      let data = try encodeImage(values[1], width: width, height: height)
+    if values.count > 1 {
+      let tensors = try values.dropFirst().map { input -> TensorAndWeight in
+        let data = try encodeImage(input, width: width, height: height)
+        return TensorAndWeight.with { $0.tensor = data; $0.weight = 1 }
+      }
       payload.hints = [HintProto.with {
         $0.hintType = "shuffle"
-        $0.tensors = [TensorAndWeight.with { $0.tensor = data; $0.weight = 1 }]
+        $0.tensors = tensors
       }]
     }
   }
@@ -129,11 +133,12 @@ enum Conditioning {
         kCGImageSourceThumbnailMaxPixelSize: 4096
       ] as CFDictionary) else { throw TransportError.invalidMedia }
     var width = width, height = height
-    if input["role"] as? String == "moodboard" {
+    if ["moodboard", "reference"].contains(input["role"] as? String ?? "") {
       // Preserve reference composition; the model performs its own reference encoding.
       let ratio = min(1, Double(max(width, height)) / Double(max(image.width, image.height)))
-      width = max(16, Int(Double(image.width) * ratio / 16) * 16)
-      height = max(16, Int(Double(image.height) * ratio / 16) * 16)
+      let multiple = input["role"] as? String == "reference" ? 32 : 16
+      width = max(multiple, Int(Double(image.width) * ratio / Double(multiple)) * multiple)
+      height = max(multiple, Int(Double(image.height) * ratio / Double(multiple)) * multiple)
     }
     var pixels = [UInt8](repeating: 0, count: width * height * 4)
     try pixels.withUnsafeMutableBytes { storage in

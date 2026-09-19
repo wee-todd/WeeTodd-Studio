@@ -264,6 +264,18 @@ def describe_generation(request):
     }
 
 
+def ltx_coverage_duration(duration, fps):
+    """Plan enough native latent intervals to cover a fixed editorial trim."""
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+               and math.isfinite(v) and v > 0 for v in (duration, fps)):
+        raise ValueError("LTX duration and frame rate must be finite positive numbers.")
+    covered = math.ceil(duration * fps / 8 - 1e-9) * 8 / fps
+    if covered > 30:
+        raise ValueError(
+            "Clip duration exceeds the model's supported frame grid; shorten this shot.")
+    return covered
+
+
 def compose_recipe(request):
     """Map explicit editorial roles to the existing fail-closed renderer contract."""
     from wee_todd_mlx.studio_continuity import (
@@ -300,6 +312,31 @@ def compose_recipe(request):
     )
 
     engine = clip["engine"]
+    music_source = clip.get("musicSource")
+    if music_source is not None:
+        from wee_todd_mlx.music_video import verify_source_audio
+
+        if not isinstance(music_source, dict):
+            raise ValueError("Invalid music-video source provenance; replan this shot.")
+        source_path, _ = verify_source_audio(
+            music_source.get("path", ""), music_source.get("sha256", "")
+        )
+        for key in ("start", "duration"):
+            value = music_source.get(key)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0):
+                raise ValueError("Invalid music-video source interval; replan this shot.")
+        known_assets = {a["id"]: a for a in project["assets"] + request.get("globalAssets", [])}
+        for driver in active_attachments(clip):
+            if driver["role"] != "audioDriver":
+                continue
+            asset = known_assets.get(driver["assetID"], {})
+            if (Path(asset.get("path", "")).expanduser().resolve() != source_path
+                    or driver.get("audioSourceStart") != music_source["start"]
+                    or driver.get("audioSourceDuration") != music_source["duration"]):
+                raise ValueError(
+                    "The audio driver differs from this shot's planned song interval; replan it."
+                )
     if engine == "movie":
         raise ValueError("Imported movies need finishing/export, not model generation.")
     resolved = resolve_clip_generation(request, clip)
@@ -325,6 +362,20 @@ def compose_recipe(request):
     assets = {a["id"]: a for a in project["assets"] + request.get("globalAssets", [])}
     inputs, loras = [], []
     fps = 24 if engine == "h3" else config.get("frame_rate", 24)
+    preserve_editorial_duration = (
+        engine in {"ltx23", "ltx25"}
+        and config.get("duration_mode", "manual") == "manual"
+        and task != "extension"
+        and continuity["mode"] != "motion"
+        and not request.get("_sceneResolved")
+    )
+    if preserve_editorial_duration or engine in {"ltx23", "ltx25"} and (
+        clip.get("musicSource") is not None
+        or any(a.get("audioSourceDuration") is not None for a in active_attachments(clip))
+    ):
+        # Editorial cuts may lie between latent boundaries. Render enough frames and
+        # retain the exact clip duration as its trim instead of rounding the song short.
+        config["duration_seconds"] = ltx_coverage_duration(clip["duration"], fps)
     for attachment in active_attachments(clip):
         asset = assets.get(attachment["assetID"])
         if asset is None:
@@ -356,6 +407,12 @@ def compose_recipe(request):
             )
         elif role == "audioDriver":
             item["role"] = "audio_driver"
+            for source_key, contract_key in (
+                ("audioSourceStart", "source_start_seconds"),
+                ("audioSourceDuration", "source_duration_seconds"),
+            ):
+                if attachment.get(source_key) is not None:
+                    item[contract_key] = attachment[source_key]
         elif role == "control":
             item.update(role="control", control_type=attachment.get("controlType", "canny_edges"))
         elif role == "reference" and engine == "ltx25":
@@ -455,16 +512,29 @@ def compose_recipe(request):
                 f"overall_soundscape: {clip.get('soundscape', 'Natural location sound.')}\n\n"
                 f"non_diegetic_music: {clip.get('music', 'N/A')}"
             )
-    if engine == "ltx23" and task == "ref2va" and not prompt.startswith("Reference sheet:"):
+    ingredients = (engine == "ltx23" and task == "ref2va") or (
+        engine == "ltx25" and task == "control" and any(
+            a["role"] == "control" and a.get("controlType") == "ingredients_reference_sheet"
+            for a in clip["attachments"]
+        )
+    )
+    structured_sheet = prompt.startswith(("Reference sheet:", "### Reference Sheet Description"))
+    if ingredients and not structured_sheet:
         descriptions = [
-            a.get("description", "") for a in clip["attachments"] if a["role"] == "reference"
+            a.get("description", "").strip() for a in clip["attachments"]
+            if a["role"] == "reference" or (
+                a["role"] == "control" and a.get("controlType") == "ingredients_reference_sheet"
+            )
         ]
-        if not all(descriptions):
+        if not all(descriptions) and engine == "ltx23":
             raise ValueError(
                 "Describe the Ingredients reference sheet in the attachment description "
                 "before generation."
             )
-        prompt = "Reference sheet: " + "; ".join(descriptions) + "\n\nGenerated video: " + prompt
+        if descriptions and all(descriptions):
+            prompt = (
+                "Reference sheet: " + "; ".join(descriptions) + "\n\nGenerated video: " + prompt
+            )
     recipe.update(
         prompt=prompt,
         ffmpeg=executable("ffmpeg", settings),
@@ -491,6 +561,7 @@ def compose_recipe(request):
         "task": task,
         "conditioning": report,
         "nativeFPS": fps,
+        "preserveEditorialDuration": preserve_editorial_duration,
         "movieSettings": clip.get("settingsOverride") or project["settings"],
         **({"continuity": continuity} if continuity["mode"] != "independent"
            or continuity["saveContext"] else {}),
@@ -1064,13 +1135,16 @@ def export_movie(request, destination, *, cache_directory=None):
             args += ["-i", region["path"]]
         filters, v, a = [], "v0", "a0"
         width, height, fps = movie["outputWidth"], movie["outputHeight"], movie["outputFPS"]
-        for i, _ in enumerate(rendered):
+        for i, clip in enumerate(project["clips"]):
             filters.append(
                 f"[{i}:v]{filter_fit(width, height, 'fit')},fps={fps},setsar=1,"
                 f"settb=AVTB,setpts=PTS-STARTPTS[v{i}]"
             )
             filters.append(
-                f"[{i}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[a{i}]"
+                f"[{i}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                # Decoded AAC can include trailing packet padding. Concat uses the
+                # longest stream, so padding otherwise accumulates into late cuts.
+                f"atrim=duration={clip['duration']},asetpts=PTS-STARTPTS[a{i}]"
             )
         duration = project["clips"][0]["duration"]
         for i, clip in enumerate(project["clips"][1:], 1):
@@ -1159,7 +1233,7 @@ def export_movie(request, destination, *, cache_directory=None):
             filters.append(
                 "".join(f"[{label}]" for label in audio_labels)
                 + f"amix=inputs={len(audio_labels)}:duration=first:normalize=0,"
-                "alimiter=limit=0.95[mixed]"
+                "alimiter=limit=0.95:latency=1[mixed]"
             )
             a = "mixed"
         # AAC packet padding and concat/xfade can leave gaps between otherwise
@@ -1383,6 +1457,10 @@ def main():
     parser.add_argument(
         "command",
         choices=[
+            "production-create", "production-run", "production-status", "production-verify",
+            "music-inspect", "music-generate", "music-excerpt", "music-download",
+            "music-plan", "music-resynthesize", "music-decode",
+            "music-analysis-setup", "music-analyze",
             "assistant-model-catalog", "assistant-model-inspect",
             "assistant-model-download", "assistant-model-health",
             "assist-prompt",
@@ -1405,6 +1483,8 @@ def main():
             "sequence",
             "bridge-frames",
             "freeze-continuity-frame",
+            "prepare-reference",
+            "lora-scan",
             "motion-analyze",
             "motion-enhance",
             "motion-prepare",
@@ -1414,7 +1494,30 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     request = json.loads(args.request.read_text())
-    if args.command.startswith("assistant-model-"):
+    if args.command.startswith("production-"):
+        from studio_production import dispatch
+
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+        result = dispatch(args.command, request, args.output)
+    elif args.command.startswith("music-"):
+        from studio_music import dispatch
+
+        stopped = False
+
+        def stop_music(_number, _frame):
+            nonlocal stopped
+            stopped = True
+
+        if args.command in {
+            "music-generate", "music-plan", "music-resynthesize", "music-decode",
+            "music-analyze", "music-analysis-setup",
+        }:
+            for number in (signal.SIGINT, signal.SIGTERM):
+                signal.signal(number, stop_music)
+        result = dispatch(args.command, request, args.output,
+                          progress=lambda event: emit(**event), cancelled=lambda: stopped)
+    elif args.command.startswith("assistant-model-"):
         from studio_assistant_models import dispatch
 
         result = dispatch(args.command, request,
@@ -1475,6 +1578,18 @@ def main():
         )
     elif args.command == "catalog":
         result = {"profiles": profiles(request["runtime"]["profilesDirectory"])}
+    elif args.command == "lora-scan":
+        from studio_lora import scan_lora_folders
+
+        if args.output is None:
+            raise ValueError("Choose a LoRA metadata cache location.")
+        result = scan_lora_folders(request.get("folders", []), args.output)
+    elif args.command == "prepare-reference":
+        from studio_references import prepare_reference
+
+        if args.output is None:
+            raise ValueError("Choose an output directory for prepared references.")
+        result = prepare_reference(request, args.output, request["runtime"])
     elif args.command == "inspect":
         result = inspect_media(
             request["path"], request["runtime"], lora_model=request.get("loraModel")

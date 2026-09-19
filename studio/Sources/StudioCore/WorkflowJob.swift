@@ -53,6 +53,13 @@ public struct WorkflowRunSummary: Codable {
     public var items: [String: Item]?
     public var warnings: [String]?
     public var coverageReviewReport: ObjectCoverageProposalReport?
+    /// Failed shots have no editable draft yet; whole-shot direction can repair them.
+    public func failedShotIDs(operation: String) -> [String] {
+      guard status == "failed", approved != true,
+            ["music.plan_beats@1", "movie.plan_creative_beats@1", "movie.plan_beats@1"].contains(operation) else { return [] }
+      return (items ?? [:]).filter { $0.value.status == "failed" && $0.value.approved != true }
+        .map(\.key).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
   }
   public var status: String
   public var totalSeconds: Double
@@ -64,11 +71,14 @@ public struct WorkflowRunSummary: Codable {
   public func canImportGuidedPlan(requiredSteps: [String], allSteps: [String]) -> Bool {
     !allSteps.isEmpty && allSteps.allSatisfy { steps[$0]?.status == "completed" }
       && !requiredSteps.isEmpty && requiredSteps.allSatisfy { steps[$0]?.status == "completed" && steps[$0]?.approved == true }
-      && allSteps.contains { steps[$0]?.outputs?["h3_prompts"] != nil && steps[$0]?.status == "completed" }
+      && allSteps.contains { (steps[$0]?.outputs?["h3_prompts"] != nil || steps[$0]?.outputs?["prompt_plan"] != nil) && steps[$0]?.status == "completed" }
   }
   public var preferredReviewStepID: String {
-    awaitingStep ?? steps.keys.sorted().first {
-      steps[$0]?.status == "completed" && steps[$0]?.outputs?["h3_prompts"] != nil
+    if status == "failed", let failed = steps.keys.sorted().first(where: { steps[$0]?.status == "failed" }) {
+      return failed
+    }
+    return awaitingStep ?? steps.keys.sorted().first {
+      steps[$0]?.status == "completed" && (steps[$0]?.outputs?["h3_prompts"] != nil || steps[$0]?.outputs?["prompt_plan"] != nil)
     } ?? preferredSubjectStepID ?? ""
   }
   public func repairCompleted(stepID: String, itemID: String) -> Bool {

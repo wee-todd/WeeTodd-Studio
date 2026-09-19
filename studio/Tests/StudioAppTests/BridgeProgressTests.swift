@@ -91,6 +91,60 @@ final class WorkflowResponseBufferTests: XCTestCase {
     }
     let last = String(decoding: buffer.data, as: UTF8.self).split(separator: "\n").last!
     XCTAssertNotNil(try? JSONSerialization.jsonObject(with: Data(last.utf8)))
-    XCTAssertLessThanOrEqual(buffer.data.count, 4_500_000)
+    XCTAssertLessThanOrEqual(buffer.data.count, 17 * 1024 * 1024)
+  }
+}
+
+
+extension WorkflowResponseBufferTests {
+  func testMaximumCheckpointResponseSurvivesChunkedProgressAndRemainsBounded() throws {
+    var buffer = BridgeResponseBuffer(workflow: true)
+    let progress = Data(("{\"event\":\"progress\",\"message\":\"" + String(repeating: "p", count: 6000) + "\"}\n").utf8)
+    for _ in 0..<4000 { buffer.append(progress) }
+    // A near-limit persisted document must survive the bridge's success wrapper.
+    let evidence = String(repeating: "x", count: 16 * 1024 * 1024 - 100)
+    let result = Data(("{\"status\":\"success\",\"result\":{\"evidence\":\"" + evidence + "\"}}\n").utf8)
+    for start in stride(from: 0, to: result.count, by: 16_387) {
+      buffer.append(result.subdata(in: start..<min(start + 16_387, result.count)))
+      XCTAssertLessThanOrEqual(buffer.data.count, 17 * 1024 * 1024)
+    }
+    let finalLine = try XCTUnwrap(String(decoding: buffer.data, as: UTF8.self).split(separator: "\n").last)
+    let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(finalLine.utf8)) as? [String: Any])
+    XCTAssertEqual((decoded["result"] as? [String: Any])?["evidence"] as? String, evidence)
+    // One unusually large read must still retain the final complete response.
+    let smallResult = Data("\n{\"status\":\"success\",\"result\":{\"revision\":\"latest\"}}\n".utf8)
+    buffer.append(Data(repeating: 65, count: 20 * 1024 * 1024) + smallResult)
+    XCTAssertLessThanOrEqual(buffer.data.count, 17 * 1024 * 1024)
+    XCTAssertTrue(buffer.data.suffix(smallResult.count).elementsEqual(smallResult))
+  }
+
+  func testNonWorkflowResponseRetentionIsUnchanged() {
+    var buffer = BridgeResponseBuffer(workflow: false)
+    buffer.append(Data(repeating: 65, count: 1_500_000))
+    buffer.append(Data(repeating: 66, count: 600_000))
+    XCTAssertEqual(buffer.data, Data(repeating: 65, count: 400_000) + Data(repeating: 66, count: 600_000))
+  }
+}
+
+extension BridgeProgressTests {
+  @MainActor func testLargeSuccessfulWorkflowResponseIsNotReportedAsFailed() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("scripts"), withIntermediateDirectories: true)
+    let script = """
+    import json, sys
+    print(json.dumps(dict(event='progress', message='Saving reviewed objects', fraction=0.9)), flush=True)
+    result = json.dumps(dict(status='success', result=dict(status='awaiting_approval', evidence='x' * 4_700_000))) + '\\n'
+    for start in range(0, len(result), 16387):
+        sys.stdout.write(result[start:start+16387])
+        sys.stdout.flush()
+    """
+    try script.write(to: root.appendingPathComponent("scripts/studio_bridge.py"), atomically: true, encoding: .utf8)
+    let bridge = Bridge()
+    let settings = RuntimeSettings(root: root.path, pythonPath: "/usr/bin/python3", profilesDirectory: root.path)
+    let result = try await bridge.invoke("workflow-review", runtime: settings, payload: [:])
+    XCTAssertEqual(result["status"] as? String, "awaiting_approval")
+    XCTAssertEqual((result["evidence"] as? String)?.count, 4_700_000)
+    XCTAssertFalse(bridge.busy)
   }
 }

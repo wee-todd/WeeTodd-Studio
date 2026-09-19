@@ -7,6 +7,7 @@ public enum DrawThingsTaskFilter {
     case "t2v": roles = []
     case "i2v": roles = ["first"]
     case "fflf": roles = ["first", "last"]
+    case "ref2va": roles = ["reference"]
     default: return []
     }
     return Set(capabilities.compactMap { id, value in

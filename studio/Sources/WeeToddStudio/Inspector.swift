@@ -151,10 +151,10 @@ struct ClipInspector: View {
       HStack {
         SmallLabel(text: "Conditioning")
         Spacer()
-        Text("\(clip.attachments.count)").font(.caption.monospacedDigit()).foregroundStyle(
+        Text("\(clip.attachments.filter { $0.role != .lora }.count)").font(.caption.monospacedDigit()).foregroundStyle(
           .secondary)
       }
-      if clip.attachments.isEmpty {
+      if !clip.attachments.contains(where: { $0.role != .lora }) {
         Text(
           clip.engine == .drawThings
             ? "Select an image in Media & Assets, then Use in clip → First frame. H3 FL2VA also supports Last frame: it is sent as Draw Things’ first enabled mood-board image. Both images are center-cropped to the clip dimensions. LTX currently supports First frame only."
@@ -271,6 +271,17 @@ struct AttachmentRow: View {
   @EnvironmentObject var store: StudioStore
   var attachment: Attachment
   private var isDrawThings: Bool { store.selectedClip?.engine == .drawThings }
+  private var guideTypes: [(String, String)] {
+    let kind = store.allAssets.first { $0.id == attachment.assetID }?.kind
+    let engine = store.selectedClip?.engine
+    if kind == .image { return engine == .ltx25 ? [("Ingredients reference sheet", "ingredients_reference_sheet")] : [] }
+    guard kind == .video || kind == .sequence else { return [] }
+    var values = [("Canny edges", "canny_edges"), ("Depth", "depth_map"), ("Pose", "pose_skeleton")]
+    if engine == .h3 { values += [("HED edges", "hed_edges"), ("MLSD lines", "mlsd_lines")] }
+    else { values += [("Motion tracks", "motion_track")] }
+    if engine == .ltx25 { values += [("Crossview warp", "crossview_warp")] }
+    return values
+  }
   private var supportedDrawThingsInput: Bool {
     guard let clip = store.selectedClip,
       let asset = store.allAssets.first(where: { $0.id == attachment.assetID }) else { return false }
@@ -279,10 +290,9 @@ struct AttachmentRow: View {
   private var availableRoles: [MediaRole] {
     MediaRole.allCases.filter { role in
       guard role != .lora else { return false }
-      guard isDrawThings else { return true }
       guard let clip = store.selectedClip,
         let asset = store.allAssets.first(where: { $0.id == attachment.assetID }) else { return role == attachment.role }
-      return role == attachment.role || clip.canAssignDrawThingsInput(asset, role: role)
+      return role == attachment.role || clip.canAssignMedia(asset, role: role)
     }
   }
   var body: some View {
@@ -303,12 +313,40 @@ struct AttachmentRow: View {
         }
       }.font(.system(size: 10))
       Picker(
-        "Role", selection: Binding(get: { attachment.role }, set: { v in edit { $0.role = v } })
+        "Role", selection: Binding(get: { attachment.role }, set: { v in
+          store.editClip { clip in
+            guard let index = clip.attachments.firstIndex(where: { $0.id == attachment.id }),
+              let asset = store.allAssets.first(where: { $0.id == attachment.assetID }),
+              clip.canAssignMedia(asset, role: v) else { return }
+            clip.attachments[index].role = v
+            if let action = clip.referenceActions(for: asset).first(where: { $0.role == v && $0.preparation == nil }) {
+              clip.attachments[index].controlType = action.controlType
+            }
+            clip.generationSelection?.task = v == .audioDriver ? "a2v" : v == .control ? "control"
+              : v == .reference ? "ref2va" : "fflf"
+          }
+        })
       ) { ForEach(availableRoles) { Text($0.label).tag($0) } }
       .labelsHidden()
       if isDrawThings && !supportedDrawThingsInput {
         Text("Unsupported Draw Things input. Remove this attachment with ×; its media stays in Clip Assets.")
           .font(.caption2).foregroundStyle(.orange)
+      }
+      if attachment.role == .audioDriver && !isDrawThings {
+        HStack {
+          Text("Song start (s)")
+          TextField("Start", value: Binding(get: { attachment.audioSourceStart ?? 0 }, set: { value in
+            edit { $0.audioSourceStart = value; if $0.audioSourceDuration == nil { $0.audioSourceDuration = store.selectedClip?.duration } }
+          }), format: .number)
+        }.font(.caption)
+        HStack {
+          Text("Song duration (s)")
+          TextField("Duration", value: Binding(get: { attachment.audioSourceDuration ?? store.selectedClip?.duration ?? 0 }, set: { value in
+            edit { $0.audioSourceDuration = value; if $0.audioSourceStart == nil { $0.audioSourceStart = 0 } }
+          }), format: .number)
+        }.font(.caption)
+        Button("Use clip length") { edit { $0.audioSourceStart = $0.audioSourceStart ?? 0; $0.audioSourceDuration = store.selectedClip?.duration } }
+          .font(.caption)
       }
       if attachment.role == .keyframe {
         HStack {
@@ -324,30 +362,34 @@ struct AttachmentRow: View {
           selection: Binding(
             get: { attachment.controlType }, set: { v in edit { $0.controlType = v } })
         ) {
-          Text("Canny edges").tag("canny_edges")
-          Text("Depth").tag("depth_map")
-          Text("Pose").tag("pose_skeleton")
-          Text("Motion tracks").tag("motion_track")
-          if store.selectedClip?.engine == .ltx25 {
-            Text("Ingredients reference sheet").tag("ingredients_reference_sheet")
+          if !guideTypes.contains(where: { $0.1 == attachment.controlType }) {
+            Text("\(attachment.controlType) · incompatible input").tag(attachment.controlType).disabled(true)
           }
-          if store.selectedClip?.engine == .ltx25 {
-            Text("Crossview warp").tag("crossview_warp")
-          }
-          Text("HED edges").tag("hed_edges")
-          Text("MLSD lines").tag("mlsd_lines")
+          ForEach(guideTypes, id: \.1) { type in Text(type.0).tag(type.1) }
         }.labelsHidden()
-        if attachment.controlType == "ingredients_reference_sheet" {
-          Text("Use a still reference sheet with the Ingredients adapter. LTX 2.5 requires at least 121 frames (5 seconds at 24 fps). Describe the sheet and intended video in the prompt.")
-            .font(.caption2).foregroundStyle(.secondary)
+      }
+      if let clip = store.selectedClip,
+        let asset = store.allAssets.first(where: { $0.id == attachment.assetID }) {
+        if let action = clip.referenceActions(for: asset).first(where: {
+          $0.role == attachment.role && ($0.role != .control || $0.controlType == attachment.controlType)
+        }) {
+          Text(action.detail).font(.caption2).foregroundStyle(.secondary)
+        } else if !clip.canAssignMedia(asset, role: attachment.role) {
+          Text("This media role is unsupported by the selected model. Choose a supported purpose from the asset menu.")
+            .font(.caption2).foregroundStyle(.orange)
         }
       }
       if isDrawThings && supportedDrawThingsInput {
         HStack {
-          Text("Endpoint strength · \(attachment.strength, specifier: "%.2f")")
+          Text("Input strength · \(attachment.strength, specifier: "%.2f")")
           if attachment.strength != 1 {
             Button("Reset to 1") { edit { $0.strength = 1 } }
           }
+        }.font(.caption2)
+      } else if !isDrawThings && (store.selectedClip?.engine == .h3 && attachment.role != .control || attachment.role == .audioDriver) {
+        HStack {
+          Text("Strength · fixed at 1")
+          if attachment.strength != 1 { Button("Reset to 1") { edit { $0.strength = 1 } } }
         }.font(.caption2)
       } else if !isDrawThings {
         HStack {
@@ -358,12 +400,12 @@ struct AttachmentRow: View {
           Text("\(attachment.strength,specifier:"%.2f")").monospacedDigit()
         }.font(.caption2)
       }
-      if attachment.role == .reference {
+      if attachment.role == .reference || attachment.controlType == "ingredients_reference_sheet" {
         TextField(
           "Describe this reference",
           text: Binding(get: { attachment.description }, set: { v in edit { $0.description = v } })
         ).font(.caption).textFieldStyle(.roundedBorder)
-        if store.selectedClip?.engine == .ltx25 {
+        if store.selectedClip?.engine == .ltx25 && attachment.role == .reference {
           msrControls
         }
       }
@@ -415,7 +457,7 @@ struct AttachmentRow: View {
           Text("\(attachment.attentionStrength ?? 1, specifier: "%.2f")").monospacedDigit()
         }
       }
-      Text("MSR uses 1–5 still images and at most one background. Select the MSR recipe with its dedicated adapter. Reference frames control the reference encoding, not clip duration.")
+      Text("MSR uses 1–5 still images and at most one background. Model Setup must include its dedicated MSR adapter; Automatic selects the compatible components. Reference frames control encoding, not clip duration.")
         .foregroundStyle(.secondary)
     }.font(.caption2)
   }
@@ -632,6 +674,7 @@ struct TrackInspector: View {
           "Replacement mutes clip audio only where this track has an active region. Other music and effects tracks remain mixed."
         ).font(.caption).foregroundStyle(.secondary)
         Button("Import audio…") { store.chooseImports() }
+        Button("Generate Music…") { store.openMusic() }
         Button("Add another track") { store.addAudioTrack() }
       }.font(.system(size: 12))
     }

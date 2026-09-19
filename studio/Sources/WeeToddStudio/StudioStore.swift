@@ -16,6 +16,12 @@ struct RuntimeSettings: Codable {
   var metalPath = ""
   var drawThingsHelperPath: String?
   var acceleration: AccelerationSettings?
+  var loraFolders: [LoRAFolder]?
+  var generationSettings: Self {
+    var value = self
+    value.loraFolders = nil
+    return value
+  }
 
   static func restoring(_ data: Data?, defaults: Self) -> Self {
     var value = data.flatMap { try? JSONDecoder().decode(Self.self, from: $0) } ?? defaults
@@ -54,12 +60,24 @@ struct BridgeResponseBuffer {
   private let maximum: Int
   private let retained: Int
   init(workflow: Bool) {
-    maximum = workflow ? 4_500_000 : 2_000_000
-    retained = workflow ? 3_000_000 : 1_000_000
+    // A complete workflow checkpoint plus its success envelope must survive any
+    // trimming of earlier progress lines, including a trim mid-response.
+    maximum = workflow ? WorkflowCheckpoint.maximumBytes + 1024 * 1024 : 2_000_000
+    retained = workflow ? WorkflowCheckpoint.maximumBytes + 64 * 1024 : 1_000_000
   }
   mutating func append(_ part: Data) {
-    data.append(part)
-    if data.count > maximum { data = Data(data.suffix(retained)) }
+    if part.count > maximum - data.count {
+      // Trim before appending so one unusually large pipe read cannot grow the
+      // retained buffer beyond its bound. Preserve the same rolling-tail contract.
+      if part.count >= retained {
+        data = Data(part.suffix(retained))
+      } else {
+        data = Data(data.suffix(retained - part.count))
+        data.append(part)
+      }
+    } else {
+      data.append(part)
+    }
   }
 }
 
@@ -226,21 +244,41 @@ extension Encodable {
   @Published var project = StudioProject()
   @Published var globalAssets: [MediaAsset] = []
   @Published var loraGroups: [LoRAGroup] = []
+  @Published var scannedLoRAEntries: [LoRAFolderEntry] = []
+  @Published var loraFolderWarnings: [String] = []
+  @Published var loraFolderScanBusy = false
+  @Published var loraFolderScanKey: [LoRAFolder]?
   @Published var showLoRALibrary = false
   @Published var selectedClipID: UUID?
   @Published var selectedAssetID: UUID?
   @Published var selectedTitleID: UUID?
   @Published var selectedAudioID: UUID?
-  @Published var playhead: Double = 0
+  let playbackPosition = TimelinePlaybackPosition()
+  var playhead: Double {
+    get { playbackPosition.seconds }
+    set {
+      // Idle seeks also refresh position-dependent editor actions such as keyframe placement.
+      if !isPlaying { objectWillChange.send() }
+      playbackPosition.seconds = newValue
+    }
+  }
   @Published var zoom: Double = 42
   @Published var runtime = RuntimeSettings.defaults()
   @Published var profiles: [ModelProfile] = []
   @Published var generationDescriptions: [UUID: [String: Any]] = [:]
   @Published var projectURL: URL?
   @Published var showPrompt = false
+  @Published var showMusic = false
+  @Published var selectedMusicAssetID: UUID?
+  @Published var musicModelStatus: String?
+  let musicPlayer = AVPlayer()
   @Published var showMotionPrompt = false
   @Published var showWorkflows = false
   @Published var showShotList = false
+  @Published var showMusicVideoWorkflow = false
+  @Published var showMusicVideoProduction = false
+  @Published var productionRunning = false
+  @Published var productionStatus: MusicVideoProductionStatus?
   @Published var showProductionLibrary = false
   @Published var showRuntime = false
   @Published var showDrawThings = false
@@ -253,6 +291,8 @@ extension Encodable {
   @Published var imageEstimate: [String: Any]?
   @Published var imagePreviewPath: String? { didSet { persistImageWorkspace() } }
   @Published var referenceSheetOpen = false
+  @Published var referenceImageFailure: (key: String, message: String)?
+  var activeReferenceLease: ReferenceWorkspaceLease?
   var imageWorkspaceLibrary = ImageWorkspaceLibrary()
   var restoringImageWorkspace = true
   @Published var showDrawThingsConfigImport = false
@@ -281,9 +321,23 @@ extension Encodable {
   @Published var motionPromptEditorError: String?
   @Published var dirty = false
   @Published var player = AVPlayer()
-  @Published var isPlaying = false
+  @Published var isPlaying = false {
+    didSet { if !isPlaying { playbackClipStates.removeAll() } }
+  }
+  var playbackClipStates: [UUID: ClipState] = [:]
   @Published var queue: [UUID] = []
-  @Published var previewMode = "Clip"
+  @Published var previewMode = "Timeline"
+  @Published var preparingTimelinePlayback = false
+  @Published var timelinePlaybackIssues: [UUID: String] = [:]
+  @Published var timelinePlaybackWarning: String?
+  var timelinePlaybackPlan: TimelinePlaybackPlan?
+  var timelineBuildTask: Task<Void, Never>?
+  var timelineBuildID = UUID()
+  var timelineSeekID = UUID()
+  var timelineSeekPending = false
+  var timelineItemStatus: NSKeyValueObservation?
+  var timelineClock: TimelineFallbackClock?
+  var scrubWasPlaying: Bool?
   let bridge: Bridge
   let descriptionBridge: Bridge
   let dataDirectory: URL
@@ -297,7 +351,7 @@ extension Encodable {
   private var redoStates: [StudioProject] = []
   private var lastUndoGroup: UUID?
   private var autosaveTask: Task<Void, Never>?
-  private var observer: Any?
+  private var playbackObservation: TimelinePlayerObservation?
   private var bridgeObservation: AnyCancellable?
   private var catalogObservation: AnyCancellable?
   private var digestObservation: AnyCancellable?
@@ -321,6 +375,11 @@ extension Encodable {
     bridgeObservation = bridge.objectWillChange.sink { [weak self] _ in
       self?.objectWillChange.send()
     }
+    playbackObservation = TimelinePlayerObservation(player: player, tick: { [weak self] time, item in
+      MainActor.assumeIsolated { self?.playbackTick(time.seconds, item: item) }
+    }, ended: { [weak self] item in
+      MainActor.assumeIsolated { self?.playbackEnded(item: item) }
+    })
     guard restoreSession else { return }
     try? FileManager.default.createDirectory(
       at: dataDirectory.appendingPathComponent("Profiles"),
@@ -342,23 +401,6 @@ extension Encodable {
       load(URL(fileURLWithPath: args[i + 1]))
     } else { restoreAutosavedProject() }
     restoreImageWorkspaces()
-    observer = player.addPeriodicTimeObserver(
-      forInterval: CMTime(seconds: 0.05, preferredTimescale: 600), queue: .main
-    ) { [weak self] time in
-      Task { @MainActor in
-        guard let self, self.isPlaying else { return }
-        let local =
-          time.seconds - (self.previewMode == "Movie" ? 0 : self.selectedClip?.playbackIn ?? 0)
-        let duration =
-          self.effectivePreviewDuration
-        if local >= duration {
-          self.player.pause()
-          self.isPlaying = false
-        } else if local.isFinite {
-          self.playhead = max(0, local)
-        }
-      }
-    }
     Task {
       await reloadProfiles()
       refreshPreview()
@@ -414,10 +456,7 @@ extension Encodable {
   func changed() {
     preparedDrawThingsClip = nil
     validationErrors.removeAll()
-    if previewMode == "Movie" {
-      previewMode = "Clip"
-      refreshPreview()
-    }
+    prepareTimelinePlayback()
     dirty = true
     preparedRecipe = nil
     preparedFingerprint = nil
@@ -457,9 +496,12 @@ extension Encodable {
     selectedTitleID = nil
     selectedAudioID = nil
     selectedTrackID = nil
-    playhead = 0
     preparedRecipe = nil
-    refreshPreview()
+    pausePlayback()
+    if previewMode != "Movie" { prepareTimelinePlayback() }
+    if let index = project.clips.firstIndex(where: { $0.id == id }) {
+      seek(project.start(of: index))
+    }
   }
   func addClip(_ engine: Engine = .ltx25) {
     var c = Clip(name: "Shot \(project.clips.count + 1)", engine: engine)
@@ -504,45 +546,13 @@ extension Encodable {
     select(c.id)
   }
   func split() {
-    guard let id = selectedClipID else { return }
+    guard let span = TimelinePlaybackPlan(project: project).span(at: playhead) else { return }
     do {
       var p = project
-      let next = try p.split(id, at: playhead)
+      let next = try p.split(span.clipID, at: playhead - span.start)
       change { $0 = p }
       select(next)
     } catch { self.error = error.localizedDescription }
-  }
-  var effectivePreviewDuration: Double { previewMode == "Movie" ? project.duration : selectedClip?.duration ?? 0 }
-  func seekToEnd() { seek(effectivePreviewDuration) }
-  func seek(_ seconds: Double) {
-    playhead = min(
-      max(0, seconds), effectivePreviewDuration)
-    player.seek(
-      to: CMTime(
-        seconds: (previewMode == "Movie" ? 0 : selectedClip?.playbackIn ?? 0) + playhead,
-        preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-  }
-  func togglePlayback() {
-    guard player.currentItem != nil else { return }
-    let duration = effectivePreviewDuration
-    if isPlaying {
-      player.pause()
-    } else {
-      if playhead >= duration - 0.05 { seek(0) }
-      player.play()
-    }
-    isPlaying.toggle()
-  }
-  func refreshPreview() {
-    player.pause()
-    isPlaying = false
-    previewMode = "Clip"
-    guard let c = selectedClip, !c.sourcePath.isEmpty else {
-      player.replaceCurrentItem(with: nil)
-      return
-    }
-    player.replaceCurrentItem(with: AVPlayerItem(url: URL(fileURLWithPath: c.playbackPath)))
-    seek(playhead)
   }
   func save(asNew: Bool = false) {
     var target = asNew ? nil : projectURL
@@ -587,7 +597,10 @@ extension Encodable {
     autosaveTask?.cancel()
     cancelMotionPromptEditor()
     referenceSheetOpen = false; imageDraft = nil; imagePreviewPath = nil
+    musicPlayer.pause(); musicPlayer.replaceCurrentItem(with: nil)
+    showMusic = false; selectedMusicAssetID = nil; musicModelStatus = nil
     undoStates.removeAll(); redoStates.removeAll(); lastUndoGroup = nil
+    invalidateTimelinePlayback()
     documentSessionID = UUID()
     project = value
     projectURL = url
@@ -701,13 +714,22 @@ extension Encodable {
       applyLoRAMembers([LoRAMember(asset: asset)])
       return
     }
-    if let clip = selectedClip, clip.engine == .drawThings,
-      !clip.canAssignDrawThingsInput(asset, role: role) {
-      error = "This Draw Things model accepts supported first/last image inputs only. Keep other media in Clip Assets, or add it to the movie timeline."
+    if let clip = selectedClip, !clip.canAssignMedia(asset, role: role) {
+      error = "Choose a supported reference purpose from the asset menu. Movies may need a reference sheet or control guide; LTX audio uses Audio driver."
       return
     }
     if role == .first || role == .last, let id = selectedClipID {
       assignEndpoint(asset, to: id, role: role)
+      return
+    }
+    if let action = selectedClip?.referenceActions(for: asset).first(where: {
+      $0.role == role && $0.preparation == nil
+    }) {
+      do {
+        var updated = selectedClip!
+        try updated.attachReference(asset, action: action)
+        editClip { $0 = updated }
+      } catch { self.error = error.localizedDescription }
       return
     }
     editClip { c in
@@ -764,6 +786,7 @@ extension Encodable {
         p.clips[i].sourcePath = url.path
       }
       for i in p.audio.indices where p.audio[i].path == old { p.audio[i].path = url.path }
+      p.mapMusicSourcePaths { $0 == old ? url.path : $0 }
     }
     refreshPreview()
   }
@@ -799,6 +822,17 @@ extension Encodable {
       }
       for i in p.assets.indices where p.assets[i].kind != .lora {
         p.assets[i].path = try collect(p.assets[i].path)
+        if let generation = p.assets[i].musicGeneration {
+          if let known = copied[generation.artifacts] {
+            p.assets[i].musicGeneration?.artifacts = known
+          } else {
+            let target = media.appendingPathComponent(UUID().uuidString + "-music")
+            var collected = try ProjectStorage.collectMusicArtifacts(generation, to: target)
+            collected.artifacts = "Media/" + target.lastPathComponent
+            copied[generation.artifacts] = collected.artifacts
+            p.assets[i].musicGeneration = collected
+          }
+        }
         if p.assets[i].kind == .sequence { p.assets[i].text = try collect(p.assets[i].text) }
       }
       for i in p.clips.indices {
@@ -830,6 +864,7 @@ extension Encodable {
         }
       }
       for i in p.audio.indices { p.audio[i].path = try collect(p.audio[i].path) }
+      try p.mapMusicSourcePaths(collect)
       let target = bundle.appendingPathComponent(project.name + ".weetodd")
       try ProjectStorage.write(p, to: target)
       notice = "Collected \(copied.count) media files. Model weights remain shared."
@@ -902,13 +937,18 @@ extension Encodable {
       return asset.path + "|" + String(describing: attributes?[.modificationDate])
         + "|" + String(describing: attributes?[.size])
     }.joined(separator: "\n")
-    return clip.generationFingerprint + ((try? encoder.encode(runtime).base64EncodedString()) ?? "")
+    return clip.generationFingerprint + ((try? encoder.encode(runtime.generationSettings).base64EncodedString()) ?? "")
       + project.continuityDependencyFingerprint(for: clip)
       + continuousSceneDependencyKey(for: clip)
       + GenerationSelection.assetFingerprint(for: clip, assets: allAssets)
       + ((try? encoder.encode(relevantProfiles).base64EncodedString()) ?? "")
       + ((try? encoder.encode(loraGroups).base64EncodedString()) ?? "")
       + String(clip.settings(in: project).fps) + profileMetadata + mediaMetadata
+  }
+  func generationDescriptionTaskKey(for clip: Clip) -> String {
+    // Reopening clears descriptions even when the selected clip's render inputs are identical.
+    // Keep session identity out of generationRequestKey so saved takes remain reusable.
+    documentSessionID.uuidString + "|" + generationRequestKey(for: clip)
   }
   func describeGeneration() async {
     guard let clip = selectedClip, clip.engine != .movie, clip.engine != .drawThings else { return }
@@ -1053,13 +1093,24 @@ extension Encodable {
       guard renderedDuration.isFinite, renderedDuration > 0, renderedStart.isFinite, renderedStart >= 0 else {
         throw StudioError.invalid("The extension returned no new frames.")
       }
+      let metadata = r["metadata"] as? [String: Any] ?? [:]
+      let generationConfig = metadata["generation"] as? [String: Any] ?? [:]
+      let preserveEditorialDuration = (prepared?["preserveEditorialDuration"] as? Bool)
+        ?? ([Engine.ltx23, .ltx25].contains(c.engine) && c.extensionSource.isEmpty
+          && c.extensionDirection.isEmpty && c.continuityMode != "motion"
+          && generationConfig["duration_mode"] as? String != "automatic")
+      let measuredFPS = info["fps"] as? Double ?? prepared?["nativeFPS"] as? Double ?? 24
+      let tolerance = 0.5 / (measuredFPS.isFinite && measuredFPS > 0 ? measuredFPS : 24)
+      let mediaDuration = info["duration"] as? Double ?? renderedStart + renderedDuration
+      let tooShort = preserveEditorialDuration && (
+        renderedDuration + tolerance < c.duration || renderedStart + c.duration > mediaDuration + tolerance)
       guard documentSessionID == session, project.id == projectID,
         let current = project.clips.first(where: { $0.id == c.id }) else {
         throw StudioError.invalid("The destination project or clip changed. The completed video is saved at \(video)")
       }
       let stillCurrent = current == c && signature(for: current) == submittedSignature
       var finishedClip = c
-      finishedClip.duration = min(c.duration, renderedDuration)
+      finishedClip.duration = preserveEditorialDuration ? c.duration : min(c.duration, renderedDuration)
       let finishedSignature = signature(for: finishedClip)
       change { p in
         guard let i = p.clips.firstIndex(where: { $0.id == c.id }) else { return }
@@ -1068,16 +1119,19 @@ extension Encodable {
                         stats: RenderStats(result: r), generationSettings: generationSettings,
                         resolvedFingerprint: resolvedFingerprint, usableSourceIn: renderedStart,
                         usableDuration: renderedDuration, continuationArtifact: continuationArtifact))
-        if stillCurrent {
+        if stillCurrent && !tooShort {
           p.clips[i].sourcePath = video
           p.clips[i].sourceIn = renderedStart
-          p.clips[i].duration = min(c.duration, renderedDuration)
+          p.clips[i].duration = finishedClip.duration
           p.clips[i].renderedSignature = finishedSignature
         }
         var asset = MediaAsset(
           name: c.name + " render", kind: .video, path: video, scope: .clip, owner: c.id)
-        asset.duration = min(c.duration, renderedDuration)
+        asset.duration = preserveEditorialDuration ? mediaDuration : min(c.duration, renderedDuration)
         p.assets.append(asset)
+      }
+      if tooShort {
+        throw StudioError.invalid("Generated take is shorter than the planned shot. Timeline timing was preserved; the take is saved in clip versions and at \(video).")
       }
       if stillCurrent && selectedClipID == c.id {
         if finishedClip.duration != c.duration, let accepted = selectedClip {

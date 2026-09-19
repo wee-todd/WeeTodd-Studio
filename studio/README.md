@@ -20,6 +20,7 @@ direction and backend choices. This is a source-build preview, not a notarized c
 | Choose engine, task and sampling controls | [Clip generation](#clip-generation-controls) |
 | Continue motion across clips or render an LTX 2.5 scene | [Clip continuity](#clip-continuity-in-studio) |
 | Generate image assets or import Draw Things settings | [Image workspace](#images-clips-and-loras) |
+| Compose music and drive video from a song | [Native YuE2 music](#native-yue2-music) |
 | Plan a movie with reusable subjects and references | [Guided movie planning](#guided-movie-planning) |
 | Use local Qwen models already installed by Draw Things | [Prompt Assistant](#local-qwen35-prompt-assistant) |
 | Automate a movie or use ComfyUI graphs | [Headless jobs](#headless-movie-and-clip-jobs) / [Nodes](../README.md#comfyui-nodes) |
@@ -44,6 +45,65 @@ whole checkpoint. That initial direct-weight path is text-to-video with generate
 not yet qualify all native conditioning tasks. The local assistant separately reuses supported
 Qwen3.5 files. Other models require compatible native components. Keep model files in a stable,
 readable location, and let setup validate the particular component layout and task.
+
+## Native YuE2 music
+
+Open **Movie → Generate Music…**, or **Generate Music** in the asset/track inspector. YuE2 runs
+inside WeeTodd's native MLX engine; Studio does not install or invoke another YuE package.
+Choose an existing compatible merged MLX checkpoint folder, or **Download verified 8-bit model…**
+to install the pinned 4.53 GB model, tokenizer and stereo decoder into your model library.
+This initial integration supports the merged layout published by
+[npario](https://huggingface.co/npario/YuE2-3B-MLX). Split AR/NAR layouts, including the supplied
+vanch007 conversion, are rejected with a layout error. Precision selects compatible files; it does
+not quantize or convert a model. The upstream model/decoder weights use **CC BY-NC 4.0**,
+separately from WeeTodd's source-code license.
+
+Use genre, mood, energy, instruments, vocal character, language and requested BPM to build a
+visible style prompt. Custom text is allowed in these categories. Enter lyrics with section markers,
+or select Instrumental and describe the arrangement. These are model guidance, not guaranteed musical
+constraints. **Quality** uses 32 acoustic midpoint steps; **Fast** uses 8. The length budget limits
+semantic tokens at 25 frames/second and may truncate a song; it is not an exact requested duration.
+Natural endings can arrive earlier, and truncated takes are labelled for review.
+
+Advanced generation exposes Full/Melody/Direct composition, independent score and music samplers,
+guidance, acoustic steps, seed, checkpoint precision and memory policy. Import/edit an ABC score,
+or **Compose score only** before generating audio. **Resynthesize take** retains a selected take's
+composition and music tokens while applying the current acoustic steps and seed. **Decode saved
+latents** reruns only its stereo decoder. Saved stage files and checkpoint identities are checked
+before reuse. The default memory policy releases the transformer before loading the VAE; retaining
+components applies only within the current job. No background model cache remains after a job.
+
+Every take saves a 48 kHz stereo PCM master plus its request, score, tokens, noise, latents, timings
+and integrity metadata. Audition it, then **Add to Music track** at the playhead. Default placement
+uses a track that mixes with source audio; an explicitly selected replacement track retains that
+track's chosen behavior. Trim, gain, fades, mute and solo use the existing timeline controls.
+**Collect Media** includes the stage artifacts while leaving shared model weights in place.
+
+For audio-driven video, select a supported native video clip, open Music, select a take and set
+its song in-point. **Use as audio driver** selects A2V. LTX 2.5 links the original song and its
+selected interval so consecutive intervals can drive a continuous scene; other native models
+prepare a lossless stereo excerpt covering their resolved frame duration. Source ranges are
+checked before extraction.
+The original song stays intact. When using the master on the Music track, optionally mute the
+generated clip audio to avoid doubling it, and align the matching song region on the timeline.
+The existing video preparation/review/render flow remains the next step. To plan multiple shots
+from a song, use [Create a music video](#create-a-music-video), then review and explicitly apply
+the shot plan.
+
+**Export job…** saves the same request used by Studio. Headless music commands share the engine:
+
+```bash
+python scripts/studio_bridge.py music-generate --request music-job.json --output /new/take
+python scripts/studio_bridge.py music-plan --request music-job.json --output /new/score
+```
+
+`music-resynthesize` accepts `source_artifacts` plus optional acoustic `steps` and `seed`;
+`music-decode` accepts `source_artifacts`. Both require a fresh output folder. `music-inspect`
+validates the model layout without loading its tensors. Unsupported settings fail explicitly.
+Real generation qualification currently covers the pinned 8-bit checkpoint on M3 Ultra, including
+a 159.8-second song at 32 steps in 123.2 seconds. This is one run, not a cross-device performance
+guarantee. BF16/4-bit layouts have structural checks but are not real-render qualified here; M5
+numerical behavior and lower-memory Macs need separate qualification.
 
 ## Build and open
 
@@ -418,6 +478,8 @@ a speedup claim. Query chunking and the retained-page budget are separate contro
 
 ## LTX 2.5 images, controls, and references
 
+See [reference inputs by purpose](#reference-inputs-by-purpose) for the complete input matrix.
+
 For ordinary image-to-video, choose **WeeTodd (local) → LTX 2.5**, import/select an image,
 and choose **Use in clip → First frame · Image to video**. Prepare the clip after attaching it;
 compatible installed components are selected automatically. The Reference role selects MSR
@@ -431,15 +493,57 @@ from the basic image preset and do not require a spatial upscaler for that singl
 
 - **Control:** attach a preprocessed guide video as Control and choose its matching guide type
   (such as depth, pose, motion tracks or crossview). The recipe's adapter must support that type.
-- **Ingredients:** attach one image using **Ingredients reference sheet · IC-LoRA**, use at least
+- **Ingredients:** attach one image using **Appearance · Ingredients sheet**, use at least
   121 output frames, and describe the sheet and intended scene in the prompt.
-- **MSR:** attach one to five images as **MSR reference · dedicated adapter**, describe each, and
+- **MSR:** attach one to five images as **Appearance · MSR image**, describe each, and
   choose subject/object/clothing/background, priority, reference frames, sizing and attention
   strength in Conditioning. Only one background is allowed. Recipe default preserves matching-image
   options from an imported recipe; removed attachments never leave hidden recipe media active.
 
 These routes reuse shared renderer validation and remain subject to adapter and memory constraints.
 First-frame success on 36 GB does not establish MSR/control memory fit or reference quality.
+
+## Reference inputs by purpose
+
+Choose what the model should retain from an asset's **Use in clip** menu. Selecting a purpose
+sets its task in the same undoable change. Other attachments stay visible; preparation reports
+incompatible combinations instead of dropping inputs. Role and guide menus filter by media type.
+
+| Input purpose | Local H3 | Local LTX 2.3 | Local LTX 2.5 | Draw Things video |
+| --- | --- | --- | --- | --- |
+| Image appearance | Ref2VA image | Ingredients sheet | MSR images or Ingredients sheet | H3 Ref2VA images |
+| Movie appearance / story | Ref2VA movie context | Sampled Ingredients sheet | Sampled Ingredients sheet | Not exposed |
+| Movie motion / composition | Guide + Fun ControlNet | Guide + Union IC-LoRA | Guide + Union IC-LoRA | Not exposed |
+| Audio-driven video | Ref2VA timing reference; new generated audio | Supplied audio is frozen | Supplied audio is frozen | Not exposed |
+| Sound / voice reference | Ref2VA audio with visual context | Use Audio driver | Use Audio driver | Not exposed |
+| Endpoint image | First/last frames | First/last frames | First/last frames | H3 FL2VA endpoints; LTX first frame |
+
+**Appearance / story · make reference sheet** samples six movie frames into a labelled image.
+Review that asset and describe the subjects, setting and intended story in the prompt. It provides
+visual context; it does not infer a screenplay, preserve movie timing or copy the soundtrack.
+**Motion / composition · make edge guide** runs Canny extraction and saves a silent guide movie.
+It crops to the shot's aspect ratio and stops at the shorter of the source and shot duration.
+It never loops the source to invent extra motion. Preparation uses 24 fps; custom-rate guides
+can be imported as already prepared controls. Limits are 60 seconds, 2048 pixels per dimension
+and 3600 frames. Cached outputs are verified before reuse. Originals remain unchanged;
+derived assets and attachments undo together.
+
+For Ingredients on either LTX version, the attachment description is included in the resolved
+reference-sheet prompt. The shot prompt remains editable as written; review the complete resolved
+prompt before generation. An already structured Ingredients prompt is preserved.
+
+LTX 2.3 Model Setup now offers **Ingredients reference sheet** and **Union IC-LoRA motion guide**.
+Ingredients requires a Dev bundle with its distilled helper adapter, one image, 768×448,
+at least 121 frames and 24 fps. Union uses a distilled bundle and dimensions divisible by 128.
+Both require resident loading without generic LoRAs. LTX 2.5 has dedicated Ingredients, MSR
+and control setup choices. Automatic selects compatible installed components. IC-LoRAs stay
+outside style LoRA groups because they change reference encoding and stage behavior.
+
+For Draw Things, select **Image references · H3**, refresh the connection, select an H3 **Ref2VA**
+model, and attach 1–9 still images. This requires the updated transport helper. FL2VA models
+cannot reinterpret those references as endpoints. Other video models retain their discovered
+endpoint capabilities. LTX IC-LoRAs and movie/audio references have no qualified mapping in
+the current helper. Software and transport tests do not establish real-model quality or memory fit.
 
 ## H3 reference clips with paged Q8 models
 
@@ -497,24 +601,74 @@ A 36GB physical-device maximum is not yet established; the header-based estimate
   restore the complete previous/next seed, including while the field retains focus. Unchanged field
   writes do not add Undo steps or clear Redo.
 
-**Preview movie** builds a reduced-resolution movie containing the actual transitions, titles,
-and active audio tracks. Clip preview is immediate; movie preview is rebuilt after edits. Missing
-renders must be generated first. Movie preview omits interpolation/upscaling, which are applied
-in final export. This first build does not provide live multitrack compositing or waveform editing.
+### Timeline playback and scrubbing
+
+The viewport plays the entire timeline by default. Its timecode, frame-step controls and skip-to-end
+use movie time. Playback continues through each shot without selecting it in the inspector.
+Clicking a clip selects it and moves the playhead into that clip; **Split at playhead** splits the
+shot under the playhead. Keyframe attachment times remain relative to the selected shot and are
+available only while the playhead is inside it.
+
+Click or drag the **time ruler** above a clip to seek. Clicks in the blank area beyond the clips are
+ignored. Drag the playhead's triangle or vertical line to scrub; dragging beyond the timeline clamps
+to its start or end. Scrubbing pauses playback and resumes on release if it was already playing.
+The ruler and playhead share the scrolled, zoomed timeline coordinates.
+
+**Timeline · cuts** uses native playback with source trims, still images, title overlays and active
+audio regions. It references existing movies in place, loads metadata asynchronously and limits
+the preview canvas to 1280 pixels on its longest edge. Missing or unrendered shots keep their place
+and show a placeholder, so later shots do not shift. Selecting a clip reuses the loaded timeline.
+Transitions use a cut at the incoming shot's start while preserving the edited movie duration.
+
+**Render movie preview** builds a reduced-resolution movie with the actual transitions, titles,
+audio crossfades and finishing mix. It is the more accurate check before export. Use **Timeline
+playback** to return to immediate editing. Rendered previews are rebuilt after edits and require
+all shots to have media. Interpolation/upscaling are applied in final export. Waveform editing is
+not yet available.
 
 ## LoRAs and groups
 
-Open **LoRAs & Groups…** in Assets, or **Add / Groups…** in the clip inspector. Import linked
-SafeTensors adapters into the reusable Global library. Select the adapter's **Trained model** before
-importing; recognized checkpoint metadata takes precedence. Older imports without provenance appear
-under **Imports needing a trained model**, where you can classify them explicitly. Filenames are
-never used to infer the training model.
+Open **LoRAs & Groups…** in Assets, or **Add / Groups…** in either clip inspector or the Draw Things
+image workspace. The library has one search and **All / Local folders / Draw Things** source filters.
+**Compatible with selected model**
+starts enabled; turn it off to review other models and files needing classification. Source and
+model labels explain where each adapter can run. Only applied LoRAs appear in the inspectors.
+Image-workspace changes apply to the image draft without changing the underlying movie clip.
+
+In **Runtime Settings → LoRA model folders** (also **Folders…** in the library):
+
+1. Use **Add folders…** to link one or more existing LoRA libraries. Files remain in place.
+2. Enable/disable each folder, choose whether to include subfolders, and optionally specify a
+   training-model fallback for files without metadata. Checkpoint declarations always take precedence.
+3. Use **Refresh folders** after adding or replacing files. Opening the library also refreshes it.
+   Scanning runs in the background, reads headers without loading model weights, and reuses cached
+   inspections for unchanged files. Overlapping paths and file symlinks are deduplicated.
+
+The default folder is `~/Library/Application Support/WeeTodd Studio/Models/LoRAs`; **Open default
+folder** creates it when needed. There is no automatic file move, download, conversion or upload.
+Removing a folder removes its discovery results; explicit individual imports and saved clip/group
+links remain. Missing drives produce a notice and do not delete saved settings. Scans stop at
+1,000 candidates or 20,000 directory entries; use narrower folders if the limit is reported.
+
+**Link individual files / adapter options** retains manual SafeTensors imports, including H3 Turbo
+options. Choose the **Trained model** before importing. Files with missing metadata offer **Set
+trained model** when the compatibility filter is off. Filenames never establish the model.
+Specialized or unreadable adapters remain visible under **Adapters needing setup**, with a reason;
+IC-LoRAs still require the dedicated reference/control Model Setup route.
+
+For Draw Things, use **Connections…** to configure the server, then **Refresh** beside its library
+section. Local servers must advertise their installed LoRAs through Model Browsing. **Add to current
+stack** uses the server's exact LoRA ID and checks the selected connection/model. A `.ckpt` store
+is not a native SafeTensors adapter; pointing Studio at that folder does not convert it. To use an
+ordinary local adapter with Draw Things, install it there and refresh its catalog. Native generation
+can link compatible SafeTensors files wherever they are stored, including a shared model folder.
 
 | Selected clip / group model | LoRAs offered |
 | --- | --- |
 | MiniMax H3 | H3 |
 | LTX 2.3 | LTX 2.3 |
 | LTX 2.5 | LTX 2.3 and LTX 2.5, including mixed groups |
+| Draw Things | Catalog entries advertised for the selected connection and model |
 | Movie / Still | None |
 
 Use **New group**, or **Save current stack as group**, name it, and set each member's strength.
@@ -549,7 +703,7 @@ small synthetic header fixtures; these checks do not qualify LoRA visual quality
 ### Native H3 Turbo
 
 1. Choose a standard native H3 model and Text to video, Image to video, or First and last frames.
-2. Open **LoRAs & Groups…**, select **H3 Turbo (4 steps)** under Adapter, and import a compatible
+2. Open **LoRAs & Groups… → Link individual files / adapter options**, select **H3 Turbo (4 steps)** under Adapter, and import a compatible
    SafeTensors LoRA. For files without reliable profile metadata, this is an explicit declaration
    that the adapter is intended for four-step inference; its filename is not evidence.
 3. Add it to the clip or a group and set its strength. **Steps** displays four actual transformer
@@ -646,7 +800,11 @@ pairs: competing full-strength images can cause a sudden change even with native
 Automatic uses every guide once and avoids repeating it in incoming overlaps. Review boundary
 images together; contradictory poses or lighting can still produce a sudden change.
 Conflicting anchors and unsupported combinations fail before model loading. MSR/reference inputs,
-audio drivers, control adapters, CFG++ and DFR are not qualified together with continuous scenes.
+control adapters, CFG++ and DFR are not qualified together with continuous scenes. Source audio
+can accompany first, last and timed images: attach consecutive intervals of the same original song
+to every member. Audio-driven scene durations must land on the eight-frame grid; other lengths
+remain independent clips. Both generation stages freeze the source audio, and final publication
+retains the original source interval rather than resynthesizing it.
 
 The shared sound description and native audio context reduce independent audio restarts. A prompt
 such as “no music” remains probabilistic. For exact soundtrack control, switch off **Use generated
@@ -1087,6 +1245,10 @@ outputs, under its local `Director` data folder. Closing and reopening restores 
 An invalid imported job leaves the current session intact. After a failed or paused run, completed
 outputs remain available. Applying a result checks the originating document session and inputs;
 reopening a different movie cannot silently redirect a late result.
+For a failed shot without an editable draft, **Retry with direction** lets you supply a specific
+correction while keeping completed drafts and approved story choices. Once a shot has a draft,
+**Edit… → Visible characters** lets you select its on-screen cast directly alongside action,
+starting state, ending state and location. These saved edits do not call the assistant.
 
 Before loading weights, the helper checks the actual text/image token budget: at most 24,000 UTF-8
 input bytes, 4,096 input tokens including image expansion, and 1,024 output tokens. A task that
@@ -1158,8 +1320,9 @@ again. Select **Clips** to edit states, approve individual clips, or **Repair…
 Approved choices must be unlocked before editing or repair. Changes revalidate dependent clips;
 unaffected approved clips are reused. **Run remaining** builds endpoint descriptions directly
 from approved states and checks timing/links. Structure validity does not certify creative quality.
-Older imported v1 definitions remain supported. Workflows do not generate endpoint images/video
-or insert timeline clips yet.
+Older imported v1 definitions remain supported. Planning workflows do not generate endpoint
+images/video or insert timeline clips automatically. After importing and reviewing a plan, use
+**Shot List → Add approved selection to timeline** to create clips explicitly.
 Workflow task-LoRA/QLoRA loading and training are not available in the app. A separate small
 text-adapter experiment has demonstrated training/save/reload, but vision compatibility and
 quality gates remain unresolved. It does not qualify a user-facing training feature.
@@ -1273,8 +1436,9 @@ assets, or choose **From Assets**. Canvas images support fit/fill placement and 
 from 0–100%. Mood-board thumbnails have independent enable and strength controls; zero strength
 omits a reference. FLUX.2/Klein currently treats positive reference weights as enabled references,
 so intermediate weights are transmitted but are not a promise of proportionally reduced influence.
-Multiple mood-board references are initially enabled for FLUX.2/Klein; other image families retain
-canvas image-to-image support. Model choices reflect enabled input combinations. Steps, CFG, seed,
+Multiple mood-board inputs are supported for FLUX.2/Klein and Qwen Edit Plus/2511; other supported
+image routes retain canvas image-to-image support. Models remain listed when current inputs are
+incompatible, and preparation reports those conflicts. Steps, CFG, seed,
 sampler, shift, and compatible LoRAs/groups are editable. **Use result as canvas** explicitly starts
 another edit; generation never silently replaces the input. Control images and masks are not yet
 enabled. Images are added to the captured destination store without changing the
@@ -1389,14 +1553,16 @@ H3 uses 24 FPS and `17n+5` frames (five seconds rounds up to 124 frames). Its de
 DDIM Trailing, CFG 1, Shift 12, and Audio Shift 3; steps and both shifts remain editable. H3 video
 and 32 kHz stereo audio stay together. Only models actually advertised by the selected endpoint are
 offered; a model installed in the local app is not necessarily available through the cloud API.
-LTX still supports first-frame input only through this adapter. Last-only, arbitrary middle
-keyframes, and H3 reference-model conditioning are not enabled. A conflicting attachment/task is
+LTX still supports first-frame input only through this adapter. Last-only and arbitrary middle
+keyframes are not enabled. H3 Ref2VA supports 1–9 still-image references through its separate
+**Image references · H3** task. A conflicting attachment/task is
 reported before generation rather than discarded. Headless exports use the same image contracts.
 Clip Assets are storage; only items listed under **Conditioning** are generation inputs.
-Keep previous renders in Clip Assets without attaching them as a Reference to a Draw Things clip.
+Keep previous rendered movies in Clip Assets without attaching them as a Reference to a Draw Things clip.
 Prepare Clip names unsupported attachments, and existing unsupported inputs show an inline warning.
 Remove the attachment with **×** to retain its media in the asset store. Draw Things input menus
-offer supported image endpoints; endpoint attachment strength is fixed at 1 (LoRA strength remains editable).
+offer the selected task's supported endpoints or H3 image references; attachment strength is fixed
+at 1 (LoRA strength remains editable).
 
 **H3 Turbo:** import a compatible Turbo LoRA into Draw Things, then click **Refresh** in Studio.
 Enable it under **Server LoRAs**, set its strength, and edit **Steps**. A local FL2VA test used
@@ -1422,14 +1588,15 @@ locally without another cloud generation. A missing completion manifest is not p
 remote request failed or that another submission would be free.
 
 The pinned helper recognizes selected FLUX, Qwen Image, and Z-Image model families for images, and
-LTX 2/2.3 and H3 FL2VA for video. Only exact endpoint IDs advertised by both the helper and server
+LTX 2/2.3 and H3 FL2VA/Ref2VA for video. Only exact endpoint IDs advertised by both the helper and server
 appear. Remote LTX 2.5 remains unsupported; use its native engine.
 
 One **First Frame** image is supported for LTX video. Its full file hash participates in preparation
 and request identity, and the helper rechecks it before submission. Orientation is respected and the
 image is center-cropped to generation dimensions. H3 FL2VA also supports a First Frame / Last Frame
-pair, as described above. LTX last frames, interior keyframes, generic references, audio drivers,
-control hints, and native clip extensions are rejected explicitly in this remote adapter.
+pair, as described above; H3 Ref2VA uses the separate still-reference task. LTX last frames and
+references, interior keyframes, movie/audio references, audio drivers, control hints and native
+clip extensions are rejected explicitly in this remote adapter.
 
 Server LoRAs are filtered by exact remote model compatibility. Strength ranges from 0 to 2. Named
 remote groups copy their members/strengths to a clip and remain separate from the native LoRA library.
@@ -1596,18 +1763,23 @@ The project subject list uses the same grouping and read-only source fields. Exi
 can be reviewed without regenerating their subject inventory.
 
 Subject extraction reads numbered source passages in bounded sections, selecting evidence IDs.
-Code copies the original passages instead of accepting model-authored quotations. It runs at most
+Code copies the original passages instead of accepting model-authored quotations. Legacy extraction runs at most
 16 sections across three subject kinds (48 calls per attempt), with one retry, and at most 24 final
 subject proposals. A section that reaches its eight-proposal cap adds a visible completeness warning
-in both the workflow and imported project. Subject IDs are host-assigned, so accented names do not
+in both the workflow and imported project. Guided movie and music-video extraction supports 64 final
+subjects, requests eight new names per page, and makes at most nine page requests per kind and source
+section. Bounded oversized responses retain all validated names; stalled pagination fails explicitly.
+A uniquely matching whole name can repair a wrong paragraph citation with a review warning; ambiguous
+names require corrected citations. Subject IDs are host-assigned, so accented names do not
 break the machine-readable contract. Each request has the existing 1,024-token response ceiling. Files/models stay
 referenced in place; no image generation, cloud CU spending or model download occurs in this stage.
 Evidence selection and descriptions still need human review; exact source text does not certify
 that a model interpretation is correct.
 
-Next: feed the approved project records into versioned DT sheet-generation workflows, generate and
-visually check endpoint candidates, then explicitly apply approved shots to the timeline with engine
-capability/frame-grid validation. Current workflow checkpoints remain available independently.
+Use **Create reference…** to generate and inspect candidates, assign first/last images to shots,
+then use **Add approved selection to timeline**. Clip preparation validates the selected engine's
+task and frame-grid requirements. Automated versioned sheet/endpoint generation remains future
+work. Current workflow checkpoints remain available independently.
 
 
 ## Production library and object relationships
@@ -1636,8 +1808,9 @@ than duplicated environments.
 - Edit an imported object locally to make a movie variation. Its library origin remains visible;
   publishing creates another package version and never silently updates other movies.
 - Under a shot’s **Resolved objects and references**, add shot-only appearance/state overrides.
-  They do not rewrite the movie or global definition. These are planning data for subsequent
-  generation workflows; they are not yet applied automatically to timeline clips.
+  They do not rewrite the movie or global definition. **Add approved selection to timeline** includes
+  these notes with the resolved object descriptions in each new clip's prompt; later edits do not
+  rewrite already applied clips automatically.
 
 Approvals include transitive object-definition revisions. Changing a linked coat or prop makes
 its owners’ description/reference approvals and affected shot approvals stale. Cycles are traversed
@@ -1655,13 +1828,14 @@ snapshots per published root, retaining stable object/placement IDs across versi
 
 The reviewed inventory workflow v1.2.0 now runs extraction → **Link reusable objects** → description
 review → **Review object coverage**. `project.link_subjects@1` proposes links only to known inventory IDs, keeps source evidence,
-and separates suggested missing objects from the inventory. It is limited to 24 subjects and two
+and separates suggested missing objects from the inventory. It accepts up to 64 subjects and two
 attempts each, with per-subject checkpoints. Review or edit relationship roles/placements before
 approval. Old saved workflow definitions stay pinned; choose the current builtin for a new run to
 include the new linking step. Runtime-ready local model bindings remain outside portable definitions.
 
-Automatic sheet workflows, endpoint-frame population and shot-list application to the timeline
-remain future work. Use **Create reference…** for explicit reference-sheet generation today.
+Automatic sheet workflows and endpoint-frame population remain future work. Use **Create reference…**
+for explicit reference-sheet generation, assign the selected frames to reviewed shots, and use
+**Add approved selection to timeline** to create their clips.
 Explicit library-version reconciliation, saved appearance
 presets and automatic classification of legacy locations are follow-on work.
 
@@ -1698,8 +1872,8 @@ import** to reuse its stable ID when adding the results to the movie. Studio rec
 proposal and the selected definition/dependencies before import; stale selections need review again.
 **Create draft in movie** adds a suggested missing object for editing and approval. Neither action
 copies images or model weights, and missing-object creation does not silently change the workflow
-inventory. Sheet generation, automatic reference verification and timeline filling remain separate
-future steps.
+inventory. Reference generation and applying approved shots to the timeline are explicit actions;
+automatic sheet generation and reference verification remain future work.
 
 ## Guided movie planning
 
@@ -1757,3 +1931,152 @@ Every step must complete and every required approval must remain valid before gu
 dependent results. Saved jobs retain their definitions: **Run remaining** on an old extraction-only
 job cannot add missing stages. Its **Start guided workflow…** button starts a separate job using
 the original story. It does not overwrite the old review.
+
+
+### Create a music video
+
+Choose **Movie → Create music video** and select an imported song or a generated YuE2 take.
+Enter lyrics when available, or mark the track as instrumental or lyrics unknown. Director asks
+for essential missing creative decisions in the brief review. Reference images and existing
+production-library characters, props, environments and sets use the ordinary reviewed movie
+workflow. The imported project retains those objects, references, lyrics and source-song timing.
+
+Clip timing is automatic: the default minimum comes from the native model contract and the
+maximum is 15 seconds, capped by model support. Advanced controls override valid bounds. The
+Audio analysis panel offers learned beats/downbeats and English word evidence, alongside a quick
+DSP preview. Set up the compact analysis models or choose an existing verified model folder.
+For difficult singing, opt into **Isolate vocals first**, then include its additional 35.6 MB model
+in setup. Estimated vocals feed only English word evidence; beats and the movie soundtrack keep
+the original song. Isolation is cached and can be cancelled.
+Analyze the song, inspect words/lines and uncertain omissions/repeats, then add, move, remove or
+lock suggested cut markers. **Reviewed cut…** creates an editable marker at source seconds you
+enter for a lyric boundary; it preserves the model evidence. Supply full-song lyrics; unsupported
+words remain untimed.
+**Compare recognition with supplied lyrics** preserves the raw recognition and shows separate
+lyric-assisted wording. The matcher checks short phrase boundaries and uses matching surrounding
+words to propose corrections; every proposed letter still needs acoustic support. Word rows show
+agreement, lyric assistance or unresolved differences. Unsupported supplied lyrics are not inserted
+into the transcription. Lyric-only edits reuse cached acoustic evidence. These labels describe
+model evidence, not human verification, and sung timestamps still require review.
+A frame planner combines audio cues, pacing and locks while penalizing cuts inside supported words.
+Section/repetition and possible vocal-break labels are reviewable suggestions, not verified chorus
+or instrumental classifications. Unknown lyrics produce an unreviewed English transcript.
+LTX 2.5 is the default; LTX 2.3 and H3 also support native audio-driven planning, while soundtrack
+mode supports other configured video models. Draw Things planning requires the selected model's
+explicit duration bounds. All generation still validates actual model/task support.
+
+After reviewing Brief, Subjects and Shots, add the plan to the project. In **Shot List**, select
+adjacent unapplied shots and choose **Combine** for one continuous take with ordered text and the
+combined duration. **Restore original shots** restores their original definitions and references.
+**Split…** divides one unapplied shot at an editorial frame and preserves the exact song interval,
+including the natural audio tail. Review both resulting actions and their new boundary; original
+direction text and outer frame references are retained. **Generation settings for selection…**
+sets the model and render dimensions for selected unapplied shots, persists them with the plan,
+and carries them into timeline clips. These edits mark affected shots for review.
+To move a cut between music shots, adjust their frame counts while preserving the total song
+length, then choose **Realign song intervals to shot lengths**. Existing timeline clips must
+already match the revised starts and lengths; the action changes timing metadata, not footage
+or the audio track. Review the affected shots and explicitly reuse any trimmed takes afterward.
+Realignment requires one continuous song and uncombined shots, preserves the natural audio tail,
+and rejects changed intervals on applied audio-driven takes, which need new generation.
+For a matching take already on the timeline, **Reuse selected timeline take** links it to an
+approved shot while retaining its footage, prompt and versions. Applying the remaining plan
+preserves an existing song region covering the same source interval instead of doubling the mix.
+The editing canvas shows the complete music and title extent even while video coverage is short;
+this does not extend the exported movie beyond its actual video clips.
+Assign first/last images, approve the shots and choose **Add approved selection to timeline**.
+The ordinary clip controls then prepare and render them. The original song is placed continuously
+on the Music track and generated clip sound is muted. Additional timed frame inputs remain in the
+clip inspector. Reference images belonging to objects remain available for endpoint generation
+and compatible reference adapters; reference-only adapters are not silently applied to A2V.
+
+Compatible LTX 2.5 continuation shots can form native continuous scenes. Disabling the continuity
+preference keeps them independent. Scene groups remain limited to two through six members and
+30 seconds. Arbitrary editorial lengths render enough native frames and retain an exact timeline
+trim; a fractional final audio interval is preserved with less than one video frame of tail hold.
+Source-content verification rejects a changed song before generation. Byte-identical collected or
+relinked media remain reusable.
+
+A local two-shot A2V qualification used two image anchors, 384×256 at 24 FPS, and a four-second
+interval of a YuE2 song. Generation took 43.8 seconds and a checkpoint resume took 3.4 seconds on
+the tested M3 Ultra. Final stereo PCM32 samples matched the original interval exactly and native
+AVFoundation playback was verified. This establishes that input combination and source retention;
+it does not guarantee lip sync, beat-following movement or seamless results for every scene.
+
+### Native audio analysis qualification
+
+The analysis engine independently implements wav2vec2-base-960h, Beat This small0 and optional
+UMX-HQ vocal isolation using MLX; it does not import third-party inference packages. Model setup verifies pinned file hashes and
+keeps the Apache-2.0 model card and MIT license alongside the optional downloaded weights.
+The stages run sequentially, release their weights and support cancellation. Beat evidence,
+estimated stereo vocals and recognition evidence have independent source/model/settings caches;
+lyric changes reuse those stages. Corrupted caches are recomputed.
+
+Numerical checks matched the speech reference's frame-token decisions exactly and the beat
+reference logits within 0.000023. A 160-second song took 2.12 seconds for combined analysis and
+0.18 seconds from cache on the tested M3 Ultra. A known spoken sentence aligned all 16 supplied
+words; absent words and lines stayed untimed. These measurements are local qualification, not
+a guarantee of accuracy on other sources.
+
+Vocal-isolation numerical checks matched the reference network within relative L2 error 0.00000034.
+On the full 159.8-second song, isolation increased supported supplied words from 29/174 to 61/174;
+neither mode fully timed a line. End-to-end analysis took 2.09s mixed and 4.38s with isolation,
+with 988 MB peak MLX allocation dominated by the sequential acoustic stage on the test machine.
+These counts compare acoustic evidence with the exact song's generation-request lyrics, not an
+independent transcript or hand-timed boundaries. A qualification-only singing-trained checkpoint
+reached 83/174 words after isolation and remains outside the shipped model selection.
+
+Sung words, omission/repetition flags and section labels still require review; acoustic-support
+scores are not calibrated probabilities. The optional vocal estimate uses six-second crossfaded
+windows and mixture phase, without multistem Wiener refinement. No multilingual aligner, speaker
+diarization or guaranteed lip-sync system is included.
+
+### Resumable movie production
+
+Use **Movie → Produce movie…**, or **Shot List → Add approved plan and produce…** after reviewing
+the shots and their production objects. The Shot List action adds unapplied approved shots with
+their song intervals. Existing timeline clips remain part of the movie.
+
+During production, the shot list refreshes automatically while rendering continues. Pausing
+retains completed takes; a delayed status response cannot overwrite the finished run or a
+different movie.
+
+Production preparation and headless job export revalidate existing native takes when their
+process-local validation is missing, including after reopening Studio. Unchanged resolved inputs
+reuse the saved take; changed inputs or missing media still queue generation. An edit during
+revalidation stops preparation so a stale result cannot choose what to render.
+
+**Prepare production** captures the edit and execution settings. **Start production** runs native
+H3/LTX jobs serially, prepares continuity-dependent shots after their predecessors finish, and
+assembles the movie using the existing finishing and audio mixer. Complete LTX2.5 scenes render
+as one unit. Scene frame constraints must preserve the reviewed shot lengths; incompatible timing
+stops before generation rather than moving music cuts. Source Music regions, stereo channels,
+volume/fades, titles and track mute/solo settings remain part of the final assembly.
+
+Choose zero to three automatic retries for local renderer failures. Pause retains completed takes
+and scene checkpoints; Resume verifies their hashes before reuse. Cancellation and invalid inputs
+are not retried. Assembly publication is journaled so an interruption after the final rename can
+resume. The saved project links to its production directory; save the project to retain that link.
+Changed source files, runtime settings or global references require a new snapshot, preserving old
+outputs. Prepare and render use the same native adapters as individual Studio clips.
+
+Self-hosted Draw Things execution is opt-in and has no automatic resubmission after an uncertain
+remote attempt. Cloud API shots still use their individual generation and cost-confirmation flow;
+accept those takes before producing the movie. Existing supported model/task restrictions apply.
+
+When assembly completes, preview the movie and use **Apply generated takes** to update the timeline.
+Application verifies source/artifact receipts and the unchanged edit/execution context, preserves
+older takes and shared scene versions, and leaves production objects and original song data intact.
+The original timeline is not replaced during background generation.
+
+Qualification includes real two-clip stereo assembly (48 frames at 24 FPS), distinct left/right test
+tones, sample-timing probes, interrupted publication recovery, bounded failure retries, both
+cancellation exception types, continuity preparation order and changed-source/changed-context
+rejection. The final mixer compensates limiter lookahead so it does not shift the soundtrack.
+
+On an M3 Ultra, a cold two-shot LTX 2.5 audio-driven scene with two image anchors (384×256,
+96 frames at 24 FPS) completed generation and assembly in 57.88 seconds. Its verified completed
+queue resumed in 0.022 seconds. Native scene PCM matched all 192,000 original stereo samples;
+after the mixer correction, the final AAC export had zero measured sample offset on both channels.
+These are one local qualification run, not a general throughput guarantee. Rendering quality and
+musical gesture/lip synchronization remain model-dependent.

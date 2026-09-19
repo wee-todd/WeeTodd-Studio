@@ -63,7 +63,12 @@ public struct PlanningShot: Codable, Equatable, Identifiable {
   public var engine: Engine = .ltx25
   public var task = "fflf"
   public var modelID = ""
+  public var generationWidth: Int?
+  public var generationHeight: Int?
   public var linkedClipID: UUID?
+  /// Retained source shots make combining reversible without losing references or text.
+  public var combinedShots: [PlanningShot]?
+  public var musicSource: MusicShotSource?
   public var appearanceOverrides: [ObjectStateOverride]?
   public var approvedRevision: String?
   public init(name: String, frameCount: Int) { self.name = name; self.frameCount = frameCount }
@@ -78,6 +83,8 @@ public struct ProjectPlanning: Codable, Equatable {
   public var frameRate = 24
   public var subjects: [PlanningSubject] = []
   public var shots: [PlanningShot] = []
+  public var musicTimings: [String: MusicVideoTiming]?
+  public var musicAnalysis: [String: JSONValue]?
   public var importedSources: [String] = []
   public var reviewNotes: [String] = []
   public init() {}
@@ -132,6 +139,11 @@ public struct ProjectPlanning: Codable, Equatable {
     let s = shots[i]
     var issues: [String] = []
     if !(1...120).contains(frameRate) || !(1...100_000_000).contains(s.frameCount) { issues.append("Use 1–120 FPS and a positive frame count up to 100,000,000.") }
+    if s.generationWidth != nil || s.generationHeight != nil {
+      if !Self.validGenerationSize(width: s.generationWidth ?? 0, height: s.generationHeight ?? 0, engine: s.engine) {
+        issues.append("Set both render dimensions to supported multiples: 64 pixels for Draw Things, 32 for native models, between 128 and 4096.")
+      }
+    }
     if s.name.trimmed.isEmpty || s.action.trimmed.isEmpty || s.firstFrame.trimmed.isEmpty || s.lastFrame.trimmed.isEmpty {
       issues.append("Add a shot name, action, first-frame description and last-frame description.")
     }
@@ -274,7 +286,18 @@ public struct ProjectPlanning: Codable, Equatable {
     let story = try decode("story", WorkflowStoryOutline.self)
     let clips = try decode("clips", WorkflowClipPlan.self)
     if let preview = run.outputs["h3_prompts"] { outputs["h3_prompts"] = preview }
-    let promptPreview = try decode("h3_prompts", H3PromptPreview.self)
+    if let preview = run.outputs["prompt_plan"] { outputs["prompt_plan"] = preview }
+    let promptPreview = try decode("prompt_plan", H3PromptPreview.self) ?? decode("h3_prompts", H3PromptPreview.self)
+    if let timing = run.outputs["music_timing"] { outputs["music_timing"] = timing }
+    let musicTiming = try decode("music_timing", MusicVideoTiming.self)
+    try musicTiming?.validate()
+    if let musicTiming {
+      guard let clips, musicTiming.fps == clips.fps, musicTiming.totalFrames == clips.totalFrames,
+        musicTiming.clips.map(\.clipID) == clips.clips.map(\.id),
+        zip(musicTiming.clips, clips.clips).allSatisfy({ $0.startFrame == $1.startFrame && $0.frameCount == $1.frameCount }) else {
+        throw StudioError.invalid("Music analysis timing differs from the reviewed shot plan. Rebuild timing before importing.")
+      }
+    }
     var promptSubjects: [String: [String]] = [:]
     if let promptPreview {
       let known = Set((inventory ?? []).map(\.id))
@@ -387,6 +410,13 @@ public struct ProjectPlanning: Codable, Equatable {
         let key = prefix + "shot:" + clip.id
         if shots.contains(where: { $0.sourceKey == key }) { continue }
         var shot = PlanningShot(name: "Shot \(index + 1)", frameCount: clip.frameCount)
+        if let timing = musicTiming, let interval = timing.clips.first(where: { $0.clipID == clip.id }) {
+          shot.engine = Engine(rawValue: timing.engine) ?? .ltx25; shot.task = timing.task
+          shot.musicSource = MusicShotSource(path: timing.sourceAudio.path, sha256: timing.sourceAudio.sha256,
+            start: interval.sourceStartSeconds, duration: interval.sourceDurationSeconds, task: timing.task)
+          shot.musicSource?.sceneEligible = interval.sceneEligible ?? false
+          shot.musicSource?.maximumGenerationSeconds = timing.bounds?.modelMaximumSeconds ?? timing.bounds?.maximumSeconds
+        }
         shot.sourceKey = key; shot.action = clip.action; shot.firstFrame = clip.startState; shot.lastFrame = clip.endState
         shot.continuity = clip.continuity; shot.subjectIDs = clip.characters.compactMap { mapping[$0] }
         if let references = promptSubjects[clip.id] {
@@ -412,6 +442,10 @@ public struct ProjectPlanning: Codable, Equatable {
         }
         shots.append(shot)
       }
+    }
+    if let musicTiming, musicTimings?[sourceID] == nil {
+      if musicTimings == nil { musicTimings = [:] }; musicTimings?[sourceID] = musicTiming
+      if musicAnalysis == nil { musicAnalysis = [:] }; musicAnalysis?[sourceID] = outputs["music_timing"]
     }
     if !importedSources.contains(sourceID) { importedSources.append(sourceID) }
   }

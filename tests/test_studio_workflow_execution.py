@@ -209,6 +209,7 @@ def test_packaged_builtins_and_dispatch_support_next_step(tmp_path):
 
     catalog = dispatch("workflow-catalog", {})
     assert {d["id"] for d in catalog["definitions"]} == {
+        "weetodd.music-video-planning",
         "weetodd.guided-movie-planning",
         "weetodd.staged-prompt-editing",
         "weetodd.movie-planning",

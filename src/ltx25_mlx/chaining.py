@@ -475,6 +475,7 @@ def decode_ltx25_chain(
     frame_rate,
     low_memory=True,
     check_interrupted=None,
+    source_audio=None,
 ):
     """Decode the assembled video once, release it, then decode audio once.
 
@@ -507,7 +508,12 @@ def decode_ltx25_chain(
                 video_freed = True
             if check_interrupted is not None:
                 check_interrupted()
-            waveform = audio_decoder(audio_latent)
+            sample_rate = 48000
+            if source_audio is None:
+                waveform = audio_decoder(audio_latent)
+            else:
+                waveform, sample_rate = source_audio
+                samples = round(frames / frame_rate * sample_rate)
             array = mlx_audio_to_numpy(waveform)
             del waveform
             if low_memory:
@@ -516,7 +522,19 @@ def decode_ltx25_chain(
             if array.ndim == 3 and array.shape[0] == 1:
                 array = array[0]
             array, adjustment = fit_audio_window(array, samples)
-            _save_waveform(audio_file, array, 48000)
+            if source_audio is None:
+                _save_waveform(audio_file, array, sample_rate)
+            else:
+                # 32-bit PCM avoids the old generated-audio 16-bit quantizer.
+                # ALAC stores 24-bit PCM, preserving integer PCM source fidelity
+                # up to 24 bits without an AAC generation/re-encoding round trip.
+                pcm = np.rint(np.clip(array.T.astype(np.float64), -1, 1) * 2147483648)
+                pcm = np.ascontiguousarray(np.clip(pcm, -2147483648, 2147483647).astype('<i4'))
+                with wave.open(str(audio_file), 'w') as handle:
+                    handle.setnchannels(array.shape[0])
+                    handle.setsampwidth(4)
+                    handle.setframerate(sample_rate)
+                    handle.writeframes(pcm.tobytes())
             del array
             if check_interrupted is not None:
                 check_interrupted()
@@ -537,7 +555,7 @@ def decode_ltx25_chain(
                     "-c:v",
                     "copy",
                     "-c:a",
-                    "aac",
+                    "alac" if source_audio is not None else "aac",
                     "-b:a",
                     "192k",
                     str(target),
@@ -550,7 +568,10 @@ def decode_ltx25_chain(
                 "output_frames": frames,
                 "output_audio_samples": samples,
                 "audio_adjustment": adjustment,
-                "weighted_stage_order": "video_decode_then_audio_decode",
+                "weighted_stage_order": ("video_decode_only" if source_audio is not None
+                                         else "video_decode_then_audio_decode"),
+                "audio_policy": "source" if source_audio is not None else "generated",
+                "audio_sample_rate": sample_rate,
             }
     finally:
         if low_memory:

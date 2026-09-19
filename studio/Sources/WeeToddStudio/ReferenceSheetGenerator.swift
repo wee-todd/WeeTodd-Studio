@@ -81,7 +81,6 @@ struct ReferenceSheetGenerator: View {
       Text("Apply template rebuilds the prompt. Starting settings change steps/CFG only; choose your model and LoRAs separately.")
         .font(.caption).foregroundStyle(.secondary)
       }
-      if let error = store.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
       if referencesExpanded && !referencePaths.isEmpty {
         ScrollView(.horizontal) {
           HStack {
@@ -118,17 +117,9 @@ struct ReferenceSheetGenerator: View {
   private func begin() {
     guard !started else { return }; started = true
     lease = ReferenceWorkspaceLease(store: store, subjectKey: subject.subjectKey)
-    var draft = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: store.project.id))
-    context.apply(to: &draft); draft.seed = -1; draft.steps = 8
+    let draft = store.makeReferenceImageDraft(context, previousDraft: lease?.previousDraft)
+    context = draft.referenceSheet ?? context
     let saved = store.imageWorkspaceLibrary.sessions[draft.storageKey]
-    if let saved, saved.draft.referenceSheet?.description == subject.description,
-       saved.draft.referenceSheet?.linkedDefinitions == subject.linkedDefinitions,
-       saved.draft.referenceSheet?.name == subject.name {
-      draft = saved.draft; context = draft.referenceSheet ?? context
-    } else {
-      draft.profileID = lease?.previousDraft?.profileID ?? store.drawThingsConnections.first?.id ?? ""
-      // Model selection is explicit. Never pick an arbitrary model or silently add a LoRA.
-    }
     store.referenceSheetOpen = true
     store.restoringImageWorkspace = true
     store.imagePreviewPath = saved?.draft == draft ? saved?.previewPath : nil

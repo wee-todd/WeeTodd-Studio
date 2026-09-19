@@ -51,6 +51,7 @@ public struct MediaAsset: Codable, Identifiable, Equatable {
   public var loraLayout: String?
   public var loraAdalnInputGrid: String?
   public var generation: ImageGeneration?
+  public var musicGeneration: MusicGeneration?
   public init(
     name: String, kind: AssetKind, path: String = "", scope: AssetScope = .project,
     owner: UUID? = nil
@@ -80,6 +81,9 @@ public struct Attachment: Codable, Identifiable, Equatable {
   public var referenceFrames: String?
   public var referenceSizePolicy: String?
   public var attentionStrength: Double?
+  /// Canonical interval in the original audio, shared by adjacent music-video shots.
+  public var audioSourceStart: Double?
+  public var audioSourceDuration: Double?
   public init(assetID: UUID, role: MediaRole, time: Double = 0) {
     self.assetID = assetID
     self.role = role
@@ -172,6 +176,8 @@ public struct Clip: Codable, Identifiable, Equatable {
   public var prompt = ""
   public var soundscape = "Natural location sound. No dialogue."
   public var music = "N/A"
+  public var musicSource: MusicShotSource?
+  public var reviewedTakeFingerprint: String?
   public var negativePrompt = ""
   public var duration: Double = 5
   public var sourceIn: Double = 0
@@ -307,6 +313,8 @@ public struct AudioRegion: Codable, Identifiable, Equatable {
   }
 }
 public struct StudioProject: Codable, Equatable {
+  public var production: MusicVideoProduction?
+  public var musicDraft: MusicDraft?
   public var planning: ProjectPlanning?
   public var version = 1
   public var id = UUID()
@@ -418,8 +426,12 @@ public enum ProjectStorage {
     return p
   }
   public static func mapPaths(_ project: inout StudioProject, transform: (String) -> String) {
+    project.mapMusicSourcePaths(transform)
     for i in project.assets.indices {
       project.assets[i].path = transform(project.assets[i].path)
+      if let artifacts = project.assets[i].musicGeneration?.artifacts {
+        project.assets[i].musicGeneration?.artifacts = transform(artifacts)
+      }
       if let grid = project.assets[i].loraAdalnInputGrid {
         project.assets[i].loraAdalnInputGrid = transform(grid)
       }
@@ -460,8 +472,15 @@ public enum ProjectStorage {
 }
 
 extension Clip {
+  public var reuseFingerprint: String {
+    planningDigest([generationFingerprint, sourcePath, String(sourceIn)])
+  }
+  public var hasReviewedReusedTake: Bool {
+    !sourcePath.isEmpty && reviewedTakeFingerprint == reuseFingerprint
+  }
   public var generationFingerprint: String {
     var c = self
+    c.reviewedTakeFingerprint = nil
     c.motionFidelity = nil
     c.savedNativeGenerations = nil
     c.lastLocalEngine = nil

@@ -17,10 +17,11 @@ public enum TransportError: String, Error {
 }
 
 public enum Configuration {
-  static let allowed: Set<String> = [
+  static let ltxHighResSettings: Set<String> = ["hiresFix", "hiresFixWidth", "hiresFixHeight", "hiresFixStrength"]
+  static let allowed: Set<String> = ltxHighResSettings.union([
     "width", "height", "steps", "seed", "guidanceScale", "strength", "numFrames", "fps",
     "shift", "audioShift", "sampler"
-  ]
+  ])
 
   static func number(_ value: Any?, min: Double, max: Double, integer: Bool = false) throws -> Double {
     guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else {
@@ -41,7 +42,7 @@ public enum Configuration {
     let version = ModelZoo.versionForModel(model)
     switch version {
     case .minimaxH3:
-      guard operation == "video", ModelZoo.modifierForModel(model) == .fl2va else {
+      guard operation == "video", [.fl2va, .ref2va].contains(ModelZoo.modifierForModel(model)) else {
         throw TransportError.unsupportedOperation
       }
     case .ltx2, .ltx2_3:
@@ -53,6 +54,12 @@ public enum Configuration {
     default: throw TransportError.unsupportedModel
     }
     let inputs = try Conditioning.inputs(request)
+    let references = inputs.filter { $0["role"] as? String == "reference" }
+    if version == .minimaxH3 && ModelZoo.modifierForModel(model) == .ref2va {
+      guard !references.isEmpty, references.count == inputs.count else {
+        throw TransportError.unsupportedConditioning
+      }
+    } else if !references.isEmpty { throw TransportError.unsupportedConditioning }
     guard operation == "image" || inputs.count < 2 || version == .minimaxH3 else {
       throw TransportError.unsupportedConditioning
     }
@@ -97,6 +104,37 @@ public enum Configuration {
       guard SamplerType(rawValue: raw) != nil else { throw TransportError.invalidRequest }
       config.sampler = raw
     }
+    if !Set(values.keys).isDisjoint(with: ltxHighResSettings) {
+      guard version == .ltx2 || version == .ltx2_3 else { throw TransportError.invalidRequest }
+      if let value = values["hiresFix"] {
+        guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else {
+          throw TransportError.invalidRequest
+        }
+        config.hiresFix = flag.boolValue
+      }
+      for key in ["hiresFixWidth", "hiresFixHeight"] {
+        if let value = values[key] {
+          let pixels = try number(value, min: 64, max: 4096, integer: true)
+          guard Int(pixels) % 64 == 0 else { throw TransportError.invalidRequest }
+          if key == "hiresFixWidth" { config.hiresFixWidth = UInt32(pixels) }
+          else { config.hiresFixHeight = UInt32(pixels) }
+        }
+      }
+      if let value = values["hiresFixStrength"] {
+        config.hiresFixStrength = Float(try number(value, min: 0, max: 1))
+      }
+      if config.hiresFix {
+        // Require explicit first-pass geometry rather than inheriting unrelated app defaults.
+        guard values["hiresFixWidth"] != nil, values["hiresFixHeight"] != nil else {
+          throw TransportError.invalidRequest
+        }
+        let firstWidth = Int(config.hiresFixWidth), firstHeight = Int(config.hiresFixHeight)
+        guard (firstWidth * 2 == Int(width) && firstHeight * 2 == Int(height))
+          || (firstWidth * 3 == Int(width) * 2 && firstHeight * 3 == Int(height) * 2) else {
+          throw TransportError.invalidRequest
+        }
+      }
+    }
     if operation == "video" {
       config.numFrames = UInt32(try number(values["numFrames"], min: 1, max: 100000, integer: true))
       config.fps = UInt32(try number(values["fps"], min: 1, max: 240, integer: true))
@@ -131,9 +169,10 @@ public enum ComputeEstimate {
     }
     let config = try Configuration.resolve(request)
     let inputs = try Conditioning.inputs(request)
-    let hasImage = inputs.contains { ["canvas", "first"].contains($0["role"] as? String ?? "") }
+    let referenceCount = inputs.filter { $0["role"] as? String == "reference" }.count
+    let hasImage = referenceCount > 0 || inputs.contains { ["canvas", "first"].contains($0["role"] as? String ?? "") }
     let shuffleCount = inputs.filter { ["moodboard", "last"].contains($0["role"] as? String ?? "")
-      && (($0["strength"] as? NSNumber)?.doubleValue ?? 0) > 0 }.count
+      && (($0["strength"] as? NSNumber)?.doubleValue ?? 0) > 0 }.count + max(0, referenceCount - 1)
     guard let cu = ComputeUnits.from(config, hasImage: hasImage, shuffleCount: shuffleCount) else {
       throw TransportError.unsupportedModel
     }
@@ -142,6 +181,10 @@ public enum ComputeEstimate {
       throw TransportError.invalidRequest
     }
     var supported = Configuration.allowed
+    let version = ModelZoo.versionForModel(config.model ?? "")
+    if version != .ltx2 && version != .ltx2_3 {
+      supported.subtract(Configuration.ltxHighResSettings)
+    }
     if request["operation"] as? String == "image" { supported.subtract(["numFrames", "fps"]) }
     var normalized = full.filter { supported.contains($0.key) }
     if ModelZoo.versionForModel(config.model ?? "") == .minimaxH3 {

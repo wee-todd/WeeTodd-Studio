@@ -236,6 +236,27 @@ def test_approved_story_cannot_be_edited_until_unlocked(tmp_path):
         )
 
 
+def test_failed_shot_accepts_direction_without_scoped_draft_or_losing_prefix(tmp_path):
+    backend = TextBackend([json.dumps(outline()), json.dumps(beat(0)), "bad", "bad"])
+    req = request(tmp_path)
+    state = dispatch("workflow-run", req, backend=backend)
+    review(req, state, "story")
+    state = dispatch("workflow-run", req, backend=backend)
+    prefix = copy.deepcopy(state["steps"]["clips"]["items"]["clip-1"])
+    assert state["status"] == "failed"
+    instruction = "Enter the shelter with empty hands."
+    state = review(req, state, "clips", "repair", itemID="clip-2", instruction=instruction)
+    item = state["steps"]["clips"]["items"]["clip-2"]
+    assert item["repairInstruction"] == instruction
+    assert "repairFieldScope" not in item
+    backend.replies = iter([json.dumps(beat(1)), json.dumps(beat(2))])
+    state = dispatch("workflow-run", req, backend=backend)
+    assert state["awaitingStep"] == "clips", state.get("error")
+    assert instruction in backend.prompts[4]
+    assert state["steps"]["clips"]["items"]["clip-1"] == prefix
+    assert state["steps"]["story"]["approved"]
+
+
 def test_character_ids_and_requested_movie_time_cannot_be_bypassed_by_edit(tmp_path):
     req, state, _ = to_clips(tmp_path)
     outputs = copy.deepcopy(state["steps"]["clips"]["outputs"])

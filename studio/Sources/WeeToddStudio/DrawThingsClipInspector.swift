@@ -6,8 +6,6 @@ struct DrawThingsClipInspector: View {
   var clip: Clip
   var isH3: Bool { clip.drawThings?.modelFamily.lowercased() == "minimaxh3" }
   var hasCatalog: Bool { store.drawThingsCatalogs[clip.drawThings?.profileID ?? ""] != nil }
-  @State private var groupName = ""
-  @State private var loraSearch = ""
   func selection<T>(_ key: WritableKeyPath<DrawThingsSelection, T>, fallback: T) -> Binding<T> {
     Binding(get: { store.selectedClip?.drawThings?[keyPath: key] ?? fallback }, set: { value in
       store.editClip {
@@ -20,6 +18,8 @@ struct DrawThingsClipInspector: View {
         }
         if let selected = $0.drawThings {
           $0.drawThings?.modelFamily = store.drawThingsModelFamily(
+            profileID: selected.profileID, modelID: selected.modelID)
+          $0.drawThings?.modelModifier = store.drawThingsModelModifier(
             profileID: selected.profileID, modelID: selected.modelID)
         }
       }
@@ -58,11 +58,13 @@ struct DrawThingsClipInspector: View {
             .contains(where: { $0.id == selected.modelID }) {
           $0.drawThings?.modelID = ""
           $0.drawThings?.modelFamily = ""
+          $0.drawThings?.modelModifier = nil
         }
       } })) {
         Text("Text to video").tag("t2v")
         Text("Image to video").tag("i2v")
         Text("First and last frames").tag("fflf")
+        Text("Image references · H3").tag("ref2va")
       }
       Text(clip.drawThings?.modelID.isEmpty != false
         ? "Choose your task and add frame images first, then select a connection and model. First and last frames requires H3 FL2VA."
@@ -149,51 +151,27 @@ struct DrawThingsClipInspector: View {
   var loraControls: some View {
     let available = store.drawThingsLoRAs(
       profileID: clip.drawThings?.profileID ?? "", modelID: clip.drawThings?.modelID ?? "")
-    let unavailable = clip.drawThings?.unavailableLoRAs(
-      availableIDs: hasCatalog ? Set(available.map(\.id)) : nil) ?? []
-    let saved = hasCatalog ? unavailable : clip.drawThings?.loras ?? []
+    let names = Dictionary(available.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
     return VStack(alignment: .leading, spacing: 8) {
-      Text("Server LoRAs").font(.caption.bold())
-      TextField("Search LoRAs and groups", text: $loraSearch)
-      ForEach(available.filter { matchesSearch($0.name) || matchesSearch($0.id) }, id: \.id) { lora in
-        loraRow(modelID: lora.id, name: lora.name)
+      HStack {
+        Text("LoRAs · Draw Things").font(.caption.bold())
+        Spacer()
+        Button("Add / Groups…") { store.showLoRALibrary = true }.controlSize(.small)
       }
-      if !saved.isEmpty {
-        VStack(alignment: .leading, spacing: 6) {
-          Text(hasCatalog ? "Unavailable for this connection or model" : "Saved LoRAs · connection not verified")
-            .font(.caption.bold()).foregroundStyle(hasCatalog ? .orange : .secondary)
-          ForEach(saved.filter { matchesSearch($0.modelID) }) { lora in
-            loraRow(modelID: lora.modelID, name: lora.modelID)
+      ForEach(clip.drawThings?.loras ?? []) { lora in
+        VStack(alignment: .leading, spacing: 5) {
+          loraRow(modelID: lora.modelID, name: names[lora.modelID] ?? lora.modelID)
+          if !hasCatalog || names[lora.modelID] == nil {
+            Text(hasCatalog ? "Unavailable for this connection or model" : "Connection not verified")
+              .font(.caption2).foregroundStyle(.orange)
           }
-          if hasCatalog { Button("Remove all unavailable") {
-            let ids = Set(unavailable.map(\.modelID))
-            store.editClip { $0.drawThings?.loras.removeAll { ids.contains($0.modelID) } }
-          }.controlSize(.small) }
-        }.padding(8).background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        }.padding(9).background(Theme.raised, in: RoundedRectangle(cornerRadius: 7))
       }
-      if available.isEmpty {
-        Text(hasCatalog
-          ? "No compatible LoRAs were advertised for this model. Install them in Draw Things, enable Model Browsing for a local server, then Refresh."
-          : "Connect and Refresh to load compatible LoRAs. Saved assignments remain editable; generation verifies compatibility.")
+      if clip.drawThings?.loras.isEmpty != false {
+        Text("Add compatible LoRAs or apply a saved group from the library.")
           .font(.caption2).foregroundStyle(.secondary)
       }
-      HStack {
-        TextField("Group name", text: $groupName)
-        Button("Save group") { saveGroup() }.disabled(!hasCatalog || groupName.trimmingCharacters(in: .whitespaces).isEmpty || clip.drawThings?.loras.isEmpty != false)
-      }
-      Menu("Apply LoRA group") {
-        ForEach(compatibleGroups.filter { matchesSearch($0.name) }) { group in
-          Menu(group.name) {
-            ForEach(LoRAGroupApplicationMode.allCases) { mode in
-              Button(mode.label) { apply(group, mode: mode) }
-            }
-          }
-        }
-      }.disabled(compatibleGroups.isEmpty)
     }
-  }
-  func matchesSearch(_ value: String) -> Bool {
-    loraSearch.isEmpty || value.localizedCaseInsensitiveContains(loraSearch)
   }
   func loraRow(modelID: String, name: String) -> some View {
     let assignment = clip.drawThings?.loras.first { $0.modelID == modelID }
@@ -224,32 +202,6 @@ struct DrawThingsClipInspector: View {
         }))
       }
     }
-  }
-  var compatibleGroups: [DrawThingsLoRAGroup] {
-    guard let selection = clip.drawThings else { return [] }
-    return store.drawThingsLoRAGroups.filter {
-      $0.profileID == selection.profileID && $0.family == selection.modelFamily
-        && $0.compatibleModelIDs.contains(selection.modelID)
-    }
-  }
-  func saveGroup() {
-    guard let selection = clip.drawThings else { return }
-    let discovered = store.drawThingsLoRAs(profileID: selection.profileID, modelID: selection.modelID)
-    guard let family = discovered.first(where: { candidate in selection.loras.contains { $0.modelID == candidate.id } })?.family,
-      selection.loras.allSatisfy({ member in discovered.contains { $0.id == member.modelID && $0.family == family } })
-    else { store.error = "A Draw Things LoRA group cannot mix model families."; return }
-    let compatible = discovered.filter { candidate in selection.loras.contains { $0.modelID == candidate.id } }
-      .reduce(Set([selection.modelID])) { $0.intersection(Set($1.compatibleModelIDs)) }
-    store.drawThingsLoRAGroups.append(DrawThingsLoRAGroup(name: groupName, profileID: selection.profileID,
-      family: family, compatibleModelIDs: Array(compatible).sorted(), members: selection.loras))
-    store.saveDrawThingsLoRAGroups(); groupName = ""
-  }
-  func apply(_ group: DrawThingsLoRAGroup, mode: LoRAGroupApplicationMode) {
-    guard var selection = store.selectedClip?.drawThings else { return }
-    do {
-      try selection.apply(group, mode: mode)
-      store.editClip { $0.drawThings = selection }
-    } catch { store.error = error.localizedDescription }
   }
   func removeLoRA(_ modelID: String) {
     store.editClip { $0.drawThings?.loras.removeAll { $0.modelID == modelID } }

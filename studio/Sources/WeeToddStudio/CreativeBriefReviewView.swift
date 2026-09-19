@@ -6,6 +6,7 @@ struct CreativeBriefReviewView: View {
   let value: CreativeBrief
   let approved: Bool
   let busy: Bool
+  var dynamicMusicTiming = false
   let onSave: ([String: JSONValue]) async -> Bool
   let onDirtyChange: (Bool) -> Void
   private var baseline: CreativeBrief {
@@ -110,10 +111,17 @@ struct CreativeBriefReviewView: View {
   private var preferenceFields: some View {
     VStack(alignment: .leading, spacing: 10) {
       Text("Creative preferences").font(.headline)
-      Text("\(duration) seconds · about \(clipDuration) seconds per clip · \(frameRate) fps")
+      Text(dynamicMusicTiming
+        ? "\(duration) seconds · music-paced clips · \(frameRate) fps"
+        : "\(duration) seconds · about \(clipDuration) seconds per clip · \(frameRate) fps")
         .font(.caption).foregroundStyle(.secondary)
       LabeledContent("Movie duration (seconds)") { TextField("Seconds", text: draftBinding(\.duration)).frame(maxWidth: 140) }
-      LabeledContent("Target clip duration (seconds)") { TextField("Seconds per clip", text: draftBinding(\.clipDuration)).frame(maxWidth: 140) }
+      if dynamicMusicTiming {
+        Text("Director chooses clip lengths from the song’s pacing and timing cues, within the minimum and maximum in Timing and creative controls.")
+          .font(.caption).foregroundStyle(.secondary)
+      } else {
+        LabeledContent("Target clip duration (seconds)") { TextField("Seconds per clip", text: draftBinding(\.clipDuration)).frame(maxWidth: 140) }
+      }
       LabeledContent("Frame rate (fps)") { TextField("Frames per second", text: draftBinding(\.frameRate)).frame(maxWidth: 140) }
       preferenceText("Visual style", text: draftBinding(\.preferences).visualStyle)
       preferenceText("Presentation", text: draftBinding(\.preferences).presentation)

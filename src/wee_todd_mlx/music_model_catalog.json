@@ -1,0 +1,56 @@
+{
+  "id": "yue2-3b-mlx-8bit",
+  "name": "YuE2 3B \u00b7 8-bit",
+  "license": "cc-by-nc-4.0",
+  "source": "https://huggingface.co/npario/YuE2-3B-MLX",
+  "files": [
+    {
+      "repo": "npario/YuE2-3B-MLX",
+      "revision": "3cc223c59ac90251b179754c6e7def0b80769ab4",
+      "filename": "8bit/config.json",
+      "target": "config.json",
+      "size": 1042,
+      "sha256": "0240917587f4a46c843da7b353a4835f222b6205c2ec33b3f009ce2147f22ea9"
+    },
+    {
+      "repo": "npario/YuE2-3B-MLX",
+      "revision": "3cc223c59ac90251b179754c6e7def0b80769ab4",
+      "filename": "8bit/model.safetensors",
+      "target": "model.safetensors",
+      "size": 4264488042,
+      "sha256": "bb6ff9895114be4aaa6e1b3a7d272eee55b54c9e619716c67355b45673fe3d7c"
+    },
+    {
+      "repo": "npario/YuE2-3B-MLX",
+      "revision": "3cc223c59ac90251b179754c6e7def0b80769ab4",
+      "filename": "8bit/qwen.tiktoken",
+      "target": "qwen.tiktoken",
+      "size": 2561218,
+      "sha256": "b2b1b8dfb5cc5f024bafc373121c6aba3f66f9a5a0269e243470a1de16a33186"
+    },
+    {
+      "repo": "npario/YuE2-3B-MLX",
+      "revision": "3cc223c59ac90251b179754c6e7def0b80769ab4",
+      "filename": "8bit/vae.safetensors",
+      "target": "vae.safetensors",
+      "size": 265441814,
+      "sha256": "dc7bea8e4f8e764be6ee2ce3291606a5381aaa20f5c4eb26e86ca81dd1eeac6e"
+    },
+    {
+      "repo": "npario/YuE2-3B-MLX",
+      "revision": "3cc223c59ac90251b179754c6e7def0b80769ab4",
+      "filename": "8bit/vae_config.json",
+      "target": "vae_config.json",
+      "size": 1378,
+      "sha256": "f0191bb9694009956de44e0c361a6f1334760be4c8f848e599bde242a54a0970"
+    },
+    {
+      "repo": "npario/YuE2-3B-MLX",
+      "revision": "3cc223c59ac90251b179754c6e7def0b80769ab4",
+      "filename": "8bit/yue2_generation_config.json",
+      "target": "yue2_generation_config.json",
+      "size": 466,
+      "sha256": "203830cebde6e3644eb291925362990d198e66c3b6006cd11f1aaa21904bcc61"
+    }
+  ]
+}

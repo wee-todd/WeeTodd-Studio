@@ -71,10 +71,10 @@ def scene_members(request):
         if clip.get("extensionDirection") or clip.get("extensionSource"):
             raise ValueError("Clear video extension before preparing a continuous scene.")
         for attachment in clip.get("attachments", []):
-            if attachment.get("role") not in {"first", "last", "keyframe", "lora"}:
+            if attachment.get("role") not in {"first", "last", "keyframe", "lora", "audioDriver"}:
                 raise ValueError(
                     "Continuous scenes support endpoint/keyframe images and ordinary "
-                    "LoRAs only; MSR, audio drivers and controls are not qualified."
+                    "LoRAs and a shared audio driver; MSR and controls are not qualified."
                 )
     return members
 
@@ -191,11 +191,14 @@ def validate_scene_recipe(recipe):
     config.validate_chain_support()
     contract = recipe.get("conditioning", {})
     if (
-        contract.get("task") not in {"t2v", "fflf"}
+        contract.get("task") not in {"t2v", "fflf", "a2v"}
         or contract.get("extension")
-        or contract.get("audio_policy", "generated") != "generated"
+        or contract.get("audio_policy", "source" if contract.get("task") == "a2v" else "generated")
+        != ("source" if contract.get("task") == "a2v" else "generated")
     ):
-        raise ValueError("Continuous scenes support generated audio and image keyframes only.")
+        raise ValueError(
+            "Continuous scenes require generated audio or one continuous source audio driver."
+        )
     plan = plan_ltx25_scene(
         [s["duration_seconds"] for s in segments],
         overlap_frames=scene["overlap_frames"],
@@ -203,8 +206,23 @@ def validate_scene_recipe(recipe):
     )
     if abs(config.duration_seconds - (plan.total_frames - 1) / plan.frame_rate) > 1e-8:
         raise ValueError("Scene config duration must match the resolved scene timeline.")
+    drivers = [item for item in contract.get("inputs", []) if item.get("role") == "audio_driver"]
+    if contract.get("task") == "a2v":
+        if len(drivers) != 1 or drivers[0].get("kind") != "audio":
+            raise ValueError("An audio-driven scene requires one continuous source interval.")
+        driver = drivers[0]
+        start, duration = driver.get("source_start_seconds"), driver.get("source_duration_seconds")
+        if (isinstance(start, bool) or not isinstance(start, (int, float))
+                or not math.isfinite(start) or start < 0):
+            raise ValueError("Audio scenes require an explicit nonnegative source start.")
+        if abs(_duration(duration) - config.duration_seconds) > 1e-6:
+            raise ValueError("Scene source audio duration must match the delivered timeline.")
+    elif drivers:
+        raise ValueError("An audio scene requires the a2v task.")
     anchors = {}
     for item in contract.get("inputs", []):
+        if item.get("role") == "audio_driver":
+            continue
         if item.get("kind") != "image" or item.get("role") != "keyframe":
             raise ValueError("Continuous scenes support endpoint/keyframe images only.")
         frame = item.get("frame_index")
@@ -285,11 +303,37 @@ def compose_scene_recipe(request, compose_clip):
             "boundaryImagePolicy", "balanced"
         ),
     }
+    audio_drivers = [[item for item in per_clip["conditioning"]["inputs"]
+                      if item.get("role") == "audio_driver"] for per_clip in recipes]
+    shared_audio = None
+    if any(audio_drivers):
+        if any(len(items) != 1 for items in audio_drivers):
+            raise ValueError("Every scene member must have one compatible shared audio driver.")
+        shared_audio = copy.deepcopy(audio_drivers[0][0])
+        origin = shared_audio.get("source_start_seconds")
+        if origin is None:
+            raise ValueError("Audio scenes require explicit contiguous source audio intervals.")
+        for items, start, length in zip(audio_drivers, plan.segment_start_frames,
+                                        plan.segment_frame_counts, strict=True):
+            item = items[0]
+            if Path(item["path"]).resolve() != Path(shared_audio["path"]).resolve():
+                raise ValueError("Audio scenes require the same source file for every member.")
+            if (item.get("source_start_seconds") is None
+                    or abs(item["source_start_seconds"] - origin - start / fps) > 1e-6):
+                raise ValueError(
+                    "Audio scene source intervals must be contiguous on the resolved timeline."
+                )
+            if (item.get("source_duration_seconds") is None
+                    or abs(item["source_duration_seconds"] - length / fps) > 1e-6):
+                raise ValueError("Audio scene durations must match the resolved eight-frame grid.")
+        shared_audio.update(id="scene-audio", source_duration_seconds=(plan.total_frames - 1) / fps)
     inputs = {}
     for member, per_clip, start, length in zip(
         members, recipes, plan.segment_start_frames, plan.segment_frame_counts, strict=True
     ):
         for original in per_clip["conditioning"]["inputs"]:
+            if original.get("role") == "audio_driver":
+                continue
             item = copy.deepcopy(original)
             local = item["frame_index"]
             # A last endpoint is the last visible delivered frame, never the extra VAE frame.
@@ -313,8 +357,10 @@ def compose_scene_recipe(request, compose_clip):
     recipe["config"]["duration_seconds"] = (plan.total_frames - 1) / fps
     recipe["conditioning"] = {
         "version": 1,
-        "task": "fflf" if inputs else "t2v",
-        "inputs": [inputs[key] for key in sorted(inputs)],
+        "task": "a2v" if shared_audio else "fflf" if inputs else "t2v",
+        "inputs": ([inputs[key] for key in sorted(inputs)]
+                   + ([shared_audio] if shared_audio else [])),
+        "audio_policy": "source" if shared_audio else "generated",
     }
     recipe["prompt"] = "\n\n".join(
         [f"Shot {i}: {s['prompt']}" for i, s in enumerate(scene["segments"], 1)]

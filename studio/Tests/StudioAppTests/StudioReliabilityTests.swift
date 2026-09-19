@@ -34,6 +34,46 @@ import XCTest
 }
 
 final class StudioReliabilityTests: XCTestCase {
+  @MainActor func testPreparedReferenceAttachesAtomicallyAndUndoRestoresShot() async throws {
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false,
+      invocation: { command, _, _, _ in
+        XCTAssertEqual(command, "prepare-reference")
+        return ["path": "/tmp/reference-sheet.png", "kind": "image", "width": 1152, "height": 480]
+      })
+    store.addClip()
+    store.editClip { $0.engine = .ltx25 }
+    let source = MediaAsset(name: "Story", kind: .video, path: "/tmp/story.mov")
+    store.change { $0.assets.append(source) }
+    let before = store.project
+    let action = try XCTUnwrap(store.selectedClip?.referenceActions(for: source).first)
+    await store.useReference(source, action: action)
+    XCTAssertNil(store.error)
+    XCTAssertEqual(store.selectedClip?.inferredTask, "control")
+    XCTAssertEqual(store.selectedClip?.attachments.first?.controlType, "ingredients_reference_sheet")
+    XCTAssertEqual(store.project.assets.count, before.assets.count + 1)
+    store.undo()
+    XCTAssertEqual(store.project, before)
+  }
+
+  @MainActor func testLateReferencePreparationDoesNotAttachAfterModelChange() async throws {
+    let fake = SuspendedBridge("prepare-reference")
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.addClip(); store.editClip { $0.engine = .ltx25 }
+    let source = MediaAsset(name: "Story", kind: .video, path: "/tmp/story.mov")
+    store.change { $0.assets.append(source) }
+    let action = try XCTUnwrap(store.selectedClip?.referenceActions(for: source).first)
+    let entered = expectation(description: "reference preparation suspended")
+    fake.entered = { entered.fulfill() }
+    let task = Task { await store.useReference(source, action: action) }
+    await fulfillment(of: [entered], timeout: 2)
+    store.editClip { $0.engine = .h3 }
+    fake.continuation?.resume(returning: ["path": "/tmp/reference-sheet.png", "kind": "image"])
+    await task.value
+    XCTAssertTrue(store.selectedClip?.attachments.isEmpty == true)
+    XCTAssertEqual(store.project.assets.last?.scope, .project)
+    XCTAssertEqual(store.project.assets.last?.path, "/tmp/reference-sheet.png")
+  }
+
   func temporaryDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -133,9 +173,9 @@ final class StudioReliabilityTests: XCTestCase {
     store.seekToEnd()
     XCTAssertEqual(store.effectivePreviewDuration, 10)
     XCTAssertEqual(store.playhead, 10)
-    store.previewMode = "Clip"
+    store.previewMode = "Timeline"
     store.seekToEnd()
-    XCTAssertEqual(store.playhead, 3)
+    XCTAssertEqual(store.playhead, 10)
   }
 
   @MainActor func testMoviePreviewAcceptsUnchangedMultiShotProject() async throws {

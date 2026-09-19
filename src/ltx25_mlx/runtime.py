@@ -1355,6 +1355,7 @@ class LTX25RuntimeCache:
         overlap_frames: int,
         window_frame_counts=None,
         images=None,
+        audio_reference=None,
         seeds=None,
         checkpoint_dir: str | Path | None = None,
         boundary_image_policy: str = "strict",
@@ -1371,6 +1372,10 @@ class LTX25RuntimeCache:
         )
 
         config.validate_chain_support()
+        if audio_reference is not None:
+            from .audio_driven import source_audio_identity
+
+            source_audio_identity(audio_reference)
         if spec.ic_loras or spec.msr_lora_path:
             raise ValueError("LTX 2.5 chained scenes do not support IC-LoRA or MSR adapters.")
         report = spec.validate(
@@ -1515,6 +1520,7 @@ class LTX25RuntimeCache:
                     stage2_sampler=config.stage2_sampler,
                     window_frame_counts=window_frame_counts,
                     images=images,
+                    audio_reference=audio_reference,
                     boundary_image_policy=boundary_image_policy,
                     seeds=seeds,
                     checkpoint_dir=checkpoint_dir,

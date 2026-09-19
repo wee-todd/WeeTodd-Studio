@@ -34,8 +34,19 @@ class DownloadFile:
     provider: str = "huggingface"
 
     def __post_init__(self):
-        if self.provider not in {"huggingface", "github", "drawthings-static"}:
+        if self.provider not in {"huggingface", "github", "drawthings-static", "cpjku", "zenodo"}:
             raise ValueError("Unsupported download provider")
+        if self.provider == "zenodo" and (
+            self.repo != "sigsep/open-unmix-pytorch"
+            or self.filename != "vocals-b62c91ce.pth"
+            or self.revision != "fb672c9584997c2b05e148eeaa65b4c23ed4693b"
+        ):
+            raise ValueError("Unsupported vocal separation catalog file")
+        if self.provider == "cpjku" and (
+            self.repo != "CPJKU/beat_this" or self.filename != "small0.ckpt"
+            or self.revision != "b95c8ab0c58c2d9fcfd40508ae8dffbc05ac4f5c"
+        ):
+            raise ValueError("Unsupported Beat This catalog file")
         if self.provider == "drawthings-static" and (
             self.repo != "drawthingsai/draw-things-community"
             or self.filename != "qwen_3.5_4b_i8x.ckpt"
@@ -53,6 +64,10 @@ class DownloadFile:
 
     @property
     def url(self):
+        if self.provider == "zenodo":
+            return "https://zenodo.org/records/3370489/files/vocals-b62c91ce.pth"
+        if self.provider == "cpjku":
+            return "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/small0.ckpt"
         if self.provider == "drawthings-static":
             return "https://static.libnnc.org/" + self.filename
         if self.provider == "github":

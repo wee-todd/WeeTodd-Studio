@@ -127,12 +127,25 @@ def inspect_media(recipe, contract):
             duration = float(
                 stream.get("duration") or metadata.get("format", {}).get("duration") or 0
             )
+            source_duration = duration
+            if not math.isfinite(source_duration) or source_duration <= 0:
+                raise ValueError(f"{item['id']}: source media duration must be finite and positive")
+            if "source_start_seconds" in item:
+                start = item["source_start_seconds"]
+                duration = item["source_duration_seconds"]
+                if start + duration > source_duration + 1e-6:
+                    raise ValueError(
+                        f"{item['id']}: source audio interval exceeds the source duration"
+                    )
             maximum = 15 if recipe["engine"] == "h3" else 30
             if not math.isfinite(duration) or not 0 < duration <= maximum + 0.05:
                 raise ValueError(
                     f"{item['id']}: input duration must be positive and at most {maximum}s"
                 )
             report = {"duration_seconds": duration}
+            if "source_start_seconds" in item:
+                report.update(source_start_seconds=item["source_start_seconds"],
+                              source_duration_seconds=source_duration)
             if item["kind"] == "video":
                 if any(
                     float(side.get("rotation", 0)) != 0 for side in stream.get("side_data_list", [])
@@ -274,13 +287,15 @@ def read_media(recipe, item, report):
     command = [media_binary(recipe, "ffmpeg"), "-v", "error", "-nostdin", "-i", item["path"]]
     if item["kind"] == "audio":
         rate = 32000 if recipe["engine"] == "h3" else report["sample_rate"]
+        if "source_start_seconds" in item:
+            command += ["-ss", str(item["source_start_seconds"])]
         command += [
             "-map",
             "0:a:0",
             "-t",
             str(report["duration_seconds"]),
             "-ac",
-            "2",
+            str(report.get("channels", 2)) if "source_start_seconds" in item else "2",
             "-ar",
             str(rate),
             "-f",
@@ -288,9 +303,12 @@ def read_media(recipe, item, report):
             "pipe:1",
         ]
         raw = subprocess.run(command, check=True, capture_output=True, timeout=60).stdout
-        waveform = np.frombuffer(raw, dtype="<f4").reshape(-1, 2).T.copy()[None]
+        channels = report.get("channels", 2) if "source_start_seconds" in item else 2
+        waveform = np.frombuffer(raw, dtype="<f4").reshape(-1, channels).T.copy()[None]
         if not waveform.size or not np.isfinite(waveform).all():
             raise ValueError(f"{item['id']}: decoded audio is empty or non-finite")
+        if recipe["engine"] == "h3" and waveform.shape[1] == 1:
+            waveform = np.repeat(waveform, 2, axis=1)
         return {"waveform": waveform, "sample_rate": rate}
     maximum_frames = math.ceil(report["duration_seconds"] * report["fps"]) + 1
     command += [
@@ -365,6 +383,8 @@ def ltx_conditioning_kwargs(recipe, contract, reports):
         elif item["role"] == "audio_driver":
             if recipe["engine"] == "ltx23":
                 kwargs["audio_path"] = item["path"]
+                if "source_start_seconds" in item:
+                    kwargs["audio_interval_input"] = {"item": item, "report": report}
             else:
                 kwargs["audio_reference"] = read_media(recipe, item, report)
         elif item["role"] == "reference" and contract["task"] == "extension":
@@ -474,3 +494,18 @@ def materialize_ingredients_video(item, config, directory, *, ffmpeg=None):
     # Preserve semantic kind=image for the task validator; path is now the
     # private static-video transport consumed by ICLoraPipeline.
     return {**item, "path": str(target)}
+
+
+def materialize_audio_interval(recipe, item, report, directory):
+    """Prepare bounded stereo PCM for a path-only native A2V runtime."""
+    destination = Path(directory) / "source-interval.wav"
+    command = [media_binary(recipe, "ffmpeg"), "-v", "error", "-nostdin",
+               "-i", item["path"], "-ss", str(item["source_start_seconds"]),
+               "-t", str(item["source_duration_seconds"]), "-map", "0:a:0"]
+    if report["channels"] == 1:
+        command += ["-af", "pan=stereo|c0=c0|c1=c0"]
+    command += ["-c:a", "pcm_f32le", "-n", str(destination)]
+    subprocess.run(command, check=True, capture_output=True, timeout=60)
+    if not destination.is_file() or not destination.stat().st_size:
+        raise ValueError("Source audio interval preparation produced no waveform")
+    return str(destination)

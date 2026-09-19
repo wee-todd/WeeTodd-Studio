@@ -18,6 +18,8 @@ dependencies = [
   "opencv-python-headless>=4.10",
   "pillow>=11",
   "safetensors>=0.4",
+  "scipy>=1.11",
+  "tiktoken>=0.12,<0.13",
   "transformers>=4.57",
 ]
 
@@ -40,6 +42,7 @@ packages = [
   "src/minimax_h3_mlx",
   "src/ltx23_mlx",
   "src/ltx25_mlx",
+  "src/yue2_mlx",
   "src/mlx_preprocessors",
   "src/wee_todd_mlx",
   "src/wee_todd_remote",

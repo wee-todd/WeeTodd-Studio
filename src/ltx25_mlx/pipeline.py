@@ -771,6 +771,7 @@ class LTX25DistilledPipeline:
         video_references=None,
         msr_references=None,
         audio_reference=None,
+        _preencoded_audio_tokens=None,
         stage1_steps: int = 8,
         stage2_steps: int = 3,
         ic_lora_single_stage: bool = False,
@@ -840,8 +841,8 @@ class LTX25DistilledPipeline:
             raise ValueError(
                 "LTX 2.5 temporal DFR is not yet available for chained timelines."
             )
-        if audio_reference is not None and continuation is not None:
-            raise ValueError("Audio-driven conditioning is not yet available in chained mode.")
+        if audio_reference is not None and _preencoded_audio_tokens is not None:
+            raise ValueError("Supply source audio or prepared source tokens, not both.")
         from ltx_core_mlx.components.patchifiers import (
             compute_video_latent_shape,
             snap_output_dimensions,
@@ -951,7 +952,10 @@ class LTX25DistilledPipeline:
         )
         audio_positions = compute_audio_positions(audio_tokens)
 
-        audio_reference_tokens = None
+        audio_reference_tokens = _preencoded_audio_tokens
+        if (audio_reference_tokens is not None
+                and tuple(audio_reference_tokens.shape) != audio_shape):
+            raise ValueError("Prepared source audio tokens must match this window.")
         if audio_reference is not None:
             from .audio_driven import prepare_audio_driven_conditioning
 
@@ -1155,7 +1159,8 @@ class LTX25DistilledPipeline:
                 legacy_scalar_blend=continuation is None,
             )
         mx.eval(video_state.latent, video_state.clean_latent, audio_state.latent)
-        model = self._sampling_model()
+        model = (self._sampling_model(frozen_audio=True)
+                 if audio_reference_tokens is not None else self._sampling_model())
         if ic_lora_single_stage and self.sol_attention_profile != "disabled":
             from .sol_attention import set_ltx25_sol_context
 
@@ -1234,6 +1239,7 @@ class LTX25DistilledPipeline:
                         audio_state,
                         video_embeds,
                         audio_embeds,
+                        freeze_audio=audio_reference_tokens is not None,
                         **sampler_kwargs,
                     )
                 timings["stage1_sampler"] = stage1_sampler
@@ -1557,13 +1563,15 @@ class LTX25DistilledPipeline:
                 ),
                 include_ic_loras=False,
             )
-            model = self._sampling_model()
+            model = (self._sampling_model(frozen_audio=True)
+                 if audio_reference_tokens is not None else self._sampling_model())
             timings["ic_lora_stage_scope"] = "stage_1_only"
         elif pipeline_mode != "distilled":
             self._load_transformer(
                 extra_loras=((str(self.distilled_lora_path), 1.0),)
             )
-            model = self._sampling_model()
+            model = (self._sampling_model(frozen_audio=True)
+                 if audio_reference_tokens is not None else self._sampling_model())
         if dfr_detailing_lora is not None:
             if self.dfr_stage2_transformer_path is not None:
                 self._load_transformer(
@@ -1571,7 +1579,8 @@ class LTX25DistilledPipeline:
                 )
             else:
                 self.load(extra_loras=(dfr_detailing_lora,))
-            model = self._sampling_model()
+            model = (self._sampling_model(frozen_audio=True)
+                 if audio_reference_tokens is not None else self._sampling_model())
         if dfr_enabled:
             set_generated_keyframe_marker(self.dit, stage2_generated_slot_rows)
         set_mpp_feed_forward_enabled(self.dit, self.feed_forward_stage_scope in {"all", "stage2"})
@@ -1585,6 +1594,7 @@ class LTX25DistilledPipeline:
                 audio_embeds,
                 sigmas=list(LTX25_STAGE2_SIGMAS),
                 noise_seed=seed + 2,
+                freeze_audio=audio_reference_tokens is not None,
                 # The three-evaluation refinement stage is deterministic in the official
                 # pipeline. Fresh ancestral noise cannot be removed reliably this late.
                 eta=0.0,
@@ -1725,6 +1735,7 @@ class LTX25DistilledPipeline:
         stage2_sampler: str = "euler",
         window_frame_counts=None,
         images=None,
+        audio_reference=None,
         seeds=None,
         checkpoint_dir=None,
         checkpoint_identity: str | None = None,
@@ -1802,9 +1813,14 @@ class LTX25DistilledPipeline:
         stage1_h, stage1_w = (
             (full_h, full_w) if ic_lora_single_stage else (full_h // 2, full_w // 2)
         )
+        from .audio_driven import source_audio_identity
+
+        audio_identity = (source_audio_identity(audio_reference)
+                          if audio_reference is not None else None)
         prefix = prefix_identity(
             checkpoint_identity or "uncached",
             {
+                "source_audio": audio_identity,
                 "height": height,
                 "width": width,
                 "frame_rate": frame_rate,
@@ -1904,6 +1920,32 @@ class LTX25DistilledPipeline:
                 ):
                     raise ValueError("LTX 2.5 scene image changed during conditioning preparation.")
             image_encode_seconds = time.perf_counter() - image_encode_started
+            source_audio = None
+            source_audio_windows = [None] * window_count
+            audio_report = None
+            if audio_reference is not None:
+                from .audio_driven import (
+                    prepare_audio_driven_conditioning,
+                    prepare_publication_audio,
+                    scene_audio_token_windows,
+                )
+                if resumed_count < window_count:
+                    try:
+                        source_tokens, waveform, audio_report = prepare_audio_driven_conditioning(
+                            audio=audio_reference, audio_conditioner=self.audio_conditioner,
+                            audio_patchifier=self.audio_patchifier,
+                            target_tokens=plan.expected_audio_tokens,
+                            duration_seconds=plan.total_frames / frame_rate,
+                        )
+                        source_audio_windows = scene_audio_token_windows(source_tokens, plan)
+                        del source_tokens
+                    finally:
+                        if self.low_memory:
+                            self.audio_conditioner.free()
+                else:
+                    waveform, audio_report = prepare_publication_audio(
+                        audio=audio_reference, duration_seconds=plan.total_frames / frame_rate)
+                source_audio = (waveform, audio_report.source_sample_rate)
             video_windows, audio_windows, window_timings = [], [], []
             continuation = None
             forwards_per_window = stage1_steps + stage2_steps
@@ -1960,6 +2002,7 @@ class LTX25DistilledPipeline:
                         stage1_s_noise=stage1_s_noise,
                         stage2_sampler=stage2_sampler,
                         continuation=continuation,
+                        _preencoded_audio_tokens=source_audio_windows[index],
                         continuation_strength=LTX25_CHAIN_CONTINUATION_STRENGTH,
                         output_video_context_frames=plan.video_overlap_latent_frames,
                         output_audio_context_tokens=next_audio,
@@ -2025,6 +2068,7 @@ class LTX25DistilledPipeline:
                 frame_rate=frame_rate,
                 low_memory=self.low_memory,
                 check_interrupted=check_interrupted,
+                source_audio=source_audio,
             )
             if check_interrupted is not None:
                 check_interrupted()
@@ -2046,7 +2090,9 @@ class LTX25DistilledPipeline:
                 "publication_mode": "single_decode_native_latent_chain",
                 "publication": publication,
                 "video_join_mode": "causal_drop_plus_linear_latent_overlap",
-                "audio_join_mode": "joint_latent_trim_then_single_decode",
+                "audio_join_mode": ("single_source_frozen_global_tokens" if source_audio is not None
+                                    else "joint_latent_trim_then_single_decode"),
+                "audio_driven_conditioning": audio_report.as_dict() if audio_report else None,
             }
             return output_path
         finally:

@@ -18,8 +18,7 @@ struct TimelineFrameSlot: View {
 
   var body: some View {
     Button {
-      store.select(clip.id)
-      store.seek(role == .first ? 0 : max(0, clip.duration - 1 / max(1, clip.settings(in: store.project).fps)))
+      store.selectTimelineEndpoint(clip.id, role: role)
       if supported && attachment == nil { store.chooseEndpoint(for: clip.id, role: role) }
     } label: {
       ZStack(alignment: .bottomLeading) {
@@ -77,5 +76,16 @@ struct TimelineFrameSlot: View {
           ] as CFDictionary) else { return }
         thumbnail = NSImage(cgImage: image, size: .zero)
       }
+  }
+}
+
+@MainActor extension StudioStore {
+  func selectTimelineEndpoint(_ clipID: UUID, role: MediaRole) {
+    guard let index = project.clips.firstIndex(where: { $0.id == clipID }) else { return }
+    let clip = project.clips[index]
+    let start = project.start(of: index)
+    let offset = role == .first ? 0 : max(0, clip.duration - 1 / max(1, clip.settings(in: project).fps))
+    select(clipID)
+    seek(start + offset)
   }
 }

@@ -105,6 +105,25 @@ def setup_catalog() -> list[dict]:
             ],
         )
     )
+    for suffix, task, label, family, mode in (
+        ("ingredients", "ref2va", "Ingredients reference sheet",
+         "ingredients_reference_sheet", "two_stage"),
+        ("control", "control", "Union IC-LoRA motion guide", "union_control", "distilled"),
+    ):
+        result.append(dict(
+            id=f"ltx23-{suffix}", name=f"LTX 2.3 · {label}", engine="ltx23", task=task,
+            pipeline_mode=mode, ic_family=family,
+            description="Uses a dedicated IC-LoRA, outside style LoRA groups. Resident loading. "
+            + ("Choose the Dev bundle and distilled helper LoRA. Use one reference sheet, "
+               "768×448 and at least 5 seconds at 24 fps." if suffix == "ingredients" else
+               "Use a distilled bundle and Canny/depth/pose guide. Dimensions: multiples of 128."),
+            components=[dict(key=k, label=("LTX 2.3 MLX Dev bundle with refinement LoRA"
+                        if suffix == "ingredients" and k == "model_dir" else n),
+                        kind=t, accepts=[t])
+                        for k, n, t in groups["ltx23"]]
+            + [dict(key=f"{suffix}_lora_path", label=f"LTX 2.3 {label} adapter",
+                    kind="file", accepts=["file"])],
+        ))
     for suffix, task, label, key, guidance in (
         (
             "control",
@@ -337,6 +356,10 @@ def _validate_candidate(preset, key, path):
         task = {"t2v": "t2va", "fflf": "fl2va", "ref2va": "ref2va"}[preset["task"]]
         _h3_candidate(key, path, task)
     elif preset["engine"] == "ltx23":
+        if key in {"ingredients_lora_path", "control_lora_path"}:
+            from ltx23_mlx.ic_lora import LTX23ICLoRASpec
+
+            return LTX23ICLoRASpec(str(path), preset["ic_family"]).inspect()
         _ltx23_candidate(
             key,
             path,
@@ -547,6 +570,11 @@ def _ltx_recipe_config(engine, components, memory_mode, task, pipeline_mode=None
         from ltx23_mlx.runtime import LTX23GenerationConfig, LTX23ModelSpec
 
         single = pipeline_mode == "distilled_single_stage"
+        ic = components.get("ic_loras", [])
+        if ic and memory_mode == "lower_memory":
+            raise ValueError(
+                "LTX 2.3 IC-LoRA requires resident loading. Choose Custom memory or use LTX 2.5."
+            )
         config = LTX23GenerationConfig(
             pipeline_mode=pipeline_mode or ("two_stage" if task == "fflf" else "distilled"),
             stage2_steps=0 if single else 3,
@@ -555,10 +583,18 @@ def _ltx_recipe_config(engine, components, memory_mode, task, pipeline_mode=None
             stage1_steps=30 if task == "fflf" else 8,
             low_memory=True,
             low_ram_streaming=single or memory_mode == "lower_memory",
+            width=768 if task == "ref2va" or ic else 704,
+            height=448 if task == "ref2va" or not ic else 512,
         )
         config.validate()
-        spec = LTX23ModelSpec(**components)
+        from ltx23_mlx.ic_lora import LTX23ICLoRASpec, validate_ic_stack
+
+        spec = LTX23ModelSpec(
+            **{**components, "ic_loras": tuple(LTX23ICLoRASpec(**item) for item in ic)}
+        )
         spec.validate(config.pipeline_mode)
+        if ic:
+            validate_ic_stack(spec, config)
         report = spec.inventory(config.pipeline_mode)
     else:
         from ltx25_mlx.runtime import LTX25ComponentSpec, LTX25GenerationConfig
@@ -662,6 +698,12 @@ def _recipe(preset, components, memory_mode, memory_gb):
     warnings = [
         "Setup validates components without loading weights; a render has not been qualified."
     ]
+    if engine == "ltx23" and preset.get("ic_family"):
+        components = dict(components)
+        key = "ingredients_lora_path" if preset["task"] == "ref2va" else "control_lora_path"
+        components["ic_loras"] = [
+            dict(path=components.pop(key), family=preset["ic_family"], strength=1.0)
+        ]
     if engine == "ltx25":
         warnings.append(LTX25_DISTILLED_NOTICE)
         components = dict(components)

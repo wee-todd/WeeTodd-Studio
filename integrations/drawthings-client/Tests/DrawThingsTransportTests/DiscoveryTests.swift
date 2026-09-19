@@ -16,9 +16,12 @@ private final class EchoFixture: ImageGenerationServiceProvider {
       $0.files = ["fixture-model.ckpt", "flux_2_klein_4b_q8p.ckpt"]
       if includeH3 {
         $0.files.append("fixture-h3.ckpt")
+        $0.files.append("fixture-h3-reference.ckpt")
         $0.override.models = Data("""
         [{"name":"Fixture H3","file":"fixture-h3.ckpt","prefix":"",
-          "version":"minimax_h3","modifier":"fl2va","upcast_attention":false,"default_scale":8}]
+          "version":"minimax_h3","modifier":"fl2va","upcast_attention":false,"default_scale":8},
+         {"name":"Fixture H3 Ref2VA","file":"fixture-h3-reference.ckpt","prefix":"",
+          "version":"minimax_h3","modifier":"ref2va","upcast_attention":false,"default_scale":8}]
         """.utf8)
       }
       $0.serverIdentifier = 123
@@ -84,6 +87,16 @@ final class DiscoveryTests: XCTestCase {
     let wireEstimate = try XCTUnwrap(JSONSerialization.jsonObject(with: wireData) as? [String: Any])
     let wireConfig = try XCTUnwrap(wireEstimate["configuration"] as? [String: Any])
     XCTAssertEqual(wireConfig["audioShift"] as? Double, 3.1)
+    XCTAssertTrue(models.contains { $0["id"] == "fixture-h3-reference.ckpt" && $0["modifier"] == "ref2va" })
+    var referenceRequest = request
+    referenceRequest["modelID"] = "fixture-h3-reference.ckpt"
+    XCTAssertThrowsError(try Configuration.resolve(referenceRequest), "Reference model requires an image")
+    let reference: [String: Any] = ["role": "reference", "path": "/fixture.png",
+      "sha256": String(repeating: "a", count: 64), "strength": 1]
+    referenceRequest["inputs"] = [reference, reference, reference]
+    XCTAssertNoThrow(try ComputeEstimate.evaluate(referenceRequest))
+    referenceRequest["modelID"] = "fixture-h3.ckpt"
+    XCTAssertThrowsError(try Configuration.resolve(referenceRequest), "FL2VA cannot reinterpret references as endpoints")
   }
   func testSeparateHoursEndpointSuppliesMissingEchoLimits() throws {
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)

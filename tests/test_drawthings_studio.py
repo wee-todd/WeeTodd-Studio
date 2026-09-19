@@ -75,6 +75,24 @@ def test_h3_first_last_uses_actual_rounded_endpoint_and_preserves_images(tmp_pat
     validate_canonical_inputs(result)
 
 
+def test_h3_reference_task_reaches_canonical_transport_and_keeps_timing(tmp_path):
+    value = project()
+    clip = value["clips"][0]
+    clip["drawThings"].update(modelID="h3-ref", modelFamily="minimaxH3", modelModifier="ref2va")
+    clip["generationSelection"] = {"task": "ref2va", "preset": "custom"}
+    image = tmp_path / "reference.png"
+    image.write_bytes(b"reference")
+    clip["attachments"] = [{"role": "reference", "assetID": "ref"}]
+    assets = [{"id": "ref", "kind": "image", "path": str(image)}]
+    request = compose_drawthings_request(value, "clip-uuid", assets)
+    assert request["inputs"][0]["role"] == "reference"
+    assert request["configuration"]["numFrames"] == 124
+    assert request["billingPolicy"] == "freeOnly"
+    clip["attachments"] = []
+    with pytest.raises(ValueError, match="1–9 image"):
+        compose_drawthings_request(value, "clip-uuid", assets)
+
+
 def test_h3_rejects_ltx_timing_and_ltx_rejects_last_frame(tmp_path):
     value = project()
     clip = value["clips"][0]

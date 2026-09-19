@@ -10,18 +10,23 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from .io import check_json, load_document
+from .io import check_json, load_checkpoint
 from .structured import finish_scoped_repair, item_key, validate_outline, validate_plan
 
 
 def review_snapshot(step):
     """Exact reviewed content and approval state, without duplicating call transcripts."""
-    return copy.deepcopy({
-        "outputs": step.get("outputs", {}), "approved": step.get("approved", False),
-        "status": step.get("status"),
-        "items": {key: {"approved": item.get("approved", False), "status": item.get("status")}
-                  for key, item in step.get("items", {}).items()},
-    })
+    return copy.deepcopy(
+        {
+            "outputs": step.get("outputs", {}),
+            "approved": step.get("approved", False),
+            "status": step.get("status"),
+            "items": {
+                key: {"approved": item.get("approved", False), "status": item.get("status")}
+                for key, item in step.get("items", {}).items()
+            },
+        }
+    )
 
 
 def model_turn_ids(value):
@@ -29,9 +34,15 @@ def model_turn_ids(value):
     if isinstance(value, list):
         return sorted({identifier for child in value for identifier in model_turn_ids(child)})
     if isinstance(value, dict):
-        return sorted({identifier for key, child in value.items()
-                       for identifier in ([child] if key == "turnID" and isinstance(child, str)
-                                          else model_turn_ids(child))})
+        return sorted(
+            {
+                identifier
+                for key, child in value.items()
+                for identifier in (
+                    [child] if key == "turnID" and isinstance(child, str) else model_turn_ids(child)
+                )
+            }
+        )
     return []
 
 
@@ -42,7 +53,8 @@ def scoped_review_snapshots(before, after, item_id):
     Older whole-step journal entries remain readable; only new entries use this scope.
     """
     selected = {
-        key for key in before["items"].keys() | after["items"].keys()
+        key
+        for key in before["items"].keys() | after["items"].keys()
         if before["items"].get(key) != after["items"].get(key)
     }
     if item_id:
@@ -59,7 +71,8 @@ def scoped_review_snapshots(before, after, item_id):
             old_by_id = {row["id"]: row for row in rows_before}
             new_by_id = {row["id"]: row for row in rows_after}
             changed = selected | {
-                key for key in old_by_id.keys() | new_by_id.keys()
+                key
+                for key in old_by_id.keys() | new_by_id.keys()
                 if old_by_id.get(key) != new_by_id.get(key)
             }
             selected.update(changed)
@@ -80,22 +93,32 @@ def scoped_review_snapshots(before, after, item_id):
                 left[port] = old
             if port in after["outputs"]:
                 right[port] = new
-    return tuple({
-        **snapshot, "outputs": outputs,
-        "items": {key: value for key, value in snapshot["items"].items() if key in selected},
-    } for snapshot, outputs in ((before, left), (after, right)))
+    return tuple(
+        {
+            **snapshot,
+            "outputs": outputs,
+            "items": {key: value for key, value in snapshot["items"].items() if key in selected},
+        }
+        for snapshot, outputs in ((before, left), (after, right))
+    )
 
 
 def validate_references(runner, references):
-    if (not isinstance(references, list) or len(references) > 8
-            or any(not isinstance(key, str) for key in references)
-            or len(set(references)) != len(references)):
+    if (
+        not isinstance(references, list)
+        or len(references) > 8
+        or any(not isinstance(key, str) for key in references)
+        or len(set(references)) != len(references)
+    ):
         raise ValueError("Choose up to eight distinct reference images")
     bindings = getattr(runner.backend, "assets", {})
     for key in references:
         source = Path(bindings.get(key, ""))
-        if (not source.is_absolute() or not source.is_file()
-                or not 0 < source.stat().st_size <= 64 * 1024 * 1024):
+        if (
+            not source.is_absolute()
+            or not source.is_file()
+            or not 0 < source.stat().st_size <= 64 * 1024 * 1024
+        ):
             raise ValueError("Relink a readable reference image of at most 64 MiB")
 
 
@@ -147,7 +170,7 @@ def apply_review(runner, values, mutation):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ValueError("This workflow run is already active") from error
-        runner.state = load_document(destination)
+        runner.state = load_checkpoint(destination, limits=runner.limits)
         state = runner.state
         if (
             not mutation.get("expectedRevision")
@@ -190,12 +213,24 @@ def apply_review(runner, values, mutation):
         before = review_snapshot(step)
         parent_revision = state["revision"]
         if action == "approve":
-            if runner.specs[sid]["operation"] == "movie.prepare_creative_brief@1":
+            if runner.specs[sid]["operation"] in {
+                "movie.prepare_creative_brief@1",
+                "music.prepare_brief@1",
+            }:
                 from .creative import require_answers
 
                 require_answers(step["outputs"]["creative_brief"])
+                if runner.specs[sid]["operation"] == "music.prepare_brief@1":
+                    from .music import require_music_answers
+
+                    require_music_answers(
+                        step["outputs"]["creative_brief"], values["lyrics"], values["lyrics_status"]
+                    )
             if subject_review:
-                if runner.definition["id"] == "weetodd.guided-movie-planning":
+                if runner.definition["id"] in {
+                    "weetodd.guided-movie-planning",
+                    "weetodd.music-video-planning",
+                }:
                     from .creative import validate_classified_relations
 
                     validate_classified_relations(step["outputs"]["subjects"])
@@ -219,6 +254,7 @@ def apply_review(runner, values, mutation):
                 if runner.specs[sid]["operation"] in {
                     "movie.plan_beats@1",
                     "movie.plan_creative_beats@1",
+                    "music.plan_beats@1",
                 }:
                     validate_plan(step["outputs"]["clips"])
                     if any(i.get("status") != "completed" for i in step["items"].values()):
@@ -232,7 +268,8 @@ def apply_review(runner, values, mutation):
                 value["approved"] = False
         elif action == "apply_library_definition":
             if (
-                runner.definition["id"] != "weetodd.guided-movie-planning"
+                runner.definition["id"]
+                not in {"weetodd.guided-movie-planning", "weetodd.music-video-planning"}
                 or not subject_review
                 or item is None
                 or step.get("status") != "completed"
@@ -265,9 +302,6 @@ def apply_review(runner, values, mutation):
             if errors:
                 raise ValueError(errors[0]["message"])
             spec = runner.specs[sid]
-            runner.backend.fingerprint(
-                {"id": spec["model"], **runner.definition["models"][spec["model"]]}, []
-            )
             resolved = {
                 port: runner._resolve(binding, values) for port, binding in spec["inputs"].items()
             }
@@ -312,6 +346,9 @@ def apply_review(runner, values, mutation):
                 runner._validate_outputs(spec, outputs)
                 step["outputs"] = outputs
                 step["coverageReviewReport"] = {"version": 1, "proposals": proposals}
+                if proposals:
+                    # A certificate covers only the artifact actually applied to this step.
+                    record.pop("coverageCertificate", None)
                 if changed:
                     runner.invalidate(sid)
             finally:
@@ -393,7 +430,8 @@ def apply_review(runner, values, mutation):
                             .get("preferences", {})
                             .get("designPolicy", "")
                             .casefold()
-                            if runner.definition["id"] == "weetodd.guided-movie-planning"
+                            if runner.definition["id"]
+                            in {"weetodd.guided-movie-planning", "weetodd.music-video-planning"}
                             else True
                         ),
                     )
@@ -450,29 +488,56 @@ def apply_review(runner, values, mutation):
                         row.pop("descriptionMentions", None)
                         row.pop("mentionSourceDescription", None)
             runner._validate_outputs(runner.specs[sid], outputs)
-            if runner.specs[sid]["operation"] == "movie.prepare_creative_brief@1":
+            if runner.specs[sid]["operation"] in {
+                "movie.prepare_creative_brief@1",
+                "music.prepare_brief@1",
+            }:
                 from .creative import validate_edit
 
                 validate_edit(step["outputs"]["creative_brief"], outputs["creative_brief"])
-            if runner.specs[sid]["operation"] in {"movie.plan_story@2", "movie.plan_treatment@1"}:
+                if runner.specs[sid]["operation"] == "music.prepare_brief@1":
+                    from .music import add_music_lyrics_question
+
+                    # The host may ask one newly consequential question after a user edit;
+                    # callers still cannot rewrite the original evidence or question identity.
+                    if len(outputs["creative_brief"]["questions"]) < 6:
+                        add_music_lyrics_question(
+                            outputs["creative_brief"], values["lyrics"], values["lyrics_status"]
+                        )
+                    runner._validate_outputs(runner.specs[sid], outputs)
+            if runner.specs[sid]["operation"] in {
+                "movie.plan_story@2",
+                "movie.plan_treatment@1",
+                "music.plan_treatment@1",
+            }:
                 from .operations import allocate_frames
 
                 resolved = {
                     port: runner._resolve(binding, values)
                     for port, binding in runner.specs[sid]["inputs"].items()
                 }
-                validate_outline(outputs["story"], len(allocate_frames(resolved, 200)["clips"]))
-                if runner.specs[sid]["operation"] == "movie.plan_treatment@1" and (
-                    outputs["story"]["characters"] != step["outputs"]["story"]["characters"]
-                ):
+                allocation = (
+                    resolved["music_timing"]["allocation"]
+                    if "music_timing" in resolved
+                    else allocate_frames(resolved, 200)
+                )
+                validate_outline(outputs["story"], len(allocation["clips"]))
+                if runner.specs[sid]["operation"] in {
+                    "movie.plan_treatment@1",
+                    "music.plan_treatment@1",
+                } and (outputs["story"]["characters"] != step["outputs"]["story"]["characters"]):
                     raise ValueError("Edit approved character identities in the inventory stage")
             if outputs == step.get("outputs"):
                 return copy.deepcopy(state)
             if runner.specs[sid]["operation"] in {
                 "movie.plan_beats@1",
                 "movie.plan_creative_beats@1",
+                "music.plan_beats@1",
             }:
-                if runner.specs[sid]["operation"] == "movie.plan_creative_beats@1":
+                if runner.specs[sid]["operation"] in {
+                    "movie.plan_creative_beats@1",
+                    "music.plan_beats@1",
+                }:
                     subjects = runner._resolve(runner.specs[sid]["inputs"]["subjects"], values)
                     locations = {
                         row["name"]
@@ -489,7 +554,8 @@ def apply_review(runner, values, mutation):
                     allow_kind=(
                         runner.specs[sid]["operation"] == "project.classify_subjects@1"
                         or (
-                            runner.definition["id"] == "weetodd.guided-movie-planning"
+                            runner.definition["id"]
+                            in {"weetodd.guided-movie-planning", "weetodd.music-video-planning"}
                             and sid == "subjects_coverage"
                             and runner.specs[sid]["operation"] == "project.review_object_coverage@1"
                         )
@@ -506,18 +572,29 @@ def apply_review(runner, values, mutation):
 
         after = review_snapshot(step)
         scoped_before, scoped_after = scoped_review_snapshots(before, after, item_id)
-        state.setdefault("humanDecisions", []).append({
-            "id": str(uuid4()), "version": 1, "actor": "human", "action": action,
-            "stepID": sid, "itemID": item_id, "createdAt": time.time(),
-            "parentRevision": parent_revision, "before": scoped_before, "after": scoped_after,
-            "snapshotScope": "changed_records",
-            "beforeContentDigest": digest(before["outputs"]),
-            "afterContentDigest": digest(after["outputs"]),
-            "instruction": instruction, "trainingConsent": "not_granted",
-            **({"fieldScope": mutation.get("fieldScope", "all")} if action == "repair" else {}),
-            "executionKey": step.get("key"), "contentKey": step.get("contentKey"),
-            "modelTurnIDs": model_turn_ids(step),
-        })
+        state.setdefault("humanDecisions", []).append(
+            {
+                "id": str(uuid4()),
+                "version": 1,
+                "actor": "human",
+                "action": action,
+                "stepID": sid,
+                "itemID": item_id,
+                "createdAt": time.time(),
+                "parentRevision": parent_revision,
+                "before": scoped_before,
+                "after": scoped_after,
+                "snapshotScope": "changed_records",
+                "beforeContentDigest": digest(before["outputs"]),
+                "afterContentDigest": digest(after["outputs"]),
+                "instruction": instruction,
+                "trainingConsent": "not_granted",
+                **({"fieldScope": mutation.get("fieldScope", "all")} if action == "repair" else {}),
+                "executionKey": step.get("key"),
+                "contentKey": step.get("contentKey"),
+                "modelTurnIDs": model_turn_ids(step),
+            }
+        )
         runner._save()
         return copy.deepcopy(state)
 

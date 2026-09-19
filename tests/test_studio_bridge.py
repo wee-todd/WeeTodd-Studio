@@ -281,6 +281,39 @@ def test_six_aac_clips_export_as_exact_constant_frame_rate(
     assert any(stream["codec_type"] == "audio" for stream in probe["streams"])
 
 
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg required"
+)
+def test_aac_padding_does_not_shift_hard_cut_frames(tmp_path):
+    """Check content at every frame, not just final duration or average FPS."""
+    runtime = dict(ffmpegPath=shutil.which("ffmpeg"), ffprobePath=shutil.which("ffprobe"))
+    sources = []
+    for color in ("red", "lime", "blue"):
+        source = tmp_path / f"{color}.mp4"
+        subprocess.run([
+            runtime["ffmpegPath"], "-v", "error", "-f", "lavfi", "-i",
+            f"color=c={color}:size=192x128:rate=24", "-f", "lavfi", "-i",
+            "sine=frequency=440:sample_rate=48000", "-t", "1",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(source),
+        ], check=True)
+        sources.append(source)
+    project = fixture_project(sources * 4)
+    project["audio"] = []
+    project["titles"] = []
+    for clip in project["clips"]:
+        clip.update(duration=0.5, transition="cut")
+    output = tmp_path / "cuts.mp4"
+    bridge.export_movie(dict(project=project, runtime=runtime), output)
+    pixels = subprocess.check_output([
+        runtime["ffmpegPath"], "-v", "error", "-i", str(output),
+        "-vf", "scale=1:1", "-an", "-pix_fmt", "rgb24", "-f", "rawvideo", "-",
+    ])
+    assert len(pixels) == 144 * 3
+    dominant = [max(range(3), key=lambda channel: pixels[frame * 3 + channel])
+                for frame in range(144)]
+    assert dominant == [clip % 3 for clip in range(12) for _ in range(12)]
+
+
 def test_finishing_preflight_blocks_before_generation(tmp_path, monkeypatch):
     p = fixture_project(["missing.mov"])
     p["settings"].update(interpolation="rife")

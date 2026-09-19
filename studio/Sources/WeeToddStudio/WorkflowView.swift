@@ -23,6 +23,7 @@ struct WorkflowView: View {
   @StateObject private var director = DirectorSessionController()
   @State private var documentTarget: DirectorDocumentTarget?
   @State private var setupModel: String?
+  @State private var analyzingAudio = false
   @State private var catalog: [[String: JSONValue]] = []
   private var definition: [String: JSONValue] {
     get { director.state.definition }
@@ -91,8 +92,15 @@ struct WorkflowView: View {
     get { director.state.reviewAssetBindings }
     nonmutating set { director.state.reviewAssetBindings = newValue }
   }
+  private var allReferenceBindings: [String: String] {
+    var bindings = reviewAssetBindings
+    for (name, images) in imageInputs {
+      for (index, image) in images.enumerated() { bindings["asset:\(name)-\(index + 1)"] = image.path }
+    }
+    return bindings
+  }
   private var reviewingStructuredOutput: Bool {
-    ["subjects", "creative_brief", "h3_prompts", "story", "clips"].contains {
+    ["subjects", "creative_brief", "h3_prompts", "prompt_plan", "story", "clips"].contains {
       result?.steps[selectedStep]?.outputs?[$0] != nil
     }
   }
@@ -103,17 +111,18 @@ struct WorkflowView: View {
     return list.compactMap(\.workflowObject)
   }
   private var busy: Bool { running || store.operationBusy }
-  private var guided: Bool { definition["id"]?.workflowText == "weetodd.guided-movie-planning" }
+  private var musicVideo: Bool { definition["id"]?.workflowText == "weetodd.music-video-planning" }
+  private var guided: Bool { musicVideo || definition["id"]?.workflowText == "weetodd.guided-movie-planning" }
   private var legacyInventory: Bool { definition["id"]?.workflowText == "weetodd.subject-inventory" }
   private var presentation: DirectorReviewPresentation { DirectorReviewPresentation(definition: definition, result: result) }
   private var guidedImportReady: Bool { presentation.canImport }
   private var preparation: DirectorPreparationState {
-    DirectorPreparationState(requiredModels: Array(modelSpecs.keys), bindings: modelPaths, brief: fields["brief"] ?? "")
+    DirectorPreparationState(requiredModels: Array(modelSpecs.keys), bindings: modelPaths, brief: musicVideo ? "Music video" : (fields["brief"] ?? ""))
   }
-  private var hasUnsavedReviews: Bool {
-    director.state.reviews.contains { id, draft in
-      draft.hasUnsavedChanges(outputs: result?.steps[id]?.outputs ?? [:], referenceBindings: reviewAssetBindings)
-    }
+  private var hasUnsavedReviews: Bool { director.state.hasUnsavedReviews }
+  private func changeInputs(_ update: (inout DirectorSession) -> Void) {
+    do { try director.state.changeInputs(update) }
+    catch { self.error = error.localizedDescription }
   }
 
   var body: some View {
@@ -133,9 +142,9 @@ struct WorkflowView: View {
           if let name = setupModel { modelPaths[name] = path; promptModel = path }
         }
       }
-      .interactiveDismissDisabled(running)
+      .interactiveDismissDisabled(running || analyzingAudio)
       .task { await loadCatalog() }
-      .onDisappear { if running { store.bridge.cancel() }; Task { try? await director.flush() } }
+      .onDisappear { if running || analyzingAudio { store.bridge.cancel() }; Task { try? await director.flush() } }
   }
 
   private var advancedBody: some View {
@@ -156,7 +165,7 @@ struct WorkflowView: View {
         Button("Open job…") { openJob() }.disabled(busy)
         Button("Resume last") { loadJob(URL(fileURLWithPath: lastJobPath)) }
           .disabled(busy || lastJobPath.isEmpty)
-        Button("Done") { dismiss() }.disabled(running)
+        Button("Done") { dismiss() }.disabled(running || analyzingAudio)
       }
       Text("Plan your movie: refine the brief, review objects and shot plans, then import approved planning. Timeline generation remains a separate step.").font(.callout).foregroundStyle(.secondary)
       Text("Drafts are kept locally across sessions. Save updates a reviewable result; approval is always your explicit choice.").font(.caption).foregroundStyle(.secondary)
@@ -194,7 +203,7 @@ struct WorkflowView: View {
             }
             Divider()
             if guided {
-              CreativeIntakeView(fields: Binding(get: { fields }, set: { fields = $0; result = nil; addedToProject = false; catalogFrozen = false }))
+              CreativeIntakeView(fields: Binding(get: { fields }, set: { value in changeInputs { $0.fields = value; $0.addedToProject = false; $0.catalogFrozen = false } }))
               inputField("images")
               inputField("library")
             } else {
@@ -214,7 +223,7 @@ struct WorkflowView: View {
               let id = step.workflowID
               VStack(alignment: .leading, spacing: 4) {
                 Text(step["name"]?.workflowText ?? id)
-                Text(result?.steps[id]?.approved == true ? "Approved" : result?.steps[id]?.status ?? "Pending").font(.caption).foregroundStyle(.secondary)
+                Text(savedStepStatus(id)).font(.caption).foregroundStyle(.secondary)
               }.tag(id)
             }
           }
@@ -243,9 +252,9 @@ struct WorkflowView: View {
         }.frame(minWidth: 320, maxWidth: .infinity)
       }
       if let failure = director.persistenceError { Text("Draft could not be saved: " + failure).font(.callout).foregroundStyle(.red) }
-      if let error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
+      if let error { WorkflowTextPreviewView(text: error).font(.callout).foregroundStyle(.red) }
       HStack {
-        if running {
+        if running || analyzingAudio {
           ProgressView().controlSize(.small)
           WorkflowLiveProgress(bridge: store.bridge)
           Button("Pause") { store.bridge.cancel() }
@@ -253,13 +262,13 @@ struct WorkflowView: View {
           Button("Run next") { Task { await run(maxSteps: 1) } }.disabled(busy || definition.isEmpty)
           Button("Run remaining") { Task { await run() } }.buttonStyle(.borderedProminent)
             .disabled(busy || definition.isEmpty)
-          if let result { Text(String(format: "%@ · %.1f s total", result.status.capitalized, result.totalSeconds)).font(.caption) }
+          if let savedResultSummary { Text(savedResultSummary).font(.caption) }
         }
         Spacer()
         if let result, result.steps.values.contains(where: { $0.status == "completed" && ($0.outputs?["story"] != nil || $0.outputs?["clips"] != nil || $0.outputs?["subjects"] != nil) }) {
           Button(addedToProject ? "Added to project" : "Add to project") {
             do {
-              try validateTarget(); try store.importPlanning(result, sourceID: runDirectory, sourceText: fields["brief"] ?? "", referenceBindings: reviewAssetBindings, librarySelections: librarySelections)
+              try validateTarget(); try store.importPlanning(result, sourceID: runDirectory, sourceText: fields["brief"] ?? "", referenceBindings: allReferenceBindings, librarySelections: librarySelections)
               documentTarget = DirectorDocumentTarget(store: store); addedToProject = true
               if let onProjectImport { onProjectImport(); dismiss() }
             } catch { self.error = error.localizedDescription }
@@ -289,7 +298,7 @@ struct WorkflowView: View {
             WorkspaceImage(path: image.path).frame(width: 58, height: 42).clipped()
             Text(image.label).font(.caption).lineLimit(2)
             Spacer()
-            Button { imageInputs[name]?.removeAll { $0.id == image.id }; result = nil } label: { Image(systemName: "xmark") }
+            Button { changeInputs { $0.imageInputs[name]?.removeAll { $0.id == image.id } } } label: { Image(systemName: "xmark") }
           }
         }
         Button("Add reference images…") { addImages(name) }
@@ -300,13 +309,23 @@ struct WorkflowView: View {
       } else if type == "subject_list" {
         Text("Structured inventory loaded from the saved job.").font(.caption).foregroundStyle(.secondary)
       } else if type == "boolean" {
-        Toggle("Enabled", isOn: Binding(get: { fields[name] == "true" }, set: { fields[name] = $0 ? "true" : "false"; result = nil }))
+        Toggle("Enabled", isOn: Binding(get: { fields[name] == "true" }, set: { value in changeInputs { $0.fields[name] = value ? "true" : "false" } }))
       } else {
-        let binding = Binding(get: { fields[name] ?? "" }, set: { fields[name] = $0; result = nil })
+        let binding = Binding(get: { fields[name] ?? "" }, set: { value in changeInputs { $0.fields[name] = value } })
         if type == "text" { TextEditor(text: binding).frame(minHeight: 70, maxHeight: 120) }
         else { TextField(type == "integer" ? "Whole number" : "Number", text: binding) }
       }
     }
+  }
+  private func savedStepStatus(_ id: String) -> String {
+    guard let step = result?.steps[id] else { return running ? "No saved result" : "Pending" }
+    let status = step.approved == true ? "Approved" : step.status.capitalized
+    return running ? "Previous saved result · " + status : status
+  }
+  private var savedResultSummary: String? {
+    guard let result else { return nil }
+    let summary = String(format: "%@ · %.1f s total", result.status.capitalized, result.totalSeconds)
+    return running ? "Previous saved result · " + summary : summary
   }
   private var outputText: String {
     let value = selectedStep.isEmpty ? result?.outputs : result?.steps[selectedStep]?.outputs
@@ -330,6 +349,8 @@ struct WorkflowView: View {
     for name in modelSpecs.keys { if !promptModel.isEmpty { modelPaths[name] = promptModel } }
     if guided {
       fields["frame_rate"] = String(Int(store.project.settings.fps.rounded()))
+      if inputSpecs["analysis_mode"] != nil { fields["analysis_mode"] = "neural" }
+      if inputSpecs["analysis_vocal_mode"] != nil { fields["analysis_vocal_mode"] = "mixed" }
       let settings = store.project.settings
       fields["presentation"] = settings.width == settings.height ? "Square" : settings.width > settings.height ? "Widescreen" : "Vertical"
       if fields["brief"]?.isEmpty != false { fields["brief"] = store.planning.sourceText }
@@ -385,7 +406,13 @@ struct WorkflowView: View {
     // Keep reviewable results visible while work runs or fails.
     defer { running = false }
     do {
-      try validateTarget(); var request = try job()
+      try validateTarget()
+      if musicVideo {
+        guard fields["audio_path"]?.isEmpty == false, fields["audio_sha256"]?.count == 64 else {
+          throw StudioError.invalid("Choose a song before preparing the music-video brief.")
+        }
+      }
+      var request = try job()
       director.state.executionStarted = true
       let saved = store.dataDirectory.appendingPathComponent("Workflows/Jobs/\(runID.uuidString).json")
       try FileManager.default.createDirectory(at: saved.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -395,7 +422,9 @@ struct WorkflowView: View {
       try await director.execute { try await store.bridge.invoke("workflow-run", runtime: store.runtime, payload: try request.object()) }
       pruneLibrarySelections()
       error = result?.error
-      if guided, presentation.mode == .focused {
+      if result?.status == "failed" {
+        selectedStep = result?.preferredReviewStepID ?? ""
+      } else if guided, presentation.mode == .focused {
         if case .review(let id) = presentation.nextAction { selectedStep = id }
         else { selectedStep = presentation.stepID(for: .shots) ?? result?.preferredReviewStepID ?? "" }
       } else { selectedStep = result?.preferredReviewStepID ?? "" }
@@ -511,8 +540,9 @@ struct WorkflowView: View {
     guard panel.runModal() == .OK else { return }
     let existing = imageInputs[name] ?? []
     guard existing.count + panel.urls.count <= 8 else { error = "Use at most eight images per input."; return }
-    imageInputs[name] = existing + panel.urls.map { PromptAssistantImage(path: $0.path, label: $0.deletingPathExtension().lastPathComponent) }
-    result = nil
+    changeInputs { state in
+      state.imageInputs[name] = existing + panel.urls.map { PromptAssistantImage(path: $0.path, label: $0.deletingPathExtension().lastPathComponent) }
+    }
   }
   private func importDefinition() {
     let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]
@@ -619,7 +649,7 @@ private extension WorkflowView {
           Button("Resume last") { loadJob(URL(fileURLWithPath: lastJobPath)) }.disabled(lastJobPath.isEmpty)
           Button("Export job…") { exportJob() }
         }.disabled(busy)
-        Button("Done") { dismiss() }.disabled(running)
+        Button("Done") { dismiss() }.disabled(running || analyzingAudio)
       }
       HStack(spacing: 12) {
         ForEach(DirectorReviewPhase.allCases) { phase in
@@ -657,7 +687,11 @@ private extension WorkflowView {
         HSplitView {
           ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-              CreativeIntakeView(fields: Binding(get: { fields }, set: { fields = $0; addedToProject = false; catalogFrozen = false }))
+              if musicVideo {
+                MusicVideoIntakeView(fields: Binding(get: { fields }, set: { value in changeInputs { $0.fields = value; $0.addedToProject = false; $0.catalogFrozen = false } }), currentRunID: { runID }, onAnalysisBusy: { analyzingAudio = $0 })
+              } else {
+                CreativeIntakeView(fields: Binding(get: { fields }, set: { value in changeInputs { $0.fields = value; $0.addedToProject = false; $0.catalogFrozen = false } }))
+              }
               inputField("images")
               inputField("library")
             }.padding(.trailing, 16)
@@ -681,10 +715,10 @@ private extension WorkflowView {
       if let failure = director.persistenceError {
         Text("Draft could not be saved: " + failure).font(.caption).foregroundStyle(.red)
       }
-      if let error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
+      if let error { WorkflowTextPreviewView(text: error).font(.callout).foregroundStyle(.red) }
       Divider()
       HStack {
-        if running {
+        if running || analyzingAudio {
           ProgressView().controlSize(.small)
           WorkflowLiveProgress(bridge: store.bridge)
           Spacer()
@@ -735,12 +769,15 @@ private extension WorkflowView {
     }
   }
   @ViewBuilder var reviewContent: some View {
+    if running, result != nil {
+      Text("Previous saved result").font(.caption).foregroundStyle(.secondary)
+    }
     if let step = result?.steps[selectedStep], step.outputs != nil, result?.revision != nil {
       ForEach(step.warnings ?? [], id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
       let reviewedStep = selectedStep
       let reviewedRevision = result?.revision
       WorkflowReviewPanel(draft: reviewDraft(selectedStep), bindReferences: bindReferences, step: step, busy: busy && !store.referenceSheetOpen,
-        referenceBindings: reviewAssetBindings,
+        referenceBindings: allReferenceBindings,
         onDescriptionReview: { id, paths in await applyReferences(id, paths, action: "review_description", stepID: reviewedStep, expectedRevision: reviewedRevision) },
         onReferenceSave: { id, paths in await applyReferences(id, paths, action: "set_reference_assets", stepID: reviewedStep, expectedRevision: reviewedRevision) },
         subjectScope: runDirectory, onCoverageReview: reviewObjectCoverage,
@@ -749,16 +786,39 @@ private extension WorkflowView {
         allowKindEditing: (guided && selectedStep == "subjects_coverage") || steps.first(where: { $0.workflowID == selectedStep })?["operation"]?.workflowText == "project.classify_subjects@1",
         subjectApprovalLabel: guided && selectedStep == "classify" ? "classification" : (guided && selectedStep == "inventory" ? "inventory item" : "description"),
         preserveApprovedCast: guided, focused: guided && presentation.mode == .focused,
+        dynamicMusicTiming: musicVideo,
         subjectNames: Dictionary(((try? result?.subjectsForImport()) ?? []).map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }),
         storyContext: decodeOutput(WorkflowStoryOutline.self, stepID: "story", key: "story"),
-        promptPreview: decodeOutput(H3PromptPreview.self, stepID: "prompt_preview", key: "h3_prompts")) { action, item, outputs, instruction, scope in
+        promptPreview: decodeOutput(H3PromptPreview.self, stepID: "prompt_preview", key: musicVideo ? "prompt_plan" : "h3_prompts")) { action, item, outputs, instruction, scope in
           await review(action, item: item, outputs: outputs, instruction: instruction, fieldScope: scope, stepID: reviewedStep)
         }.id(selectedStep)
     } else {
+      let previousFailure = guided && running && result?.steps[selectedStep]?.error != nil
       ScrollView {
-        Text(guided && selectedStep.isEmpty ? "Continue planning to prepare your next review." : outputText)
+        WorkflowTextPreviewView(text: previousFailure
+          ? "Director is running. The previous attempt’s error is available in Inspector."
+          : guided && selectedStep.isEmpty ? "Continue planning to prepare your next review." : outputText)
           .font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(10)
       }.background(Theme.raised, in: RoundedRectangle(cornerRadius: 8))
+      if let step = result?.steps[selectedStep], result?.revision != nil {
+        let reviewedStep = selectedStep
+        let operation = steps.first(where: { $0.workflowID == reviewedStep })?["operation"]?.workflowText ?? ""
+        ForEach(step.failedShotIDs(operation: operation), id: \.self) { itemID in
+          VStack(alignment: .leading, spacing: 8) {
+            Text("Correct \(itemID)").font(.headline)
+            Text("Tell Director what to change in this failed shot. Completed drafts and approved story choices are kept.")
+              .font(.caption).foregroundStyle(.secondary)
+            TextField("Correction instructions", text: Binding(
+              get: { director.state.reviews[reviewedStep]?.repairs[itemID] ?? "" },
+              set: { director.state.reviews[reviewedStep, default: DirectorReviewDraft()].repairs[itemID] = $0 }
+            ), axis: .vertical).lineLimit(3...6).textFieldStyle(.roundedBorder).disabled(busy)
+            Button("Retry with direction") {
+              let instruction = director.state.reviews[reviewedStep]?.repairs[itemID] ?? ""
+              Task { _ = await review("repair", item: itemID, outputs: nil, instruction: instruction, stepID: reviewedStep) }
+            }.disabled(busy || hasUnsavedReviews || (director.state.reviews[reviewedStep]?.repairs[itemID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          }.padding(10)
+        }
+      }
     }
   }
   func decodeOutput<T: Decodable>(_ type: T.Type, stepID: String, key: String) -> T? {
@@ -769,7 +829,7 @@ private extension WorkflowView {
     guard let result, guidedImportReady, !hasUnsavedReviews else { return }
     do {
       try validateTarget()
-      try store.importPlanning(result, sourceID: runDirectory, sourceText: fields["brief"] ?? "", referenceBindings: reviewAssetBindings, librarySelections: librarySelections)
+      try store.importPlanning(result, sourceID: runDirectory, sourceText: fields["brief"] ?? "", referenceBindings: allReferenceBindings, librarySelections: librarySelections)
       documentTarget = DirectorDocumentTarget(store: store); addedToProject = true
       if let onProjectImport { onProjectImport(); dismiss() }
     } catch { self.error = error.localizedDescription }
@@ -789,7 +849,7 @@ private extension WorkflowView {
             ForEach(steps, id: \.workflowID) { step in
               VStack(alignment: .leading, spacing: 3) {
                 Text(step["name"]?.workflowText ?? step.workflowID)
-                Text(result?.steps[step.workflowID]?.approved == true ? "Approved" : result?.steps[step.workflowID]?.status ?? "Pending")
+                Text(savedStepStatus(step.workflowID))
                   .font(.caption).foregroundStyle(.secondary)
               }.tag(step.workflowID)
             }
@@ -826,11 +886,11 @@ private extension WorkflowView {
               Button("All outputs") { selectedStep = "" }.disabled(busy)
             }
             ScrollView {
-              Text(outputText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+              WorkflowTextPreviewView(text: outputText).font(.system(.caption, design: .monospaced))
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
           }
-          if let result { Text(String(format: "%@ · %.1f s total", result.status.capitalized, result.totalSeconds)).font(.caption) }
+          if let savedResultSummary { Text(savedResultSummary).font(.caption) }
         }.padding(.leading, 12).frame(minWidth: 450)
       }
       HStack {

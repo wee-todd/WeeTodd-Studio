@@ -60,7 +60,7 @@ final class DirectorSessionTests: XCTestCase {
     let job = WorkflowJob(definition: ["format": .string("weetodd-workflow-v1"), "id": .string("test"), "steps": .array([.object(["id": .string("one")])])], inputs: [:], models: [:], assets: [:], runDirectory: dir.path)
     let url = dir.appendingPathComponent("job.json")
     try JSONEncoder().encode(job).write(to: url)
-    try Data(repeating: 32, count: 2 * 1024 * 1024 + 1).write(to: dir.appendingPathComponent("run.json"))
+    try Data(repeating: 32, count: 16 * 1024 * 1024 + 1).write(to: dir.appendingPathComponent("run.json"))
     do { try await controller.importJob(url, validateDefinition: { _ in }); XCTFail("Oversized checkpoint accepted") } catch {}
     XCTAssertEqual(controller.state.fields["brief"], "Keep me")
   }
@@ -310,5 +310,79 @@ extension DirectorSessionTests {
     session.executionStarted = true
     XCTAssertTrue(session.reviewModeLocked)
     XCTAssertThrowsError(try session.setReviewMode(.detailed))
+  }
+}
+
+
+extension DirectorSessionTests {
+  @MainActor func testLargeCheckpointRefreshAndImportKeepDefinitionImportBounded() async throws {
+    let dir = try directory(), controller = DirectorSessionController()
+    let definition: [String: JSONValue] = ["format": .string("weetodd-workflow-v1"), "id": .string("same"), "steps": .array([.object(["id": .string("one")])])]
+    let job = WorkflowJob(definition: definition, inputs: [:], models: [:], assets: [:], runDirectory: dir.path)
+    let jobURL = dir.appendingPathComponent("job.json")
+    try JSONEncoder().encode(job).write(to: jobURL)
+    let evidence = String(repeating: "Verified word and beat evidence. ", count: 70_000)
+    let envelope: [String: JSONValue] = ["format": .string("weetodd-workflow-run-v1"), "workflowID": .string("same"), "status": .string("completed"), "totalSeconds": .integer(1), "revision": .string("large-reviewed"), "steps": .object([:]), "outputs": .object([:]), "definition": .object(definition), "inputs": .object([:]), "evidence": .string(evidence)]
+    try JSONEncoder().encode(envelope).write(to: dir.appendingPathComponent("run.json"))
+    controller.state.runDirectory = dir.path
+    await controller.refreshCheckpoint()
+    XCTAssertEqual(controller.state.result?.revision, "large-reviewed")
+    try await controller.importJob(jobURL, validateDefinition: { _ in })
+    XCTAssertEqual(controller.state.result?.revision, "large-reviewed")
+    var oversizedJob = job
+    oversizedJob.inputs["brief"] = .string(evidence)
+    try JSONEncoder().encode(oversizedJob).write(to: jobURL)
+    do { try await controller.importJob(jobURL, validateDefinition: { _ in }); XCTFail("Oversized job accepted") } catch {}
+    XCTAssertEqual(controller.state.result?.revision, "large-reviewed")
+  }
+}
+
+extension DirectorSessionTests {
+  private func inputChangeSession() throws -> DirectorSession {
+    var session = DirectorSession()
+    let subject = try JSONDecoder().decode(WorkflowSubjectProposal.self, from: Data(#"{"id":"ada","name":"Ada","kind":"character","description":"Red coat","aliases":[],"evidence":[],"suggestions":[],"referenceAssets":["asset:a"]}"#.utf8))
+    let clip = try JSONDecoder().decode(WorkflowClipDraft.self, from: Data(#"{"id":"c1","startFrame":0,"frameCount":120,"action":"Walk","startState":"Door","endState":"Desk","location":"Office","characters":["ada"],"continuity":"cut"}"#.utf8))
+    let outputs: [String: JSONValue] = ["subjects": try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode([subject])), "clips": .object(["fps": .integer(24), "totalFrames": .integer(120), "characters": .array([]), "clips": .array([try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(clip))])])]
+    let envelope: [String: JSONValue] = ["status": .string("paused"), "totalSeconds": .integer(1), "revision": .string("saved"), "steps": .object(["review": .object(["name": .string("Review objects and clips"), "status": .string("completed"), "outputs": .object(outputs)])]), "outputs": .object([:])]
+    session.result = try JSONDecoder().decode(WorkflowRunSummary.self, from: JSONEncoder().encode(envelope))
+    session.fields = ["engine": "ltx25", "minimum_seconds": "1"]
+    session.reviewAssetBindings = ["asset:a": "/original.png"]
+    var draft = DirectorReviewDraft()
+    draft.subjects = ["ada": subject]; draft.referencePaths = ["ada": ["/original.png"]]; draft.clips = ["c1": clip]
+    draft.selectedSubject = "ada"; draft.repairs = ["c1": "Keep the original camera direction"]
+    draft.repairScopes = ["c1": .states]; draft.repairBaselines = ["c1": clip]
+    session.reviews = ["review": draft]
+    return session
+  }
+  func testInputChangesClearOnlyCleanReviewCachesAndAllowFollowingEdits() throws {
+    var session = try inputChangeSession()
+    XCTAssertFalse(session.hasUnsavedReviews)
+    try session.changeInputs { $0.fields["engine"] = "drawThings" }
+    XCTAssertNil(session.result)
+    XCTAssertFalse(session.hasUnsavedReviews)
+    XCTAssertTrue(session.reviews["review"]?.subjects.isEmpty == true)
+    XCTAssertTrue(session.reviews["review"]?.referencePaths.isEmpty == true)
+    XCTAssertTrue(session.reviews["review"]?.clips.isEmpty == true)
+    XCTAssertEqual(session.reviews["review"]?.selectedSubject, "ada")
+    XCTAssertEqual(session.reviews["review"]?.repairs["c1"], "Keep the original camera direction")
+    XCTAssertEqual(session.reviews["review"]?.repairScopes?["c1"], .states)
+    XCTAssertEqual(session.reviews["review"]?.repairBaselines?["c1"]?.action, "Walk")
+    try session.changeInputs { $0.fields["minimum_seconds"] = "4" }
+    XCTAssertEqual(session.fields["engine"], "drawThings")
+    XCTAssertEqual(session.fields["minimum_seconds"], "4")
+    XCTAssertFalse(session.hasUnsavedReviews)
+  }
+  func testGenuineSubjectReferenceAndClipEditsBlockInputChangesWithoutLoss() throws {
+    for change in ["subject", "references", "clip"] {
+      var session = try inputChangeSession()
+      if change == "subject" { session.reviews["review"]?.subjects["ada"]?.description = "Blue coat" }
+      if change == "references" { session.reviews["review"]?.referencePaths["ada"] = ["/new.png"] }
+      if change == "clip" { session.reviews["review"]?.clips["c1"]?.action = "Run" }
+      let before = try JSONEncoder().encode(session)
+      XCTAssertTrue(session.hasUnsavedReviews, change)
+      XCTAssertThrowsError(try session.changeInputs { $0.fields["engine"] = "drawThings" }, change)
+      let after = try JSONEncoder().encode(session)
+      XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: before), try JSONDecoder().decode(JSONValue.self, from: after), change)
+    }
   }
 }

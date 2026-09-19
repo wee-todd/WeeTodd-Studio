@@ -4,6 +4,52 @@ import StudioCore
 import UniformTypeIdentifiers
 
 extension StudioStore {
+  func makeReferenceImageDraft(_ context: ReferenceSheetContext,
+                               previousDraft: DrawThingsImageDraft?) -> DrawThingsImageDraft {
+    var draft = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: project.id))
+    context.apply(to: &draft); draft.seed = -1; draft.steps = 8
+    if let saved = imageWorkspaceLibrary.sessions[draft.storageKey],
+       saved.draft.referenceSheet?.description == context.description,
+       saved.draft.referenceSheet?.linkedDefinitions == context.linkedDefinitions,
+       saved.draft.referenceSheet?.name == context.name {
+      return saved.draft
+    }
+    let ids = Set(drawThingsConnections.map(\.id))
+    if let preferred = imageWorkspaceLibrary.referenceConnectionID {
+      // A removed explicit preference must not silently select a different service.
+      draft.profileID = ids.contains(preferred) ? preferred : ""
+    } else if let previous = previousDraft?.profileID, ids.contains(previous) {
+      draft.profileID = previous
+    }
+    return draft
+  }
+  func selectImageConnection(_ id: String) {
+    guard imageDraft != nil else { return }
+    if imageDraft?.referenceSheet != nil {
+      imageWorkspaceLibrary.referenceConnectionID = id
+    }
+    imageDraft?.selectConnection(id); imageEstimate = nil
+  }
+  private func referenceImageOperationKey(_ draft: DrawThingsImageDraft) -> String? {
+    guard draft.referenceSheet != nil else { return nil }
+    return documentSessionID.uuidString + ":" + (activeReferenceLease?.id.uuidString ?? "")
+      + ":" + draft.storageKey + ":" + draft.profileID
+  }
+  var referenceImageError: String? {
+    guard let draft = imageDraft, let key = referenceImageOperationKey(draft),
+          referenceImageFailure?.key == key else { return nil }
+    return referenceImageFailure?.message
+  }
+  func beginImageAttempt(_ draft: DrawThingsImageDraft) -> String? {
+    let key = referenceImageOperationKey(draft)
+    if referenceImageFailure?.key == key { referenceImageFailure = nil }
+    return key
+  }
+  func recordImageFailure(_ message: String, referenceKey: String?) {
+    guard let referenceKey else { error = message; return }
+    guard let draft = imageDraft, referenceImageOperationKey(draft) == referenceKey else { return }
+    referenceImageFailure = (referenceKey, message)
+  }
   func persistImageWorkspace() {
     guard !restoringImageWorkspace else { return }
     if let draft = imageDraft { imageWorkspaceLibrary.record(draft, preview: imagePreviewPath) }

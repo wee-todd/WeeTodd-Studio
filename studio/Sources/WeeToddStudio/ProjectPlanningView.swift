@@ -6,10 +6,24 @@ struct ProjectPlanningView: View {
   @EnvironmentObject var store: StudioStore
   @Environment(\.dismiss) private var dismiss
   @State private var page = "shots"
-  @State private var selectedShot: UUID?
+  @State private var selectedShotIDs = Set<UUID>()
+  @State private var maximumClipSeconds = 15.0
+  private var selectedShot: UUID? {
+    get { plan.shots.first { selectedShotIDs.contains($0.id) }?.id }
+    nonmutating set { selectedShotIDs = newValue.map { [$0] } ?? [] }
+  }
   @State private var selectedSubject: UUID?
   @State private var extracting = false
   @State private var libraryOpen = false
+  @State private var producing = false
+  @State private var splitting = false
+  @State private var splitFrames = 1
+  @State private var splitBoundary = ""
+  @State private var generationSettingsOpen = false
+  @State private var generationEngine: Engine = .ltx25
+  @State private var generationWidth = 1344
+  @State private var generationHeight = 768
+  @State private var editingProjectID: UUID?
   @State private var error: String?
   @State private var sheetContext: ReferenceSheetContext?
   var plan: ProjectPlanning { store.planning }
@@ -42,6 +56,9 @@ struct ProjectPlanningView: View {
         .font(.caption).foregroundStyle(.secondary)
     }.padding(22).frame(width: 1140, height: 770)
       .sheet(isPresented: $libraryOpen) { ProductionLibraryView().environmentObject(store) }
+      .sheet(isPresented: $producing) { MusicVideoProductionView().environmentObject(store) }
+      .sheet(isPresented: $splitting) { splitEditor }
+      .sheet(isPresented: $generationSettingsOpen) { generationEditor }
       .sheet(item: $sheetContext) { context in
         let subject = plan.subjects.first { store.project.id.uuidString + ":" + $0.id.uuidString == context.subjectKey }
         ReferenceSheetGenerator(context: context, referencePaths: (subject?.referenceAssetIDs ?? []).compactMap { id in store.allAssets.first { $0.id == id }?.path }) { asset in
@@ -120,18 +137,125 @@ struct ProjectPlanningView: View {
           TextField("FPS", value: Binding(get: { plan.frameRate }, set: { value in store.changePlanning { $0.frameRate = value } }), format: .number).frame(width: 50)
           Text("FPS").font(.caption)
         }
-        Table(plan.shots, selection: $selectedShot) {
+        HStack {
+          Button("Split…") {
+            guard let shot = plan.shots.first(where: { $0.id == selectedShot }) else { return }
+            splitFrames = max(1, shot.frameCount / 2); splitBoundary = ""
+            editingProjectID = store.project.id; splitting = true
+          }.disabled(selectedShotIDs.count != 1 || selectedShot.flatMap { id in plan.shots.first { $0.id == id } }.map { $0.linkedClipID != nil || $0.combinedShots != nil || $0.frameCount < 2 } ?? true)
+          Button("Combine") { attempt {
+            var value = plan
+            let id = try value.combineShots(selectedShotIDs, maximumSeconds: maximumClipSeconds)
+            store.change { $0.planning = value }; selectedShot = id
+          } }.disabled(selectedShotIDs.count < 2)
+          Button("Restore original shots") { attempt {
+            guard let id = selectedShot else { return }
+            var value = plan; try value.uncombineShot(id)
+            store.change { $0.planning = value }; selectedShot = nil
+          } }.disabled(selectedShot.flatMap { id in plan.shots.first { $0.id == id }?.combinedShots } == nil)
+          Text("Max s").font(.caption)
+          TextField("15", value: $maximumClipSeconds, format: .number).frame(width: 45)
+        }
+        Button("Generation settings for selection…") {
+          guard let shot = plan.shots.first(where: { selectedShotIDs.contains($0.id) }) else { return }
+          generationEngine = shot.engine
+          generationWidth = shot.generationWidth ?? store.project.clips.first?.generationWidth ?? 768
+          generationHeight = shot.generationHeight ?? store.project.clips.first?.generationHeight ?? 512
+          editingProjectID = store.project.id; generationSettingsOpen = true
+        }.disabled(selectedShotIDs.isEmpty || plan.shots.contains { selectedShotIDs.contains($0.id) && $0.linkedClipID != nil })
+        Table(plan.shots, selection: $selectedShotIDs) {
           TableColumn("Shot") { shot in Text(shot.name) }.width(min: 90, ideal: 120)
           TableColumn("Start") { shot in Text(String(format: "%.2f s", Double(plan.startFrame(of: shot.id)) / Double(max(1, plan.frameRate)))) }.width(65)
           TableColumn("Frames") { shot in Text(String(shot.frameCount)) }.width(55)
           TableColumn("Review") { shot in Text(shotStatus(shot)).font(.caption) }.width(min: 85, ideal: 100)
         }
-        Text("Workflow results can be added here using Add to project in Workflows.").font(.caption).foregroundStyle(.secondary)
+        if plan.shots.contains(where: { $0.musicSource != nil }) {
+          Button("Realign song intervals to shot lengths") { attempt {
+            var value = store.project
+            let count = try value.realignPlanningMusicIntervals()
+            store.change { $0 = value }
+            store.notice = count == 0 ? "Song intervals already match the shot lengths." : "Realigned \(count) song intervals. Review affected shots, then explicitly reuse any trimmed timeline takes."
+          } }.disabled(store.operationBusy || store.productionRunning)
+            .help("Preserve the complete song while moving cuts between shots. Trim existing timeline clips first; affected shots require review.")
+        }
+        Button("Add approved selection to timeline") { attempt {
+          var value = store.project; try value.applyPlanningShots(selectedShotIDs)
+          store.change { $0 = value }
+          store.notice = "Added approved shots and their song intervals. Produce the timeline or render individual clips."
+        } }.disabled(selectedShotIDs.isEmpty)
+        if let clip = store.selectedClip, !clip.sourcePath.isEmpty {
+          Button("Reuse selected timeline take: " + clip.name) { attempt {
+            guard let id = selectedShot else { return }
+            var value = store.project
+            try value.reuseTimelineClip(clip.id, forPlanningShot: id)
+            store.change { $0 = value }
+            store.notice = "Linked the existing take to the reviewed shot; its footage and versions are preserved."
+          } }.disabled(selectedShotIDs.count != 1)
+        }
+        Button("Add approved plan and produce…") { attempt {
+          let pending = Set(plan.shots.filter { $0.linkedClipID == nil }.map(\.id))
+          if !pending.isEmpty {
+            var value = store.project; try value.applyPlanningShots(pending)
+            store.change { $0 = value }
+          }
+          producing = true
+        } }.disabled(store.operationBusy || store.productionRunning || plan.shots.isEmpty)
+        Text("Split keeps the song interval intact; review each new action and boundary. Combine retains original shots and frame references for restoration.").font(.caption).foregroundStyle(.secondary)
       }.frame(minWidth: 430, idealWidth: 490)
       if let id = selectedShot, let shot = plan.shots.first(where: { $0.id == id }) {
         shotEditor(shot).frame(minWidth: 470)
       } else { empty("Select a shot to edit its action, subjects and first/last-frame descriptions.") }
     }
+  }
+  private var splitEditor: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Split planned shot").font(.title2)
+      if let shot = plan.shots.first(where: { $0.id == selectedShot }) {
+        Text("\(shot.name) · \(shot.frameCount) frames")
+        TextField("First part frames", value: $splitFrames, format: .number)
+        Text(String(format: "First part %.3f s · second part %.3f s", Double(splitFrames) / Double(max(1, plan.frameRate)), Double(shot.frameCount - splitFrames) / Double(max(1, plan.frameRate)))).font(.caption)
+        Text("State at the cut")
+        TextEditor(text: $splitBoundary).frame(height: 90).border(Color.secondary)
+        Text("Both parts keep the original direction for revision. Outer frame images stay with their respective ends; the new cut starts without an image. Song timing and the natural ending stay intact.").font(.caption)
+      }
+      if let error { Text(error).foregroundStyle(.red) }
+      HStack {
+        Button("Cancel") { splitting = false; error = nil }
+        Spacer()
+        Button("Split shot") { attempt {
+          guard store.project.id == editingProjectID, let id = selectedShot else { throw StudioError.invalid("The movie changed. Reopen the shot editor.") }
+          var value = plan
+          let next = try value.splitShot(id, afterFrames: splitFrames, boundary: splitBoundary)
+          store.change { $0.planning = value }; selectedShot = next; splitting = false
+        } }.disabled(splitBoundary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      }
+    }.padding(22).frame(width: 520)
+  }
+  private var generationEditor: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Generation settings · \(selectedShotIDs.count) shots").font(.title2)
+      Picker("Model", selection: $generationEngine) {
+        ForEach([Engine.ltx25, .ltx23, .h3, .drawThings]) { Text($0.label).tag($0) }
+      }
+      HStack {
+        Text("Render size")
+        TextField("Width", value: $generationWidth, format: .number)
+        Text("×")
+        TextField("Height", value: $generationHeight, format: .number)
+      }
+      Text("Applies to the selected unapplied shots and marks them for review. Song timing is preserved. Model-specific conditioning is checked before rendering.").font(.caption)
+      if let error { Text(error).foregroundStyle(.red) }
+      HStack {
+        Button("Cancel") { generationSettingsOpen = false; error = nil }
+        Spacer()
+        Button("Apply settings") { attempt {
+          guard store.project.id == editingProjectID else { throw StudioError.invalid("The movie changed. Reopen generation settings.") }
+          var value = plan
+          try value.setGenerationSettings(selectedShotIDs, engine: generationEngine, width: generationWidth, height: generationHeight)
+          store.change { $0.planning = value }; generationSettingsOpen = false
+        } }
+      }
+    }.padding(22).frame(width: 480)
   }
   private func subjectEditor(_ subject: PlanningSubject) -> some View {
     ScrollView {
@@ -204,7 +328,7 @@ struct ProjectPlanningView: View {
           Button("Create reference…") {
             sheetContext = ReferenceSheetContext(subjectKey: store.project.id.uuidString + ":" + subject.id.uuidString,
               name: subject.name, kind: subject.kind, description: subject.details,
-              linkedDefinitions: descriptionTargets(subject).map { "\($0.id) · \($0.name): \($0.description)" }.joined(separator: "\n"))
+              linkedDefinitions: ReferenceSheetLinks.definitions(subject: subject, inventory: plan.subjects))
           }.disabled(store.bridge.busy || subject.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
           Menu("Choose project/global image") {
             ForEach(store.allAssets.filter { $0.kind == .image && !subject.referenceAssetIDs.contains($0.id) }) { asset in
@@ -318,6 +442,17 @@ struct ProjectPlanningView: View {
         }
         VStack(alignment: .leading, spacing: 10) {
           TextField("Name", text: shotBinding(shot.id, \.name))
+          Picker("Model", selection: shotBinding(shot.id, \.engine)) {
+            ForEach([Engine.ltx25, .ltx23, .h3, .drawThings]) { Text($0.label).tag($0) }
+          }
+          if let width = shot.generationWidth, let height = shot.generationHeight {
+            Text("Render size: \(width) × \(height)").font(.caption)
+          }
+          if let source = shot.musicSource {
+            Text("Song: \(source.start, specifier: "%.3f")–\(source.start + source.duration, specifier: "%.3f") s").font(.caption)
+          }
+          endpointPicker("First image", shot: shot, key: \.firstAssetID)
+          endpointPicker("Last image", shot: shot, key: \.lastAssetID)
           HStack {
             TextField("Frames", value: shotBinding(shot.id, \.frameCount), format: .number)
             Text(String(format: "%.2f seconds", Double(shot.frameCount) / Double(max(1, plan.frameRate))))
@@ -352,6 +487,8 @@ struct ProjectPlanningView: View {
           HStack {
             Text("Unlinked appearance override: " + state.state).font(.caption).foregroundStyle(.orange)
             Button("Remove override") { shotBinding(shot.id, \.appearanceOverrides).wrappedValue = shot.appearanceOverrides?.filter { $0.subjectID != state.subjectID } }
+              .accessibilityLabel("Remove appearance override for \(plan.subjects.first(where: { $0.id == state.subjectID })?.name ?? "missing object")")
+              .accessibilityIdentifier("remove-appearance-override-\(shot.id.uuidString)-\(state.subjectID.uuidString)")
           }
         }
         DisclosureGroup("Resolved objects and references") {
@@ -364,17 +501,37 @@ struct ProjectPlanningView: View {
                 var states = shot.appearanceOverrides?.filter { $0.subjectID != object.id } ?? []
                 if !text.isEmpty { states.append(ObjectStateOverride(subjectID: object.id, state: String(text.prefix(2000)))) }
                 shotBinding(shot.id, \.appearanceOverrides).wrappedValue = states
-              })).disabled(plan.isShotApproved(shot.id, assets: store.project.assets))
+              }))
+                .accessibilityLabel("\(object.name) appearance in \(shot.name)")
+                .accessibilityIdentifier("shot-appearance-\(shot.id.uuidString)-\(object.id.uuidString)")
+                .disabled(plan.isShotApproved(shot.id, assets: store.project.assets))
             }
             Text("Only this shot’s linked dependencies are included. Sibling sets are excluded.").font(.caption).foregroundStyle(.secondary)
           }
         }
         ForEach(plan.issues(for: shot.id, assets: store.project.assets), id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
-        Text("Generation model and endpoint-image assignment will be configured when applying approved shots to the timeline.")
+        Text("Subject references remain in the production library. Assign first/last images here; timed frames and model-specific reference adapters remain available in the timeline inspector.")
           .font(.caption).foregroundStyle(.secondary)
         Button("Remove shot") { store.changePlanning { $0.shots.removeAll { $0.id == shot.id } }; selectedShot = nil }
           .disabled(plan.isShotApproved(shot.id, assets: store.project.assets))
       }.padding(12)
+    }
+  }
+  private func endpointPicker(_ title: String, shot: PlanningShot, key: WritableKeyPath<PlanningShot, UUID?>) -> some View {
+    HStack {
+      Picker(title, selection: shotBinding(shot.id, key)) {
+        Text("None").tag(nil as UUID?)
+        ForEach(store.project.assets.filter { $0.kind == .image }) { image in Text(image.name).tag(Optional(image.id)) }
+      }
+      Button("Import…") {
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let asset = MediaAsset(name: url.deletingPathExtension().lastPathComponent, kind: .image, path: url.path)
+        store.change { project in
+          guard let i = project.planning?.shots.firstIndex(where: { $0.id == shot.id }) else { return }
+          project.assets.append(asset); project.planning?.shots[i][keyPath: key] = asset.id
+        }
+      }
     }
   }
   private func subjectBinding<T>(_ id: UUID, _ key: WritableKeyPath<PlanningSubject, T>) -> Binding<T> {

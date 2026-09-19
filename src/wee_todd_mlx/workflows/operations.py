@@ -1,4 +1,4 @@
-"""Allowlisted workflow operations. Weighted work crosses only Context.ask()."""
+"""Allowlisted workflow operations. Models use Context.ask() or explicit native audio adapters."""
 
 from __future__ import annotations
 
@@ -178,6 +178,10 @@ def check_plan(inputs, *, known_context=""):
 
 
 def execute(operation, inputs, parameters, ctx):
+    if operation.startswith("music."):
+        from .music import execute_music
+
+        return execute_music(operation, inputs, parameters, ctx)
     if operation in {
         "movie.prepare_creative_brief@1",
         "movie.resolve_creative_brief@1",

@@ -54,6 +54,26 @@ struct DirectorSession: Codable {
   var reviews: [String: DirectorReviewDraft] = [:]
   var executionStarted: Bool?
   var reviewModeLocked: Bool { executionStarted == true || result != nil }
+  var hasUnsavedReviews: Bool {
+    reviews.contains { id, draft in
+      draft.hasUnsavedChanges(outputs: result?.steps[id]?.outputs ?? [:], referenceBindings: reviewAssetBindings)
+    }
+  }
+  mutating func changeInputs(_ update: (inout DirectorSession) -> Void) throws {
+    // Compare with the saved outputs before invalidating them. Merely opening an
+    // editor populates clean caches; those are not unsaved user changes.
+    guard !hasUnsavedReviews else {
+      throw StudioError.invalid("Save or discard your review edits before changing workflow inputs.")
+    }
+    for id in Array(reviews.keys) {
+      reviews[id]?.subjects = [:]; reviews[id]?.referencePaths = [:]
+      reviews[id]?.brief = nil; reviews[id]?.clips = [:]
+      reviews[id]?.story = nil; reviews[id]?.json = nil
+      // Navigation and unsubmitted repair instructions remain the user's work.
+    }
+    update(&self)
+    result = nil
+  }
   mutating func setReviewMode(_ mode: DirectorReviewMode) throws {
     definition = try mode.applying(to: definition, hasStarted: reviewModeLocked)
   }
@@ -61,7 +81,7 @@ struct DirectorSession: Codable {
 
 /// File I/O and decoding never run on the UI actor. Limits match the workflow writer.
 actor DirectorSessionFiles {
-  static let checkpointLimit = 2 * 1024 * 1024
+  static let jobImportLimit = 2 * 1024 * 1024
   static let draftLimit = 8 * 1024 * 1024
   private var savedSequence: [String: Int] = [:]
   func read<T: Decodable>(_ type: T.Type, at url: URL, limit: Int) throws -> T {
@@ -82,10 +102,10 @@ actor DirectorSessionFiles {
   func checkpoint(in directory: String) throws -> WorkflowRunSummary? {
     let url = URL(fileURLWithPath: directory).appendingPathComponent("run.json")
     guard !directory.isEmpty, FileManager.default.fileExists(atPath: url.path) else { return nil }
-    return try read(WorkflowRunSummary.self, at: url, limit: Self.checkpointLimit)
+    return try WorkflowCheckpoint.read(WorkflowRunSummary.self, at: url)
   }
   func candidate(at url: URL) throws -> DirectorSession {
-    let saved = try read(WorkflowJob.self, at: url, limit: Self.checkpointLimit)
+    let saved = try read(WorkflowJob.self, at: url, limit: Self.jobImportLimit)
     guard saved.definition["format"]?.directorText == "weetodd-workflow-v1",
           let id = saved.definition["id"]?.directorText, !id.isEmpty,
           case .array(let steps) = saved.definition["steps"], !steps.isEmpty,
@@ -122,7 +142,7 @@ actor DirectorSessionFiles {
     if let candidates = saved.coverageLibraryCandidates { candidate.libraryCandidates = candidates; candidate.catalogFrozen = true }
     let checkpointURL = URL(fileURLWithPath: saved.runDirectory).appendingPathComponent("run.json")
     if FileManager.default.fileExists(atPath: checkpointURL.path) {
-      let envelope = try read([String: JSONValue].self, at: checkpointURL, limit: Self.checkpointLimit)
+      let envelope = try WorkflowCheckpoint.read([String: JSONValue].self, at: checkpointURL)
       guard envelope["format"]?.directorText == "weetodd-workflow-run-v1", envelope["workflowID"]?.directorText == id else {
         throw StudioError.invalid("Run directory belongs to a different workflow.")
       }
@@ -213,6 +233,7 @@ private extension JSONValue {
 }
 
 @MainActor final class ReferenceWorkspaceLease {
+  let id = UUID()
   let previousDraft: DrawThingsImageDraft?
   private let previousPreview: String?
   private let previousEstimate: [String: Any]?
@@ -220,10 +241,17 @@ private extension JSONValue {
   private let subjectKey: String?
   init(store: StudioStore, subjectKey: String? = nil) {
     sessionID = store.documentSessionID; self.subjectKey = subjectKey
-    previousDraft = store.imageDraft; previousPreview = store.imagePreviewPath; previousEstimate = store.imageEstimate
+    if let previous = store.activeReferenceLease, previous.sessionID == sessionID {
+      // A closing editor may disappear after its replacement has already opened.
+      previousDraft = previous.previousDraft
+      previousPreview = previous.previousPreview; previousEstimate = previous.previousEstimate
+    } else {
+      previousDraft = store.imageDraft; previousPreview = store.imagePreviewPath; previousEstimate = store.imageEstimate
+    }
+    store.activeReferenceLease = self
   }
   func validate(store: StudioStore) throws {
-    guard store.documentSessionID == sessionID,
+    guard store.activeReferenceLease === self, store.documentSessionID == sessionID,
           subjectKey == nil || store.imageDraft?.referenceSheet?.subjectKey == subjectKey else {
       throw StudioError.invalid("The movie or reference workspace changed. Reopen this subject before attaching a candidate.")
     }
@@ -232,7 +260,8 @@ private extension JSONValue {
     guard (try? validate(store: store)) != nil else { return false }
     store.persistImageWorkspace(); store.restoringImageWorkspace = true
     store.imageDraft = previousDraft; store.imagePreviewPath = previousPreview; store.imageEstimate = previousEstimate
-    store.restoringImageWorkspace = false; store.referenceSheetOpen = false; store.persistImageWorkspace()
+    store.restoringImageWorkspace = false; store.referenceSheetOpen = false
+    store.activeReferenceLease = nil; store.persistImageWorkspace()
     return true
   }
 }

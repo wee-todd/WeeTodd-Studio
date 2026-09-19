@@ -497,5 +497,216 @@
     "modelCapability": "text",
     "iterationBound": "maxClips",
     "callsPerIteration": 2
+  },
+  "music.analyze@1": {
+    "inputs": {
+      "audio_path": "text",
+      "audio_sha256": "text"
+    },
+    "outputs": {
+      "analysis": "music_analysis"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 1
+  },
+  "music.prepare_brief@1": {
+    "inputs": {
+      "brief": "text",
+      "duration_seconds": "number",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer",
+      "visual_style": "text",
+      "presentation": "text",
+      "camera_style": "text",
+      "audio_style": "text",
+      "design_policy": "text",
+      "constraints": "text",
+      "observations": "observation_list",
+      "lyrics": "text",
+      "lyrics_status": "text"
+    },
+    "outputs": {
+      "creative_brief": "creative_brief"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 1,
+    "modelCapability": "text"
+  },
+  "music.plan_timing@1": {
+    "inputs": {
+      "analysis": "music_analysis",
+      "creative_brief": "creative_brief",
+      "audio_path": "text",
+      "audio_sha256": "text",
+      "source_start_seconds": "number",
+      "lyrics": "text",
+      "lyrics_status": "text",
+      "generation_engine": "text",
+      "generation_task": "text",
+      "min_clip_seconds": "number",
+      "max_clip_seconds": "number",
+      "backend_min_seconds": "number",
+      "backend_max_seconds": "number",
+      "timing_markers": "text",
+      "pacing": "text",
+      "continuity_enabled": "boolean"
+    },
+    "outputs": {
+      "music_timing": "music_timing"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 1,
+    "modelCapability": "text"
+  },
+  "music.plan_treatment@1": {
+    "inputs": {
+      "subjects": "subject_list",
+      "creative_brief": "creative_brief",
+      "brief": "text",
+      "duration_seconds": "number",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer",
+      "observations": "observation_list",
+      "music_timing": "music_timing"
+    },
+    "outputs": {
+      "story": "story_outline"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 252,
+    "modelCapability": "text"
+  },
+  "music.plan_beats@1": {
+    "inputs": {
+      "story": "story_outline",
+      "duration_seconds": "number",
+      "target_clip_seconds": "number",
+      "frame_rate": "integer",
+      "subjects": "subject_list",
+      "creative_brief": "creative_brief",
+      "music_timing": "music_timing"
+    },
+    "outputs": {
+      "clips": "structured_clip_plan"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "maxClips": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "maxClips"
+      ],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "modelCapability": "text",
+    "iterationBound": "maxClips",
+    "callsPerIteration": 2
+  },
+  "music.compile_prompts@1": {
+    "inputs": {
+      "subjects": "subject_list",
+      "creative_brief": "creative_brief",
+      "clips": "structured_clip_plan",
+      "planning_review": "planning_review"
+    },
+    "outputs": {
+      "prompt_plan": "h3_prompt_preview"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 1
+  },
+  "music.check_plan@1": {
+    "inputs": {
+      "clips": "structured_clip_plan",
+      "endpoints": "endpoint_plan",
+      "duration_seconds": "number",
+      "frame_rate": "integer",
+      "music_timing": "music_timing"
+    },
+    "outputs": {
+      "review": "planning_review"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented"
+  },
+  "music.analyze@2": {
+    "inputs": {
+      "audio_path": "text",
+      "audio_sha256": "text",
+      "lyrics": "text",
+      "lyrics_status": "text",
+      "analysis_mode": "text",
+      "analysis_model_directory": "text"
+    },
+    "outputs": {
+      "analysis": "music_analysis"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 1
+  },
+  "music.analyze@3": {
+    "inputs": {
+      "audio_path": "text",
+      "audio_sha256": "text",
+      "lyrics": "text",
+      "lyrics_status": "text",
+      "analysis_mode": "text",
+      "analysis_model_directory": "text",
+      "analysis_vocal_mode": "text"
+    },
+    "outputs": {
+      "analysis": "music_analysis"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "executionStatus": "implemented",
+    "maxCalls": 1
   }
 }

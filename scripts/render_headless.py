@@ -512,7 +512,7 @@ def render_h3(recipe, target):
 
 
 
-def publish_scene_movie(source, target, *, frames, fps, ffmpeg):
+def publish_scene_movie(source, target, *, frames, fps, ffmpeg, source_audio=None):
     """Trim the native extra frame/audio and atomically publish the delivered scene."""
     import os
     import subprocess
@@ -523,13 +523,21 @@ def publish_scene_movie(source, target, *, frames, fps, ffmpeg):
     duration = frames / fps
     with tempfile.TemporaryDirectory(prefix=".scene-publish-", dir=target.parent) as work:
         temporary = Path(work) / "scene.mp4"
-        subprocess.run([
-            ffmpeg, "-v", "error", "-i", str(source), "-filter_complex",
+        inputs = [ffmpeg, "-v", "error", "-i", str(source)]
+        audio_stream = "0:a:0"
+        if source_audio is not None:
+            inputs += ["-ss", str(source_audio["source_start_seconds"]),
+                       "-t", str(source_audio["source_duration_seconds"]),
+                       "-i", source_audio["path"]]
+            audio_stream = "1:a:0"
+        subprocess.run(inputs + [
+            "-filter_complex",
             f"[0:v:0]trim=end_frame={frames},setpts=PTS-STARTPTS[v];"
-            f"[0:a:0]atrim=end={duration:.12f},asetpts=PTS-STARTPTS[a]",
+            f"[{audio_stream}]atrim=end={duration:.12f},asetpts=PTS-STARTPTS[a]",
             "-map", "[v]", "-map", "[a]", "-r", str(fps), "-fps_mode", "cfr",
             "-c:v", "libx264", "-crf", "15", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-t", f"{duration:.12f}", "-movflags", "+faststart",
+            "-c:a", "pcm_s32le" if source_audio is not None else "aac", "-t", f"{duration:.12f}",
+            "-movflags", "+faststart",
             "-n", str(temporary),
         ], check=True)
         os.replace(temporary, target)
@@ -554,6 +562,13 @@ def render_ltx(recipe, target, *, checkpoint_directory=None):
     task_report = validate_conditioning(recipe)
     contract = task_report["contract"]
     media_report = inspect_media(recipe, contract)
+    source_audio_item = next((item for item in contract["inputs"]
+                              if scene_report and item["role"] == "audio_driver"), None)
+    source_audio_sha256 = None
+    if source_audio_item is not None:
+        from ltx25_mlx.chain_checkpoints import content_identity
+
+        source_audio_sha256 = content_identity(source_audio_item["path"])
     if recipe["engine"] == "ltx23":
         from ltx23_mlx.ic_lora import recipe_ic_specs
         from ltx23_mlx.lora import recipe_specs
@@ -605,7 +620,15 @@ def render_ltx(recipe, target, *, checkpoint_directory=None):
                 item, config, ingredients_dir.name, ffmpeg=recipe.get("ffmpeg")
             )
         ]
+    audio_interval_dir = None
     try:
+        if "audio_interval_input" in conditioning_kwargs:
+            from wee_todd_mlx.conditioning_media import materialize_audio_interval
+
+            interval = conditioning_kwargs.pop("audio_interval_input")
+            audio_interval_dir = tempfile.TemporaryDirectory(prefix="weetodd-audio-interval-")
+            conditioning_kwargs["audio_path"] = materialize_audio_interval(
+                recipe, interval["item"], interval["report"], audio_interval_dir.name)
         extension = recipe["engine"] in {"ltx23", "ltx25"} and contract[
             "task"
         ] == "extension"
@@ -638,6 +661,7 @@ def render_ltx(recipe, target, *, checkpoint_directory=None):
                 overlap_frames=recipe["scene"]["overlap_frames"],
                 boundary_image_policy=recipe["scene"].get("boundary_image_policy", "strict"),
                 window_frame_counts=scene_report["plan"]["window_frame_counts"],
+                audio_reference=conditioning_kwargs.get("audio_reference"),
                 images=images, seeds=[item["seed"] for item in recipe["scene"]["segments"]],
                 checkpoint_dir=checkpoint_directory or target.parent / "checkpoints",
                 unload_after=True,
@@ -645,8 +669,14 @@ def render_ltx(recipe, target, *, checkpoint_directory=None):
             )
             frames = scene_report["plan"]["total_frames"] - 1
             render_progress("publishing", "Trimming scene to its delivered timeline")
+            if source_audio_item is not None:
+                if content_identity(source_audio_item["path"]) != source_audio_sha256:
+                    raise ValueError("Scene source audio changed during generation.")
+                result.update(source_audio_sha256=source_audio_sha256,
+                              source_audio_publication="original_interval_pcm_s32le")
             publish_scene_movie(Path(result["video_path"]), target, frames=frames,
-                                fps=config.frame_rate, ffmpeg=media_binary(recipe, "ffmpeg"))
+                                fps=config.frame_rate, ffmpeg=media_binary(recipe, "ffmpeg"),
+                                source_audio=source_audio_item)
             result.update(native_video_path=result["video_path"], video_path=str(target),
                           delivered_frames=frames,
                           delivered_duration_seconds=frames / config.frame_rate,
@@ -706,6 +736,8 @@ def render_ltx(recipe, target, *, checkpoint_directory=None):
         RUNTIME.unload()
         if ingredients_dir is not None:
             ingredients_dir.cleanup()
+        if audio_interval_dir is not None:
+            audio_interval_dir.cleanup()
 
 
 def main():

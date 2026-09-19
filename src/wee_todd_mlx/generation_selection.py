@@ -373,6 +373,15 @@ def resolve_generation_selection(selection, clip, profiles, capabilities, *, val
             if None not in required_families and required_families <= families:
                 checked.append((candidate, content))
         compatible = checked
+    if clip["engine"] == "ltx23" and task == "control":
+        from wee_todd_mlx.task_conditioning import CONTROL_FAMILIES
+
+        required_families = {CONTROL_FAMILIES.get(a.get("controlType", "canny_edges"))
+                             for a in clip.get("attachments", []) if a["role"] == "control"}
+        compatible = [
+            (p, r) for p, r in compatible if None not in required_families and
+            required_families <= {i.get("family") for i in r["components"].get("ic_loras", [])}
+        ]
     if not compatible:
         raise ValueError(
             f"{clip['engine']} {task} conflicts with the selected recipe. "

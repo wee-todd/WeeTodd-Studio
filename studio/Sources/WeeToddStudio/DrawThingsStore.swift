@@ -27,6 +27,10 @@ extension StudioStore {
     (drawThingsCatalogs[profileID]?["models"] as? [[String: Any]])?
       .first(where: { $0["id"] as? String == modelID })?["family"] as? String ?? ""
   }
+  func drawThingsModelModifier(profileID: String, modelID: String) -> String? {
+    (drawThingsCatalogs[profileID]?["models"] as? [[String: Any]])?
+      .first(where: { $0["id"] as? String == modelID })?["modifier"] as? String
+  }
   func prepareDrawThingsClip() async {
     guard !operationBusy else { return }
     guard let clip = selectedClip,
@@ -198,7 +202,7 @@ extension StudioStore {
     }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
   }
   func loadDrawThingsLoRAGroups() {
-    let url = Self.supportDirectory.appendingPathComponent("drawthings-lora-groups.json")
+    let url = dataDirectory.appendingPathComponent("drawthings-lora-groups.json")
     if let data = try? Data(contentsOf: url),
       let groups = try? JSONDecoder().decode([DrawThingsLoRAGroup].self, from: data) {
       drawThingsLoRAGroups = groups
@@ -207,7 +211,7 @@ extension StudioStore {
   func saveDrawThingsLoRAGroups() {
     do {
       try JSONEncoder().encode(drawThingsLoRAGroups).write(
-        to: Self.supportDirectory.appendingPathComponent("drawthings-lora-groups.json"), options: .atomic)
+        to: dataDirectory.appendingPathComponent("drawthings-lora-groups.json"), options: .atomic)
     } catch { self.error = error.localizedDescription }
   }
   func beginImageGeneration(scope: AssetScope) {
@@ -227,12 +231,13 @@ extension StudioStore {
   func prepareImageGeneration() async {
     guard let draft = imageDraft,
       let connection = drawThingsConnections.first(where: { $0.id == draft.profileID }) else { return }
+    let referenceKey = beginImageAttempt(draft)
     do {
       let result = try await bridge.invoke("dt-estimate", runtime: runtime, payload: [
         "connection": try connection.object(), "drawThingsRequest": try draft.request(id: UUID().uuidString)])
       guard imageDraft == draft else { return }
       imageEstimate = result
-    } catch { self.error = error.localizedDescription }
+    } catch { recordImageFailure(error.localizedDescription, referenceKey: referenceKey) }
   }
   func generateImageAsset() async {
     guard let draft = imageDraft,
@@ -240,6 +245,7 @@ extension StudioStore {
     let inputPaths = Set(([draft.canvas].compactMap { $0 }.filter { $0.enabled }
       + draft.moodboard.filter { $0.enabled && $0.strength > 0 }).map { $0.path })
     let inputAssetIDs = allAssets.filter { inputPaths.contains($0.path) }.map { $0.id.uuidString }
+    let referenceKey = beginImageAttempt(draft)
     do {
       let output = Self.supportDirectory.appendingPathComponent("Generated Images/\(UUID().uuidString)")
       try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -268,6 +274,6 @@ extension StudioStore {
       selectedAssetID = asset.id
       if imageDraft == draft { imagePreviewPath = path }
       notice = "Generated \(draft.name) in \(asset.scope.rawValue) assets."
-    } catch { self.error = error.localizedDescription }
+    } catch { recordImageFailure(error.localizedDescription, referenceKey: referenceKey) }
   }
 }

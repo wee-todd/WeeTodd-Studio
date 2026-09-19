@@ -41,6 +41,8 @@ def test_catalog_covers_shared_studio_tasks_without_loading_models():
         ("h3", "ref2va"),
         ("ltx23", "t2v"),
         ("ltx23", "fflf"),
+        ("ltx23", "control"),
+        ("ltx23", "ref2va"),
         ("ltx25", "t2v"),
         ("ltx25", "fflf"),
         ("ltx25", "control"),
@@ -48,6 +50,31 @@ def test_catalog_covers_shared_studio_tasks_without_loading_models():
     }
     assert all(p["components"] and p["description"] for p in catalog)
     assert all(c["kind"] in {"file", "directory"} for p in catalog for c in p["components"])
+
+
+@pytest.mark.parametrize("suffix,family,task,mode", [
+    ("ingredients", "ingredients_reference_sheet", "ref2va", "two_stage"),
+    ("control", "union_control", "control", "distilled"),
+])
+def test_ltx23_setup_preserves_dedicated_ic_adapter_contract(
+    monkeypatch, suffix, family, task, mode
+):
+    setup = service()
+    preset = next(p for p in setup.setup_catalog() if p["id"] == "ltx23-" + suffix)
+    assert preset["pipeline_mode"] == mode
+    calls = []
+
+    def config(engine, components, memory, selected_task, selected_mode):
+        calls.append((engine, components, memory, selected_task, selected_mode))
+        return {"pipeline_mode": selected_mode}, {}
+
+    monkeypatch.setattr(setup, "_ltx_recipe_config", config)
+    recipe, _ = setup._recipe(preset, {"model_dir": "bundle", "gemma_model": "gemma",
+                                      suffix + "_lora_path": "ic.safetensors"}, "automatic", 256)
+    assert recipe["components"]["ic_loras"] == [
+        {"path": "ic.safetensors", "family": family, "strength": 1.0}]
+    assert suffix + "_lora_path" not in recipe["components"]
+    assert calls[0][3:] == (task, mode)
 
 
 @pytest.mark.parametrize(

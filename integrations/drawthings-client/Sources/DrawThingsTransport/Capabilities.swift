@@ -7,7 +7,7 @@ public enum Capabilities {
     let operation: String
     switch ModelZoo.versionForModel(model) {
     case .minimaxH3:
-      guard ModelZoo.modifierForModel(model) == .fl2va else { return nil }
+      guard [.fl2va, .ref2va].contains(ModelZoo.modifierForModel(model)) else { return nil }
       operation = "video"
     case .ltx2, .ltx2_3: operation = "video"
     case .v1, .v2, .kandinsky21, .sdxlBase, .sdxlRefiner, .ssd1b, .wurstchenStageC,
@@ -38,6 +38,9 @@ public enum Capabilities {
       rule["fps"] = ["min": 1, "max": 240, "multipleOf": 1]
       if ModelZoo.versionForModel(model) == .minimaxH3 {
         rule["inputRoleCombinations"] = [[], ["first"], ["first", "last"]]
+        if ModelZoo.modifierForModel(model) == .ref2va {
+          rule["inputRoleCombinations"] = (1...9).map { Array(repeating: "reference", count: $0) }
+        }
         rule["numFrames"] = ["min": 5, "max": 100000, "multipleOf": 17, "offset": 5]
         rule["fps"] = ["min": 24, "max": 24, "multipleOf": 1]
       }

@@ -6,15 +6,22 @@ import UniformTypeIdentifiers
 
 struct PreviewPane: View {
   @EnvironmentObject var store: StudioStore
+  var body: some View { PlaybackPreviewPane(position: store.playbackPosition) }
+}
+struct PlaybackPreviewPane: View {
+  @EnvironmentObject var store: StudioStore
+  @ObservedObject var position: TimelinePlaybackPosition
   var body: some View {
     VStack(spacing: 0) {
       HStack {
         SmallLabel(text: "Viewport")
+        Text(store.previewMode == "Movie" ? "Rendered movie" : "Timeline · cuts")
+          .font(.system(size: 9)).foregroundStyle(.secondary)
         Spacer()
-        Text(store.selectedClip?.name ?? "No clip selected").font(.system(size: 10))
+        Text(store.previewClip?.name ?? "Timeline").font(.system(size: 10))
           .foregroundStyle(.secondary)
         Spacer()
-        Button(store.previewMode == "Movie" ? "Clip preview" : "Preview movie") {
+        Button(store.previewMode == "Movie" ? "Timeline playback" : "Render movie preview") {
           if store.previewMode == "Movie" {
             store.refreshPreview()
           } else {
@@ -22,12 +29,20 @@ struct PreviewPane: View {
           }
         }.disabled(store.bridge.busy || store.project.clips.isEmpty)
       }.padding(.horizontal, 20).frame(height: 40)
+      if store.preparingTimelinePlayback {
+        HStack { ProgressView().controlSize(.small); Text("Loading timeline…").font(.caption); Spacer() }
+          .padding(.horizontal, 20).padding(.bottom, 6)
+      } else if let warning = store.timelinePlaybackWarning {
+        Text(warning).font(.caption).foregroundStyle(.orange).lineLimit(2)
+          .padding(.horizontal, 20).padding(.bottom, 6)
+      }
       GeometryReader { geo in
         ZStack {
           Color.black
           if store.previewMode == "Movie" {
             NativePlayer(player: store.player)
-          } else if let clip = store.selectedClip, !clip.sourcePath.isEmpty {
+          } else if let clip = store.previewClip, !clip.sourcePath.isEmpty,
+            store.timelinePlaybackIssues[clip.id] == nil {
             if ["png", "jpg", "jpeg", "webp", "tif", "tiff", "heic"].contains(
               URL(fileURLWithPath: clip.sourcePath).pathExtension.lowercased())
             {
@@ -41,26 +56,26 @@ struct PreviewPane: View {
               Image(systemName: "viewfinder").font(.system(size: 43, weight: .ultraLight))
                 .foregroundStyle(Theme.mint.opacity(0.7))
               Text(
-                store.selectedClip == nil
-                  ? "Every movie begins with a shot." : store.selectedClip?.name ?? "Current shot"
+                store.previewClip == nil
+                  ? "Every movie begins with a shot." : store.previewClip?.name ?? "Current shot"
               ).font(.system(size: 23, weight: .light))
               Text(
-                store.selectedClip == nil
+                store.previewClip == nil
                   ? "Drop a movie below, or create a clip with H3 or LTX."
-                  : (store.selectedClip?.prompt.isEmpty == false ? store.selectedClip?.prompt ?? "" : "Describe this shot, then add its reference images.")
+                  : (store.previewClip?.prompt.isEmpty == false ? store.previewClip?.prompt ?? "" : "Describe this shot, then add its reference images.")
               ).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(4).multilineTextAlignment(.center)
-              if let clip = store.selectedClip {
-                Text("\(clip.attachments.count) references · \(clip.displayTask)").font(.caption)
-                if let blocker = store.issues(for: clip).first {
+              if let clip = store.previewClip {
+                Text("\(clip.reviewMediaCount) references · \(clip.displayTask)").font(.caption)
+                if let blocker = store.timelinePlaybackIssues[clip.id] ?? store.issues(for: clip).first {
                   Text(blocker).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center)
                 }
               }
               HStack(spacing: 10) {
                 Button {
-                  if store.selectedClip == nil { store.addClip() }
+                  if let clip = store.previewClip { store.select(clip.id) } else { store.addClip() }
                   store.showPrompt = true
                 } label: {
-                  Label(store.selectedClip == nil ? "Create a shot" : "Edit this shot", systemImage: store.selectedClip == nil ? "plus" : "pencil")
+                  Label(store.previewClip == nil ? "Create a shot" : "Edit this shot", systemImage: store.previewClip == nil ? "plus" : "pencil")
                 }.buttonStyle(.borderedProminent).foregroundStyle(.white)
                 Button("Import movie") { store.chooseImports(addToTimeline: true) }.buttonStyle(
                   .bordered)
@@ -72,7 +87,7 @@ struct PreviewPane: View {
           .frame(width: geo.size.width, height: geo.size.height)
       }.padding(.horizontal, 20).padding(.bottom, 12)
       HStack(spacing: 15) {
-        Text(timecode(store.playhead)).font(.system(size: 11, design: .monospaced)).foregroundStyle(
+        Text(timecode(position.seconds)).font(.system(size: 11, design: .monospaced)).foregroundStyle(
           Theme.mint
         ).frame(width: 92, alignment: .leading)
         Spacer()
@@ -116,8 +131,7 @@ struct PreviewPane: View {
       frames % fps)
   }
   @ViewBuilder func titlePreview(_ clip: Clip) -> some View {
-    let index = store.project.clips.firstIndex { $0.id == clip.id } ?? 0
-    let time = store.project.start(of: index) + store.playhead
+    let time = store.playhead
     ForEach(store.project.titles.filter { time >= $0.start && time < $0.start + $0.duration }) {
       title in
       VStack {
@@ -204,7 +218,7 @@ struct TimelineView: View {
           ).frame(width: 77, alignment: .leading)
           GeometryReader { geo in
             ScrollView(.horizontal) {
-              let width = max(geo.size.width - 10, store.project.duration * store.zoom + 130)
+              let width = max(geo.size.width - 10, store.project.timelineContentDuration * store.zoom + 130)
               ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
                   ruler(width: width)
@@ -267,20 +281,12 @@ struct TimelineView: View {
                       }
                     }.frame(height: 38)
                   }
-                }
-                if let id = store.selectedClipID,
-                  let i = store.project.clips.firstIndex(where: { $0.id == id })
-                {
-                  Rectangle().fill(Theme.mint).frame(width: 1, height: 199).overlay(alignment: .top)
-                  {
-                    Image(systemName: "arrowtriangle.down.fill").font(.system(size: 9))
-                      .foregroundStyle(Theme.mint).offset(y: -1)
-                  }.offset(
-                    x: (store.previewMode == "Movie"
-                      ? store.playhead : store.project.start(of: i) + store.playhead) * store.zoom
-                  ).allowsHitTesting(false)
+                }.frame(width: width, alignment: .leading)
+                if !store.project.clips.isEmpty {
+                  TimelinePlayhead(position: store.playbackPosition)
                 }
               }.frame(width: width, height: CGFloat(162 + store.project.audioTracks.count * 38))
+                .coordinateSpace(name: "timeline")
                 .dropDestination(for: String.self) { items, _ in
                   handleDrop(items)
                   return true
@@ -307,7 +313,14 @@ struct TimelineView: View {
           Rectangle().fill(Theme.line).frame(width: 1, height: 5)
         }.frame(width: 30).offset(x: Double(i) * store.zoom - 15)
       }
-    }.frame(height: 23)
+    }.frame(height: 23).contentShape(Rectangle())
+      .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("timeline"))
+        .onChanged { store.scrubTimeline(to: $0.location.x / store.zoom) }
+        .onEnded { _ in store.endTimelineScrub() })
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("Timeline time ruler")
+      .accessibilityValue(String(format: "0 to %.2f seconds", store.project.duration))
+      .help("Click or drag above a clip to move the playhead")
   }
   func handleDrop(_ items: [String]) {
     for item in items {
@@ -332,12 +345,36 @@ struct TimelineView: View {
     }
   }
 }
+struct TimelinePlayhead: View {
+  @EnvironmentObject var store: StudioStore
+  @ObservedObject var position: TimelinePlaybackPosition
+  var body: some View {
+    ZStack(alignment: .top) {
+      Rectangle().fill(Theme.mint).frame(width: 1)
+      Image(systemName: "arrowtriangle.down.fill").font(.system(size: 11))
+        .foregroundStyle(Theme.mint)
+    }.frame(width: 18, height: CGFloat(162 + store.project.audioTracks.count * 38))
+      .contentShape(Rectangle())
+      .offset(x: position.seconds * store.zoom - 9)
+      .highPriorityGesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("timeline"))
+        .onChanged { store.scrubTimeline(to: $0.location.x / store.zoom, clamped: true) }
+        .onEnded { _ in store.endTimelineScrub() })
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("Timeline playhead")
+      .accessibilityValue(String(format: "%.2f seconds", position.seconds))
+      .accessibilityAdjustableAction { direction in
+        store.seek(position.seconds + (direction == .increment ? 1 : -1) / store.project.settings.fps)
+      }
+      .help("Drag to scrub the timeline")
+  }
+}
 struct TimelineClip: View {
   @EnvironmentObject var store: StudioStore
   var clip: Clip
   var index: Int
   var body: some View {
     GeometryReader { geo in
+      let state = store.timelineClipState(clip)
       VStack(alignment: .leading, spacing: 7) {
         HStack(spacing: 5) {
           Image(systemName: clip.engine == .movie ? "film" : "sparkles")
@@ -345,7 +382,7 @@ struct TimelineClip: View {
           Spacer(minLength: 0)
         }.font(.system(size: 10))
         HStack {
-          Text(store.clipState(clip).label.uppercased()).font(.system(size: 8, weight: .medium))
+          Text(state.label.uppercased()).font(.system(size: 8, weight: .medium))
             .lineLimit(1)
           Spacer(minLength: 0)
           Text("\(clip.duration,specifier:"%.1f")s").font(.system(size: 9, design: .monospaced))
@@ -367,12 +404,12 @@ struct TimelineClip: View {
         }.frame(height: 30)
       }.padding(9).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
-          store.clipState(clip).color.opacity(store.selectedClipID == clip.id ? 0.22 : 0.10),
+          state.color.opacity(store.selectedClipID == clip.id ? 0.22 : 0.10),
           in: RoundedRectangle(cornerRadius: 6)
         )
         .overlay(
           RoundedRectangle(cornerRadius: 6).strokeBorder(
-            store.selectedClipID == clip.id ? store.clipState(clip).color : Theme.line,
+            store.selectedClipID == clip.id ? state.color : Theme.line,
             lineWidth: store.selectedClipID == clip.id ? 1.5 : 1)
         )
         .overlay(alignment: .topLeading) {
@@ -386,7 +423,7 @@ struct TimelineClip: View {
         .contentShape(Rectangle())
         .onTapGesture { location in
           store.select(clip.id)
-          store.seek(location.x / max(1, geo.size.width) * clip.duration)
+          store.seek(store.project.start(of: index) + location.x / max(1, geo.size.width) * clip.duration)
         }
         .draggable("clip:" + clip.id.uuidString)
         .dropDestination(for: String.self) { items, location in

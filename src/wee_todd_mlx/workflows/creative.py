@@ -221,7 +221,9 @@ def classify_subjects(subjects, brief, ctx):
     return result
 
 
-def compile_prompts(brief, plan, subjects):
+def compile_prompts(brief, plan, subjects, *, model_neutral=False):
+    from .music_context import named_subject_ids
+    from .schema import value_schema
     from .structured import validate_plan
 
     require_answers(brief)
@@ -267,7 +269,8 @@ def compile_prompts(brief, plan, subjects):
     warnings = [
         "Draft prompts only. Validate engine task support, dimensions, frame count and "
         "reference roles before creating any generation job.",
-        "Reference images remain unassigned visual evidence; no keyframe alignment is implied.",
+        "Reference images remain unassigned visual evidence. Choose compatible images for the "
+        "selected shot and generation task before rendering; no keyframe alignment is implied.",
     ]
     if "dialogue" in low or "<d>" in brief["sourceText"]:
         warnings.append(
@@ -278,20 +281,14 @@ def compile_prompts(brief, plan, subjects):
     for clip in plan["clips"]:
         selected = set(clip["characters"])
         context = " ".join(clip[key] for key in ("location", "action", "startState", "endState"))
-        mentions = {}
-        for row in subjects:
-            for name in [row.get("name", ""), *row.get("aliases", [])]:
-                phrase = " ".join(re.findall(r"\w+", name.casefold()))
-                if phrase:
-                    mentions.setdefault(phrase, set()).add(row["id"])
-        normalized_context = " " + " ".join(re.findall(r"\w+", context.casefold())) + " "
-        for phrase, ids in mentions.items():
-            if " " + phrase + " " in normalized_context:
-                if len(ids) > 1:
-                    raise ValueError(
-                        "A shot names multiple possible subjects; clarify its identity"
-                    )
-                selected.update(ids)
+        mentioned = named_subject_ids(
+            [{**row, "name": row.get("name", "")} for row in subjects], context,
+            include_ids=False, positive_only=True, reject_ambiguous=True,
+        )
+        # The reviewed cast is authoritative. Possessives, namesakes and location
+        # membership must not put an absent character back into a render prompt.
+        selected.update(sid for sid in mentioned
+                        if sid not in cast and inventory[sid].get("kind") != "character")
         explicit = set(selected)
         while True:
             linked = set()
@@ -300,6 +297,9 @@ def compile_prompts(brief, plan, subjects):
                     target = link["targetID"]
                     if target not in inventory:
                         raise ValueError("A prompt relationship targets a missing subject")
+                    if (target in cast or inventory[target].get("kind") == "character") \
+                            and target not in clip["characters"]:
+                        continue
                     # Scene membership and held/used objects vary over time. Inventory links
                     # cannot make a future setting or hidden prop visible in every shot.
                     if link["role"] in {"located_in", "holds", "uses"} and target not in explicit:
@@ -336,7 +336,7 @@ def compile_prompts(brief, plan, subjects):
                 descriptions.append("Surrounding context: " + row["name"] + ".")
             else:
                 descriptions.append(row["description"])
-        visual = "[Shot 1] " + " ".join(descriptions)
+        visual = ("" if model_neutral else "[Shot 1] ") + " ".join(descriptions)
         reference_assets = list(
             dict.fromkeys(
                 [o["image"] for o in brief["referenceObservations"]]
@@ -350,8 +350,9 @@ def compile_prompts(brief, plan, subjects):
                 ]
             )
         )
-        if len(reference_assets) > 8:
-            raise ValueError("Select at most eight reference assets per draft shot")
+        evidence_limit = value_schema("draft_reference_evidence_list")["maxItems"]
+        if len(reference_assets) > evidence_limit:
+            raise ValueError(f"Draft reference evidence exceeds the {evidence_limit}-image bound")
         visual += (
             f" Location: {clip['location']}. Start: {clip['startState']} "
             f"Action: {clip['action']} End: {clip['endState']} "
@@ -372,7 +373,11 @@ def compile_prompts(brief, plan, subjects):
                 raise ValueError("Shot dialogue must exactly preserve supplied dialogue")
             warnings.append(
                 f"{clip['id']}: approved spoken words need explicit speaker and "
-                "language assignment in H3 <d> syntax before generation."
+                + (
+                    "language assignment before generation."
+                    if model_neutral
+                    else "language assignment in H3 <d> syntax before generation."
+                )
             )
         spoken = re.findall(r"<d>.*?</d>", visual, flags=re.DOTALL)
         if any(words not in approved_text for words in spoken):
@@ -381,15 +386,17 @@ def compile_prompts(brief, plan, subjects):
             visual += " Constraints: " + preferences["constraints"]
         fields = {
             "integrated_multimodal_description": visual,
-            "overall_soundscape": sound,
-            "non_diegetic_music": score,
+            "overall_soundscape": "Preserve the original source song." if model_neutral else sound,
+            "non_diegetic_music": "Original source song" if model_neutral else score,
         }
         prompts.append(
             {
                 "clipID": clip["id"],
                 "durationSeconds": clip["frameCount"] / plan["fps"],
                 **fields,
-                "prompt": "\n\n".join(k + ": " + v for k, v in fields.items()),
+                "prompt": visual + " Source audio drives timing; preserve the original song."
+                if model_neutral
+                else "\n\n".join(k + ": " + v for k, v in fields.items()),
                 "referenceAssets": reference_assets,
                 "subjectIDs": selected_ids,
             }
@@ -424,6 +431,7 @@ def execute_creative(operation, inputs, parameters, ctx):
                     ),
                     inventory=inputs["subjects"],
                     allow_proposals=allow,
+                    preserve_current_identity=True,
                 )
                 for row in inputs["subjects"]
             ]
@@ -439,8 +447,12 @@ def execute_creative(operation, inputs, parameters, ctx):
         require_answers(inputs["creative_brief"])
         bounded = {k: v for k, v in inputs.items() if k != "creative_brief"}
         bounded["sourceText"] = inputs["creative_brief"].get("sourceText", inputs["brief"])
-        bounded["dialogueAuthority"] = bounded["sourceText"] + "\n" + "\n".join(
-            question.get("answer", "") for question in inputs["creative_brief"]["questions"]
+        bounded["dialogueAuthority"] = (
+            bounded["sourceText"]
+            + "\n"
+            + "\n".join(
+                question.get("answer", "") for question in inputs["creative_brief"]["questions"]
+            )
         )
         bounded["subjects"] = [
             {k: row[k] for k in ("id", "kind", "name", "description")} for row in inputs["subjects"]
@@ -501,17 +513,9 @@ def apply_library_definition(subject, choice, library):
 
 
 def validate_classified_relations(subjects):
+    from .relationship_rules import validate_guided_relationship
+
     inventory = {row["id"]: row for row in subjects}
     for row in subjects:
         for link in row.get("relationships", []):
-            target = inventory[link["targetID"]]
-            if (
-                row["kind"] == "set"
-                and link["role"] in {"part_of", "located_in"}
-                and target["kind"] != "environment"
-            ):
-                raise ValueError("A set's parent relationship must target an environment")
-            if link["role"] == "wears" and (
-                row["kind"] != "character" or target["kind"] not in {"clothing", "outfit"}
-            ):
-                raise ValueError("A wears relationship runs from a character to clothing or outfit")
+            validate_guided_relationship(row, inventory[link["targetID"]], link["role"])

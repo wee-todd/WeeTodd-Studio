@@ -8,8 +8,10 @@ import re
 import unicodedata
 
 from .context_budget import NonRetryableAssistantError, inventory_context
+from .coverage_packing import REQUEST_VERSION, compact_request, restore_proposal
 from .description_review import relevant_passages
 from .operations import parse_value
+from .relationship_rules import GUIDED_RELATIONSHIP_RULES, validate_guided_relationship
 from .validation import validate_value
 
 
@@ -24,7 +26,10 @@ def _link(subject, target, role, placement):
     }
 
 
-def _direction(subject, target, role):
+def _direction(subject, target, role, *, guided=False):
+    if guided:
+        validate_guided_relationship(subject, target, role)
+        return
     if role == "wears" and (
         subject["kind"] != "character" or target["kind"] not in {"clothing", "outfit", "prop"}
     ):
@@ -53,7 +58,7 @@ def _anchor(subject, target, phrase, occurrence):
     }
 
 
-def deterministic(subject, inventory):
+def deterministic(subject, inventory, *, guided=False):
     """Only unique complete names/aliases/IDs and explicit role grammar certify a link."""
     result = copy.deepcopy(subject)
     result.pop("descriptionMentions", None)
@@ -68,7 +73,7 @@ def deterministic(subject, inventory):
     targets = {item["id"]: item for item in inventory}
     for link in links:
         try:
-            _direction(subject, targets[link["targetID"]], link["role"])
+            _direction(subject, targets[link["targetID"]], link["role"], guided=guided)
         except ValueError as error:
             issues.append(str(error))
     for label, ids in sorted(labels.items(), key=lambda pair: -len(pair[0])):
@@ -115,7 +120,7 @@ def deterministic(subject, inventory):
                 if role_match:
                     role = role_match[1].lower().replace("wearing", "wears")
                     try:
-                        _direction(subject, targets[target], role)
+                        _direction(subject, targets[target], role, guided=guided)
                     except ValueError:
                         continue
                     if len(links) >= 32:
@@ -188,7 +193,7 @@ def _missing_is_current(subject, missing):
     return False
 
 
-def _apply(subject, base, proposal, inventory, library, brief):
+def _apply(subject, base, proposal, inventory, library, brief, *, guided=False):
     result = copy.deepcopy(base)
     links = result["relationships"]
     pairs = {(link["targetID"], link["role"], link["placement"]) for link in links}
@@ -197,7 +202,7 @@ def _apply(subject, base, proposal, inventory, library, brief):
         target = value["targetID"]
         if target not in inventory or target == subject["id"]:
             raise ValueError("Relationships require a known other inventory ID")
-        _direction(subject, inventory[target], value["role"])
+        _direction(subject, inventory[target], value["role"], guided=guided)
         names = [
             item
             for item in inventory.values()
@@ -294,7 +299,19 @@ def _apply(subject, base, proposal, inventory, library, brief):
     return result, matches
 
 
-def _merge_components(subject, base, proposal, inventory, library, brief, matches, missing):
+def _merge_components(
+    subject,
+    base,
+    proposal,
+    inventory,
+    library,
+    brief,
+    matches,
+    missing,
+    *,
+    guided=False,
+    request_ids=None,
+):
     """Reject a bad component without losing independent checked relationships or suggestions."""
     result = copy.deepcopy(base)
     matches, missing = copy.deepcopy(matches), copy.deepcopy(missing)
@@ -312,10 +329,14 @@ def _merge_components(subject, base, proposal, inventory, library, brief, matche
                 errors = validate_value("object_coverage_proposal", packet)
                 if errors:
                     raise ValueError(errors[0]["message"])
+                if request_ids is not None:
+                    packet = restore_proposal(packet, request_ids)
                 if field == "issues":
                     rejected.append(value)
                     continue
-                candidate, new_matches = _apply(subject, result, packet, inventory, library, brief)
+                candidate, new_matches = _apply(
+                    subject, result, packet, inventory, library, brief, guided=guided
+                )
                 errors = validate_value(
                     "subject_list",
                     [
@@ -414,6 +435,95 @@ SYSTEM = (
 )
 
 
+# Bump when coverage selection, anchoring or merge semantics change.
+COVERAGE_IMPLEMENTATION_VERSION = 3
+
+
+def _coverage_execution_key(ctx, guided):
+    from .runner import digest
+    from .schema import contracts
+
+    model = {"id": ctx.spec["model"], **ctx.runner.definition["models"][ctx.spec["model"]]}
+    return digest(
+        {
+            "operation": "project.review_object_coverage@1",
+            "implementation": COVERAGE_IMPLEMENTATION_VERSION,
+            "system": SYSTEM + (GUIDED_RELATIONSHIP_RULES if guided else ""),
+            "contracts": contracts()[0]["values"],
+            "guided": guided,
+            "requestVersion": REQUEST_VERSION if guided else 1,
+            "model": model,
+            "runtime": ctx.runner.backend.fingerprint(model, []),
+            "settings": {"maxTokens": ctx.runner.max_tokens, "decoding": "greedy"},
+            "parameters": ctx.spec.get("parameters", {}),
+        }
+    )
+
+
+def _coverage_certificate(subjects, brief, library, execution_key):
+    from .runner import digest
+
+    return {
+        "version": 1,
+        "key": digest(
+            {
+                "subjects": subjects,
+                "brief": brief,
+                "library": list(library),
+                "executionKey": execution_key,
+            }
+        ),
+    }
+
+
+def _complete_coverage_values(record, subjects):
+    items = record.get("items", {})
+    return set(items) == {row["id"] for row in subjects} and all(
+        items[row["id"]].get("status") == "completed" and items[row["id"]].get("value") == row
+        for row in subjects
+    )
+
+
+def _reuse_direct_coverage(subjects, brief, library, execution_key, ctx):
+    steps = ctx.runner.state["steps"]
+    if (
+        ctx.spec["operation"] != "project.review_object_coverage@1"
+        or steps.get(ctx.spec["id"]) is not ctx.record
+    ):
+        return False  # An explicit manual review is never skipped by an ancestor's certificate.
+    binding = ctx.spec["inputs"]["subjects"]
+    if "step" not in binding or binding.get("output") != "subjects":
+        return False
+    source = steps.get(binding["step"], {})
+    if source.get("status") != "completed" or source.get("outputs", {}).get("subjects") != subjects:
+        return False
+    if source.get("coverageReviewReport", {}).get("proposals"):
+        return False
+    expected = _coverage_certificate(subjects, brief, library, execution_key)
+    for name, record in (
+        ("coverageReviewRuns", source.get("coverageReviewRuns", {})),
+        ("step", source),
+    ):
+        if record.get("coverageCertificate") != expected or not _complete_coverage_values(
+            record, subjects
+        ):
+            continue
+        ctx.record["items"] = {
+            row["id"]: {"status": "completed", "approved": False, "value": copy.deepcopy(row)}
+            for row in subjects
+        }
+        ctx.record["coverageCertificate"] = expected
+        ctx.record["coverageReuse"] = {
+            "sourceStepID": binding["step"],
+            "sourceRecord": name,
+            "certificateKey": expected["key"],
+        }
+        ctx.message("Reused completed object coverage from " + binding["step"] + "; no model calls")
+        ctx.runner._save()
+        return True
+    return False
+
+
 def review_object_coverage(subjects, brief, ctx, library=()):
     from .runner import Context, digest
 
@@ -421,18 +531,51 @@ def review_object_coverage(subjects, brief, ctx, library=()):
         errors = validate_value(kind, value)
         if errors:
             raise ValueError(errors[0]["message"])
+    guided = ctx.runner.definition["id"] in {
+        "weetodd.guided-movie-planning",
+        "weetodd.music-video-planning",
+    }
+    ctx.check()
+    execution_key = _coverage_execution_key(ctx, guided)
+    if ctx.record.get("coverageExecutionKey") != execution_key:
+        # Old/manual caches cannot certify a new runtime using previously returned values.
+        ctx.record.update(coverageExecutionKey=execution_key, items={}, calls=[])
+    ctx.record.pop("coverageCertificate", None)
+    ctx.record.pop("coverageReuse", None)
+    if _reuse_direct_coverage(subjects, brief, library, execution_key, ctx):
+        return {"subjects": copy.deepcopy(subjects)}
     inventory = {item["id"]: item for item in subjects}
     records, results = ctx.record.setdefault("items", {}), []
     for subject in subjects:
         ctx.check()
         key = digest(
-            {"subject": subject, "inventory": inventory, "brief": brief, "library": list(library)}
+            {
+                "subject": subject,
+                "inventory": inventory,
+                "brief": brief,
+                "library": list(library),
+                **(
+                    {
+                        "guided": True,
+                        "relationshipRulesVersion": 1,
+                        "requestVersion": REQUEST_VERSION,
+                    }
+                    if guided
+                    else {}
+                ),
+            }
         )
         record = records.setdefault(subject["id"], {})
         if record.get("key") != key:
             record.clear()
-            record.update(key=key, calls=[], attempts=0, status="pending", approved=False,
-                          attemptStateVersion=2)
+            record.update(
+                key=key,
+                calls=[],
+                attempts=0,
+                status="pending",
+                approved=False,
+                attemptStateVersion=2,
+            )
         if record.get("status") == "completed":
             results.append(copy.deepcopy(record["value"]))
             continue
@@ -443,7 +586,7 @@ def review_object_coverage(subjects, brief, ctx, library=()):
             if not record.get("lastIssue"):
                 record["attempts"] = min(record.get("attempts", 0), len(record.get("calls", [])))
             record["attemptStateVersion"] = 2
-        base, initial_issues = deterministic(subject, subjects)
+        base, initial_issues = deterministic(subject, subjects, guided=guided)
         result = copy.deepcopy(record.get("partialValue", base))
         issues = list(dict.fromkeys(initial_issues + record.get("partialIssues", [])))
         missing = copy.deepcopy(record.get("partialMissing", []))
@@ -463,33 +606,43 @@ def review_object_coverage(subjects, brief, ctx, library=()):
             record["attemptStatus"] = "running"
             ctx.runner._save()
             try:
+                payload = {
+                    "CURRENT_OBJECT_ONLY": subject["id"],
+                    "currentObject": {
+                        k: result[k] for k in ("id", "name", "kind", "relationships")
+                    },
+                    "currentDescription": subject["description"],
+                    "legalOutgoingRoles": legal_roles,
+                    "otherInventoryRowsForContextOnly": [
+                        row for row in selected["rows"] if row["id"] != subject["id"]
+                    ],
+                    "contextSelection": {k: v for k, v in selected.items() if k != "rows"},
+                    "sourcePassages": passages,
+                    "libraryCandidatesForCurrentObjectOnly": shortlisted,
+                    "previousIssues": issues,
+                }
+                original_ids = None
+                if guided:
+                    payload, original_ids = compact_request(payload)
                 raw = child.ask(
-                    SYSTEM,
-                    json.dumps(
-                        {
-                            "CURRENT_OBJECT_ONLY": subject["id"],
-                            "currentObject": {
-                                k: result[k] for k in ("id", "name", "kind", "relationships")
-                            },
-                            "currentDescription": subject["description"],
-                            "legalOutgoingRoles": legal_roles,
-                            "otherInventoryRowsForContextOnly": [
-                                row for row in selected["rows"] if row["id"] != subject["id"]
-                            ],
-                            "contextSelection": {k: v for k, v in selected.items() if k != "rows"},
-                            "sourcePassages": passages,
-                            "libraryCandidatesForCurrentObjectOnly": shortlisted,
-                            "previousIssues": issues,
-                        },
-                        ensure_ascii=False,
-                    ),
+                    SYSTEM + (GUIDED_RELATIONSHIP_RULES if guided else ""),
+                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
                 )
                 for call in record["calls"]:
                     for field in ("system", "prompt", "images"):
                         call.pop(field, None)
                 proposal = parse_value(raw, "object_coverage_response")
                 result, matches, missing, rejected = _merge_components(
-                    subject, result, proposal, inventory, shortlisted, brief, matches, missing
+                    subject,
+                    result,
+                    proposal,
+                    inventory,
+                    shortlisted,
+                    brief,
+                    matches,
+                    missing,
+                    guided=guided,
+                    request_ids=original_ids,
                 )
                 issues = list(dict.fromkeys(initial_issues + rejected))[:12]
                 record["attempts"] += 1
@@ -537,4 +690,15 @@ def review_object_coverage(subjects, brief, ctx, library=()):
         record.update(value=result, status="completed", approved=False)
         ctx.runner._save()
         results.append(copy.deepcopy(result))
+    if (
+        _complete_coverage_values(ctx.record, results)
+        and all(
+            item.get("attemptStatus") == "returned" and not item.get("lastIssue")
+            for item in records.values()
+        )
+        and _coverage_execution_key(ctx, guided) == execution_key
+    ):
+        ctx.record["coverageCertificate"] = _coverage_certificate(
+            results, brief, library, execution_key
+        )
     return {"subjects": results}

@@ -20,6 +20,34 @@ def test_ltx25_guided_catalog_requires_dedicated_adapters():
     assert "First frame" in presets["ltx25-image"]["description"]
 
 
+def test_ltx25_ingredients_description_reaches_resolved_prompt(tmp_path, monkeypatch):
+    request, compose = recipe_request(tmp_path)
+    clip = request["project"]["clips"][0]
+    prompt = clip["prompt"]
+    clip["attachments"] = [dict(id="sheet", assetID="sheet", role="control",
+                               controlType="ingredients_reference_sheet",
+                               description="A cyclist in a yellow coat and a blue bicycle.")]
+    request["project"]["assets"] = [
+        dict(id="sheet", kind="image", name="Sheet", path="/tmp/sheet.png")]
+    profile = Path(clip["profileID"])
+    recipe = json.loads(profile.read_text())
+    recipe["conditioning"] = dict(version=1, task="control", inputs=[])
+    profile.write_text(json.dumps(recipe))
+    monkeypatch.setattr(model_setup, "ltx25_recipe_control_families",
+                        lambda _: {"ingredients_reference_sheet"})
+    monkeypatch.setattr("wee_todd_mlx.task_conditioning.validate_conditioning", lambda _: {})
+    resolved, _ = compose(request)
+    assert resolved["prompt"] == (
+        "Reference sheet: A cyclist in a yellow coat and a blue bicycle.\n\nGenerated video: "
+        + prompt)
+    assert clip["prompt"] == prompt
+    clip["attachments"][0].pop("description")
+    assert compose(request)[0]["prompt"] == prompt  # Preserve legacy control-only projects.
+    clip["attachments"][0]["description"] = "Edited attachment"
+    clip["prompt"] = "Reference sheet: Complete description\n\nGenerated video: A quiet street."
+    assert compose(request)[0]["prompt"] == clip["prompt"]
+
+
 def test_msr_editor_maps_all_controls_and_preserves_recipe_options(tmp_path, monkeypatch):
     request, compose = recipe_request(tmp_path)
     clip = request["project"]["clips"][0]
@@ -329,3 +357,52 @@ def test_control_routing_reads_baked_checkpoint_metadata_and_rejects_oversized_h
     transformer.write_bytes(struct.pack("<Q", MAX_HEADER_BYTES + 1))
     with pytest.raises(ValueError, match="header length"):
         model_setup.ltx25_recipe_control_families(profile)
+
+
+def test_audio_driver_preserves_canonical_source_interval(tmp_path, monkeypatch):
+    request, compose = recipe_request(tmp_path)
+    clip = request["project"]["clips"][0]
+    clip["attachments"] = [dict(id="song", assetID="song", role="audioDriver",
+                               audioSourceStart=12.5, audioSourceDuration=clip["duration"])]
+    request["project"]["assets"] = [
+        dict(id="song", kind="audio", name="Song", path="/tmp/song.wav")
+    ]
+    monkeypatch.setattr("wee_todd_mlx.task_conditioning.validate_conditioning", lambda _: {})
+    resolved, _ = compose(request)
+    driver = resolved["conditioning"]["inputs"][0]
+    assert driver["source_start_seconds"] == 12.5
+    assert driver["source_duration_seconds"] == clip["duration"]
+
+
+def test_music_clip_rounds_generation_up_without_changing_editorial_length(tmp_path, monkeypatch):
+    request, compose = recipe_request(tmp_path)
+    clip = request["project"]["clips"][0]
+    clip["duration"] = 1.1
+    import hashlib
+
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    clip["musicSource"] = dict(
+        path=str(source), sha256=hashlib.sha256(b"original").hexdigest(),
+        start=0, duration=1.1, task="t2v",
+    )
+    monkeypatch.setattr("wee_todd_mlx.task_conditioning.validate_conditioning", lambda _: {})
+    resolved, _ = compose(request)
+    assert resolved["config"]["duration_seconds"] == pytest.approx(32 / 24)
+    assert clip["duration"] == 1.1
+
+
+def test_music_clip_rejects_changed_song_before_composing(tmp_path):
+    import hashlib
+
+    request, compose = recipe_request(tmp_path)
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    clip = request["project"]["clips"][0]
+    clip["musicSource"] = dict(
+        path=str(source), sha256=hashlib.sha256(b"original").hexdigest(),
+        start=0, duration=clip["duration"], task="t2v",
+    )
+    source.write_bytes(b"replacement")
+    with pytest.raises(ValueError, match="changed|hash"):
+        compose(request)

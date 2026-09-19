@@ -9,19 +9,26 @@ import StudioCore
       let body = try payload()
       let snapshot = project
       let session = documentSessionID
-      let target = Self.supportDirectory.appendingPathComponent("Previews/\(UUID().uuidString).mp4")
+      invalidateTimelinePlayback()
+      let request = timelineBuildID
+      let target = dataDirectory.appendingPathComponent("Previews/\(UUID().uuidString).mp4")
       _ = try await bridge.invoke("preview", runtime: runtime, payload: body, output: target)
-      guard documentSessionID == session, project == snapshot else {
+      guard documentSessionID == session, project == snapshot, timelineBuildID == request else {
         throw StudioError.invalid(
           "The edit changed while preparing its preview. Build the preview again.")
       }
       player.pause()
       isPlaying = false
       previewMode = "Movie"
-      playhead = 0
-      player.replaceCurrentItem(with: AVPlayerItem(url: target))
+      let item = AVPlayerItem(url: target)
+      player.replaceCurrentItem(with: item)
+      observeTimelineItem(item)
+      seek(playhead)
       notice = "Movie preview includes titles, transitions and all active audio tracks."
-    } catch { self.error = error.localizedDescription }
+    } catch {
+      self.error = error.localizedDescription
+      if previewMode != "Movie" { refreshPreview() }
+    }
   }
   func importSequence() {
     let panel = NSOpenPanel()

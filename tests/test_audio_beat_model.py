@@ -1,0 +1,194 @@
+"""Independent numeric/contract checks for native beat inference."""
+
+import importlib.util
+import io
+import os
+import pickle
+import unittest
+from pathlib import Path
+
+import numpy as np
+
+MODULE = Path(__file__).parents[1] / "src/wee_todd_mlx/audio_analysis/beat_model.py"
+
+
+class BeatModelTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("beat_model_under_test", MODULE)
+        cls.m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.m)
+
+    def test_logmel_silence_and_sinusoid(self):
+        silence = self.m.log_mel(np.zeros(22050, np.float32))
+        self.assertEqual(silence.shape, (51, 128))
+        np.testing.assert_array_equal(silence, 0)
+        tone = np.sin(np.arange(22050) * (2 * np.pi * 1000 / 22050)).astype(np.float32)
+        mel = self.m.log_mel(tone)
+        self.assertTrue(np.isfinite(mel).all())
+        self.assertGreater(mel[10].max(), 8)
+        self.assertLess(
+            abs(self.m.mel_filterbank().argmax(axis=0)[mel[10].argmax()] * 22050 / 1024 - 1000), 60
+        )
+
+    def test_chunk_coverage_has_no_missing_frame_or_extra_edges(self):
+        for size in (1, 100, 1488, 1489, 1500, 1501, 3000, 7991):
+            chunks = self.m.chunk_ranges(size)
+            coverage = np.zeros(size, dtype=np.int32)
+            for start, length in chunks:
+                self.assertLessEqual(length, 1500)
+                lo, hi = start + 6, start + length - 6
+                self.assertGreaterEqual(lo, 0)
+                self.assertLessEqual(hi, size)
+                coverage[lo:hi] += 1
+            self.assertTrue((coverage > 0).all(), size)
+
+    def test_peak_threshold_plateau_and_downbeat_snap(self):
+        beats = np.full(40, -10.0, dtype=np.float32)
+        down = beats.copy()
+        beats[5:7] = 2
+        beats[20] = 3
+        beats[30] = 0  # exactly .5 is excluded
+        down[19] = 2
+        b, d = self.m.events_from_logits(beats, down)
+        self.assertEqual([v["timeSeconds"] for v in b], [0.11, 0.4])
+        self.assertEqual([v["timeSeconds"] for v in d], [0.4])
+        self.assertAlmostEqual(b[0]["confidence"], 1 / (1 + np.exp(-2)))
+        self.assertEqual(self.m.events_from_logits(np.zeros(2), np.ones(2)), ([], []))
+
+    def test_checkpoint_rejects_code_execution_globals(self):
+        with self.assertRaises(pickle.UnpicklingError):
+            self.m._TensorUnpickler(io.BytesIO(pickle.dumps(eval)), None, "").load()
+
+    def test_invalid_audio_and_missing_weights_fail_before_loading_mlx(self):
+        with self.assertRaisesRegex(ValueError, "finite mono"):
+            self.m.beat_events(np.array([np.nan]), "/nonexistent")
+        with self.assertRaises(FileNotFoundError):
+            self.m.beat_events(np.zeros(22050), "/nonexistent")
+
+    def test_attention_matches_explicit_numpy_softmax(self):
+        try:
+            import mlx.core as mx
+        except ImportError:
+            self.skipTest("MLX is unavailable")
+        rng = np.random.default_rng(66)
+        weights = {
+            "a.norm.gamma": rng.uniform(0.5, 1.5, 32).astype(np.float32),
+            "a.to_qkv.weight": rng.normal(0, 0.1, (96, 32)).astype(np.float32),
+            "a.to_gates.weight": rng.normal(0, 0.1, (1, 32)).astype(np.float32),
+            "a.to_gates.bias": np.array([0.2], np.float32),
+            "a.to_out.0.weight": rng.normal(0, 0.1, (32, 32)).astype(np.float32),
+        }
+        x = rng.normal(0, 1, (2, 5, 32)).astype(np.float32)
+        norm = x / np.linalg.norm(x, axis=-1, keepdims=True) * np.sqrt(32) * weights["a.norm.gamma"]
+        q, k, v = np.split(norm @ weights["a.to_qkv.weight"].T, 3, axis=-1)
+
+        def rotate(a):
+            out = np.empty_like(a)
+            for t in range(5):
+                for pair in range(16):
+                    angle = t * 10000 ** (-pair / 16)
+                    real, imag = a[:, t, 2 * pair], a[:, t, 2 * pair + 1]
+                    out[:, t, 2 * pair] = real * np.cos(angle) - imag * np.sin(angle)
+                    out[:, t, 2 * pair + 1] = real * np.sin(angle) + imag * np.cos(angle)
+            return out
+
+        scores = rotate(q) @ rotate(k).transpose(0, 2, 1) / np.sqrt(32)
+        probabilities = np.exp(scores - scores.max(axis=-1, keepdims=True))
+        probabilities /= probabilities.sum(axis=-1, keepdims=True)
+        gates = 1 / (1 + np.exp(-(norm @ weights["a.to_gates.weight"].T + 0.2)))
+        expected = ((probabilities @ v) * gates) @ weights["a.to_out.0.weight"].T
+        actual = self.m._BeatNetwork(weights).attention(mx.array(x), "a")
+        np.testing.assert_allclose(np.array(actual), expected, atol=2e-6, rtol=2e-5)
+
+    @unittest.skipUnless(
+        os.environ.get("BEAT_THIS_MODEL_DIR"), "optional pinned-weight qualification"
+    )
+    def test_weighted_model_matches_independent_torch_operator_oracle(self):
+        # Golden values generated by CPU Torch 2.11 functional operators; no external
+        # beat inference code. This checks convolution layout and all 6 main layers.
+        samples = np.random.default_rng(843).normal(0, 0.2, 22050).astype(np.float32)
+        weights = self.m.load_checkpoint(os.environ["BEAT_THIS_MODEL_DIR"])
+        model = self.m._BeatNetwork(weights)
+        actual = np.stack(model(self.m.log_mel(samples)))[:, :8]
+        expected = np.array(
+            [
+                [
+                    -1.27488172,
+                    -1.69071317,
+                    -1.20852280,
+                    -0.63277847,
+                    -1.29231119,
+                    -1.50410748,
+                    -1.57260346,
+                    -1.48800969,
+                ],
+                [
+                    -1.56182754,
+                    -2.33124924,
+                    -1.74273169,
+                    -1.08057356,
+                    -1.84334338,
+                    -1.97518468,
+                    -1.99543929,
+                    -1.97830415,
+                ],
+            ]
+        )
+        np.testing.assert_allclose(actual, expected, atol=1e-4, rtol=1e-4)
+
+    @unittest.skipUnless(
+        os.environ.get("BEAT_THIS_MODEL_DIR"), "optional pinned-weight qualification"
+    )
+    def test_weighted_silence_and_mid_inference_cancellation_release(self):
+        import mlx.core as mx
+
+        folder = os.environ["BEAT_THIS_MODEL_DIR"]
+        out = self.m.beat_events(np.zeros(22050, dtype=np.float32), folder)
+        self.assertEqual(out["beats"], [])
+        self.assertEqual(out["downbeats"], [])
+        self.assertLess(mx.get_active_memory(), 1_000_000)
+        calls = 0
+
+        class Cancelled(Exception):
+            pass
+
+        def check():
+            nonlocal calls
+            calls += 1
+            if calls == 5:
+                raise Cancelled()
+
+        with self.assertRaises(Cancelled):
+            self.m.beat_events(np.zeros(22050, dtype=np.float32), folder, check=check)
+        self.assertEqual(calls, 5)
+        self.assertLess(mx.get_active_memory(), 1_000_000)
+
+    def test_rotary_attention_and_rms_reference(self):
+        try:
+            import mlx.core as mx
+        except ImportError:
+            self.skipTest("MLX is unavailable")
+        x = np.arange(1, 25, dtype=np.float32).reshape(1, 3, 8)
+        gamma = np.linspace(0.5, 1.5, 8, dtype=np.float32)
+        expected = (
+            x / np.maximum(np.linalg.norm(x, axis=-1, keepdims=True), 1e-12) * np.sqrt(8) * gamma
+        )
+        np.testing.assert_allclose(
+            np.array(self.m._rms(mx.array(x), mx.array(gamma))), expected, atol=1e-5
+        )
+        q = mx.array(x.reshape(1, 1, 3, 8))
+        rotated = np.array(self.m._rope(q))
+        for t in range(3):
+            for pair in range(4):
+                angle = t * 10000 ** (-pair / 4)
+                a, b = x[0, t, pair * 2 : pair * 2 + 2]
+                np.testing.assert_allclose(
+                    rotated[0, 0, t, pair * 2 : pair * 2 + 2],
+                    [a * np.cos(angle) - b * np.sin(angle), a * np.sin(angle) + b * np.cos(angle)],
+                    atol=1e-5,
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()

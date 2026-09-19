@@ -2,7 +2,8 @@ import Foundation
 
 extension Clip {
   public func canAssignDrawThingsInput(_ asset: MediaAsset, role: MediaRole) -> Bool {
-    engine == .drawThings && asset.kind == .image && supportsEndpoint(role)
+    engine == .drawThings && asset.kind == .image
+      && (usesDrawThingsImageReferences ? role == .reference : supportsEndpoint(role))
   }
 
   public func drawThingsConditioningIssues(assets: [MediaAsset],
@@ -11,6 +12,23 @@ extension Clip {
     let needsModel = drawThings?.modelID.isEmpty != false
     let first = attachments.filter { $0.role == .first }
     let last = attachments.filter { $0.role == .last }
+    if usesDrawThingsImageReferences {
+      let references = attachments.filter { $0.role == .reference }
+      var issues: [String] = []
+      if !(1...9).contains(references.count) { issues.append("Add 1–9 H3 image references") }
+      for attachment in attachments where attachment.role != .lora || attachment.isEnabled {
+        guard attachment.role == .reference else {
+          issues.append("H3 Ref2VA accepts image references only. Remove the incompatible input or select FL2VA for endpoints.")
+          continue
+        }
+        guard let asset = assets.first(where: { $0.id == attachment.assetID }),
+          asset.kind == .image, fileExists(asset.path) else {
+          issues.append("Relink the H3 reference to a still image"); continue
+        }
+        if attachment.strength != 1 { issues.append("Set H3 reference strength to 1") }
+      }
+      return issues
+    }
     var issues: [String] = []
     if needsModel {
       issues.append("Choose a Draw Things video model to validate these inputs. First and last frames require H3 FL2VA.")
@@ -126,6 +144,7 @@ public struct DrawThingsSelection: Codable, Equatable {
   public var profileID: String
   public var modelID: String
   public var modelFamily: String
+  public var modelModifier: String?
   public var configuration: [String: JSONValue]
   public var loras: [DrawThingsLoRA]
 
@@ -139,12 +158,13 @@ public struct DrawThingsSelection: Codable, Equatable {
     self.configuration = configuration
     self.loras = loras
   }
-  private enum CodingKeys: String, CodingKey { case profileID, modelID, modelFamily, configuration, loras }
+  private enum CodingKeys: String, CodingKey { case profileID, modelID, modelFamily, modelModifier, configuration, loras }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     profileID = try c.decode(String.self, forKey: .profileID)
     modelID = try c.decode(String.self, forKey: .modelID)
     modelFamily = try c.decode(String.self, forKey: .modelFamily)
+    modelModifier = try c.decodeIfPresent(String.self, forKey: .modelModifier)
     configuration = try c.decodeIfPresent([String: JSONValue].self, forKey: .configuration) ?? [:]
     loras = try c.decodeIfPresent([DrawThingsLoRA].self, forKey: .loras) ?? []
   }

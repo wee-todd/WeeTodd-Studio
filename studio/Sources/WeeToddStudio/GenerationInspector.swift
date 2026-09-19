@@ -107,7 +107,7 @@ struct GenerationInspector: View {
         }
       }
     }.font(.caption).textFieldStyle(.roundedBorder)
-      .task(id: store.generationRequestKey(for: clip)) {
+      .task(id: store.generationDescriptionTaskKey(for: clip)) {
         try? await Task.sleep(for: .milliseconds(350))
         guard !Task.isCancelled else { return }
         await store.describeGeneration()

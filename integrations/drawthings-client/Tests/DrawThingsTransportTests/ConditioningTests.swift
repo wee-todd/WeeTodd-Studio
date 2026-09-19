@@ -39,6 +39,19 @@ final class ConditioningTests: XCTestCase {
     XCTAssertEqual(first[0,0,0,2], -1, accuracy: 0.02)
     XCTAssertEqual(last[0,0,0,2], 1, accuracy: 0.02)
     XCTAssertEqual(last[0,0,0,0], -1, accuracy: 0.02)
+    let references = inputs.map { input -> [String: Any] in
+      var reference = input; reference["role"] = "reference"; reference.removeValue(forKey: "frameIndex")
+      return reference
+    }
+    var referencePayload = ImageGenerationRequest()
+    try Conditioning.apply(["operation": "video", "inputs": references + [references[0]]],
+      to: &referencePayload, width: 64, height: 64)
+    XCTAssertEqual(referencePayload.image, payload.image)
+    XCTAssertEqual(referencePayload.hints[0].tensors.count, 2)
+    XCTAssertEqual(referencePayload.hints[0].tensors[0].tensor, payload.hints[0].tensors[0].tensor)
+    XCTAssertEqual(referencePayload.hints[0].tensors[1].tensor, payload.image)
+    XCTAssertThrowsError(try Conditioning.inputs(["operation": "video", "inputs": [references[0], inputs[0]]]))
+    XCTAssertThrowsError(try Conditioning.inputs(["operation": "video", "inputs": Array(repeating: references[0], count: 10)]))
     let canvas: [String: Any] = ["role": "canvas", "path": inputs[0]["path"]!,
       "sha256": inputs[0]["sha256"]!, "strength": 1, "fit": "fit"]
     let reference: [String: Any] = ["role": "moodboard", "path": inputs[1]["path"]!,

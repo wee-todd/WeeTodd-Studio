@@ -31,14 +31,14 @@ final class ImageDraftConfigTests: XCTestCase {
   }
 
   func testDrawThingsConfigAliasesAndUnsupportedSettingsAreVisible() throws {
-    let json = #"{"name":"My preset","configuration":{"model":"h3.ckpt","width":768,"height":448,"steps":4,"seed":42,"sampler":10,"shiftForAudio":3,"fpsId":24,"numFrames":124,"loras":[{"file":"turbo.ckpt","weight":0.6}],"hiresFix":true},"prompt":"saved prompt"}"#
+    let json = #"{"name":"My preset","configuration":{"model":"h3.ckpt","width":768,"height":448,"steps":4,"seed":42,"sampler":10,"shiftForAudio":3,"fpsId":24,"numFrames":124,"loras":[{"file":"turbo.ckpt","weight":0.6}],"unknownSetting":true},"prompt":"saved prompt"}"#
     let result = try DrawThingsConfigImport.parse(Data(json.utf8), operation: "video")[0]
     XCTAssertEqual(result.modelID, "h3.ckpt")
     XCTAssertEqual(result.configuration["audioShift"], .number(3))
     XCTAssertEqual(result.configuration["fps"], .integer(24))
     XCTAssertEqual(result.loras?.first?.weight, 0.6)
     XCTAssertEqual(result.prompt, "saved prompt")
-    XCTAssertTrue(result.warnings.contains { $0.contains("hiresFix") })
+    XCTAssertTrue(result.warnings.contains { $0.contains("unknownSetting") })
   }
 
   func testConfigImportRejectsMalformedValuesAndPreservesOmittedFields() throws {

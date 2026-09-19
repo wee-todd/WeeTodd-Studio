@@ -20,6 +20,7 @@ struct AssetBrowser: View {
       }.font(.system(size: 11)).padding(10).background(
         Theme.raised, in: RoundedRectangle(cornerRadius: 6)
       ).padding(12)
+      Button("Generate Music…") { store.openMusic() }
       Button("Production Library…") { store.showProductionLibrary = true }
       Button("LoRAs & Groups…") { store.showLoRALibrary = true }
         .padding(.horizontal, 12).padding(.bottom, 10)
@@ -153,35 +154,23 @@ struct AssetBrowser: View {
         .disabled(store.selectedClip.map { !store.supportsEndpoint(.first, for: $0) } ?? true)
       Button("Last frame") { store.useAsset(asset, role: .last) }
         .disabled(store.selectedClip.map { !store.supportsEndpoint(.last, for: $0) } ?? true)
-        .help("Draw Things last-frame conditioning requires an H3 FL2VA model.")
+        .help(
+          store.selectedClip?.engine == .drawThings
+            ? "Draw Things last-frame conditioning requires an H3 FL2VA model."
+            : "Use this image to condition the clip’s final frame. Availability depends on the selected model and task."
+        )
       Button("Keyframe at playhead") {
-        store.useAsset(asset, role: .keyframe, time: store.playhead)
-      }.disabled(store.selectedClip?.engine == .drawThings)
-      Button(store.selectedClip?.engine == .ltx25 ? "MSR reference · dedicated adapter" : "Reference") {
-        store.useAsset(asset, role: .reference)
-      }.disabled(store.selectedClip?.engine == .drawThings)
-      if store.selectedClip?.engine == .ltx25 {
-        Button("Ingredients reference sheet · IC-LoRA") {
-          store.useAsset(asset, role: .control)
-          store.editClip { clip in
-            if let index = clip.attachments.lastIndex(where: { $0.assetID == asset.id && $0.role == .control }) {
-              clip.attachments[index].controlType = "ingredients_reference_sheet"
-            }
-          }
-        }
+        if let local = store.selectedClipPlayhead { store.useAsset(asset, role: .keyframe, time: local) }
+      }.disabled(store.selectedClip?.engine == .drawThings || store.selectedClipPlayhead == nil)
+    }
+    if let clip = store.selectedClip {
+      ForEach(clip.referenceActions(for: asset)) { action in
+        Button(action.label) { Task { await store.useReference(asset, action: action) } }
+          .help(action.detail).disabled(store.operationBusy)
       }
-    }
-    if [.video, .sequence].contains(asset.kind) {
-      Button("Video reference") { store.useAsset(asset, role: .reference) }
-        .disabled(store.selectedClip?.engine == .drawThings)
-      Button("Preprocessed control guide") { store.useAsset(asset, role: .control) }
-        .disabled(store.selectedClip?.engine == .drawThings)
-    }
-    if asset.kind == .audio {
-      Button("Audio driver") { store.useAsset(asset, role: .audioDriver) }
-        .disabled(store.selectedClip?.engine == .drawThings)
-      Button("Audio reference · H3") { store.useAsset(asset, role: .reference) }
-        .disabled(store.selectedClip?.engine == .drawThings)
+      if clip.engine == .drawThings && asset.kind == .image && !clip.usesDrawThingsImageReferences {
+        Text("Image references: choose H3 Ref2VA. Other video models use First frame.")
+      }
     }
     if asset.kind == .lora
       && asset.loraModel?.supports(store.selectedClip?.engine ?? .movie) == true

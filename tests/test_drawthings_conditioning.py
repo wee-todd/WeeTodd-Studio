@@ -10,6 +10,26 @@ from wee_todd_remote.conditioning import (
 )
 
 
+def test_h3_reference_images_preserve_order_and_do_not_become_endpoints(tmp_path):
+    image = tmp_path / "image.png"
+    image.write_bytes(b"reference fixture")
+    assets = [{"id": "image", "kind": "image", "path": str(image)}]
+    attachments = [{"assetID": "image", "role": "reference"}] * 3
+    inputs = canonical_inputs(attachments, assets, model_family="minimaxH3")
+    assert [item["role"] for item in inputs] == ["reference"] * 3
+    assert all("frameIndex" not in item for item in inputs)
+    validate_canonical_inputs({"operation": "video", "inputs": inputs})
+    for invalid in (inputs * 4, inputs + [{**inputs[0], "role": "first", "frameIndex": 0}],
+                    [{**inputs[0], "strength": True}]):
+        with pytest.raises(ValueError):
+            validate_canonical_inputs({"operation": "video", "inputs": invalid})
+    for kind in ("video", "audio"):
+        with pytest.raises(ValueError, match="image"):
+            canonical_inputs(attachments, [{**assets[0], "kind": kind}], model_family="minimaxH3")
+    with pytest.raises(ValueError):
+        canonical_inputs(attachments, assets, model_family="ltx2_3")
+
+
 def test_image_canvas_and_ordered_moodboard_validate_hashes_and_weights(tmp_path):
     image = tmp_path / "image.png"
     image.write_bytes(b"test image")

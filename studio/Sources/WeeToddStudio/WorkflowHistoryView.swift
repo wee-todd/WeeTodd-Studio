@@ -134,11 +134,9 @@ struct WorkflowHistoryView: View {
       let update = try await Task.detached(priority: .utility) { () -> (Date?, WorkflowHistorySnapshot)? in
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }
         let info = try file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-        guard (info.fileSize ?? Int.max) <= 2 * 1024 * 1024 else { throw StudioError.invalid("Checkpoint exceeds the 2 MiB inspection limit.") }
+        guard (info.fileSize ?? Int.max) <= WorkflowCheckpoint.maximumBytes else { throw StudioError.invalid("Checkpoint exceeds the 16 MiB inspection limit.") }
         if let date = info.contentModificationDate, date == previous { return nil }
-        let data = try Data(contentsOf: file)
-        guard data.count <= 2 * 1024 * 1024 else { throw StudioError.invalid("Checkpoint exceeds the inspection limit.") }
-        return (info.contentModificationDate, try JSONDecoder().decode(WorkflowHistorySnapshot.self, from: data))
+        return (info.contentModificationDate, try WorkflowCheckpoint.read(WorkflowHistorySnapshot.self, at: file))
       }.value
       if let update {
         modified = update.0; snapshot = update.1; error = nil

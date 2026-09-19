@@ -33,6 +33,18 @@ enum ClipState: String {
   }
 }
 @MainActor extension StudioStore {
+  // The full readiness scan belongs to the idle badge and opened action list,
+  // not the playback clock. Recompute the count when playback pauses.
+  var actionButtonTitle: String { isPlaying ? "Actions" : "Actions \(actionItems.count)" }
+  // Freeze only the tile's display badge during playback. Authoritative validation
+  // still uses clipState/issues, and pausing or replacing the movie discards these snapshots.
+  func timelineClipState(_ clip: Clip) -> ClipState {
+    guard isPlaying else { return clipState(clip) }
+    if let state = playbackClipStates[clip.id] { return state }
+    let state = clipState(clip)
+    playbackClipStates[clip.id] = state
+    return state
+  }
   func signature(for clip: Clip) -> String {
     var parts = [clip.generationFingerprint]
     let continuityDependency = project.continuityDependencyFingerprint(for: clip)
@@ -56,15 +68,16 @@ enum ClipState: String {
     var paths = clip.attachments.compactMap { attachment in
       allAssets.first { $0.id == attachment.assetID }?.path
     }
+    let requestKey = generationRequestKey(for: clip)
     if let resolved = generationDescriptions[clip.id],
-      resolved["studioInput"] as? String == generationRequestKey(for: clip) {
+      resolved["studioInput"] as? String == requestKey {
       parts.append(resolved["fingerprint"] as? String ?? "")
       paths += resolved["sourcePaths"] as? [String] ?? []
     } else {
       parts.append("unresolved")
     }
     paths += profiles.filter { $0.engine == clip.engine.rawValue }.map(\.id)
-    parts.append(generationRequestKey(for: clip))
+    parts.append(requestKey)
     parts.append(runtime.root + "|" + runtime.profilesDirectory)
     parts.append(String(clip.settings(in: project).fps))
     for path in paths.sorted() {
@@ -148,6 +161,7 @@ enum ClipState: String {
   }
   func clipState(_ clip: Clip) -> ClipState {
     if clip.engine == .movie { return .movie }
+    if clip.hasReviewedReusedTake && FileManager.default.fileExists(atPath: clip.sourcePath) { return .generated }
     if !issues(for: clip).isEmpty { return .attention }
     if !clip.versions.isEmpty {
       if clip.renderedSignature == signature(for: clip)
@@ -296,12 +310,23 @@ enum ClipState: String {
     guard panel.runModal() == .OK, let url = panel.url else { return }
     Task {
       do {
+        let session = documentSessionID, projectID = project.id, clipID = selectedClipID
+        let fingerprint = try project.productionInputFingerprint()
+        let execution = try productionExecutionFingerprint()
+        try await revalidateExistingNativeTakes()
+        guard documentSessionID == session, project.id == projectID,
+          !clipOnly || selectedClipID == clipID,
+          try project.productionInputFingerprint() == fingerprint,
+          try productionExecutionFingerprint() == execution else {
+          notice = "The movie changed while revalidating existing takes. Export the current edit again."
+          return
+        }
         var body = try payload()
         body["drawThingsConnections"] = try drawThingsConnections.map { try $0.object() }
         body["clipOnly"] = clipOnly
         body["generateIDs"] = project.clips.filter {
           $0.engine != .movie
-            && ($0.renderedSignature != signature(for: $0)
+            && ((!$0.hasReviewedReusedTake && $0.renderedSignature != signature(for: $0))
               || !FileManager.default.fileExists(atPath: $0.sourcePath))
         }.map { $0.id.uuidString }
         _ = try await bridge.invoke("export-job", runtime: runtime, payload: body, output: url)

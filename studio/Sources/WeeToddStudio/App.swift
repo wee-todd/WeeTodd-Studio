@@ -51,6 +51,9 @@ import SwiftUI
         Button("Delete Clip") { store.deleteClip() }
       }
       CommandMenu("Movie") {
+        Button("Create music video…") { store.showMusicVideoWorkflow = true }
+        Button("Produce movie…") { store.showMusicVideoProduction = true }
+        Button("Generate Music…") { store.openMusic() }
         Button("Workflows…") { store.showWorkflows = true }
         Button("Shot List…") { store.showShotList = true }
         Button("Production Library…") { store.showProductionLibrary = true }
@@ -126,6 +129,7 @@ struct StudioView: View {
       }
       .disabled(store.showPrompt || store.showMotionPrompt || store.imageDraft != nil)
       if store.imageDraft != nil && !store.referenceSheetOpen { ImageGenerationEditor().transition(.opacity).zIndex(10) }
+      if store.showMusic { MusicEditor().transition(.opacity).zIndex(11) }
       if store.showPrompt { PromptEditor().transition(.opacity).zIndex(10) }
       if store.showMotionPrompt {
         MotionPromptEditor().transition(.opacity).zIndex(10)
@@ -148,6 +152,8 @@ struct StudioView: View {
     .sheet(isPresented: $store.showDrawThings) { DrawThingsSettings().environmentObject(store) }
     .sheet(isPresented: $store.showContinuousSceneReview) { ContinuousSceneReviewView().environmentObject(store) }
     .sheet(isPresented: $store.showDrawThingsConfigImport) { DrawThingsConfigImportView().environmentObject(store) }
+    .sheet(isPresented: $store.showMusicVideoWorkflow) { WorkflowView(initialBuiltin: "weetodd.music-video-planning").environmentObject(store) }
+    .sheet(isPresented: $store.showMusicVideoProduction) { MusicVideoProductionView().environmentObject(store) }
     .sheet(isPresented: $store.showWorkflows) { WorkflowView().environmentObject(store) }
     .sheet(isPresented: $store.showProductionLibrary) { ProductionLibraryView().environmentObject(store) }
     .sheet(isPresented: $store.showShotList) { ProjectPlanningView().environmentObject(store) }
@@ -264,7 +270,7 @@ struct LiveStatus: View {
       Button {
         store.showActions.toggle()
       } label: {
-        Label("Actions \(store.actionItems.count)", systemImage: "checklist")
+        Label(store.actionButtonTitle, systemImage: "checklist")
       }.popover(isPresented: $store.showActions) { ActionList().environmentObject(store) }
       Button {
         store.showLog = true

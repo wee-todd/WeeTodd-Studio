@@ -118,7 +118,11 @@ struct DrawThingsConfigImportView: View {
       let family = store.drawThingsModelFamily(profileID: profileID, modelID: modelID)
       store.change { project in
         guard let index = project.clips.firstIndex(where: { $0.id == clipID }) else { return }
-        if result.modelID != nil { project.clips[index].drawThings?.modelID = modelID; project.clips[index].drawThings?.modelFamily = family }
+        if result.modelID != nil {
+          project.clips[index].drawThings?.modelID = modelID
+          project.clips[index].drawThings?.modelFamily = family
+          project.clips[index].drawThings?.modelModifier = store.drawThingsModelModifier(profileID: profileID, modelID: modelID)
+        }
         if let loras = result.loras { project.clips[index].drawThings?.loras = loras }
         if includePrompt {
           if let prompt = result.prompt { project.clips[index].prompt = prompt }

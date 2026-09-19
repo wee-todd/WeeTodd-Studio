@@ -25,6 +25,17 @@
       "minItems": 0,
       "maxItems": 8
     },
+    "draft_reference_evidence_list": {
+      "description": "Unassigned draft evidence: 24 shot subjects × 8 references plus 8 global observations. Generation input limits remain task-specific.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      },
+      "uniqueItems": true,
+      "maxItems": 200
+    },
     "observation_list": {
       "type": "array",
       "items": {
@@ -579,7 +590,7 @@
     },
     "subject_list": {
       "type": "array",
-      "maxItems": 24,
+      "maxItems": 64,
       "items": {
         "type": "object",
         "properties": {
@@ -1789,7 +1800,7 @@
                 "maxLength": 30000
               },
               "referenceAssets": {
-                "$ref": "urn:weetodd:schema:values:1#/$defs/image_list"
+                "$ref": "urn:weetodd:schema:values:1#/$defs/draft_reference_evidence_list"
               },
               "subjectIDs": {
                 "type": "array",
@@ -1824,7 +1835,7 @@
     },
     "guided_subject_selection_list": {
       "type": "array",
-      "maxItems": 8,
+      "maxItems": 24,
       "items": {
         "type": "object",
         "properties": {
@@ -2035,6 +2046,504 @@
           }
         }
       ]
+    },
+    "music_analysis": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": [
+            "native-dsp-v1",
+            "native-audio-analysis-v1"
+          ]
+        },
+        "sampleRate": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 192000
+        },
+        "durationSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timeSeconds": {
+                "type": "number",
+                "minimum": 0
+              },
+              "kind": {
+                "enum": [
+                  "onset",
+                  "energy_change",
+                  "beat",
+                  "downbeat",
+                  "section",
+                  "line_end",
+                  "word_end",
+                  "pause"
+                ]
+              },
+              "strength": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "provisional": {
+                "const": true
+              }
+            },
+            "required": [
+              "timeSeconds",
+              "kind",
+              "strength",
+              "provisional"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 100000
+        },
+        "energyEnvelope": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "maxItems": 3600
+        },
+        "energyHopSeconds": {
+          "const": 1
+        },
+        "beatSuggestion": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "bpm": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "provisional": {
+                  "const": true
+                },
+                "basis": {
+                  "type": "string",
+                  "maxLength": 24000
+                }
+              },
+              "required": [
+                "bpm",
+                "provisional",
+                "basis"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 24000
+          },
+          "maxItems": 8
+        },
+        "sourceSHA256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "cacheKey": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "decode": {
+          "type": "object",
+          "properties": {
+            "channels": {
+              "const": 1
+            },
+            "sampleRate": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "format": {
+              "const": "float32"
+            }
+          },
+          "required": [
+            "channels",
+            "sampleRate",
+            "format"
+          ],
+          "additionalProperties": false
+        },
+        "beats": {
+          "type": "array",
+          "maxItems": 30000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "timeSeconds": {
+                "type": "number",
+                "minimum": 0
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "timeSeconds",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "downbeats": {
+          "type": "array",
+          "maxItems": 30000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "timeSeconds": {
+                "type": "number",
+                "minimum": 0
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "timeSeconds",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "bars": {
+          "type": "array",
+          "maxItems": 20000,
+          "items": {
+            "type": "object"
+          }
+        },
+        "sections": {
+          "type": "array",
+          "maxItems": 20000,
+          "items": {
+            "type": "object"
+          }
+        },
+        "vocalGaps": {
+          "type": "array",
+          "maxItems": 20000,
+          "items": {
+            "type": "object"
+          }
+        },
+        "alignment": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "modelProvenance": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "elapsedSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "structureMethod": {
+          "type": "string"
+        },
+        "structureLimitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8
+        },
+        "vocalAnalysis": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": [
+                "mixed",
+                "isolated"
+              ]
+            },
+            "modelID": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "settings": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        }
+      },
+      "required": [
+        "method",
+        "sampleRate",
+        "durationSeconds",
+        "cues",
+        "energyEnvelope",
+        "energyHopSeconds",
+        "beatSuggestion",
+        "limitations",
+        "sourceSHA256",
+        "cacheKey",
+        "decode"
+      ],
+      "additionalProperties": false
+    },
+    "music_timing": {
+      "type": "object",
+      "properties": {
+        "sourceAudio": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "maxLength": 24000
+            },
+            "sha256": {
+              "type": "string",
+              "maxLength": 24000
+            },
+            "sourceStartSeconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "sourceEndSeconds": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "sourceStartSeconds",
+            "sourceEndSeconds"
+          ],
+          "additionalProperties": false
+        },
+        "fps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120
+        },
+        "totalFrames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "clips": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "clipID": {
+                "type": "string",
+                "maxLength": 24000
+              },
+              "startFrame": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "frameCount": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "sourceStartSeconds": {
+                "type": "number",
+                "minimum": 0
+              },
+              "sourceDurationSeconds": {
+                "type": "number",
+                "minimum": 0
+              },
+              "renderFrames": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "extraTailFrames": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sceneEligible": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "clipID",
+              "startFrame",
+              "frameCount",
+              "sourceStartSeconds",
+              "sourceDurationSeconds",
+              "renderFrames",
+              "extraTailFrames",
+              "sceneEligible"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 200
+        },
+        "allocation": {
+          "$ref": "urn:weetodd:schema:values:1#/$defs/clip_plan"
+        },
+        "engine": {
+          "enum": [
+            "ltx25",
+            "ltx23",
+            "h3",
+            "drawThings"
+          ]
+        },
+        "task": {
+          "enum": [
+            "a2v",
+            "t2v"
+          ]
+        },
+        "suppliedLyrics": {
+          "type": "string",
+          "maxLength": 24000
+        },
+        "lyricStatus": {
+          "enum": [
+            "supplied_unaligned",
+            "unknown",
+            "instrumental",
+            "aligned_needs_review",
+            "transcribed_unreviewed",
+            "no_words_detected"
+          ]
+        },
+        "analysis": {
+          "$ref": "urn:weetodd:schema:values:1#/$defs/music_analysis"
+        },
+        "bounds": {
+          "type": "object",
+          "properties": {
+            "minimumFrames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maximumFrames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "minimumSeconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "maximumSeconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "basis": {
+              "type": "string",
+              "maxLength": 24000
+            },
+            "modelMinimumSeconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "modelMaximumSeconds": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "minimumFrames",
+            "maximumFrames",
+            "minimumSeconds",
+            "maximumSeconds",
+            "basis",
+            "modelMinimumSeconds",
+            "modelMaximumSeconds"
+          ],
+          "additionalProperties": false
+        },
+        "preferredSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "timingQuantum": {
+          "enum": [
+            1,
+            8
+          ]
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timeSeconds": {
+                "type": "number",
+                "minimum": 0
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 24000
+              }
+            },
+            "required": [
+              "timeSeconds"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 1000
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 24000
+          },
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "sourceAudio",
+        "fps",
+        "totalFrames",
+        "clips",
+        "allocation",
+        "engine",
+        "task",
+        "suppliedLyrics",
+        "lyricStatus",
+        "analysis",
+        "bounds",
+        "preferredSeconds",
+        "timingQuantum",
+        "markers",
+        "warnings"
+      ],
+      "additionalProperties": false
     }
   }
 }

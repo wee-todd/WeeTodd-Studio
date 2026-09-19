@@ -10,6 +10,7 @@ The standalone app runs without ComfyUI.
 
 [Get started](#get-started) · [Studio guide](studio/README.md) ·
 [Make a movie with Director](#make-a-movie-with-director) ·
+[Create a music video](#create-a-music-video) ·
 [Connect shots](#connect-shots-with-continuity) ·
 [Draw Things setup](studio/README.md#draw-things--experimental) ·
 [Model reuse](#reuse-models-you-already-have) · [ComfyUI nodes](#comfyui-nodes) ·
@@ -56,6 +57,25 @@ Studio is the interface in each case. The engine choice determines where inferen
 
 ComfyUI and headless jobs use these same shared adapters where supported. Selecting a different
 backend never implies identical timing, output, task support or memory use.
+
+**Native YuE2 music** runs inside WeeTodd's own MLX engine. Open **Movie → Generate Music…**
+to guide a song with genre, mood, instruments, vocals and lyrics, audition takes, then place them
+on the stereo Music track or use a sample-accurate excerpt to drive a supported native video clip.
+Advanced controls include score composition, separate token samplers, acoustic steps, guidance,
+seeds and saved-stage reuse. No external YuE runtime or ComfyUI installation is required.
+See [music generation](studio/README.md#native-yue2-music) for checkpoint and license limits.
+
+### Use image, movie and audio references
+
+Choose a purpose from an asset's **Use in clip** menu. Local models offer image references,
+movie appearance/story references or motion guides, and audio-driven video. H3 also supports
+sound/voice references alongside visual references. LTX Ingredients, MSR and motion controls
+use dedicated adapters, separate from ordinary style LoRAs and groups.
+
+Movie-to-sheet and movie-to-edge-guide actions create visible, reusable assets for review.
+Draw Things accepts still-image inputs: H3 Ref2VA image references, H3 FL2VA endpoints, and a
+first frame for supported LTX models. Movie/audio reference transport and LTX IC-LoRAs remain
+native features in this integration. See the [reference support guide](studio/README.md#reference-inputs-by-purpose).
 
 ## Get started
 
@@ -117,12 +137,21 @@ Native clips expose **Model**, **Task**, sampling controls, render size and seed
 inspector, without a required template step. Execution presets and custom recipes remain under
 **Advanced generation**.
 LoRA stacks support enable/disable with preserved strengths, reusable groups, and explicit Add or
-Replace actions across native and Draw Things generation. Native H3 four-step Turbo adapters can
+Replace actions across native and Draw Things generation. **Runtime Settings → LoRA model folders**
+manages multiple linked libraries, with optional subfolders and a default app-managed location.
+**LoRAs & Groups…** searches local adapters and connected Draw Things catalogs with source/model
+labels and a compatibility filter; the inspector shows the applied stack.
+See [LoRA folders and groups](studio/README.md#loras-and-groups) for setup and format limits.
+Native H3 four-step Turbo adapters can
 be imported through **LoRAs & Groups…**; enabling one resolves its required schedule and disabling
 it restores standard Steps. See [native H3 Turbo](studio/README.md#native-h3-turbo) for supported
 tasks, auxiliary files and validation limits.
 
 ## Connect shots with continuity
+
+The viewport plays all timeline clips, with a draggable playhead and click-to-seek time ruler.
+Native editing playback uses cuts; **Render movie preview** includes the final transitions and
+finishing mix. See [timeline playback and scrubbing](studio/README.md#timeline-playback-and-scrubbing).
 
 In **Clip Continuity → Connection**, choose how a native shot relates to its source:
 
@@ -135,8 +164,9 @@ In **Clip Continuity → Connection**, choose how a native shot relates to its s
 
 **Continue scene** uses one name across models; the inspector explains the required source and
 what will be rendered. Continuation remains experimental. LTX 2.5 groups support two to six shots,
-up to 30 seconds, with compatible distilled settings and first/last or timed images. Reference/MSR,
-audio-driver and control inputs are not supported in this grouped route.
+up to 30 seconds, with compatible distilled settings and first/last or timed images. A shared,
+contiguous source-audio interval can drive the group; scene members must satisfy the eight-frame
+grid. Reference/MSR and control inputs remain unsupported in this grouped route.
 
 For LTX 2.5 groups, **Boundary image guidance → Automatic** avoids applying the same image again
 in overlapping generation windows. The join-strobing correction runs during generation; regenerate
@@ -168,8 +198,8 @@ For a short movie with first/last-frame clips, start with this flow:
    images to their **FF** and **LF** timeline slots. For Draw Things, choose a discovered H3 FL2VA
    model and a compatible configuration. Use **Prepare clip**, review the resolved prompt, then
    **Generate clip**. Retain and compare takes in Clip Assets.
-6. **Finish and save.** Arrange clips, adjust trims and transition overlaps, and use **Preview
-   movie** to review continuity and sound. Check the finished duration: model frame counts can
+6. **Finish and save.** Arrange clips, adjust trims and transition overlaps, and use **Render
+   movie preview** to review continuity and sound. Check the finished duration: model frame counts can
    round up, so six five-second requests do not necessarily total 30 seconds. Choose **Export
    Movie…**, then **Collect Media…** to save a separate project with its linked media.
 
@@ -184,6 +214,29 @@ See the [editing guide](studio/README.md#editing),
 [H3 endpoint controls](studio/README.md#images-clips-and-loras), and
 [finishing guide](studio/README.md#movie-settings-and-finishing) for details. Collected projects
 retain shared model/LoRA paths; model weights are not included.
+
+## Create a music video
+
+Choose **Movie → Create music video** to plan around an imported or YuE2 song. Supply lyrics
+when available, a visual brief, reference images and reusable characters, environments and props.
+Director asks for missing planning information and keeps its proposed subjects and shots reviewable.
+
+Audio analysis combines cached DSP cues with optional native learned beat/downbeat and English
+word evidence. Supplied lyrics help check the recognized words; local vocal isolation can improve
+word evidence. Sung-word timing and semantic chorus boundaries remain uncertain, so review the
+editable lyric cut markers before approving the shot plan. The original song remains the
+beat-analysis source and the movie soundtrack.
+
+A bounded frame planner selects clip lengths around pacing and available timing cues. The default
+range is the selected model's minimum through 15 seconds, with user overrides subject to model
+limits. The Shot List supports reversible combining and explicit timeline application. Compatible
+native LTX 2.5 continuous scenes accept contiguous source-audio intervals with image anchors.
+
+Use **Movie → Produce movie** to continue a reviewed timeline through serial generation and
+assembly, with bounded local retries and verified resume. The Shot List can add its approved plan
+and open production directly. Review takes and continuity before exporting the finished movie.
+See the [music-video guide](studio/README.md#create-a-music-video) and
+[production guide](studio/README.md#resumable-movie-production) for setup and qualification limits.
 
 ## Reuse models you already have
 
@@ -214,8 +267,10 @@ can run in the native renderer.
 | **Edit and finish** | Generated/imported clips, render versions, titles, transitions, multiple audio tracks and configured interpolation/upscaling. [Studio guide](studio/README.md) |
 | **Run repeatable jobs** | Resumable movie/clip jobs, portable Draw Things requests and shared headless execution. [Headless guide](examples/headless/README.md) |
 
-Planning workflows currently produce reviewed documents and prompt drafts. Full automatic
-frame/video generation from the guided movie plan remains future work. Experimental features,
+Planning workflows produce reviewed documents and prompt drafts. Apply approved shots from the
+Shot List to the timeline, prepare and review their reference images, then use **Produce movie**
+for resumable clip generation and assembly. Automatic endpoint-image creation from a guided plan
+remains future work. Experimental features,
 model qualification and specific hardware measurements are recorded in [STATUS.md](STATUS.md)
 and the detailed guides.
 

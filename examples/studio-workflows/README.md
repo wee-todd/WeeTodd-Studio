@@ -15,8 +15,10 @@ have handlers. Staged prompt editing and movie planning run through the existing
 helper, with typed outputs, atomic checkpoints, pause/resume and dependency invalidation.
 Open **Director** in the toolbar, **Movie → Workflows…**, or **Prompt Assistant → Step-by-step…**. Built-ins and imported
 JSON definitions use the same validator and runner. Movie outputs are plans and endpoint
-**descriptions**, not generated frames or timeline clips. Qwen task-adapter loading, training
-and reviewed dataset export remain future work.
+**descriptions**. After approval, Studio can import the plan into Shot List, add approved shots
+to the timeline and hand them to the separate resumable movie-production controls. The planning
+runner itself does not generate frames or video. Qwen task-adapter loading, training and reviewed
+dataset export remain future work.
 
 Director keeps unfinished intake and review drafts separate from execution checkpoints. It restores
 them on reopening, validates imported jobs before replacing the session, and retains completed
@@ -44,6 +46,7 @@ arguments. All manifests are validated before compatibility declarations are com
 
 | Example | Steps | Result contract |
 | --- | --- | --- |
+| [Create a music video](music-video-planning.json) | Source song → DSP or neural audio evidence → creative choices and reusable subjects → bounded exact frame timing → reviewed shots and model-neutral prompts | `music_timing` retains the original source interval/hash, supplied lyrics, analysis provenance and exact per-shot audio intervals; neural word evidence remains provisional; no media generation |
 | [Create a movie](guided-movie-planning.json) | Friendly creative brief → clarify identities → classify and review reusable subjects → treatment and timed shots → H3 prompt drafts | Approved creative choices, subject IDs, shot plan and three-field H3 prompt preview; no media generation |
 | [Staged prompt editing](staged-prompt-editing.json) | Describe images → plan discrete edits → apply edits individually → review | Revised prompt and a separate review |
 | [Subject inventory](subject-inventory.json) | Identify characters, props and locations in bounded source sections → review | Factual descriptions, selected source passages and optional suggestions; import into Project Subjects for individual approval |
@@ -103,8 +106,8 @@ milestone; automatic updates, migrations, distribution and dependency locking ar
 ## Inputs, bindings and dataflow
 
 Workflow inputs declare a `type`, human-readable `label`, optional `default`, and optional
-numeric `minimum`/`maximum`. Types available to users are `text`, `integer`, `number`, `boolean`
-and `image_list`. Defaults are validated. Images use logical asset IDs such as
+numeric `minimum`/`maximum`. Supported input types are `text`, `integer`, `number`, `boolean`,
+`image_list`, `subject_list` and `object_catalog`. Defaults are validated. Images use logical asset IDs such as
 `asset:character-front`; the job’s `assets` mapping resolves them to existing files. Definitions
 contain neither machine-specific media paths nor credentials. Image lists contain at most eight
 references for the initial Qwen vision path.
@@ -129,8 +132,9 @@ The validator enforces declared retry bounds (1–3 attempts), timeouts (1–3,6
 iteration limits, and a sufficient `maxStepExecutions` budget. `maxParallelSteps` is fixed at 1 for
 this first contract. `maxArtifacts` and `maxWorkingBytes` bound runner-owned checkpoint storage; they do not
 change existing renderers. The runner requires at least three artifact slots for its state,
-atomic temporary and lock. It caps the state at 2 MiB and reserves twice its serialized size
-for atomic replacement. Model calls require five slots, including the full-turn database and
+atomic temporary and lock. Resume checkpoints have a separate 16 MiB hard cap; definition and job imports remain
+limited to 2 MiB. The declared working budget can reduce the checkpoint allowance. Storage
+allocation reserves old and new checkpoint files together for atomic replacement. Model calls require five slots, including the full-turn database and
 its transaction journal, as described under execution history below. Models and media are
 never copied into run directories.
 `maxWorkingBytes` refers to temporary artifact storage, not model weights or resident GPU memory.
@@ -256,16 +260,24 @@ active local model call. Select a step to inspect its outputs, or **Regenerate s
 invalidate it and dependent steps. **Use proposal** returns staged text to the Prompt Assistant
 for editing and explicit application; it does not alter clip settings or start a render.
 
-The legacy movie planner's `story` and `clips` steps declare `requiresApproval: true`. New Studio
+The Movie planning v2 definition's `story` and `clips` steps declare `requiresApproval: true`;
+the retained v1 example has no approval gates. New Studio
 movie workflows default to **Create a movie**, with the guided creative-brief and review stages.
 Execution stops
 with `status: awaiting_approval` and `awaitingStep`. Select the step, review/edit its result and
 choose **Approve step**, then **Run remaining**. Native editors expose character descriptions,
 chronological actions, and individual clip action/start/end/location/continuity fields.
+The shot editor also exposes the approved character list for selecting the visible cast directly.
+Prompt compilation preserves that selected cast; names in possessives or production-object
+relationships cannot silently add an absent character. Qualified object names take precedence
+over shorter aliases, and negated object mentions do not attach those objects.
 **Approve** on a clip locks that saved choice; **Unlock** permits edits or repair. **Repair**
 reruns the chosen clip and rechecks dependent continuous clips. Independent cuts and unchanged
 approved clips reuse their item cache. Incomplete item caches are sensitive to model/runtime changes;
 completed reviewable steps use the content-preservation rule below.
+If an individual shot fails before it has an editable draft, **Retry with direction** accepts
+a correction for that shot and resumes planning. This retains completed drafts and the approved
+story. Scoped repair is available after a shot has a complete draft.
 Stale outputs remain readable but cannot be approved until recomputed. A step-level approval
 must be renewed when a dependency changes, even if some individual clip approvals still apply.
 
@@ -278,6 +290,10 @@ Reference additions, removals and order can be saved with subject text. Exact he
 and available preparation/load/prefill/decode timings are retained in the model-turn archive; missing
 vision-stage timings are left unavailable. The helper rejects impossible input budgets before loading
 weights, and non-retryable context/model errors require a changed task or model binding.
+Music-shot model requests use temporary short aliases for long subject IDs to reduce token
+overhead. The host restores canonical IDs before validation and checkpointing; names, appearance
+definitions, lyrics and saved project IDs remain unchanged. Model-turn records retain the exact
+request and reply, including their request-local aliases.
 The CLI supports `--review /path/to/review-action.json`, for example:
 
 ```json
@@ -303,7 +319,7 @@ repairs remain resumable; an explicit manual edit supersedes the pending repair.
 Checkpoints retain the exact model request text, responses, reference IDs, model/helper file
 fingerprints, image hashes and decoding settings for newly executed calls. Normal resume reuses
 saved results. Fresh inference across hardware/runtime versions is not promised byte-identical.
-The existing 2 MiB checkpoint and declared disk budgets still apply; no model/media copies or
+The 16 MiB checkpoint cap and declared disk budgets still apply; no model/media copies or
 unbounded checkpoint histories are created. Local model/helper fingerprints use size and mtime,
 not a cryptographic hash of multi-gigabyte weights. Retain the installed model version when exact
 provenance matters. A future artifact/image generation stage still needs its own qualification.
@@ -348,8 +364,9 @@ A minimal local job (replace placeholders with existing absolute paths):
 Use `definition` for an inline portable definition or `definitionPath` for a local definition
 file in place of `builtin`. For vision, put IDs such as `asset:character` in `inputs.images`
 and their absolute image paths in `assets`. Model bindings use the logical names declared in
-`models`. Built-ins require 4B because they include vision-capable operations, even with no
-images selected. A custom text-only definition can declare and bind 9B.
+`models`. All shipped built-ins pin 4B. The prompt and movie planners require vision capability
+even with no images selected; the subject-inventory definitions declare text capability only.
+A custom text-only definition can declare and bind 9B.
 
 ## Inspect execution history
 
@@ -361,8 +378,11 @@ execution time. Whole-step reuse creates an overview entry rather than a fabrica
 Rejected responses survive cache clearing, and transcript rows survive overview retention trimming.
 The database is read-only from Studio and messages load on selection; lists use 100-row pages.
 
-SQLite's page limit caps the file at min(16 MiB, (maxWorkingBytes − 4 MiB) / 2), leaving room for
-its rollback journal and the maximum atomic checkpoint write. This requires five artifact slots
+Checkpoint and SQLite storage share one allocation: the checkpoint allowance is at most
+16 MiB, starting at 2 MiB when affordable and growing to one quarter of the declared budget.
+Half the remaining budget, capped at 16 MiB, is allocated to each of the database and its
+rollback journal; a further 64 KiB is withheld from the database page limit for transaction
+overhead. The two atomic checkpoint files and the two history allocations cannot overlap. This requires five artifact slots
 for model calls. Response space is reserved before submitting a call. Exhaustion stops execution
 with an explicit diagnostic rather than silently dropping turns. Old runs expose the messages
 still in their checkpoint, with missing fields/order uncertainty disclosed. A parser result records
@@ -433,8 +453,9 @@ exist. Inspect pacing and still-frame descriptions before generating assets.
 
 ## Next implementation milestones
 
-1. Connect reviewed movie plans to existing image/video render jobs, with generated endpoint assets,
-   timeline insertion, engine frame-grid/audio alignment and explicit generation controls.
+1. Extend and qualify automatic endpoint-asset generation. Reviewed Shot List timeline insertion
+   and the separate resumable movie-production handoff are already available; see
+   [production controls](../../studio/README.md#resumable-movie-production).
 2. Qualify Qwen task-adapter loading against exact installed bases, preserving vision. Adapter
    manifests already validate metadata; they do not enable a tensor loader or training pipeline.
 3. Add user adapter import and reviewed dataset export with provenance, asset references and
@@ -454,6 +475,13 @@ rejected. The final inventory is bounded to 24 proposals and remains subject to 
 reach eight proposals add step warnings, retained as project review notes on import, because more
 subjects may be missing.
 
+Guided extraction (`project.identify_creative_subjects@1`) supports 64 final subjects. It requests
+eight new names per page with at most nine requests per kind and source window. Valid responses of
+up to 24 names are retained with a warning rather than truncated; full pages trigger another request.
+Repeated pages without new subjects fail explicitly. Whole-name matching accepts typographic
+apostrophes while retaining source spelling. A wrong citation is corrected only when the name has
+one matching passage in the current window, with a warning; ambiguous matches require correction.
+
 Studio imports completed subject, story and clip outputs additively into its optional project
 planning document. Stable source keys prevent repeated imports from duplicating existing records.
 Explicit human approval of an inventory or individual subject carries into newly imported project
@@ -462,8 +490,9 @@ Reimport matches the workflow source and stable subject ID even after reclassifi
 existing project edits and references. Ambiguous legacy duplicates must be merged before reimport.
 Project reference
 images are ordinary Project Assets linked by ID; the source file is not copied. Planning JSON export
-is separate from an executable workflow job. Automated sheet/endpoint generation and timeline
-application have not been enabled by this milestone.
+is separate from an executable workflow job. Reference creation uses the separate image workspace;
+automatic sheet/endpoint generation is not a planning operation. Studio's Shot List can explicitly
+apply approved shots to the timeline and hand them to production.
 
 
 ## Visual subject review
@@ -479,7 +508,7 @@ The shipped workflow's library input defaults to `[]` when no catalog is supplie
 `descriptionMentions` anchors and advisory `coverageReview` issues, missing objects and library
 matches. Each anchor stores its target ID, exact phrase and zero-based occurrence alongside
 `mentionSourceDescription`; changing the text invalidates its semantic anchors. The pass is limited
-to 24 subjects and two attempts each, with resumable per-subject records. Independent valid entries
+to 64 subjects and two attempts each, with resumable per-subject records. Independent valid entries
 survive rejected proposals. Library candidates contain identity, kind, name, aliases, tags,
 description, package/version, scope and definition revision; they never contain model weights or
 copied media. Studio supplies at most 64 candidates and explicitly confirms reuse on project import.
@@ -503,3 +532,45 @@ issues and the exact reviewed description. Human approval accepts the saved desc
 that report remains visible and is never rewritten as an agent pass. Empty descriptions, stale
 checkpoint revisions and incomplete subject steps remain blocked.
 It is a model-assisted quality check, not proof of factual correctness.
+
+## Music-video planning
+
+`weetodd.music-video-planning` reuses the guided Brief, Subjects and Shots approvals, object
+library choices and reference-image review. Supply a local `audio_path`, its `audio_sha256`,
+`source_start_seconds`, and `duration_seconds`. The hash is checked again on resume. Original
+audio is read without modification; analysis caches are keyed by source contents, sample rate
+and analysis version outside the project sources.
+
+`generation_engine` and `generation_task` select native model bounds or explicit
+`backend_min_seconds`/`backend_max_seconds` from the selected Draw Things capability.
+`min_clip_seconds: 0` selects the supported minimum; `max_clip_seconds` defaults to 15 and
+is capped by the backend maximum. Native LTX planning permits 0.25–30 seconds, H3 2.5–15
+seconds at 24 FPS. This declares the planning bounds, not generation qualification.
+
+The assistant suggests creative pacing; a deterministic dynamic program selects exact frame
+coverage within those bounds. Optional `timing_markers` is a JSON array of source-absolute
+`timeSeconds`, `locked` booleans and optional user-supplied `label` values. Locked markers
+are quantized to the movie frame timebase. Impossible bounds or locks fail explicitly.
+`continuity_enabled` prefers eight-frame boundaries for LTX 2.5; `sceneEligible` marks
+whole-grid shots. Arbitrary final fragments remain independent. The video rounds up to cover
+the whole selected song interval; only the final source-audio excerpt may be shorter than
+its video by less than one frame. Each shot records render handles to trim independently.
+
+Fast analysis uses independently implemented energy and spectral-onset DSP with provisional tempo
+suggestions. This mode does not transcribe or align words, and supplied `lyrics` remains unaligned.
+Neural analysis adds the provisional acoustic evidence described below; neither mode establishes
+verified chorus/verse labels or accurate sung timing.
+`lyrics_status` is `supplied`, `unknown`, or `instrumental`; consequential performance
+ambiguities use the existing question-and-approval flow. Outputs include `music_timing`,
+`prompt_plan`, approved objects, clips, endpoints and review. The prompt preview retains
+legacy typed sound fields for import compatibility, but its `prompt` is model-neutral prose.
+
+The music-video workflow adds `music.analyze@3`: choose `fast` for the original DSP
+preview or `neural` with a verified analysis model folder for learned beats and English word
+evidence. The portable definition defaults to `fast`; Studio's new-movie intake defaults to
+`neural` and offers explicit model setup. Lyrics/line times, acoustic support and uncertainty
+remain in the saved analysis. Supplied timing markers are editable in Studio; locks override
+soft word-interior cut penalties. `analysis_vocal_mode` defaults to `mixed`; opt into `isolated`
+with neural analysis and the optional UMX-HQ model to feed estimated vocals to English word
+evidence. Beats and the soundtrack retain the original mix. Musical sections and sung timing
+remain provisional and need review. Earlier definitions and `music.analyze@1`/`@2` remain executable.

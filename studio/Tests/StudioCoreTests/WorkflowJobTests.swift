@@ -3,6 +3,11 @@ import XCTest
 @testable import StudioCore
 
 final class WorkflowJobTests: XCTestCase {
+  func testFailedRunOpensFailedStepInsteadOfEarlierCompletedOutput() throws {
+    let data = Data(#"{"status":"failed","totalSeconds":1,"outputs":{},"steps":{"timing":{"name":"Music timing","status":"completed","outputs":{"music_timing":{}}},"inventory":{"name":"Inventory","status":"completed","outputs":{"subjects":[]}},"subjects":{"name":"Subjects","status":"failed","error":"Invalid selection","outputs":null}}}"#.utf8)
+    let run = try JSONDecoder().decode(WorkflowRunSummary.self, from: data)
+    XCTAssertEqual(run.preferredReviewStepID, "subjects")
+  }
   func testGuidedImportRequiresEveryUpstreamApproval() throws {
     let data = Data(#"{"status":"paused","totalSeconds":1,"outputs":{},"steps":{"brief":{"name":"Brief","status":"completed","approved":false},"preview":{"name":"Preview","status":"completed","approved":true,"outputs":{"h3_prompts":{}}}}}"#.utf8)
     let run = try JSONDecoder().decode(WorkflowRunSummary.self, from: data)
@@ -87,6 +92,17 @@ final class WorkflowReviewTests: XCTestCase {
 }
 
 final class WorkflowRepairResultTests: XCTestCase {
+  func testFailedShotDirectionsExcludeApprovedAndCompletedItems() throws {
+    let data = Data(#"{"name":"Clips","status":"failed","items":{"clip-2":{"status":"failed"},"clip-1":{"status":"completed","approved":true},"clip-10":{"status":"failed"},"clip-3":{"status":"failed","approved":true}}}"#.utf8)
+    var step = try JSONDecoder().decode(WorkflowRunSummary.Step.self, from: data)
+    XCTAssertEqual(step.failedShotIDs(operation: "music.plan_beats@1"), ["clip-2", "clip-10"])
+    XCTAssertEqual(step.failedShotIDs(operation: "movie.plan_creative_beats@1"), ["clip-2", "clip-10"])
+    XCTAssertTrue(step.failedShotIDs(operation: "project.design_subjects@1").isEmpty)
+    step.approved = true
+    XCTAssertTrue(step.failedShotIDs(operation: "music.plan_beats@1").isEmpty)
+    step.approved = false; step.status = "running"
+    XCTAssertTrue(step.failedShotIDs(operation: "music.plan_beats@1").isEmpty)
+  }
   func testFailedCancelledAndBlockedRepairsDoNotReportSuccess() throws {
     for status in ["failed", "cancelled", "awaiting_approval"] {
       let data = Data("{\"status\":\"\(status)\",\"awaitingStep\":\"story\",\"totalSeconds\":1,\"steps\":{\"clips\":{\"name\":\"Clips\",\"status\":\"completed\",\"items\":{\"clip-2\":{\"status\":\"completed\"}}}},\"outputs\":{}}".utf8)

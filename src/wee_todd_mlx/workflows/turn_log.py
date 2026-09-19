@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from uuid import uuid4
 
-from .io import MAX_DOCUMENT_BYTES
+from .io import TURN_LOG_OVERHEAD_BYTES, storage_budgets
 
 _ACTIVE = ContextVar("workflow_turn_log", default=None)
 APPLICATION_ID = 0x57545431
@@ -46,8 +46,9 @@ class TurnLog:
     @contextmanager
     def database(self):
         limits = self.runner.limits
-        budget = min(16 * 1024 * 1024, (limits["maxWorkingBytes"] - 2 * MAX_DOCUMENT_BYTES) // 2)
-        if limits["maxArtifacts"] < 5 or budget < 256 * 1024:
+        allocation = storage_budgets(limits)[1]
+        budget = max(0, allocation - TURN_LOG_OVERHEAD_BYTES)
+        if limits["maxArtifacts"] < 5 or allocation < 256 * 1024:
             raise ValueError(
                 "Full model-turn history needs 5 artifact slots and a larger disk budget"
             )

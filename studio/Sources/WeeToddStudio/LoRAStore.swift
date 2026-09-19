@@ -3,14 +3,17 @@ import StudioCore
 
 @MainActor extension StudioStore {
   func compatibleLoRAs(for engine: Engine) -> [MediaAsset] {
+    localLoRALibraryAssets.filter { $0.loraModel?.supports(engine) == true }
+  }
+  var localLoRALibraryAssets: [MediaAsset] {
     var seen = Set<String>()
     // Reimported library metadata wins; existing clip-owned snapshots remain untouched.
     let candidates = Array(globalAssets.reversed()) + project.assets
+      + folderLoRAEntries.filter { ["ready", "needsModel"].contains($0.status) }.map(\.asset)
     return candidates.filter {
       $0.kind == .lora
         && ($0.scope != .clip || $0.owner == selectedClipID)
         && seen.insert(LoRAMember(asset: $0).fileKey).inserted
-        && $0.loraModel?.supports(engine) == true
     }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
   }
   func loadLoRAGroups() {
@@ -84,12 +87,19 @@ import StudioCore
     if let index = globalAssets.firstIndex(where: { $0.id == asset.id }) {
       globalAssets[index].loraModel = model
       saveGlobals()
-    } else {
+    } else if project.assets.contains(where: { $0.id == asset.id }) {
       change { p in
         if let index = p.assets.firstIndex(where: { $0.id == asset.id }) {
           p.assets[index].loraModel = model
         }
       }
+    } else {
+      // A manual classification becomes an explicit library entry. Applied clips
+      // still own their snapshots and generation rechecks the file's metadata.
+      var linked = asset
+      linked.loraModel = model
+      globalAssets.append(linked)
+      saveGlobals()
     }
   }
   func chooseLoRAImports(model: LoRAModel, profile: String = "standard", layout: String = "auto", adalnInputGrid: String? = nil) {

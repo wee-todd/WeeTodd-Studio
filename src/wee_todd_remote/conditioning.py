@@ -45,6 +45,23 @@ def canonical_inputs(
         if model_family.lower() != "minimaxh3":
             raise ValueError("Draw Things last-frame attachments require an H3 FL2VA model")
         validate_endpoint_roles(attachments)
+    if any(isinstance(item, dict) and item.get("role") == "reference" for item in attachments):
+        if (model_family.lower() != "minimaxh3" or len(attachments) > 9 or
+                not all(isinstance(item, dict) and item.get("role") == "reference"
+                        for item in attachments)):
+            raise ValueError("Draw Things H3 Ref2VA accepts 1–9 image references without endpoints")
+        result = []
+        for attachment in attachments:
+            # Reuse file/kind/strength validation, but preserve the semantic reference role.
+            item = canonical_inputs([{**attachment, "role": "first"}], assets)[0]
+            item.pop("frameIndex")
+            item["role"] = "reference"
+            result.append(item)
+        return result
+    if any(isinstance(item, dict) and item.get("role") == "last" for item in attachments):
+        if model_family.lower() != "minimaxh3":
+            raise ValueError("Draw Things last-frame attachments require an H3 FL2VA model")
+        validate_endpoint_roles(attachments)
         if isinstance(num_frames, bool) or not isinstance(num_frames, int) or num_frames < 2:
             raise ValueError("Draw Things last-frame input requires a resolved video frame count")
         result = []
@@ -55,7 +72,7 @@ def canonical_inputs(
             result.append(item)
         return result
     unsupported = [
-        item.get("role")
+        item.get("role") if isinstance(item, dict) else None
         for item in attachments
         if not isinstance(item, dict) or item.get("role") != "first"
     ]
@@ -131,6 +148,20 @@ def canonical_loras(loras: Any) -> list[dict[str, Any]]:
 
 def validate_canonical_inputs(request: dict[str, Any]) -> None:
     inputs = request.get("inputs", [])
+    if request.get("operation") == "video" and isinstance(inputs, list) and any(
+        isinstance(item, dict) and item.get("role") == "reference" for item in inputs
+    ):
+        if not 1 <= len(inputs) <= 9:
+            raise ValueError("Draw Things H3 accepts 1–9 image references")
+        for item in inputs:
+            if (not isinstance(item, dict) or set(item) != {"role", "path", "sha256", "strength"}
+                    or item.get("role") != "reference" or type(item["strength"]) not in {int, float}
+                    or item["strength"] != 1):
+                raise ValueError("H3 image references cannot be mixed with other input roles")
+            validate_canonical_inputs({**request, "inputs": [
+                {**item, "role": "first", "frameIndex": 0}
+            ]})
+        return
     if request.get("operation") == "image":
         if not isinstance(inputs, list) or len(inputs) > 9:
             raise ValueError("Use one canvas image and up to eight moodboard images")

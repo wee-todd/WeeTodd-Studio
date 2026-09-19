@@ -42,11 +42,24 @@ public struct DrawThingsConfigImport: Identifiable {
       result.negativePrompt = try string("negativePrompt", in: entry) ?? string("negativePrompt", in: values)
       let aliases = ["fpsId": "fps", "shiftForAudio": "audioShift"]
       let integerBounds: [String: ClosedRange<Double>] = ["width": 64...4096, "height": 64...4096,
-        "steps": 1...1000, "seed": -1...Double(UInt32.max), "sampler": 0...19, "fps": 1...240, "numFrames": 1...100000]
+        "steps": 1...1000, "seed": -1...Double(UInt32.max), "sampler": 0...19, "fps": 1...240, "numFrames": 1...100000,
+        "hiresFixWidth": 64...4096, "hiresFixHeight": 64...4096]
       let realBounds: [String: ClosedRange<Double>] = ["guidanceScale": 0...100, "strength": 0...1,
-        "shift": 0...100, "audioShift": 0.1...100]
+        "shift": 0...100, "audioShift": 0.1...100, "hiresFixStrength": 0...1]
       for (source, value) in values.sorted(by: { $0.key < $1.key }) {
         let key = aliases[source] ?? source
+        if operation == "image" && key.hasPrefix("hiresFix") {
+          result.warnings.append("\(source): HighResFix import is supported only for LTX video."); continue
+        }
+        if key == "hiresFix" {
+          guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else {
+            throw StudioError.invalid("hiresFix must be a boolean.")
+          }
+          result.configuration[key] = .boolean(flag.boolValue); continue
+        }
+        if ["stage2Steps", "stage2Guidance", "stage2Cfg", "stage2Shift"].contains(key) {
+          result.warnings.append("\(source): not imported; Wurstchen stage-two controls do not control LTX HighResFix. LTX reuses steps, guidanceScale and shift."); continue
+        }
         if let bounds = integerBounds[key] ?? realBounds[key] {
           if operation == "image" && ["fps", "numFrames", "audioShift"].contains(key) {
             result.warnings.append("\(source): video setting is not applied to an image."); continue
@@ -57,7 +70,7 @@ public struct DrawThingsConfigImport: Identifiable {
           }
           let n = number.doubleValue
           if integerBounds[key] != nil {
-            guard n.rounded() == n, !["width", "height"].contains(key) || Int(n) % 64 == 0 else {
+            guard n.rounded() == n, !["width", "height", "hiresFixWidth", "hiresFixHeight"].contains(key) || Int(n) % 64 == 0 else {
               throw StudioError.invalid("\(source) must be an integer; dimensions use multiples of 64.")
             }
           }

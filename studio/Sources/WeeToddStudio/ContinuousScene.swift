@@ -79,7 +79,7 @@ struct PendingContinuousSceneTake: Identifiable {
           let endpointTask = project.clips[index].attachments.contains {
             $0.role == .last || $0.role == .keyframe
           } ? "fflf" : "i2v"
-          project.clips[index].selectGenerationTask(endpointTask)
+          project.clips[index].selectGenerationTask(project.clips[index].attachments.contains { $0.role == .audioDriver } ? "a2v" : endpointTask)
         }
         project.clips[index].continuity = ClipContinuity(mode: "scene", sourceClipID: predecessor)
       }
@@ -97,6 +97,11 @@ struct PendingContinuousSceneTake: Identifiable {
   /// Includes all scene inputs but never its accepted media or generation descriptions.
   /// Those change as a result is reviewed, without changing the requested generation.
   func continuousSceneDependencyKey(for clip: Clip) -> String {
+    // Ordinary timeline shots have no scene inputs. Avoid serializing the model
+    // library and probing every profile file on each redraw of those shots.
+    do {
+      guard !(try project.continuousSceneMembers(for: clip)).isEmpty else { return "" }
+    } catch { return "invalid-scene:" + error.localizedDescription }
     let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
     let relevantProfiles = profiles.filter { $0.engine == "ltx25" }.sorted { $0.id < $1.id }
     let profileFiles = relevantProfiles.map { profile in
@@ -104,7 +109,7 @@ struct PendingContinuousSceneTake: Identifiable {
       return profile.id + "|" + String(describing: (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970)
         + "|" + String(describing: attributes?[.size])
     }.joined(separator: "\n")
-    let runtimeKey = ((try? encoder.encode(runtime).base64EncodedString()) ?? "")
+    let runtimeKey = ((try? encoder.encode(runtime.generationSettings).base64EncodedString()) ?? "")
       + ((try? encoder.encode(relevantProfiles).base64EncodedString()) ?? "")
       + ((try? encoder.encode(loraGroups).base64EncodedString()) ?? "") + profileFiles
     do {

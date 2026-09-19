@@ -62,7 +62,7 @@ def test_scene_calls_chain_once_and_unloads_on_all_terminal_paths(
     def one_shot(*a, **k):
         pytest.fail("scene must never use one-shot generation")
 
-    def publish(source, destination, *, frames, fps, ffmpeg):
+    def publish(source, destination, *, frames, fps, ffmpeg, source_audio=False):
         assert source == native and frames == 240 and fps == 24
         destination.write_bytes(b"delivered fixture")
 

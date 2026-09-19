@@ -42,7 +42,8 @@ public enum Discovery {
         "transport": ["tls": useTLS, "hostnameVerified": useTLS, "authenticated": true],
         "models": resources.files.compactMap { file -> [String: String]? in
           guard let model = ModelZoo.specificationForModel(file), Capabilities.rules(for: file) != nil else { return nil }
-          return ["id": file, "name": model.name, "family": String(describing: model.version)]
+          return ["id": file, "name": model.name, "family": String(describing: model.version),
+                  "modifier": String(describing: ModelZoo.modifierForModel(file))]
         },
         "loras": resources.LoRAs.filter {
           resources.files.contains($0.file) && ($0.modifier.map { $0 == .none } ?? true)

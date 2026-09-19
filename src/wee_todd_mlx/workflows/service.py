@@ -7,11 +7,12 @@ from importlib.resources import files
 from pathlib import Path
 
 from .backend import LocalQwenBackend
-from .io import load_document
+from .io import load_checkpoint, load_document
 from .runner import WorkflowRunner
 from .validation import validate_document
 
 BUILTINS = (
+    "music-video-planning",
     "guided-movie-planning",
     "staged-prompt-editing",
     "movie-planning",
@@ -43,7 +44,7 @@ def dispatch(
             if checkpoint.is_symlink():
                 raise ValueError("Workflow checkpoint cannot be a symlink")
             if checkpoint.is_file():
-                saved = load_document(checkpoint)
+                saved = load_checkpoint(checkpoint)
                 # A saved job owns its definition. Upgrading the installed builtin must not
                 # silently rerun extraction, remove approvals, or rewrite its reviewed objects.
                 if saved.get("workflowID") == definition["id"] and "definition" in saved:

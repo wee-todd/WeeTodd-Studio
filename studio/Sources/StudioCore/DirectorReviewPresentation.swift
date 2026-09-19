@@ -5,7 +5,8 @@ public enum DirectorReviewMode: String, CaseIterable, Identifiable {
   public var id: String { rawValue }
   public var label: String { self == .focused ? "Focused · 3 reviews" : "Detailed · 8 reviews" }
   public static func supports(_ definition: [String: JSONValue]) -> Bool {
-    definition["id"] == .string("weetodd.guided-movie-planning") && definition["version"] == .string("1.1.0")
+    (definition["id"] == .string("weetodd.guided-movie-planning") && definition["version"] == .string("1.1.0")) ||
+      (definition["id"] == .string("weetodd.music-video-planning") && [JSONValue.string("1.0.0"), .string("1.1.0")].contains(definition["version"] ?? .null))
   }
   /// Choose gates before the run has any saved execution identity. Saved jobs keep their definition.
   public func applying(to definition: [String: JSONValue], hasStarted: Bool) throws -> [String: JSONValue] {

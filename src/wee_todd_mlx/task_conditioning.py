@@ -236,6 +236,8 @@ def normalize_conditioning(recipe, *, check_files=True):
                 "reference_frames",
                 "reference_size_policy",
                 "reference_priority",
+                "source_start_seconds",
+                "source_duration_seconds",
             },
             "input",
         )
@@ -279,6 +281,15 @@ def normalize_conditioning(recipe, *, check_files=True):
             raise ValueError(f"{identity}: timed placement is not implemented for this role")
         if item["role"] == "audio_driver" and item["kind"] != "audio":
             raise ValueError(f"{identity}: audio_driver requires audio")
+        interval_fields = {"source_start_seconds", "source_duration_seconds"} & item.keys()
+        if interval_fields:
+            if engine not in {"h3", "ltx23", "ltx25"} or item["role"] != "audio_driver":
+                raise ValueError("Source audio intervals require a native audio driver")
+            if len(interval_fields) != 2:
+                raise ValueError("Source audio intervals require both start and duration")
+            _number(item["source_start_seconds"], "source_start_seconds", 0, 86400)
+            _number(item["source_duration_seconds"], "source_duration_seconds",
+                    1e-9, 15 if engine == "h3" else 30)
         if item["role"] == "control":
             if item.get("control_type") not in CONTROL_FAMILIES or item["kind"] not in {
                 "image",

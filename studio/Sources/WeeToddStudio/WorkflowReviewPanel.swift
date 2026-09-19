@@ -20,6 +20,7 @@ struct WorkflowReviewPanel: View {
   var subjectApprovalLabel = "description"
   var preserveApprovedCast = false
   var focused = false
+  var dynamicMusicTiming = false
   var subjectNames: [String: String] = [:]
   var storyContext: WorkflowStoryOutline?
   var promptPreview: H3PromptPreview?
@@ -46,7 +47,7 @@ struct WorkflowReviewPanel: View {
   private var story: WorkflowStoryOutline? { decode(WorkflowStoryOutline.self, key: "story") }
   private var subjects: [WorkflowSubjectProposal]? { decode([WorkflowSubjectProposal].self, key: "subjects") }
   private var creativeBrief: CreativeBrief? { decode(CreativeBrief.self, key: "creative_brief") }
-  private var h3Preview: H3PromptPreview? { decode(H3PromptPreview.self, key: "h3_prompts") }
+  private var h3Preview: H3PromptPreview? { decode(H3PromptPreview.self, key: "h3_prompts") ?? decode(H3PromptPreview.self, key: "prompt_plan") }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -77,6 +78,7 @@ struct WorkflowReviewPanel: View {
       }
       if let creativeBrief {
         CreativeBriefReviewView(draft: $draft.brief, value: creativeBrief, approved: step.approved == true, busy: busy,
+          dynamicMusicTiming: dynamicMusicTiming,
           onSave: { values in await onReview("edit", nil, values, nil, nil) },
           onDirtyChange: { creativeDirty = $0 })
       } else if let h3Preview {
@@ -126,10 +128,10 @@ struct WorkflowReviewPanel: View {
         }
         Button("Edit story…") { editingStory = true }.disabled(step.approved == true || step.status == "stale")
       } else {
-        ScrollView { Text(pretty(outputs)).font(.system(.callout, design: .monospaced)).textSelection(.enabled) }
+        ScrollView { WorkflowTextPreviewView(text: pretty(outputs)).font(.system(.callout, design: .monospaced)) }
         Button("Edit output…") { editingJSON = true }.disabled(step.approved == true || step.status != "completed")
       }
-      if let localError { Text(localError).foregroundStyle(.red).font(.caption) }
+      if let localError { WorkflowTextPreviewView(text: localError).foregroundStyle(.red).font(.caption) }
     }.disabled(busy)
       .confirmationDialog("Discard unsaved review edits?", isPresented: $showDiscardDraft) {
         Button("Discard draft edits", role: .destructive) {
@@ -138,7 +140,8 @@ struct WorkflowReviewPanel: View {
         }
       } message: { Text("The saved review output stays intact. This removes your unsaved text, reference, and shot edits in this review.") }
       .sheet(item: $editingClip) { clip in
-        WorkflowClipEditSheet(clip: Binding(get: { draft.clips[clip.id] ?? clip }, set: { draft.clips[clip.id] = $0 })) { edited in
+        WorkflowClipEditSheet(clip: Binding(get: { draft.clips[clip.id] ?? clip }, set: { draft.clips[clip.id] = $0 }),
+          characters: plan?.characters ?? [], subjectNames: subjectNames) { edited in
           do {
             guard var plan else { return false }
             try plan.replace(edited)
@@ -235,6 +238,8 @@ struct WorkflowReviewPanel: View {
 private struct WorkflowClipEditSheet: View {
   @Environment(\.dismiss) private var dismiss
   @Binding var clip: WorkflowClipDraft
+  let characters: [WorkflowCharacter]
+  let subjectNames: [String: String]
   let onSave: (WorkflowClipDraft) async -> Bool
   @State private var saving = false
   @State private var failed = false
@@ -249,6 +254,22 @@ private struct WorkflowClipEditSheet: View {
       Picker("Connection", selection: $clip.continuity) {
         Text("Cut").tag("cut"); Text("Continue previous clip").tag("continue")
       }.disabled(clip.startFrame == 0)
+      DisclosureGroup("Visible characters · \(clip.characters.count)") {
+        Text("Select only characters visible in this shot.").font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+          VStack(alignment: .leading, spacing: 6) {
+            ForEach(characters) { character in
+              Toggle(subjectNames[character.id] ?? character.id, isOn: Binding(
+                get: { clip.characters.contains(character.id) },
+                set: { selected in
+                  clip.characters.removeAll { $0 == character.id }
+                  if selected { clip.characters.append(character.id) }
+                }
+              ))
+            }
+          }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(height: min(140, CGFloat(characters.count * 26)))
+      }.disabled(saving)
       Text("A changed ending can require repairs to following continuous clips. Timing is controlled by movie settings.")
         .font(.caption).foregroundStyle(.secondary)
       if failed { Text("Could not save. Close this editor to see the workflow error.").foregroundStyle(.red) }

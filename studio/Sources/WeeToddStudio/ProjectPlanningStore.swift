@@ -15,6 +15,7 @@ extension StudioStore {
     var value = planning
     try value.importRun(run, sourceID: sourceID, sourceText: sourceText)
     var updated = project; updated.planning = value
+    updated.retainPlanningImages(referenceBindings)
     for subject in value.subjects where !existingIDs.contains(subject.id) && subject.sourceKey.hasPrefix(sourceID + ":subject:") {
       for key in (try run.subjectsForImport()).first(where: { subject.sourceKey.hasSuffix(":" + $0.id) })?.referenceAssetKeys ?? [] {
         guard let path = referenceBindings[key] else { continue }
@@ -66,6 +67,7 @@ extension StudioStore {
     let previous = project
     var staged = project; var plan = planning
     try plan.importRun(run, sourceID: sourceID, sourceText: sourceText); staged.planning = plan
+    staged.retainPlanningImages(referenceBindings)
     let sourceSubjects = try run.subjectsForImport()
     for (workflowID, match) in librarySelections {
       guard sourceSubjects.first(where: { $0.id == workflowID })?.validatesReuse(match) == true else {

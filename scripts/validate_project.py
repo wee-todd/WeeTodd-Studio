@@ -73,7 +73,10 @@ def build_checks(project: Path, profiles: list[str], python: str) -> list[list[s
             "scripts/evaluate_director_production.py",
         })
     if "studio" in selected:
-        lint_paths.update({"scripts/studio_bridge.py", "scripts/build_studio_app.py",
+        lint_paths.update({"scripts/studio_bridge.py", "scripts/studio_references.py",
+                           "scripts/studio_lora.py", "scripts/studio_music.py",
+                           "scripts/studio_production.py",
+                           "scripts/build_studio_app.py",
                            "scripts/install_studio_runtime.py", "scripts/setup_assistant_model.py",
                            "scripts/studio_assistant_models.py",
                            "src/wee_todd_mlx/assistant_models.py",

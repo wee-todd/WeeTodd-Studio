@@ -6,12 +6,157 @@ projection, shape, scaling, and specialized-pipeline checks.
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import re
+import tempfile
 from pathlib import Path
 
 from wee_todd_mlx.adapter_contract import inspect_adapter
 from wee_todd_mlx.studio_h3_turbo import h3_lora_metadata
+
+MAX_LIBRARY_FILES = 1000
+MAX_LIBRARY_VISITS = 20000
+
+
+def scan_lora_folders(folders, cache_path):
+    """Inspect headers only; never copy weights or change a project/library asset.
+
+    Folder order breaks ties for overlapping roots. Symlink directories are not
+    traversed, but explicitly selected symlink roots and linked files are supported.
+    Cache entries are only hints: generation revalidates every enabled adapter.
+    """
+    if not isinstance(folders, list) or len(folders) > 64:
+        raise ValueError("Choose up to 64 LoRA folders.")
+    cache_path = Path(cache_path)
+    old = {}
+    try:
+        if cache_path.stat().st_size <= 4_000_000:
+            saved = json.loads(cache_path.read_text())
+            if saved.get("version") == 1 and isinstance(saved.get("files"), dict):
+                old = saved["files"]
+    except (OSError, ValueError, AttributeError):
+        pass
+    entries, warnings, updated = [], [], {}
+    seen_files, seen_directories = set(), set()
+    visits = 0
+    skipped_dt = 0
+    limited = False
+
+    def signature(source, hint):
+        info = source.stat()
+        return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, hint]
+
+    for folder in folders:
+        if not isinstance(folder, dict) or not isinstance(folder.get("path"), str):
+            raise ValueError("Each LoRA folder needs a path.")
+        if folder.get("enabled", True) is False:
+            continue
+        if not folder["path"].strip():
+            continue
+        root = Path(folder["path"]).expanduser().resolve()
+        hint = folder.get("modelHint")
+        if hint not in {None, "h3", "ltx23", "ltx25"}:
+            raise ValueError("Choose a supported folder training model.")
+        pending = [root]
+        while pending and not limited:
+            directory = pending.pop()
+            # Include scan policy: an overlapping recursive root can add descendants
+            # after an earlier nonrecursive root, without reinspecting shared files.
+            directory_key = (str(directory), folder.get("recursive", True), hint)
+            if directory_key in seen_directories:
+                continue
+            seen_directories.add(directory_key)
+            try:
+                with os.scandir(directory) as children:
+                    for child in children:
+                        visits += 1
+                        if visits > MAX_LIBRARY_VISITS or len(entries) >= MAX_LIBRARY_FILES:
+                            limited = True
+                            break
+                        if child.name.startswith("."):
+                            continue
+                        if child.is_dir(follow_symlinks=False):
+                            if folder.get("recursive", True):
+                                pending.append(Path(child.path))
+                            continue
+                        if not child.is_file():
+                            continue
+                        suffix = Path(child.name).suffix.lower()
+                        if suffix == ".ckpt":
+                            skipped_dt += 1
+                            continue
+                        if suffix != ".safetensors":
+                            continue
+                        source = Path(child.path).resolve()
+                        key = str(source)
+                        if key in seen_files:
+                            continue
+                        seen_files.add(key)
+                        entry = dict(name=source.stem, path=key, sourceFolder=str(root))
+                        try:
+                            stamp = signature(source, hint)
+                            cached = old.get(key, {})
+                            if not isinstance(cached, dict):
+                                cached = {}
+                            inspection = cached.get("inspection")
+                            if not (
+                                cached.get("signature") == stamp
+                                and isinstance(inspection, dict)
+                                and inspection.get("status") in {
+                                    "ready", "needsModel", "specialized", "unsupported"
+                                }
+                                and inspection.get("path", key) == key
+                            ):
+                                try:
+                                    inspection = inspect_lora(source, model_hint=hint)
+                                    inspection["status"] = (
+                                        "ready" if inspection.get("loraModel") else "needsModel"
+                                    )
+                                except (OSError, ValueError, TypeError) as exc:
+                                    message = str(exc)[:500]
+                                    inspection = dict(
+                                        status=(
+                                            "specialized" if "recipe" in message else "unsupported"
+                                        ),
+                                        detail=message,
+                                    )
+                            if signature(source, hint) != stamp:
+                                raise ValueError(
+                                    "File changed during inspection. Refresh to retry."
+                                )
+                            updated[key] = dict(signature=stamp, inspection=inspection)
+                            entry.update(inspection)
+                        except (OSError, ValueError) as exc:
+                            entry.update(status="unsupported", detail=str(exc)[:500])
+                        entries.append(entry)
+            except OSError as exc:
+                warnings.append(f"Cannot read {directory}: {exc.strerror or str(exc)}")
+        if limited:
+            break
+    if limited:
+        warnings.append("Scan limit reached. Choose smaller LoRA folders or disable subfolders.")
+    if skipped_dt:
+        warnings.append(
+            f"Skipped {skipped_dt} .ckpt files. Browse installed Draw Things LoRAs "
+            "through its connection; native generation needs compatible SafeTensors adapters."
+        )
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", dir=cache_path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            try:
+                json.dump(dict(version=1, files=updated), stream)
+                stream.close()
+                temporary.replace(cache_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+    except OSError as exc:
+        warnings.append(f"LoRA metadata cache could not be saved: {exc.strerror or str(exc)}")
+    return dict(
+        entries=sorted(entries, key=lambda item: item["path"].casefold()), warnings=warnings[:100]
+    )
 
 
 def inspect_lora(source, model_hint=None):

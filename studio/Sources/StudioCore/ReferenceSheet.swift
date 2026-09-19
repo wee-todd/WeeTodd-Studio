@@ -1,11 +1,41 @@
 import Foundation
 
+/// Builds reference context from explicit placements, never from name mentions alone.
+public enum ReferenceSheetLinks {
+  public static func definitions(relationships: [WorkflowObjectRelationship], inventory: [WorkflowSubjectProposal]) -> String {
+    format(relationships, targets: inventory.map {
+      DescriptionLinkTarget(id: $0.id, name: $0.name, description: $0.description)
+    })
+  }
+  public static func definitions(subject: PlanningSubject, inventory: [PlanningSubject]) -> String {
+    var links = (subject.relationships ?? []).map {
+      WorkflowObjectRelationship(id: $0.id.uuidString, targetID: $0.targetID.uuidString, role: $0.role, placement: $0.placement)
+    }
+    if let environment = subject.environmentID?.uuidString,
+       !links.contains(where: { $0.targetID == environment && $0.role == .located_in }) {
+      links.append(WorkflowObjectRelationship(id: "environment:" + environment, targetID: environment,
+        role: .located_in, placement: "Parent environment of this set."))
+    }
+    return format(links, targets: inventory.map {
+      DescriptionLinkTarget(id: $0.id.uuidString, name: $0.name, description: $0.details)
+    })
+  }
+  private static func format(_ relationships: [WorkflowObjectRelationship], targets: [DescriptionLinkTarget]) -> String {
+    relationships.map { link in
+      let target = targets.first { $0.id == link.targetID }
+      return "Link \(link.id) → \(link.targetID) · \(target?.name ?? "Missing object")\n"
+        + "Role: \(link.role.rawValue). Placement / state: \(link.placement.isEmpty ? "Unspecified." : link.placement)\n"
+        + "Separate object definition: \(target?.description ?? "Definition unavailable; do not invent its appearance.")"
+    }.joined(separator: "\n\n")
+  }
+}
+
 public enum ReferenceSheetTemplate: String, Codable, CaseIterable, Identifiable {
   case character, portrait, prop, environment, set, clothing, custom
   public var id: String { rawValue }
   public var label: String {
     switch self {
-    case .character: return "Character · three views"
+    case .character: return "Character · front, close-up, profile"
     case .portrait: return "Character · portrait"
     case .prop: return "Prop · three views"
     case .environment: return "Environment · establishing views"
@@ -26,7 +56,7 @@ public enum ReferenceSheetTemplate: String, Codable, CaseIterable, Identifiable 
   public var layout: String {
     switch self {
     case .character:
-      return "Production character reference sheet on a clean neutral backdrop with soft even lighting. Three full-body views of the SAME character, equal scale, entire body and feet visible: left front view; center true three-quarter view with torso, hips and feet rotated about 40 degrees; right true side profile at 90 degrees. Keep identity, anatomy, proportions, clothing and accessories identical across all views. Adapt stance to the subject's species; a quadruped stays on four legs. No text labels."
+      return "Production character reference sheet on a clean neutral backdrop with soft even lighting. Three clearly separated views of the SAME character: left full-body front view; center head-and-shoulders face close-up showing facial structure and distinctive identity features; right full-body side profile at 90 degrees. Keep the two body views at equal scale, entire body and feet visible. Enlarge the center close-up for facial detail. Keep identity, anatomy, proportions, clothing and accessories identical across all views. Adapt stance to the subject's species; a quadruped stays on four legs. No text labels."
     case .portrait:
       return "Production portrait reference of the same character, head and shoulders, neutral expression, soft even light and a plain backdrop. Make facial structure, eyes, hair or fur and distinctive identity features clear. No text labels."
     case .prop:
@@ -61,15 +91,17 @@ public struct ReferenceSheetContext: Codable, Equatable, Identifiable {
   }
   public var prompt: String {
     var text = template.layout + "\nVisual style: " + style + "\nSubject: " + name + ".\n" + description
-    text += "\nIf visual references are supplied, preserve the depicted subject's identity and design while applying the requested views and sheet layout."
-    if !linkedDefinitions.isEmpty { text += "\nLinked objects (separate definitions; include only where relevant):\n" + linkedDefinitions }
+    text += "\nUse the subject description as the authoritative baseline identity and appearance. Preserve ordinary authored clothing and equipment. Linked definitions provide context, not an instruction to display every linked object: honor each relationship's role and placement / state. Do not incorporate conditional or future transfers, damage, held objects or poses into the baseline unless explicitly requested in the sheet instructions. Preserve explicitly defined state variants."
+    text += "\nIf visual references are supplied, preserve the depicted subject's identity and design while applying the requested views and sheet layout; temporary image states must not override the defined baseline or relationship conditions."
+    if !linkedDefinitions.isEmpty { text += "\nLinked objects and relationship conditions (separate definitions):\n" + linkedDefinitions }
     if !direction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { text += "\nView / pose / camera instructions: " + direction }
     return text
   }
   public func apply(to draft: inout DrawThingsImageDraft) {
     draft.name = name + " · " + template.label
     draft.prompt = prompt
-    draft.negativePrompt = "inconsistent identity, mismatched views, inconsistent materials, cropped subject, distorted anatomy, unwanted text, watermark, clutter"
+    let framingErrors = template == .character ? "cropped full-body views" : "cropped subject"
+    draft.negativePrompt = "inconsistent identity, mismatched views, inconsistent materials, \(framingErrors), distorted anatomy, unwanted text, watermark, clutter"
     draft.width = template == .portrait ? 768 : 1280
     draft.height = template == .portrait ? 1024 : 768
     draft.referenceSheet = self
