@@ -15,7 +15,7 @@ from pathlib import Path
 from .config import ABC_DEFAULTS, SEMANTIC_DEFAULTS, integer, number, sampling
 
 
-def tensor_header(filename):
+def tensor_header(filename, *, additional_widths=None):
     filename = Path(filename)
     size = filename.stat().st_size
     with filename.open("rb") as stream:
@@ -29,6 +29,7 @@ def tensor_header(filename):
     header = json.loads(raw)
     header.pop("__metadata__", None)
     widths = {"BF16": 2, "F16": 2, "F32": 4, "U32": 4}
+    widths.update(additional_widths or {})
     spans = []
     for name, entry in header.items():
         shape, dtype, offsets = entry.get("shape"), entry.get("dtype"), entry.get("data_offsets")

@@ -1,8 +1,19 @@
 import Foundation
+import StudioCore
 import XCTest
 @testable import WeeToddStudio
 
 final class RuntimeSettingsTests: XCTestCase {
+  func testVoiceModelsAreRuntimeOnlyAndLegacySettingsStillDecode() throws {
+    var settings = RuntimeSettings(root: "/root", pythonPath: "/python", profilesDirectory: "/profiles")
+    XCTAssertNil(try JSONDecoder().decode(RuntimeSettings.self, from: JSONEncoder().encode(settings)).voiceModels)
+    var models = VoiceModelSettings()
+    let model = models.register(InstalledVoiceModel(engine: .fishS2Pro, name: "Fish S2 Pro · 8-bit", path: "/models/fish"))
+    settings.voiceModels = models
+    let restored = try JSONDecoder().decode(RuntimeSettings.self, from: JSONEncoder().encode(settings))
+    XCTAssertEqual(restored.voiceModels?.preferred(for: .fishS2Pro)?.id, model.id)
+    XCTAssertNil(settings.generationSettings.voiceModels)
+  }
   private let defaults = RuntimeSettings(
     root: "/new/source", pythonPath: "/new/python", profilesDirectory: "/new/profiles",
     drawThingsHelperPath: "/Applications/Studio.app/Contents/MacOS/WeeToddDrawThings")

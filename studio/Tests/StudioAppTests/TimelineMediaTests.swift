@@ -12,6 +12,19 @@ final class TimelineMediaTests: XCTestCase {
     return url
   }
 
+  @MainActor func playbackStore(in folder: URL) throws -> StudioStore {
+    // Media composition tests inject a prepared soundtrack; Python mixer tests verify its PCM.
+    let mixed = try audio(in: folder)
+    let invocation: Bridge.Invocation = { command, _, payload, _ in
+      if command == "audio-mix" {
+        XCTAssertEqual(payload["purpose"] as? String, "preview")
+        return ["path": mixed.path]
+      }
+      return [:]
+    }
+    return StudioStore(dataDirectory: folder, restoreSession: false, invocation: invocation)
+  }
+
   /// Three one-second color blocks let decoded pixels prove both source trims and timeline cuts.
   func movie(in directory: URL) async throws -> URL {
     let url = directory.appendingPathComponent("colors.mov")
@@ -100,7 +113,7 @@ final class TimelineMediaTests: XCTestCase {
   @MainActor func testNativePlayerCrossesClipBoundaryAndStopsAtTimelineEnd() async throws {
     let folder = try directory()
     let url = try await movie(in: folder)
-    let store = StudioStore(dataDirectory: folder, restoreSession: false)
+    let store = try playbackStore(in: folder)
     var a = Clip(name: "First", engine: .movie); a.sourcePath = url.path; a.duration = 0.3
     var b = Clip(name: "Second", engine: .movie); b.sourcePath = url.path; b.sourceIn = 2; b.duration = 0.3
     store.project.clips = [a, b]
@@ -139,7 +152,7 @@ extension TimelineMediaTests {
   @MainActor func testAudioOnlyCompositionPlaysUnrenderedTimelineWithRegionFades() async throws {
     let folder = try directory()
     let sound = try audio(in: folder)
-    let store = StudioStore(dataDirectory: folder, restoreSession: false)
+    let store = try playbackStore(in: folder)
     var clip = Clip(); clip.duration = 0.4
     var region = AudioRegion(assetID: UUID(), path: sound.path)
     region.start = 0; region.sourceIn = 1; region.duration = 0.4; region.volume = 0.6; region.fade = 0.1
@@ -150,7 +163,7 @@ extension TimelineMediaTests {
     let mix = try XCTUnwrap(item.audioMix?.inputParameters.last)
     var start: Float = 0; var end: Float = 0; var range = CMTimeRange.zero
     XCTAssertTrue(mix.getVolumeRamp(for: TimelinePlaybackBuilder.time(0.05), startVolume: &start, endVolume: &end, timeRange: &range))
-    XCTAssertEqual(start, 0); XCTAssertEqual(end, 0.6, accuracy: 0.001)
+    XCTAssertEqual(start, 1); XCTAssertEqual(end, 1, accuracy: 0.001) // Fades are baked once into canonical PCM.
     for _ in 0..<100 where item.status == .unknown { try await Task.sleep(nanoseconds: 20_000_000) }
     XCTAssertEqual(item.status, .readyToPlay, item.error?.localizedDescription ?? "")
     store.togglePlayback()
@@ -162,7 +175,7 @@ extension TimelineMediaTests {
   @MainActor func testEmptyLeadAndTailKeepTheirPositionsDuringRealVideoPlayback() async throws {
     let folder = try directory()
     let url = try await movie(in: folder)
-    let store = StudioStore(dataDirectory: folder, restoreSession: false)
+    let store = try playbackStore(in: folder)
     var blank = Clip(); blank.duration = 0.2
     var video = Clip(engine: .movie); video.sourcePath = url.path; video.sourceIn = 1; video.duration = 0.2
     var tail = Clip(); tail.duration = 0.2
@@ -177,5 +190,18 @@ extension TimelineMediaTests {
     XCTAssertEqual(store.playhead, 0.6, accuracy: 0.001)
     XCTAssertFalse(store.isPlaying)
     XCTAssertEqual(store.previewClip?.id, tail.id)
+  }
+}
+
+extension TimelineMediaTests {
+  @MainActor func testClearingTimelineStopsOldPreparedItem() async throws {
+    let store = try playbackStore(in: directory())
+    var clip = Clip(); clip.duration = 2; store.project.clips = [clip]
+    store.prepareTimelinePlayback(); await store.timelineBuildTask?.value
+    XCTAssertNotNil(store.player.currentItem)
+    store.togglePlayback(); XCTAssertTrue(store.isPlaying)
+    store.project.clips = []
+    store.prepareTimelinePlayback(force: true)
+    XCTAssertNil(store.player.currentItem); XCTAssertFalse(store.isPlaying)
   }
 }

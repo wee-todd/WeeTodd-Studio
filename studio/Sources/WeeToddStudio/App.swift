@@ -54,6 +54,7 @@ import SwiftUI
         Button("Create music video…") { store.showMusicVideoWorkflow = true }
         Button("Produce movie…") { store.showMusicVideoProduction = true }
         Button("Generate Music…") { store.openMusic() }
+        Button("Generate Voice…") { store.openVoice() }
         Button("Workflows…") { store.showWorkflows = true }
         Button("Shot List…") { store.showShotList = true }
         Button("Production Library…") { store.showProductionLibrary = true }
@@ -129,6 +130,7 @@ struct StudioView: View {
       }
       .disabled(store.showPrompt || store.showMotionPrompt || store.imageDraft != nil)
       if store.imageDraft != nil && !store.referenceSheetOpen { ImageGenerationEditor().transition(.opacity).zIndex(10) }
+      if store.showVoice { VoiceEditor().transition(.opacity).zIndex(12) }
       if store.showMusic { MusicEditor().transition(.opacity).zIndex(11) }
       if store.showPrompt { PromptEditor().transition(.opacity).zIndex(10) }
       if store.showMotionPrompt {

@@ -17,9 +17,11 @@ struct RuntimeSettings: Codable {
   var drawThingsHelperPath: String?
   var acceleration: AccelerationSettings?
   var loraFolders: [LoRAFolder]?
+  var voiceModels: VoiceModelSettings?
   var generationSettings: Self {
     var value = self
     value.loraFolders = nil
+    value.voiceModels = nil
     return value
   }
 
@@ -268,6 +270,9 @@ extension Encodable {
   @Published var generationDescriptions: [UUID: [String: Any]] = [:]
   @Published var projectURL: URL?
   @Published var showPrompt = false
+  @Published var showVoice = false
+  @Published var selectedVoiceAssetID: UUID?
+  lazy var audioMixBridge = bridge.independent()
   @Published var showMusic = false
   @Published var selectedMusicAssetID: UUID?
   @Published var musicModelStatus: String?
@@ -380,13 +385,13 @@ extension Encodable {
     }, ended: { [weak self] item in
       MainActor.assumeIsolated { self?.playbackEnded(item: item) }
     })
+    runtime = RuntimeSettings.restoring(
+      try? Data(contentsOf: dataDirectory.appendingPathComponent("runtime.json")),
+      defaults: runtime)
     guard restoreSession else { return }
     try? FileManager.default.createDirectory(
       at: dataDirectory.appendingPathComponent("Profiles"),
       withIntermediateDirectories: true)
-    runtime = RuntimeSettings.restoring(
-      try? Data(contentsOf: dataDirectory.appendingPathComponent("runtime.json")),
-      defaults: runtime)
     if let data = try? Data(
       contentsOf: dataDirectory.appendingPathComponent("global-assets.json")),
       let value = try? JSONDecoder().decode([MediaAsset].self, from: data)
@@ -424,6 +429,13 @@ extension Encodable {
   func change(undoGroup: UUID? = nil, _ body: (inout StudioProject) -> Void) {
     var updated = project
     body(&updated)
+    for i in updated.clips.indices where updated.clips[i].audioDriverSelection != nil {
+      let clip = updated.clips[i]
+      if let old = project.clips.first(where: { $0.id == clip.id }),
+        project.audioDriverRevision(for: old) != updated.audioDriverRevision(for: clip) {
+        updated.clips[i].audioDriverMixKey = nil
+      }
+    }
     guard updated != project else { return }
     if undoGroup == nil || undoGroup != lastUndoGroup { undoStates.append(project) }
     lastUndoGroup = undoGroup
@@ -517,6 +529,7 @@ extension Encodable {
     guard let id = selectedClipID else { return }
     change {
       $0.clips.removeAll { $0.id == id }
+      $0.audio.removeAll { $0.anchor?.clipID == id }
       $0.assets.removeAll { $0.scope == .clip && $0.owner == id }
     }
     selectedClipID = project.clips.first?.id
@@ -598,6 +611,7 @@ extension Encodable {
     cancelMotionPromptEditor()
     referenceSheetOpen = false; imageDraft = nil; imagePreviewPath = nil
     musicPlayer.pause(); musicPlayer.replaceCurrentItem(with: nil)
+    showVoice = false; selectedVoiceAssetID = nil
     showMusic = false; selectedMusicAssetID = nil; musicModelStatus = nil
     undoStates.removeAll(); redoStates.removeAll(); lastUndoGroup = nil
     invalidateTimelinePlayback()
@@ -787,9 +801,12 @@ extension Encodable {
       }
       for i in p.audio.indices where p.audio[i].path == old { p.audio[i].path = url.path }
       p.mapMusicSourcePaths { $0 == old ? url.path : $0 }
+      p.mapVoicePaths { $0 == old ? url.path : $0 }
     }
     refreshPreview()
   }
+  var timelineAudioLease: AudioMixLease?
+
   func collectMedia() {
     let panel = NSOpenPanel()
     panel.title = "Choose a folder for the portable project"
@@ -865,6 +882,9 @@ extension Encodable {
       }
       for i in p.audio.indices { p.audio[i].path = try collect(p.audio[i].path) }
       try p.mapMusicSourcePaths(collect)
+      try p.mapVoicePaths(collect)
+      // Collected media have new identities; rebuild drivers from these portable sources.
+      for i in p.clips.indices where p.clips[i].audioDriverSelection != nil { p.clips[i].audioDriverMixKey = nil }
       let target = bundle.appendingPathComponent(project.name + ".weetodd")
       try ProjectStorage.write(p, to: target)
       notice = "Collected \(copied.count) media files. Model weights remain shared."
@@ -973,12 +993,19 @@ extension Encodable {
   }
   func generateSelected() async {
     guard !operationBusy else { return }
+    let target = selectedClipID, session = documentSessionID
     if !canGenerateSelected { await prepareSelected() }
-    guard canGenerateSelected else { return }
+    guard selectedClipID == target, documentSessionID == session, canGenerateSelected else { return }
     await renderPrepared()
   }
   func prepareSelected() async {
-    guard !operationBusy, let clip = selectedClip else { return }
+    guard !operationBusy else { return }
+    let target = selectedClipID, originalSession = documentSessionID
+    if selectedClip?.audioDriverSelection != nil {
+      guard await prepareAudioDriver(), selectedClipID == target,
+        documentSessionID == originalSession else { return }
+    }
+    guard let clip = selectedClip else { return }
     if clip.engine == .drawThings { await prepareDrawThingsClip(); return }
     let requestID = UUID()
     activeNativeRequest = requestID

@@ -4,7 +4,7 @@ extension StudioProject {
   /// Editing needs space for the full song and titles while video coverage is still being built.
   /// Export and playback duration continue to follow the actual video timeline.
   public var timelineContentDuration: Double {
-    let ends = [duration] + audio.map { $0.start + $0.duration } + titles.map { $0.start + $0.duration }
+    let ends = [duration] + resolvedAudio.map { $0.start + $0.duration } + titles.map { $0.start + $0.duration }
     return max(0, ends.filter { $0.isFinite }.max() ?? 0)
   }
 }
@@ -18,6 +18,7 @@ public struct TimelinePlaybackSpan: Equatable {
   public let path: String
   public let sourceIn: Double
   public let volume: Double
+  public let pan: Double
   public var end: Double { start + duration }
   public var isStill: Bool {
     ["png", "jpg", "jpeg", "webp", "tif", "tiff", "heic"].contains(
@@ -50,7 +51,7 @@ public struct TimelinePlaybackPlan: Equatable {
       let end = index + 1 < starts.count ? starts[index + 1] : cursor
       return TimelinePlaybackSpan(clipID: clip.id, start: starts[index],
         duration: max(0, end - starts[index]), path: clip.playbackPath,
-        sourceIn: clip.playbackIn, volume: clip.volume)
+        sourceIn: clip.playbackIn, volume: clip.volume, pan: clip.sourcePan ?? 0)
     }
     fps = project.settings.fps.isFinite ? max(1, project.settings.fps) : 24
     // Keep live preview bounded by display needs; export retains the chosen dimensions.
@@ -58,7 +59,7 @@ public struct TimelinePlaybackPlan: Equatable {
     width = max(2, Int(Double(project.settings.width) * scale) / 2 * 2)
     height = max(2, Int(Double(project.settings.height) * scale) / 2 * 2)
     fit = project.settings.fit
-    audio = project.audio
+    audio = project.resolvedAudio
     audioTracks = project.audioTracks
   }
 
@@ -73,5 +74,17 @@ public struct TimelinePlaybackPlan: Equatable {
     guard seconds.isFinite, duration > 0 else { return nil }
     let target = clamped ? min(duration, max(0, seconds)) : seconds
     return span(at: target) == nil ? nil : target
+  }
+}
+
+extension StudioProject {
+  /// Resolve the same approved media used by video playback before canonical audio preparation.
+  public var audioPlaybackProject: StudioProject {
+    var resolved = self
+    for i in clips.indices {
+      resolved.clips[i].sourcePath = clips[i].playbackPath
+      resolved.clips[i].sourceIn = clips[i].playbackIn
+    }
+    return resolved
   }
 }

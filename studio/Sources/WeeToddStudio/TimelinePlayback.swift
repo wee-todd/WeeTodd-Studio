@@ -1,3 +1,4 @@
+import Darwin
 import AVFoundation
 import Combine
 import StudioCore
@@ -25,7 +26,7 @@ struct TimelinePlaybackBuilder {
     return CMTime(value: Int64((seconds * 60000).rounded()), timescale: 60000)
   }
 
-  static func build(_ plan: TimelinePlaybackPlan) async throws -> TimelinePlaybackMedia {
+  static func build(_ plan: TimelinePlaybackPlan, canonicalAudio: String? = nil) async throws -> TimelinePlaybackMedia {
     let composition = AVMutableComposition()
     let video = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
     let sourceAudio = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
@@ -37,7 +38,7 @@ struct TimelinePlaybackBuilder {
     var hasVideo = false
     var assets: [String: AVURLAsset] = [:]
     let solo = plan.audioTracks.contains(where: \.solo)
-    let activeAudio = plan.audio.filter { region in
+    let activeAudio = (canonicalAudio == nil ? plan.audio : []).filter { region in
       let track = plan.audioTracks.first(where: { $0.id == region.trackID })
       return track?.muted != true && (!solo || track?.solo == true)
     }
@@ -110,7 +111,7 @@ struct TimelinePlaybackBuilder {
           warnings.append("A source movie is shorter than its timeline range; its missing tail plays black.")
         }
         do {
-          if let audio = try await media.loadTracks(withMediaType: .audio).first {
+          if canonicalAudio == nil, let audio = try await media.loadTracks(withMediaType: .audio).first {
             let audioRange = try await audio.load(.timeRange)
             let audioStart = max(span.sourceIn, audioRange.start.seconds)
             let audioEnd = min(span.sourceIn + length, CMTimeRangeGetEnd(audioRange).seconds)
@@ -139,6 +140,16 @@ struct TimelinePlaybackBuilder {
       }
     }
     var parameters = [sourceMix]
+    if let canonicalAudio {
+      let mixed = AVURLAsset(url: URL(fileURLWithPath: canonicalAudio))
+      guard let audio = try await mixed.loadTracks(withMediaType: .audio).first else {
+        throw StudioError.invalid("The prepared audio mix is unavailable.")
+      }
+      let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
+      try track.insertTimeRange(CMTimeRange(start: .zero, duration: time(plan.duration)), of: audio, at: .zero)
+      let parameter = AVMutableAudioMixInputParameters(track: track); parameter.setVolume(1, at: .zero)
+      parameters.append(parameter); hasMedia = true
+    }
     for region in activeAudio {
       try Task.checkCancellation()
       guard region.start.isFinite, region.sourceIn.isFinite, region.duration.isFinite,
@@ -237,7 +248,9 @@ final class TimelineFallbackClock {
   func prepareTimelinePlayback(force: Bool = false) {
     let plan = TimelinePlaybackPlan(project: project)
     guard force || previewMode == "Movie" || timelinePlaybackPlan != plan else { return }
-    invalidateTimelinePlayback()
+    timelineBuildTask?.cancel(); audioMixBridge.cancel()
+    timelineBuildID = UUID()
+    let snapshot = project.audioPlaybackProject
     let request = timelineBuildID
     let session = documentSessionID
     previewMode = "Timeline"
@@ -245,15 +258,29 @@ final class TimelineFallbackClock {
     timelinePlaybackIssues = [:]
     timelinePlaybackWarning = nil
     timelineItemStatus = nil
-    player.replaceCurrentItem(with: nil)
     playhead = min(max(0, playhead), plan.duration)
     preparingTimelinePlayback = plan.duration > 0
-    guard plan.duration > 0 else { return }
+    guard plan.duration > 0 else {
+      pausePlayback(); player.replaceCurrentItem(with: nil); timelineAudioLease = nil
+      return
+    }
     timelineBuildTask = Task { [weak self] in
       do {
         // The builder runs outside the main actor; file metadata loading never blocks gestures.
-        let media = try await TimelinePlaybackBuilder.build(plan)
-        guard !Task.isCancelled, let self, self.timelineBuildID == request,
+        try await Task.sleep(nanoseconds: 150_000_000)
+        guard let self else { return }
+        while self.audioMixBridge.busy {
+          try Task.checkCancellation()
+          try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let mixed = try await self.audioMixBridge.invoke("audio-mix", runtime: self.runtime,
+          payload: ["project": try snapshot.object(), "purpose": "preview", "disposablePreview": true],
+          output: self.dataDirectory.appendingPathComponent("AudioPreview"))
+        try Task.checkCancellation()
+        guard let path = mixed["path"] as? String else { throw StudioError.invalid("No audio mix was prepared.") }
+        let lease = try AudioMixLease(path: path)
+        let media = try await TimelinePlaybackBuilder.build(plan, canonicalAudio: path)
+        guard !Task.isCancelled, self.timelineBuildID == request,
           self.documentSessionID == session, self.previewMode == "Timeline" else { return }
         self.preparingTimelinePlayback = false
         self.timelinePlaybackIssues = media.unavailableClips
@@ -264,6 +291,7 @@ final class TimelineFallbackClock {
           item.audioMix = media.audioMix
           item.forwardPlaybackEndTime = TimelinePlaybackBuilder.time(plan.duration)
           self.player.replaceCurrentItem(with: item)
+          self.timelineAudioLease = lease
           self.observeTimelineItem(item)
         }
         self.seek(self.playhead)
@@ -373,7 +401,7 @@ final class TimelineFallbackClock {
   }
   func invalidateTimelinePlayback() {
     pausePlayback()
-    timelineBuildTask?.cancel()
+    timelineBuildTask?.cancel(); audioMixBridge.cancel()
     timelineBuildID = UUID()
     timelineSeekID = UUID()
     timelineSeekPending = false
@@ -381,4 +409,18 @@ final class TimelineFallbackClock {
     scrubWasPlaying = nil
     preparingTimelinePlayback = false
   }
+}
+
+/// A shared filesystem lease keeps the currently playing PCM out of cache eviction.
+final class AudioMixLease {
+  let descriptor: Int32
+  init(path: String) throws {
+    let lock = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("lease.lock")
+    descriptor = open(lock.path, O_CREAT | O_RDWR, 0o600)
+    guard descriptor >= 0 else { throw StudioError.invalid("Cannot retain prepared audio.") }
+    guard flock(descriptor, LOCK_SH | LOCK_NB) == 0 else {
+      close(descriptor); throw StudioError.invalid("Prepared audio is being refreshed; retry playback.")
+    }
+  }
+  deinit { flock(descriptor, LOCK_UN); close(descriptor) }
 }

@@ -52,6 +52,7 @@ public struct MediaAsset: Codable, Identifiable, Equatable {
   public var loraAdalnInputGrid: String?
   public var generation: ImageGeneration?
   public var musicGeneration: MusicGeneration?
+  public var voiceGeneration: VoiceGeneration?
   public init(
     name: String, kind: AssetKind, path: String = "", scope: AssetScope = .project,
     owner: UUID? = nil
@@ -177,6 +178,9 @@ public struct Clip: Codable, Identifiable, Equatable {
   public var soundscape = "Natural location sound. No dialogue."
   public var music = "N/A"
   public var musicSource: MusicShotSource?
+  public var sourcePan: Double?
+  public var audioDriverSelection: AudioDriverSelection?
+  public var audioDriverMixKey: String?
   public var reviewedTakeFingerprint: String?
   public var negativePrompt = ""
   public var duration: Double = 5
@@ -295,7 +299,25 @@ public struct AudioTrack: Codable, Identifiable, Equatable {
   public var muted = false
   public var solo = false
   public var replacesSource = false
-  public init(name: String = "Music") { self.name = name }
+  public var role: AudioTrackRole = .music
+  public var gainDb: Double = 0
+  public var pan: Double = 0
+  public var ducking: AudioDucking?
+  public var reverb: AudioReverb?
+  public init(name: String = "Music", role: AudioTrackRole = .music) { self.name = name; self.role = role }
+  enum CodingKeys: String, CodingKey { case id, name, muted, solo, replacesSource, role, gainDb, pan, ducking, reverb }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    id = try c.decode(UUID.self, forKey: .id); name = try c.decode(String.self, forKey: .name)
+    muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? false
+    solo = try c.decodeIfPresent(Bool.self, forKey: .solo) ?? false
+    replacesSource = try c.decodeIfPresent(Bool.self, forKey: .replacesSource) ?? false
+    role = try c.decodeIfPresent(AudioTrackRole.self, forKey: .role) ?? (name == "Music" ? .music : .other)
+    gainDb = try c.decodeIfPresent(Double.self, forKey: .gainDb) ?? 0
+    pan = try c.decodeIfPresent(Double.self, forKey: .pan) ?? 0
+    ducking = try c.decodeIfPresent(AudioDucking.self, forKey: .ducking)
+    reverb = try c.decodeIfPresent(AudioReverb.self, forKey: .reverb)
+  }
 }
 public struct AudioRegion: Codable, Identifiable, Equatable {
   public var id = UUID()
@@ -307,6 +329,13 @@ public struct AudioRegion: Codable, Identifiable, Equatable {
   public var duration: Double = 5
   public var volume: Double = 0.8
   public var fade: Double = 0.2
+  public var fadeIn: Double?
+  public var fadeOut: Double?
+  public var anchor: ClipAudioAnchor?
+  public var fadeCurve: String?
+  public var envelope: AudioEnvelopeSlice?
+  public var effectiveFadeIn: Double { fadeIn ?? fade }
+  public var effectiveFadeOut: Double { fadeOut ?? fade }
   public init(assetID: UUID, path: String) {
     self.assetID = assetID
     self.path = path
@@ -315,6 +344,9 @@ public struct AudioRegion: Codable, Identifiable, Equatable {
 public struct StudioProject: Codable, Equatable {
   public var production: MusicVideoProduction?
   public var musicDraft: MusicDraft?
+  public var voiceDraft: VoiceDraft?
+  public var voicePresets: [VoicePreset]?
+  public var audioMixPolicy: String?
   public var planning: ProjectPlanning?
   public var version = 1
   public var id = UUID()
@@ -325,7 +357,7 @@ public struct StudioProject: Codable, Equatable {
   public var titles: [TitleOverlay] = []
   public var audio: [AudioRegion] = []
   public var audioTracks: [AudioTrack] = [AudioTrack()]
-  public init() {}
+  public init() { audioMixPolicy = "studio-v1" }
   public var duration: Double {
     clips.enumerated().reduce(0) { value, pair in
       value + pair.element.duration - overlap(before: pair.offset)
@@ -382,6 +414,7 @@ public struct StudioProject: Codable, Equatable {
     clips[i].name += " · A"
     clips[i].attachments.removeAll { $0.role == .keyframe && $0.time >= seconds }
     clips.insert(second, at: i + 1)
+    splitAnchoredAudio(clipID: id, secondID: second.id, at: seconds)
     return second.id
   }
   public mutating func move(_ id: UUID, before target: UUID?) {
@@ -395,6 +428,7 @@ public struct StudioProject: Codable, Equatable {
       throw StudioError.invalid("This project uses an unsupported document version.")
     }
     try settings.validate()
+    try validateAudio()
     guard Set(clips.map(\.id)).count == clips.count, Set(assets.map(\.id)).count == assets.count
     else {
       throw StudioError.invalid("Project contains duplicate clip or asset IDs.")
@@ -427,6 +461,7 @@ public enum ProjectStorage {
   }
   public static func mapPaths(_ project: inout StudioProject, transform: (String) -> String) {
     project.mapMusicSourcePaths(transform)
+    project.mapVoicePaths(transform)
     for i in project.assets.indices {
       project.assets[i].path = transform(project.assets[i].path)
       if let artifacts = project.assets[i].musicGeneration?.artifacts {
@@ -496,6 +531,7 @@ extension Clip {
     c.transition = "cut"
     c.transitionDuration = 0
     c.volume = 1
+    c.sourcePan = nil
     c.settingsOverride = nil
     c.depthDirectory = ""
     c.motionDirectory = ""

@@ -43,6 +43,8 @@ packages = [
   "src/ltx23_mlx",
   "src/ltx25_mlx",
   "src/yue2_mlx",
+  "src/fish_speech_mlx",
+  "src/qwen3_tts_mlx",
   "src/mlx_preprocessors",
   "src/wee_todd_mlx",
   "src/wee_todd_remote",

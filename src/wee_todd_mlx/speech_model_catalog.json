@@ -1,0 +1,488 @@
+[
+  {
+    "id": "fish-s2-pro-8bit",
+    "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+    "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+    "engine": "fishS2Pro",
+    "license": "Fish Audio Research License",
+    "files": [
+      {
+        "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+        "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+        "filename": "LICENSE.md",
+        "size": 10360,
+        "sha256": "aa7d9206e9d710590987a3636934f643529c00cd490323594e6206aaa0c32d80",
+        "target": "LICENSE.md"
+      },
+      {
+        "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+        "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+        "filename": "chat_template.jinja",
+        "size": 4116,
+        "sha256": "87a2728cb8dc9fe424d624542f6060ec05a1d285ebbec578bb078900e33396b5",
+        "target": "chat_template.jinja"
+      },
+      {
+        "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+        "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+        "filename": "codec-mlx/config.json",
+        "size": 146,
+        "sha256": "850555e1bfc9120276e4d1d0267ad1cc3ba620b6a35e499e795629b3fbb5a729",
+        "target": "codec-mlx/config.json"
+      },
+      {
+        "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+        "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+        "filename": "codec-mlx/model.safetensors",
+        "size": 1874070622,
+        "sha256": "543445a2ebc5224d2af5956d422f88c2cd21f4018c1a26d81b51ec231bb630f2",
+        "target": "codec-mlx/model.safetensors"
+      },
+      {
+        "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+        "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+        "filename": "config.json",
+        "size": 1077,
+        "sha256": "b6242b512370d08ab9d838113f7ce5d7a42c200c72a2b3288689a16190bd5234",
+        "target": "config.json"
+      },
+      {
+        "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+        "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+        "filename": "model.safetensors",
+        "size": 4847255597,
+        "sha256": "98cc58881489808dbe46e2def8dc2a34ccd03352f19aa33785b45f60a39685e2",
+        "target": "model.safetensors"
+      },
+      {
+        "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+        "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+        "filename": "special_tokens_map.json",
+        "size": 101864,
+        "sha256": "c2ff18fde6e43b7408435bc8ed079af74531befba549358a97cbc59ce606bc6b",
+        "target": "special_tokens_map.json"
+      },
+      {
+        "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+        "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+        "filename": "tokenizer.json",
+        "size": 12217872,
+        "sha256": "f24e08099d45a8adf3f52f5f0b03276e433bb9d689bb15fcbcc48ce58744588b",
+        "target": "tokenizer.json"
+      },
+      {
+        "repo": "mlx-community/fishaudio-s2-pro-8bit-mlx",
+        "revision": "4e9863f2915d6df6dcde5b6d7e1a351bddbc5986",
+        "filename": "tokenizer_config.json",
+        "size": 860832,
+        "sha256": "b8d149343ae425b0da67e6708686aceb51be7815d9792f265fc12ff04d5e9856",
+        "target": "tokenizer_config.json"
+      }
+    ]
+  },
+  {
+    "id": "fish-s2-pro-bf16",
+    "repo": "mlx-community/fish-audio-s2-pro-bf16",
+    "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+    "engine": "fishS2Pro",
+    "license": "Fish Audio Research License",
+    "files": [
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "LICENSE.md",
+        "size": 10360,
+        "sha256": "aa7d9206e9d710590987a3636934f643529c00cd490323594e6206aaa0c32d80",
+        "target": "LICENSE.md"
+      },
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "chat_template.jinja",
+        "size": 4116,
+        "sha256": "87a2728cb8dc9fe424d624542f6060ec05a1d285ebbec578bb078900e33396b5",
+        "target": "chat_template.jinja"
+      },
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "codec.safetensors",
+        "size": 1870921167,
+        "sha256": "c2096e27a1bb69a05151ccb502649a88744712270d9b029a68a3c9305f2b1edf",
+        "target": "codec.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "config.json",
+        "size": 1863,
+        "sha256": "261b519a2a9576710fc8533a77297fae007f0e7b3aa28a217f8352b7f32fe993",
+        "target": "config.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "model-00001-of-00002.safetensors",
+        "size": 4986872984,
+        "sha256": "c4218e8ac93be83b35eee30b4f94cb2e9b5ecff40f3e21611438d2f4f8804aad",
+        "target": "model-00001-of-00002.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "model-00002-of-00002.safetensors",
+        "size": 4136876104,
+        "sha256": "76738d23465deaac431433232c0762908cc99a6eddc3d49f67307d92680827be",
+        "target": "model-00002-of-00002.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "model.safetensors.index.json",
+        "size": 32686,
+        "sha256": "c8cb9974d3d17663a95dba1d6c3ea531fc42d377c0dff946f3a01a0ec48d45a3",
+        "target": "model.safetensors.index.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "special_tokens_map.json",
+        "size": 101864,
+        "sha256": "c2ff18fde6e43b7408435bc8ed079af74531befba549358a97cbc59ce606bc6b",
+        "target": "special_tokens_map.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "tokenizer.json",
+        "size": 12217872,
+        "sha256": "f24e08099d45a8adf3f52f5f0b03276e433bb9d689bb15fcbcc48ce58744588b",
+        "target": "tokenizer.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-s2-pro-bf16",
+        "revision": "eccd57bf5c1ebc13cb2f993df867f4e49931a36a",
+        "filename": "tokenizer_config.json",
+        "size": 860832,
+        "sha256": "b8d149343ae425b0da67e6708686aceb51be7815d9792f265fc12ff04d5e9856",
+        "target": "tokenizer_config.json"
+      }
+    ]
+  },
+  {
+    "id": "qwen3-tts-1.7b-base-8bit",
+    "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+    "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+    "engine": "qwen3TTS",
+    "license": "Apache-2.0",
+    "files": [
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "config.json",
+        "size": 5522,
+        "sha256": "b14fba6bfd391968876248b843b095696b0188187a3d774a3bddc32544d15627",
+        "target": "config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "generation_config.json",
+        "size": 245,
+        "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+        "target": "generation_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "merges.txt",
+        "size": 1671839,
+        "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+        "target": "merges.txt"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "model.safetensors",
+        "size": 2417320525,
+        "sha256": "b965c581ccf6aa852a4124feeb7a8a111542ee7b213139368b4cc7ba7fd4728b",
+        "target": "model.safetensors"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "model.safetensors.index.json",
+        "size": 78070,
+        "sha256": "9592a7c0ac3261a6211978416ef1796d3841225ac0ff0f9d6bfb5d1a6b49e5e9",
+        "target": "model.safetensors.index.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "preprocessor_config.json",
+        "size": 127,
+        "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+        "target": "preprocessor_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "speech_tokenizer/config.json",
+        "size": 2336,
+        "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+        "target": "speech_tokenizer/config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "speech_tokenizer/configuration.json",
+        "size": 76,
+        "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+        "target": "speech_tokenizer/configuration.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "speech_tokenizer/model.safetensors",
+        "size": 682293092,
+        "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+        "target": "speech_tokenizer/model.safetensors"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "speech_tokenizer/preprocessor_config.json",
+        "size": 234,
+        "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+        "target": "speech_tokenizer/preprocessor_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "tokenizer_config.json",
+        "size": 7344,
+        "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+        "target": "tokenizer_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+        "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+        "filename": "vocab.json",
+        "size": 2776833,
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "target": "vocab.json"
+      }
+    ]
+  },
+  {
+    "id": "qwen3-tts-0.6b-base-8bit",
+    "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+    "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+    "engine": "qwen3TTS",
+    "license": "Apache-2.0",
+    "files": [
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "config.json",
+        "size": 5522,
+        "sha256": "b404fb6f99dac6f7a81f3a03af5675b131ecf9936ac75a7c9d75e54044600044",
+        "target": "config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "generation_config.json",
+        "size": 245,
+        "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+        "target": "generation_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "merges.txt",
+        "size": 1671839,
+        "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+        "target": "merges.txt"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "model.safetensors",
+        "size": 1304461214,
+        "sha256": "9488e7005cc0cf44f8804eb543668d0763bb1c649ce6f1eddc663519524b3182",
+        "target": "model.safetensors"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "model.safetensors.index.json",
+        "size": 77731,
+        "sha256": "7829f1cc24f5cbd7d7a3ba888bb08c7cf52d82ba79a4f0f3756d41f8bf5e52b4",
+        "target": "model.safetensors.index.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "preprocessor_config.json",
+        "size": 127,
+        "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+        "target": "preprocessor_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "speech_tokenizer/config.json",
+        "size": 2336,
+        "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+        "target": "speech_tokenizer/config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "speech_tokenizer/configuration.json",
+        "size": 76,
+        "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+        "target": "speech_tokenizer/configuration.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "speech_tokenizer/model.safetensors",
+        "size": 682293092,
+        "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+        "target": "speech_tokenizer/model.safetensors"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "speech_tokenizer/preprocessor_config.json",
+        "size": 234,
+        "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+        "target": "speech_tokenizer/preprocessor_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "tokenizer_config.json",
+        "size": 7344,
+        "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+        "target": "tokenizer_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "revision": "50f45ef0047cde7e84c2ef04326acb8ada2436a7",
+        "filename": "vocab.json",
+        "size": 2776833,
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "target": "vocab.json"
+      }
+    ]
+  },
+  {
+    "id": "qwen3-tts-1.7b-customvoice-8bit",
+    "name": "Qwen3-TTS CustomVoice \u00b7 1.7B \u00b7 8-bit",
+    "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+    "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+    "engine": "qwen3TTS",
+    "license": "Apache-2.0",
+    "files": [
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "config.json",
+        "size": 6058,
+        "sha256": "43f29f9ab55cf387bd2ce1d07e9d95a5ca8974fa2fda4e2b45c13ae64aad3bfa",
+        "target": "config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "generation_config.json",
+        "size": 245,
+        "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+        "target": "generation_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "merges.txt",
+        "size": 1671839,
+        "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+        "target": "merges.txt"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "model.safetensors",
+        "size": 2393308931,
+        "sha256": "b696f4bf45f54497b6de758981e76f1410bd68af05a657477dee466b0202df1a",
+        "target": "model.safetensors"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "model.safetensors.index.json",
+        "size": 71786,
+        "sha256": "2551ed02dc288b90cd6b7ec98652433f08ef2ae98fb3eda5248a4b9e5b47d08b",
+        "target": "model.safetensors.index.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "preprocessor_config.json",
+        "size": 127,
+        "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+        "target": "preprocessor_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "speech_tokenizer/config.json",
+        "size": 2336,
+        "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+        "target": "speech_tokenizer/config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "speech_tokenizer/configuration.json",
+        "size": 76,
+        "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+        "target": "speech_tokenizer/configuration.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "speech_tokenizer/model.safetensors",
+        "size": 682293092,
+        "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+        "target": "speech_tokenizer/model.safetensors"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "speech_tokenizer/preprocessor_config.json",
+        "size": 234,
+        "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+        "target": "speech_tokenizer/preprocessor_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "tokenizer_config.json",
+        "size": 7344,
+        "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+        "target": "tokenizer_config.json"
+      },
+      {
+        "repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "revision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+        "filename": "vocab.json",
+        "size": 2776833,
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "target": "vocab.json"
+      }
+    ]
+  }
+]

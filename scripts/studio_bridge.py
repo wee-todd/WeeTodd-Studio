@@ -306,11 +306,13 @@ def compose_recipe(request):
             return compose_recipe(current)
     project, settings = request["project"], request["runtime"]
     clip = next(c for c in project["clips"] if c["id"] == request["clipID"])
+    from studio_audio import verify_driver
+
     from wee_todd_mlx.generation_selection import (
         fingerprint,
         generation_descriptor,
     )
-
+    verify_driver(request, clip)
     engine = clip["engine"]
     music_source = clip.get("musicSource")
     if music_source is not None:
@@ -1071,23 +1073,19 @@ def export_movie(request, destination, *, cache_directory=None):
         raise ValueError("Choose a new export filename. Existing movies are never overwritten.")
     destination.parent.mkdir(parents=True, exist_ok=True)
     ffmpeg = executable("ffmpeg", runtime)
-    tracks = {t["id"]: t for t in project.get("audioTracks", [])}
-    solo = any(t.get("solo") for t in tracks.values())
     project = copy.deepcopy(project)
     for clip in project["clips"]:
         resolve_motion_output(clip)
-    project["audio"] = [
-        a
-        for a in project.get("audio", [])
-        if not tracks.get(a.get("trackID"), {}).get("muted")
-        and (not solo or tracks.get(a.get("trackID"), {}).get("solo"))
-    ]
     if cache_directory:
         cache_directory.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=".weetodd-export-", dir=destination.parent
     ) as temporary:
         work = Path(temporary)
+        from wee_todd_mlx.audio_mix import compile_mix, render_mix
+        prepared_audio = render_mix(
+            compile_mix(project, purpose="export"),
+            cache_directory / "Audio" if cache_directory else work / "Audio", runtime)
         rendered, settings_list = [], []
         for i, clip in enumerate(project["clips"]):
             emit(
@@ -1129,10 +1127,7 @@ def export_movie(request, destination, *, cache_directory=None):
         args = [ffmpeg, "-v", "error", "-nostdin", "-y"]
         for target in rendered:
             args += ["-threads", "1", "-i", str(target)]
-        for region in project.get("audio", []):
-            if not Path(region["path"]).is_file():
-                raise ValueError("An audio-track file is missing. Relink it before export.")
-            args += ["-i", region["path"]]
+        args += ["-i", prepared_audio["path"]]
         filters, v, a = [], "v0", "a0"
         width, height, fps = movie["outputWidth"], movie["outputHeight"], movie["outputFPS"]
         for i, clip in enumerate(project["clips"]):
@@ -1196,46 +1191,10 @@ def export_movie(request, destination, *, cache_directory=None):
                 f"enable='between(t,{start},{start + length})'[{nv}]"
             )
             v = nv
-        if solo:
-            filters.append(f"[{a}]volume=0[source-muted]")
-            a = "source-muted"
-        else:
-            for i, region in enumerate(project.get("audio", [])):
-                if tracks.get(region.get("trackID"), {}).get("replacesSource"):
-                    new_audio = f"replaced{i}"
-                    start = float(region["start"])
-                    end = start + float(region["duration"])
-                    filters.append(f"[{a}]volume=0:enable='between(t,{start},{end})'[{new_audio}]")
-                    a = new_audio
-        audio_labels = [a]
-        for i, region in enumerate(project.get("audio", [])):
-            start, source_in, length = (
-                float(region["start"]),
-                float(region.get("sourceIn", 0)),
-                float(region["duration"]),
-            )
-            if (
-                not math.isfinite(start + source_in + length)
-                or min(start, source_in) < 0
-                or length <= 0
-            ):
-                raise ValueError("Audio region timing is invalid.")
-            fade = min(max(float(region.get("fade", 0.2)), 0), length / 2)
-            label = f"music{i}"
-            filters.append(
-                f"[{len(rendered) + i}:a]atrim=start={source_in}:duration={length},"
-                f"asetpts=PTS-STARTPTS,aresample=48000,volume={float(region['volume'])},"
-                f"afade=t=in:d={fade},afade=t=out:st={length - fade}:d={fade},"
-                f"adelay={round(start * 1000)}:all=1[{label}]"
-            )
-            audio_labels.append(label)
-        if len(audio_labels) > 1:
-            filters.append(
-                "".join(f"[{label}]" for label in audio_labels)
-                + f"amix=inputs={len(audio_labels)}:duration=first:normalize=0,"
-                "alimiter=limit=0.95:latency=1[mixed]"
-            )
-            a = "mixed"
+        # One canonical soundtrack; normalized clip audio is deliberately drained.
+        filters.append(f"[{a}]anullsink")
+        filters.append(f"[{len(rendered)}:a]anull[canonical_audio]")
+        a = "canonical_audio"
         # AAC packet padding and concat/xfade can leave gaps between otherwise
         # CFR inputs. Conform the assembled stream, not only the individual clips.
         filters.append(f"[{v}]fps={fps}[moviev]")
@@ -1458,6 +1417,8 @@ def main():
         "command",
         choices=[
             "production-create", "production-run", "production-status", "production-verify",
+            "voice-catalog", "voice-download", "voice-inspect", "voice-generate", "voice-dialogue",
+            "audio-mix", "audio-driver",
             "music-inspect", "music-generate", "music-excerpt", "music-download",
             "music-plan", "music-resynthesize", "music-decode",
             "music-analysis-setup", "music-analyze",
@@ -1500,6 +1461,18 @@ def main():
         signal.signal(signal.SIGINT, signal.default_int_handler)
         signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
         result = dispatch(args.command, request, args.output)
+    elif args.command.startswith(("voice-", "audio-")):
+        from studio_audio import dispatch as audio_dispatch
+        from studio_voice import dispatch as voice_dispatch
+        stopped = False
+        def stop_audio(_number, _frame):
+            nonlocal stopped
+            stopped = True
+        for number in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(number, stop_audio)
+        handler = voice_dispatch if args.command.startswith("voice-") else audio_dispatch
+        result = handler(args.command, request, args.output,
+                         progress=lambda event: emit(**event), cancelled=lambda: stopped)
     elif args.command.startswith("music-"):
         from studio_music import dispatch
 

@@ -148,7 +148,7 @@ extension StudioProject {
     }
     let destination: UUID
     if let trackID { destination = trackID }
-    else if let music = audioTracks.first(where: { !$0.replacesSource }) { destination = music.id }
+    else if let music = audioTracks.first(where: { $0.role == .music && !$0.replacesSource }) { destination = music.id }
     else {
       let music = AudioTrack(); audioTracks.append(music); destination = music.id
     }

@@ -45,6 +45,13 @@ New native models will be considered when they fill a meaningful feature gap, no
 another model to a list. Discovery alone does not guarantee that a new model's settings or advanced
 conditioning are compatible.
 
+Studio also generates sampled-reference speech with native **Fish S2 Pro** and **Qwen3-TTS Base**,
+plus preset voices and emotion instructions with **Qwen3-TTS CustomVoice 1.7B**. Fish inline tags,
+local auto tagging and multi-character conversations are available in the Voice workspace.
+Keep voice and music on separate tracks, adjust volume, pan and fades, and add Room, Chamber, Hall
+or Plate reverb. Select Voice, Music or their mix to drive a native video clip. See [Voice and audio mixing](studio/README.md#native-voice-and-audio-mixing)
+for supported checkpoints, reference preparation and the separate model licenses.
+
 ## Choose how to generate
 
 Studio is the interface in each case. The engine choice determines where inference runs.

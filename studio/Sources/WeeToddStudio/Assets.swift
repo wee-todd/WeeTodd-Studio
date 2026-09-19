@@ -21,6 +21,7 @@ struct AssetBrowser: View {
         Theme.raised, in: RoundedRectangle(cornerRadius: 6)
       ).padding(12)
       Button("Generate Music…") { store.openMusic() }
+      Button("Generate Voice…") { store.openVoice() }
       Button("Production Library…") { store.showProductionLibrary = true }
       Button("LoRAs & Groups…") { store.showLoRALibrary = true }
         .padding(.horizontal, 12).padding(.bottom, 10)

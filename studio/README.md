@@ -20,6 +20,7 @@ direction and backend choices. This is a source-build preview, not a notarized c
 | Choose engine, task and sampling controls | [Clip generation](#clip-generation-controls) |
 | Continue motion across clips or render an LTX 2.5 scene | [Clip continuity](#clip-continuity-in-studio) |
 | Generate image assets or import Draw Things settings | [Image workspace](#images-clips-and-loras) |
+| Generate sampled-reference speech and mix voice/music | [Voice and audio mixing](#native-voice-and-audio-mixing) |
 | Compose music and drive video from a song | [Native YuE2 music](#native-yue2-music) |
 | Plan a movie with reusable subjects and references | [Guided movie planning](#guided-movie-planning) |
 | Use local Qwen models already installed by Draw Things | [Prompt Assistant](#local-qwen35-prompt-assistant) |
@@ -45,6 +46,115 @@ whole checkpoint. That initial direct-weight path is text-to-video with generate
 not yet qualify all native conditioning tasks. The local assistant separately reuses supported
 Qwen3.5 files. Other models require compatible native components. Keep model files in a stable,
 readable location, and let setup validate the particular component layout and task.
+
+## Native voice and audio mixing
+
+Open **Movie → Generate Voice…**. Speech inference runs inside WeeTodd's own MLX engines through
+its local runtime, with no speech API or external inference server. Configure shared model locations
+under **Runtime Settings → Speech models**, using **Add installed model…** or **Download speech
+model…**. In Voice, choose **Family** (Fish or Qwen), then an **Installed model** variant. Each
+family remembers its last selection across movies and app launches. Model paths belong to Runtime
+settings; new voice drafts store a model ID, while completed takes retain their resolved request.
+Older draft model locations migrate into Runtime settings when opened. Downloads are pinned and
+verified; unsupported tensor layouts fail inspection before model allocation. Precision follows
+the installed checkpoint. Removing an entry from Runtime settings does not delete its model files.
+
+| Engine | Supported local weights | Reference modes | Master audio |
+| --- | --- | --- | --- |
+| Fish S2 Pro | MLX community S2 Pro 8-bit or BF16 | Audio + transcript; synthetic voice | 44.1 kHz mono |
+| Qwen3-TTS Base | MLX community 12Hz Base 1.7B or 0.6B, 8-bit | Audio + transcript; speaker identity only | 24 kHz mono |
+| Qwen3-TTS CustomVoice | MLX community 12Hz CustomVoice 1.7B, 8-bit | Nine built-in voices; delivery instructions | 24 kHz mono |
+
+Fish weights use the [Fish Audio Research License](https://huggingface.co/fishaudio/s2-pro/blob/main/LICENSE.md);
+commercial use requires separate permission from Fish Audio. Qwen3-TTS weights use
+[Apache 2.0](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base).
+These terms are separate from WeeTodd's source license. Original Fish `codec.pth`, arbitrary MLX
+conversions, Qwen VoiceDesign, CustomVoice 0.6B, fine-tuning and speech LoRAs are not supported here.
+
+**Sampled-reference workflow:** choose an audio/video sample, an existing audio asset, or the
+selected clip's soundtrack. Enter the sample start and length (up to 60 seconds), choose its channel,
+and audition the range. In Audio + transcript mode, enter the exact words spoken in that range.
+Changing the range does not rewrite the transcript. Save a reference preset to reuse it in this
+project. Qwen's speaker-identity-only mode accepts audio without a transcript, with potentially
+weaker matching. Fish's synthetic mode needs no sample.
+
+**Fish delivery tags:** use **Add tag** or the quick buttons above the script to insert square-bracket
+instructions at the cursor. Emotion, delivery, timing and reactions are grouped; **Custom delivery**
+accepts a short description. Tags remain editable in the script. **Auto Tag** uses the configured local
+Qwen3.5 assistant to suggest sparse insertions for the current script/line, with a preview before Apply.
+It preserves the original words, rejects invalid locations, and never analyzes the reference recording.
+Assistant setup is shared with Prompt Assistant; no hosted Fish API is used.
+
+**Qwen emotion:** the supported Base checkpoints do not accept Fish tags or natural-language style
+instructions. Use an expressive audio sample plus its matching transcript to condition delivery;
+identity-only mode is less suitable for transferring a performance. For direct text instructions, install
+**Qwen3-TTS CustomVoice · 1.7B · 8-bit** in Runtime settings. Select one of its nine built-in voices,
+choose an **Emotion preset**, or write a delivery instruction (up to 2,000 characters). Instructions
+remain separate from the spoken script. CustomVoice does not accept sampled voices; switching back to
+Base preserves your references. VoiceDesign and 0.6B CustomVoice are not supported.
+The distinctions follow the [official Qwen model capability table](https://github.com/QwenLM/Qwen3-TTS#released-models-description-and-download).
+
+**Conversations:** switch **Single voice → Conversation**, open **Speakers**, and name each character
+and assign their reference sample. Add ordered lines, choose their speakers and set pauses (0–10 seconds).
+A line can override its speaker's sample with another performance by the same character. Changing the
+assigned speaker clears that line's old override. Fish tags and Auto Tag work on the selected line.
+Qwen CustomVoice conversations instead assign a preset voice and delivery instruction to each speaker;
+a line can override that instruction. Both families render each line with its assigned voice, then
+assemble one dialogue take; speaker names are never spoken. This is sequential orchestration, not simultaneous overlapping speech or a
+single native multi-speaker sampling pass. Up to 64 lines are supported. Individual line takes, seeds,
+references, and sample-exact timing remain in the take's artifacts. Use **Add to clip** to place the
+dialogue on the voice track alongside music. Switching modes preserves both scripts.
+
+Enter the new script, choose a seed and optional sampling controls, then generate. Each take retains
+its full native-rate master, generated codes, request, model/reference digests and completion receipt.
+Stages release weights before the next component loads; success, cancellation and failure release
+the active model. Completed takes never automatically replace or place earlier media. A token-budget
+ending is labelled; audition it before deciding to use it. Speaking length is model-selected, not
+an exact-duration promise. **Add to clip** creates a clip-anchored Voice region and trims its visible
+length to fit; the complete take remains available. Moving/splitting its clip moves/splits that region.
+Music stays independently editable. Collect Media includes voice references and take artifacts;
+model weights remain in their shared library. Collected projects rebuild audio drivers from the new paths.
+
+Select an audio track to set its role, gain, pan/balance, mute or solo. Select a region for its source
+trim, length, volume and separate fade-in/out. Equal-power crossfades require overlapping regions
+on the same track; use **Crossfade with next region**. Music tracks can enable voice ducking
+(up to 12 dB, 20 ms attack, 250 ms release, -36 dBFS threshold). Mono uses equal-power pan; stereo
+uses balance with unchanged center levels. Clip source audio has separate volume and pan.
+
+Select an audio track and enable **Reverb** in its inspector. Choose **Room**, **Chamber**,
+**Hall** or **Plate**, then adjust **Amount** and **Decay** (0.2–6 seconds). **Advanced reverb**
+adds a dark/bright tone control and 0–100 ms pre-delay. Presets keep your amount; switching
+reverb off preserves settings and restores dry audio exactly. Older projects open with reverb off.
+The stereo effect covers the whole track, so tails continue across regions, splits and gaps.
+Music ducking also lowers the reverb tail while voice is present. Preview, export and selected
+audio drivers share the same effect. Tails stop at the movie boundary: leave space after the last
+sound on the timeline to hear its full decay. Reverb does not lengthen video clips.
+
+New projects share one 48 kHz stereo mixer for preview, export and driver preparation, with explicit
+gains and a 0.95 peak limiter without automatic makeup gain. Solo is a preview audition control.
+Older projects retain their legacy limiter makeup, symmetric fade cap and export-solo policy.
+Mix edits coalesce for 150 ms; the current player item stays active while a replacement is prepared.
+Decoded PCM has a 1 GiB disposable cache and preview mixes a 2 GiB eviction target, with active-file
+leases and a short grace period; saved driver/export artifacts remain durable. Preparation uses
+bounded memory and supports timelines up to one hour. Long timelines can take longer to rebuild.
+
+For an independent native H3/LTX clip, open **Timeline audio driver** in its inspector. Choose
+**Voice**, **Music**, or **Voice + Music**, select contributing tracks and prepare/audition the exact
+mix. Gains, pan, fades, reverb, ducking and mutes are included; solo does not change the driver. The
+**Use timeline soundtrack (mute clip audio)** option prevents doubled audio while retaining the
+original generated movie. Preflight rejects missing, stale or silent drivers. Native frame geometry
+may require a slightly longer reference than the visible clip; uncovered samples are silence-padded.
+Draw Things routing and planned continuous-song scene sources retain their existing separate contracts.
+Director workflow upgrades are deferred.
+
+Qualification used the same English sample/script with both Fish formats and both Qwen sizes;
+Qwen's two reference modes and Fish synthetic mode also completed. Local English recognition
+recovered the requested sentence in all seven checked takes. Five-second H3 and LTX 2.5 movies
+completed using combined voice/music drivers at 1280×768 and exported with exact five-second stereo
+audio. The H3 Turbo run used the existing headless Ref2VA path; this does not expand the ordinary
+Studio Turbo picker's supported tasks.
+This verifies execution and wording for those samples; it is not a general voice-similarity,
+multilingual quality or lip-sync guarantee. See [implementation status](../STATUS.md) for limits.
 
 ## Native YuE2 music
 
@@ -1141,8 +1251,10 @@ it becomes an available Motion Fidelity clip option.
 - Application Support contains user work as well as caches: generated clip versions, autosave,
   global assets, imported recipes, jobs and runtime receipts. Back it up before manual maintenance.
   Collect Media is the supported way to preserve a movie's referenced media for portability.
-- Prior managed runtimes are retained for existing jobs. There is no automatic cache cleanup or
-  rollback selector yet; do not remove a runtime or render directory still referenced by a project/job.
+- Prior managed runtimes and render directories are retained for existing jobs; there is no
+  automatic cleanup or rollback selector for them. Do not remove a directory still referenced by
+  a project/job. Disposable decoded-audio and preview-mix caches have automatic bounded eviction;
+  saved driver/export artifacts remain durable.
 
 Run `swift test --package-path studio` and
 `python -m pytest -q tests/test_studio_bridge.py tests/test_studio_packaging.py tests/test_studio_lora.py` before packaging.
@@ -2051,7 +2163,8 @@ H3/LTX jobs serially, prepares continuity-dependent shots after their predecesso
 assembles the movie using the existing finishing and audio mixer. Complete LTX2.5 scenes render
 as one unit. Scene frame constraints must preserve the reviewed shot lengths; incompatible timing
 stops before generation rather than moving music cuts. Source Music regions, stereo channels,
-volume/fades, titles and track mute/solo settings remain part of the final assembly.
+volume/fades, track gain/pan/reverb, titles and track mutes remain part of the final assembly.
+Solo affects preview only for new projects; legacy projects retain their export-solo policy.
 
 Choose zero to three automatic retries for local renderer failures. Pause retains completed takes
 and scene checkpoints; Resume verifies their hashes before reuse. Cancellation and invalid inputs

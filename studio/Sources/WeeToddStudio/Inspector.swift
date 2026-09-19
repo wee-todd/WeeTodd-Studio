@@ -132,6 +132,11 @@ struct ClipInspector: View {
         Text("\(Int(clip.volume*100))%").font(.system(size: 10, design: .monospaced)).frame(
           width: 32)
       }
+      HStack {
+        Text("Source pan / balance").font(.caption)
+        Slider(value: Binding(get: { clip.sourcePan ?? 0 }, set: { value in store.editClip { $0.sourcePan = value } }), in: -1...1)
+      }
+      AudioDriverInspector()
       field("INCOMING TRANSITION") {
         Picker("Transition", selection: binding(\.transition)) {
           Text("Cut").tag("cut")
@@ -624,7 +629,7 @@ struct AudioInspector: View {
           .secondary)
         HStack {
           Text("Start")
-          TextField("Start", value: binding(a, \.start), format: .number)
+          TextField("Start", value: binding(a, \.start), format: .number).disabled(a.anchor != nil)
         }
         HStack {
           Text("Source in")
@@ -639,9 +644,25 @@ struct AudioInspector: View {
           Slider(value: binding(a, \.volume), in: 0...2)
         }
         HStack {
-          Text("Fade seconds")
-          TextField("Fade", value: binding(a, \.fade), format: .number)
+          Text("Fade in")
+          TextField("Seconds", value: Binding(get: { a.effectiveFadeIn }, set: { binding(a, \.fadeIn).wrappedValue = $0 }), format: .number)
+          Text("Fade out")
+          TextField("Seconds", value: Binding(get: { a.effectiveFadeOut }, set: { binding(a, \.fadeOut).wrappedValue = $0 }), format: .number)
         }
+        if a.envelope != nil { Text("Retains the original fade through this split. Editing a fade starts a new region envelope.").font(.caption).foregroundStyle(.secondary) }
+        Picker("Fade curve", selection: Binding(get: { a.fadeCurve ?? "linear" }, set: { binding(a, \.fadeCurve).wrappedValue = $0 })) {
+          Text("Linear").tag("linear"); Text("Equal power").tag("equalPower")
+        }
+        if let anchor = a.anchor {
+          HStack { Text("Clip offset"); TextField("Seconds", value: Binding(get: { anchor.offsetSeconds }, set: { value in
+            binding(a, \.anchor).wrappedValue = ClipAudioAnchor(clipID: anchor.clipID, offsetSeconds: value)
+          }), format: .number) }
+          Button("Detach from clip") { store.change { p in if let i = p.audio.firstIndex(where: { $0.id == a.id }) {
+            p.audio[i].start = (try? resolvedAudioStart(a, in: p)) ?? a.start; p.audio[i].anchor = nil
+          } } }
+        }
+        Button("Crossfade with next region") { store.crossfadeAudio(a.id) }
+
         Button("Remove audio", role: .destructive) {
           store.change { $0.audio.removeAll { $0.id == a.id } }
           store.selectedAudioID = nil
@@ -654,7 +675,12 @@ struct AudioInspector: View {
       get: { store.project.audio.first { $0.id == a.id }?[keyPath: key] ?? a[keyPath: key] },
       set: { v in
         store.change { p in
-          if let i = p.audio.firstIndex(where: { $0.id == a.id }) { p.audio[i][keyPath: key] = v }
+          if let i = p.audio.firstIndex(where: { $0.id == a.id }) {
+            p.audio[i][keyPath: key] = v
+            if key == \AudioRegion.fadeIn || key == \AudioRegion.fadeOut || key == \AudioRegion.fadeCurve {
+              p.audio[i].envelope = nil
+            }
+          }
         }
       })
   }
@@ -667,6 +693,21 @@ struct TrackInspector: View {
       VStack(alignment: .leading, spacing: 14) {
         Text("Audio track").font(.headline)
         TextField("Track name", text: binding(t, \.name)).textFieldStyle(.roundedBorder)
+        Picker("Role", selection: binding(t, \.role)) {
+          ForEach(AudioTrackRole.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+        }
+        HStack { Text("Gain"); Slider(value: binding(t, \.gainDb), in: -60...12); Text("\(t.gainDb, specifier: "%.1f") dB").monospacedDigit() }
+        HStack { Text("Pan / balance"); Slider(value: binding(t, \.pan), in: -1...1) }
+        Button("Reset gain and pan") { store.change { p in
+          if let i = p.audioTracks.firstIndex(where: { $0.id == t.id }) { p.audioTracks[i].gainDb = 0; p.audioTracks[i].pan = 0 }
+        } }
+        if t.role == .music {
+          Toggle("Duck music under voice", isOn: Binding(get: { t.ducking != nil }, set: { enabled in
+            store.change { p in if let i = p.audioTracks.firstIndex(where: { $0.id == t.id }) { p.audioTracks[i].ducking = enabled ? AudioDucking() : nil } }
+          }))
+          if t.ducking != nil { Text("Up to 12 dB reduction · 20 ms attack · 250 ms release").font(.caption).foregroundStyle(.secondary) }
+        }
+        AudioReverbControls(effect: binding(t, \.reverb))
         Toggle("Mute", isOn: binding(t, \.muted))
         Toggle("Solo", isOn: binding(t, \.solo))
         Toggle("Replace source audio", isOn: binding(t, \.replacesSource))
@@ -675,6 +716,7 @@ struct TrackInspector: View {
         ).font(.caption).foregroundStyle(.secondary)
         Button("Import audio…") { store.chooseImports() }
         Button("Generate Music…") { store.openMusic() }
+        Button("Generate Voice…") { store.openVoice() }
         Button("Add another track") { store.addAudioTrack() }
       }.font(.system(size: 12))
     }

@@ -260,7 +260,7 @@ struct TimelineView: View {
                     ZStack(alignment: .leading) {
                       Theme.mint.opacity(0.035)
                       ForEach(
-                        store.project.audio.filter {
+                        store.project.resolvedAudio.filter {
                           $0.trackID == t.id
                             || ($0.trackID == nil && t.id == store.project.audioTracks.first?.id)
                         }

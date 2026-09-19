@@ -235,6 +235,8 @@ struct RuntimeView: View {
           }.pickerStyle(.segmented)
           LoRAFolderSettings()
           Divider()
+          VoiceModelSettingsView()
+          Divider()
           Text("Performance and acceleration").font(.headline)
           Text("This Mac · \(Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824)) GiB unified memory")
             .font(.caption).foregroundStyle(.secondary)

@@ -1,5 +1,57 @@
 # WeeTodd Studio implementation status
 
+Native voice and multitrack audio 2026-09-19: Studio's Voice workspace adds independently
+implemented local MLX Fish S2 Pro (qualified community 8-bit/BF16 layouts), Qwen3-TTS 12Hz Base
+(1.7B/0.6B 8-bit), and Qwen3-TTS CustomVoice (1.7B 8-bit). Fish and Qwen Base accept sampled audio
+with a transcript; Qwen Base also supports audio-only speaker identity. Fish supports synthetic
+speech. CustomVoice provides nine preset voices and delivery instructions, without sample cloning.
+Speech model locations are configured once in Runtime settings; Voice exposes Family → Installed
+model, remembering each family's last selection. Legacy draft locations migrate into Runtime
+settings; completed takes retain their resolved request and native-rate audio/artifacts.
+
+Fish scripts have clickable delivery tags and reviewed local Qwen3.5 auto-tag suggestions that
+preserve spoken words. Both families support sequential multi-character conversations, per-speaker
+references or preset voices, per-line performance overrides and pauses. Qwen Base delivery depends
+on expressive references; CustomVoice accepts text instructions. Line artifacts and sample-exact
+timing remain available. VoiceDesign, speech fine-tuning and speech LoRAs are not supported.
+
+Separate clip-anchored Voice and Music tracks share gain, pan/balance, independent fades, explicit
+equal-power crossfades, optional voice-driven music ducking and per-track stereo reverb.
+Room/Chamber/Hall/Plate presets expose amount/decay plus advanced tone/pre-delay; tails cross region
+boundaries and gaps, ending at the movie boundary. Music ducking also lowers its reverb tail.
+One mixer prepares preview, export and Voice/Music/combined drivers for independent native clips.
+Older projects preserve their legacy mix policy and open with reverb off. Existing scene and
+Director workflows are not rewritten. See [Voice and audio mixing](studio/README.md#native-voice-and-audio-mixing)
+for model setup, reference preparation, controls and the separate model licenses.
+
+Real speech qualification: both Fish formats and both Qwen Base sizes generated reference speech.
+Qwen's two reference modes and Fish synthetic speech produced seven checked takes; a local English
+recognizer recovered the exact target sentence from each. Later Fish tagged and Qwen Base reference
+conversations completed, as did a two-speaker CustomVoice conversation from the app. CustomVoice
+neutral/excited instructions changed generated codes and duration for the same script/voice/seed.
+Recognition recovered the Qwen wording; the whispered Fish line had approximate recognition.
+These checks establish execution and short English wording, not subjective voice matching,
+emotional quality or general multilingual accuracy.
+
+Native H3 and LTX 2.5 completed combined-driver tests, initially at 384×256 and subsequently at
+1280×768. The later exports were exactly 5.000 seconds, 24 fps, stereo 48 kHz AAC. H3 used a full
+Larry Turbo v4 adapter at strength 1 with eight evaluations through the existing headless Ref2VA
+path; Studio's ordinary Turbo picker retains its task restrictions. LTX used distilled Q8 8+3
+sampling with its two-stage upscale. Sampled frames were inspected; measured lip-sync quality
+remains unqualified. Voice-only/Music-only driver routing has automated tests; real video tests
+used the combined mode.
+
+A four-track, ten-second cached-source mix rebuilt in roughly 350–410 ms on the qualification Mac,
+before UI debounce/player replacement. Reverb DSP alone processed 60 seconds of stereo synthetic
+audio in approximately 0.083 seconds (Room) or 0.373 seconds (six-second Hall decay), after imports,
+with at most about 40 MiB temporary DSP allocation. These exclude media decoding/encoding and are
+not long-movie latency guarantees. Preparation uses disk-backed continuous PCM, one-hour input
+limits, bounded disposable caches and chunked output verification; effects require mix preparation.
+Model-free regressions cover stereo/antiphase preservation, damping, convolution continuity,
+bypass, region splits, driver crop parity, ducked tails, cancellation, stale inputs and legacy policy.
+The isolated release app exercised presets, advanced controls, bypass retention, saving and playback.
+Listening approval, full upstream checkpoint parity and low-memory hardware remain unqualified.
+
 Timeline and export reliability 2026-09-18: native playback now quantizes shared composition
 boundaries consistently, preventing black video from sub-frame instruction gaps. Playback ticks
 update the playhead without rebuilding the full editor; FF/LF controls seek in movie time, including
