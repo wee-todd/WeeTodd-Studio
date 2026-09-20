@@ -154,6 +154,21 @@ be imported through **LoRAs & Groups…**; enabling one resolves its required sc
 it restores standard Steps. See [native H3 Turbo](studio/README.md#native-h3-turbo) for supported
 tasks, auxiliary files and validation limits.
 
+### Restyle a clip with LTX Ripple
+
+Open **LTX 2.5 Ripple → Open Ripple Director…** on an existing video clip. Scrub the
+large source preview, add a reference at the playhead, and restyle the captured frame in
+Draw Things or import an edited image. The first frame is required; add up to eight
+additional references at distinct frames. Timeline thumbnails reopen their editors,
+and their context menus delete additional references.
+
+Ripple runs through Studio's local LTX 2.5 renderer. Its adjustable IC-LoRA strength
+defaults to **1.35**, and the editable prompt starts with the author's recommended
+motion-and-edit-propagation instruction. Source audio is preserved by default; silent
+clips and silent output are supported. Review a new take before applying it to the clip.
+Additional timed references are an experimental Studio extension of the author's
+first-frame workflow. See [Ripple setup and editing](studio/README.md#ltx-25-ripple-director).
+
 ## Connect shots with continuity
 
 The viewport plays all timeline clips, with a draggable playhead and click-to-seek time ruler.

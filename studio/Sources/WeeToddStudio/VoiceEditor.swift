@@ -42,7 +42,11 @@ struct VoiceEditor: View {
                 .font(.caption).foregroundStyle(.orange)
             }
             Button("Manage speech models in Runtime settings…") { store.showRuntime = true }
-            Text(store.selectedVoiceModel?.supportsInstructions == true ? "Your model choice is remembered. Choose a built-in voice and describe its delivery." : "Your model choice is remembered. The audio sample below supplies the voice to copy.")
+            Text(store.selectedVoiceModel?.supportsInstructions == true
+              ? "Your model choice is remembered. Choose a built-in voice and describe its delivery."
+              : draft.referenceMode == .synthetic
+                ? "Your model choice is remembered. Fish creates a voice without a reference sample."
+                : "Your model choice is remembered. The audio sample below supplies the voice to copy.")
               .font(.caption).foregroundStyle(.secondary)
             Divider()
             if draft.usesDialogue == true {
@@ -55,7 +59,13 @@ struct VoiceEditor: View {
               if draft.engine == .qwen3TTS { Text("Speaker identity only").tag(VoiceReferenceMode.speakerIdentityOnly) }
               if draft.engine == .fishS2Pro { Text("Synthetic voice").tag(VoiceReferenceMode.synthetic) }
             }
-            if draft.referenceMode != .synthetic {
+            if draft.engine == .fishS2Pro {
+              FishVoiceDirectionControls(direction: field(\.fishDirection))
+            }
+            if draft.referenceMode == .synthetic {
+              Text("No sample is required. Use Voice direction to describe the voice, then generate and audition. To reuse a take's identity later, select it under Audio + transcript → Use existing audio and enter its spoken words.")
+                .font(.caption).foregroundStyle(.secondary)
+            } else {
               HStack {
                 Button("Choose sample…") { store.chooseVoiceReference() }
                 Menu("Use existing audio") {
@@ -100,11 +110,43 @@ struct VoiceEditor: View {
                     ForEach(["auto","english","chinese","japanese","korean","french","german","italian","portuguese","spanish","russian"], id: \.self) { Text($0.capitalized).tag($0) }
                   }
                 }
-                TextField("Seed", value: field(\.seed), format: .number)
-                TextField("Temperature", value: field(\.sampling.temperature), format: .number)
-                TextField("Top P", value: field(\.sampling.topP), format: .number)
-                TextField("Top K", value: field(\.sampling.topK), format: .number)
-                TextField("Maximum audio tokens", value: field(\.sampling.maxTokens), format: .number)
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                  GridRow {
+                    Text("Seed")
+                    HStack {
+                      TextField("Seed", value: field(\.seed), format: .number)
+                        .accessibilityLabel("Generation seed")
+                        .help("Random sampling seed, 0–4,294,967,295. Reuse with the same inputs to repeat a take.")
+                      Button { field(\.seed).wrappedValue = Int.random(in: 0..<4_294_967_296) } label: { Image(systemName: "dice") }
+                        .accessibilityLabel("New generation seed").help("Choose a new random seed")
+                        .disabled(store.operationBusy)
+                    }
+                  }
+                  GridRow {
+                    Text("Temperature")
+                    TextField("Temperature", value: field(\.sampling.temperature), format: .number)
+                      .accessibilityLabel("Temperature")
+                      .help("Sampling randomness, 0–2. Lower values favor more likely tokens.")
+                  }
+                  GridRow {
+                    Text("Top P")
+                    TextField("Top P", value: field(\.sampling.topP), format: .number)
+                      .accessibilityLabel("Top P")
+                      .help("Probability mass retained for sampling, above 0 up to 1. At 1 this filter is off.")
+                  }
+                  GridRow {
+                    Text("Top K")
+                    TextField("Top K", value: field(\.sampling.topK), format: .number)
+                      .accessibilityLabel("Top K")
+                      .help("Number of candidate tokens kept for sampling, 1–1,000.")
+                  }
+                  GridRow {
+                    Text("Maximum audio tokens")
+                    TextField("Maximum audio tokens", value: field(\.sampling.maxTokens), format: .number)
+                      .accessibilityLabel("Maximum audio tokens")
+                      .help("Generation budget, 1–4,096 tokens per line. A take reaching this limit may be unfinished.")
+                  }
+                }
                 Text("The model chooses speaking duration. Placement trims the visible region; the full take is retained.").font(.caption).foregroundStyle(.secondary)
               }
             }

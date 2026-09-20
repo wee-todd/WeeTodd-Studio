@@ -1416,6 +1416,7 @@ def main():
     parser.add_argument(
         "command",
         choices=[
+            "ripple-inspect", "ripple-frame", "ripple-generate",
             "production-create", "production-run", "production-status", "production-verify",
             "voice-catalog", "voice-download", "voice-inspect", "voice-generate", "voice-dialogue",
             "audio-mix", "audio-driver",
@@ -1455,7 +1456,23 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     request = json.loads(args.request.read_text())
-    if args.command.startswith("production-"):
+    if args.command.startswith("ripple-"):
+        from studio_ripple import dispatch
+
+        stopped = False
+
+        def stop_ripple(_number, _frame):
+            nonlocal stopped
+            stopped = True
+
+        for number in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(number, stop_ripple)
+        try:
+            result = dispatch(args.command, request, args.output,
+                              progress=lambda event: emit(**event), cancelled=lambda: stopped)
+        except InterruptedError as exc:
+            raise KeyboardInterrupt() from exc
+    elif args.command.startswith("production-"):
         from studio_production import dispatch
 
         signal.signal(signal.SIGINT, signal.default_int_handler)

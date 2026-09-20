@@ -50,8 +50,10 @@ public struct DrawThingsImageDraft: Codable, Equatable {
   public var moodboard: [ImageWorkspaceInput] = []
   public var loras: [DrawThingsLoRA] = []
   public var referenceSheet: ReferenceSheetContext?
+  public var rippleReference: RippleImageContext?
   public var storageKey: String {
     destination.storageKey + (referenceSheet.map { ":reference:" + $0.subjectKey } ?? "")
+      + (rippleReference.map { ":ripple:" + $0.referenceID.uuidString } ?? "")
   }
   public init(destination: ImageAssetDestination) { self.destination = destination }
   /// Call only for an explicit picker edit, never while restoring/importing a draft.

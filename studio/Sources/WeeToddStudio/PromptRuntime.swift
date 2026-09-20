@@ -235,6 +235,8 @@ struct RuntimeView: View {
           }.pickerStyle(.segmented)
           LoRAFolderSettings()
           Divider()
+          RippleRuntimeSettings()
+          Divider()
           VoiceModelSettingsView()
           Divider()
           Text("Performance and acceleration").font(.headline)

@@ -201,6 +201,24 @@ def test_dialogue_turn_count_and_type_are_bounded(backend, tmp_path, turns):
     assert events == []
 
 
+def test_direction_survives_turn_receipts_without_leaking_to_other_turns(backend, tmp_path):
+    module, events = backend
+    payload = request()
+    payload["voice"]["voice_direction"] = ["must not leak"]
+    payload["voice"]["turns"][0]["voice_direction"] = [" warm ", "calm"]
+    result = module.dispatch(payload, tmp_path / "take")
+    assert events[3][1]["voice_direction"] == ["warm", "calm"]
+    assert "voice_direction" not in events[4][1]
+    receipt = json.loads((tmp_path / "take/receipt.json").read_text())["result"]
+    assert "voice_direction" not in receipt["request"]
+    assert receipt["request"]["turns"][0]["voice_direction"] == ["warm", "calm"]
+    assert "voice_direction" not in receipt["request"]["turns"][1]
+    turn = json.loads((tmp_path / "take/turns/001/receipt.json").read_text())["result"]
+    assert turn["request"]["voice_direction"] == ["warm", "calm"]
+    assert result["turns"][0]["request"]["text"] == "Hello"
+    assert payload["voice"]["turns"][0]["voice_direction"] == [" warm ", "calm"]
+
+
 def test_synthetic_fish_needs_no_reference_and_default_gap_is_zero(backend, tmp_path):
     module, events = backend
     payload = request()

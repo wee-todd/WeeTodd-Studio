@@ -9,6 +9,7 @@ struct ImageGenerationEditor: View {
   var onClose: (() -> Void)? = nil
   var onUseReference: ((MediaAsset) -> Void)? = nil
   var referenceTools: AnyView? = nil
+  var backLabel: String? = nil
   @State private var showResult = true
   @State private var zoom = 1.0
   @State private var loraLibraryOpen = false
@@ -32,7 +33,7 @@ struct ImageGenerationEditor: View {
     VStack(spacing: 0) {
       HStack {
         Button { if let onClose { onClose() } else { store.imageDraft = nil } } label: {
-          Label(onClose == nil ? "Back to movie" : "Back to approval", systemImage: "arrow.left")
+          Label(backLabel ?? (onClose == nil ? "Back to movie" : "Back to approval"), systemImage: "arrow.left")
         }.disabled(store.bridge.busy)
           .keyboardShortcut(.escape, modifiers: [])
         Divider().frame(height: 20)
@@ -143,8 +144,8 @@ struct ImageGenerationEditor: View {
         Spacer()
         if let onUseReference {
           Button("Use as reference") {
-            if let asset = store.allAssets.first(where: { $0.path == store.imagePreviewPath && $0.generation?.referenceSheet?.subjectKey == draft?.referenceSheet?.subjectKey }) { onUseReference(asset) }
-          }.disabled(store.bridge.busy || !store.allAssets.contains { $0.path == store.imagePreviewPath && $0.generation?.referenceSheet?.subjectKey == draft?.referenceSheet?.subjectKey })
+            if let asset = usableReference { onUseReference(asset) }
+          }.disabled(store.bridge.busy || usableReference == nil)
         }
         Button("Check Settings & CU") { Task { await store.prepareImageGeneration() } }.disabled(store.bridge.busy || draft?.modelID.isEmpty != false)
         Button("Generate Image") { Task { await store.generateImageAsset() } }.buttonStyle(.borderedProminent)
@@ -163,6 +164,13 @@ struct ImageGenerationEditor: View {
       .onChange(of: connection, initial: true) { _, connection in
         if let connection { Task { await store.discoverDrawThings(connection) } }
       }
+  }
+  private var usableReference: MediaAsset? {
+    store.allAssets.first {
+      $0.path == store.imagePreviewPath
+        && $0.generation?.referenceSheet?.subjectKey == draft?.referenceSheet?.subjectKey
+        && $0.generation?.rippleReference == draft?.rippleReference
+    }
   }
   var settings: some View {
     Form {

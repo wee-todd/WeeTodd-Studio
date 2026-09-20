@@ -821,10 +821,15 @@ class LTX25DistilledPipeline:
                 f"{expected_stage1}+{expected_stage2} sampler iterations."
             )
         if pipeline_mode == "distilled" and stage1_sampler not in {
+            "euler",
             "euler_ancestral",
             "euler_ancestral_cfg_pp",
         }:
             raise ValueError(f"Unsupported distilled stage-one sampler: {stage1_sampler!r}.")
+        if pipeline_mode == "distilled" and stage1_sampler == "euler" and (
+            not ic_lora_single_stage or stage1_eta != 0.0
+        ):
+            raise ValueError("Deterministic distilled Euler requires single-stage mode and eta=0.")
         if stage2_sampler != "euler":
             raise ValueError(f"Unsupported LTX 2.5 stage-two sampler: {stage2_sampler!r}.")
         if ic_lora_single_stage and pipeline_mode != "distilled":
@@ -1189,7 +1194,7 @@ class LTX25DistilledPipeline:
                     # development transformer and uses deterministic Euler in both
                     # spatial stages. Fused distilled checkpoints retain their
                     # ordinary ancestral first stage.
-                    "eta": 0.0 if dfr_official_recipe else stage1_eta,
+                    "eta": 0.0 if dfr_official_recipe or stage1_sampler == "euler" else stage1_eta,
                     "s_noise": stage1_s_noise,
                     "check_interrupted": check_interrupted,
                     "step_callback": (

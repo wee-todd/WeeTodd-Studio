@@ -11,6 +11,7 @@ public struct ImageGeneration: Codable, Equatable {
   public var inputIDs: [String]?
   public var generatedAt: Date?
   public var referenceSheet: ReferenceSheetContext?
+  public var rippleReference: RippleImageContext?
 
   public init(provider: String, requestFingerprint: String, modelID: String, prompt: String) {
     self.provider = provider

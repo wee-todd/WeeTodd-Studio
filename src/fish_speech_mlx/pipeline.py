@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gc
 
+from wee_todd_mlx.fish_voice_direction import conditioned_text
 from wee_todd_mlx.speech_lifecycle import serialized
 
 _active = None
@@ -27,6 +28,7 @@ def _release():
 def generate(
     request, *, reference_path=None, inspection=None, cancelled=lambda: False, progress=None
 ):
+    target_text = conditioned_text(request["text"], request.get("voice_direction"))
     import mlx.core as mx
     import numpy as np
     from scipy.io import wavfile
@@ -67,7 +69,7 @@ def generate(
         tokenizer = Tokenizer.from_file(spec["root"] + "/tokenizer.json")
         prompt = build_prompt(
             tokenizer,
-            request["text"],
+            target_text,
             reference_codes,
             (request.get("reference") or {}).get("transcript", ""),
         )

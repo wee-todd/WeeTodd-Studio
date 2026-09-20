@@ -18,10 +18,14 @@ struct RuntimeSettings: Codable {
   var acceleration: AccelerationSettings?
   var loraFolders: [LoRAFolder]?
   var voiceModels: VoiceModelSettings?
+  var rippleAdapterPath: String?
+  var rippleProfileID: String?
   var generationSettings: Self {
     var value = self
     value.loraFolders = nil
     value.voiceModels = nil
+    value.rippleAdapterPath = nil
+    value.rippleProfileID = nil
     return value
   }
 
@@ -270,6 +274,10 @@ extension Encodable {
   @Published var generationDescriptions: [UUID: [String: Any]] = [:]
   @Published var projectURL: URL?
   @Published var showPrompt = false
+  @Published var rippleClipID: UUID?
+  @Published var rippleInspection: [String: Any]?
+  @Published var rippleInspectionKey: RippleDraft?
+  @Published var rippleSelectedTakeID: UUID?
   @Published var showVoice = false
   @Published var selectedVoiceAssetID: UUID?
   lazy var audioMixBridge = bridge.independent()
@@ -611,6 +619,7 @@ extension Encodable {
     cancelMotionPromptEditor()
     referenceSheetOpen = false; imageDraft = nil; imagePreviewPath = nil
     musicPlayer.pause(); musicPlayer.replaceCurrentItem(with: nil)
+    rippleClipID = nil; rippleInspection = nil; rippleInspectionKey = nil; rippleSelectedTakeID = nil
     showVoice = false; selectedVoiceAssetID = nil
     showMusic = false; selectedMusicAssetID = nil; musicModelStatus = nil
     undoStates.removeAll(); redoStates.removeAll(); lastUndoGroup = nil
@@ -881,6 +890,7 @@ extension Encodable {
         }
       }
       for i in p.audio.indices { p.audio[i].path = try collect(p.audio[i].path) }
+      try p.mapRipplePaths(collect)
       try p.mapMusicSourcePaths(collect)
       try p.mapVoicePaths(collect)
       // Collected media have new identities; rebuild drivers from these portable sources.

@@ -199,6 +199,8 @@ public struct Clip: Codable, Identifiable, Equatable {
   public var extensionSource = ""
   public var depthDirectory = ""
   public var motionDirectory = ""
+  public var rippleDraft: RippleDraft?
+  public var rippleTakes: [RippleTake]?
   public var motionFidelity: MotionFidelitySettings?
   public var h3PagingCacheGB: Double?
   public var motionResult: MotionFidelityResult?
@@ -460,6 +462,7 @@ public enum ProjectStorage {
     return p
   }
   public static func mapPaths(_ project: inout StudioProject, transform: (String) -> String) {
+    project.mapRipplePaths(transform)
     project.mapMusicSourcePaths(transform)
     project.mapVoicePaths(transform)
     for i in project.assets.indices {
@@ -516,6 +519,8 @@ extension Clip {
   public var generationFingerprint: String {
     var c = self
     c.reviewedTakeFingerprint = nil
+    c.rippleDraft = nil
+    c.rippleTakes = nil
     c.motionFidelity = nil
     c.savedNativeGenerations = nil
     c.lastLocalEngine = nil

@@ -45,6 +45,7 @@ import SwiftUI
         Button("Import Movie…") { store.chooseImports(addToTimeline: true) }.keyboardShortcut("i")
         Button("Edit Prompt") { store.showPrompt = true }.keyboardShortcut(
           .return, modifiers: .command)
+        Button("Restyle with Ripple…") { store.openRipple() }.disabled(store.selectedClip?.sourcePath.isEmpty != false)
         Button("Split at Playhead") { store.split() }.keyboardShortcut("b")
         Button("Insert Bridge to Next Clip…") { Task { await store.insertBridge() } }
         Button("Duplicate Clip") { store.duplicateClip() }.keyboardShortcut("d")
@@ -128,8 +129,9 @@ struct StudioView: View {
           AssetBrowser().frame(minWidth: 245, idealWidth: 290, maxWidth: 370)
         }
       }
-      .disabled(store.showPrompt || store.showMotionPrompt || store.imageDraft != nil)
+      .disabled(store.showPrompt || store.showMotionPrompt || store.imageDraft != nil || store.rippleClipID != nil)
       if store.imageDraft != nil && !store.referenceSheetOpen { ImageGenerationEditor().transition(.opacity).zIndex(10) }
+      if store.rippleClipID != nil { RippleEditor().transition(.opacity).zIndex(13) }
       if store.showVoice { VoiceEditor().transition(.opacity).zIndex(12) }
       if store.showMusic { MusicEditor().transition(.opacity).zIndex(11) }
       if store.showPrompt { PromptEditor().transition(.opacity).zIndex(10) }

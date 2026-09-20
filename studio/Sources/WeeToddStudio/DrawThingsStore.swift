@@ -242,6 +242,7 @@ extension StudioStore {
   func generateImageAsset() async {
     guard let draft = imageDraft,
       let connection = drawThingsConnections.first(where: { $0.id == draft.profileID }) else { return }
+    let documentSession = documentSessionID
     let inputPaths = Set(([draft.canvas].compactMap { $0 }.filter { $0.enabled }
       + draft.moodboard.filter { $0.enabled && $0.strength > 0 }).map { $0.path })
     let inputAssetIDs = allAssets.filter { inputPaths.contains($0.path) }.map { $0.id.uuidString }
@@ -257,6 +258,9 @@ extension StudioStore {
       guard let value = result["asset"] as? [String: Any], let path = value["path"] as? String else {
         throw StudioError.invalid("Draw Things did not return a saved image.")
       }
+      guard documentSession == documentSessionID else {
+        notice = "Generated image saved at \(path). The destination movie changed."; return
+      }
       var asset = try draft.destination.asset(name: draft.name, path: path, in: project)
       asset.width = value["width"] as? Int ?? draft.width
       asset.height = value["height"] as? Int ?? draft.height
@@ -268,6 +272,7 @@ extension StudioStore {
           (result["normalizedRequest"] as? [String: Any])?["configuration"] ?? draft.configuration))
       provenance.inputIDs = inputAssetIDs
       provenance.referenceSheet = draft.referenceSheet
+      provenance.rippleReference = draft.rippleReference
       provenance.generatedAt = Date(); asset.generation = provenance
       if asset.scope == .global { globalAssets.append(asset); saveGlobals() }
       else { change { $0.assets.append(asset) } }

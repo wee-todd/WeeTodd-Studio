@@ -1,5 +1,35 @@
 # WeeTodd Studio implementation status
 
+LTX Ripple editing 2026-09-19: Studio adds a general clip inspector and a dedicated Ripple
+Director with a resizable source preview, frame scrubbing and clickable reference thumbnails.
+Frame zero is required; up to eight additional distinct references can be added. The frame editor
+opens Draw Things with the extracted source image on its canvas or accepts an existing edited
+image. Thumbnail context menus delete additional references while retaining the first-frame slot.
+The shared local LTX 2.5 renderer executes the verified v11 IC-LoRA with eight full-resolution
+Euler steps. Its editable strength defaults to 1.35, and the editable prompt starts with the
+author's recommended propagation instruction. Adapter/component locations are runtime settings.
+
+Source audio is preserved by default, with silent inputs and silent output supported. Source
+frame cadence, fractional trim positions, display rotation and pixel aspect are validated;
+variable-frame-rate sources are rejected before inference. New takes require explicit application,
+retain frozen edited images and receipts, and verify the source identity when replayed. Document
+session checks protect late image and video results. See [Ripple Director](studio/README.md#ltx-25-ripple-director).
+
+Qualification: one author-paired source/edited-first-frame example rendered five seconds at
+1152×768, 24 fps, seed 42 and strength 1.35. Sampled frames showed the white-fur edit throughout
+the kitten's movement; final publication was verified as 120 frames and 5.000 seconds. This source
+was silent. Separate real-media tests verify source-audio replacement, leading offsets, silence,
+exact frame extraction and trim. Additional timed references are an experimental Studio extension;
+nine-reference visual quality and broad edit consistency remain unqualified. Core/Studio validation
+passed 2,698 Python tests (three skips) and 505 Swift tests (three skips, zero failures), and release
+packaging and isolated Director interactions were checked.
+
+Fish voice direction 2026-09-19: synthetic and sampled voices now expose pitch, pace, timbre,
+accent and a short free-form voice description, with per-character settings for conversations.
+These compile into visible Fish instructions without changing the spoken script. Direction is
+guidance rather than an identity or accent guarantee; reference speech remains the strongest
+available identity control. Qwen keeps its model-specific preset/instruction controls.
+
 Native voice and multitrack audio 2026-09-19: Studio's Voice workspace adds independently
 implemented local MLX Fish S2 Pro (qualified community 8-bit/BF16 layouts), Qwen3-TTS 12Hz Base
 (1.7B/0.6B 8-bit), and Qwen3-TTS CustomVoice (1.7B 8-bit). Fish and Qwen Base accept sampled audio

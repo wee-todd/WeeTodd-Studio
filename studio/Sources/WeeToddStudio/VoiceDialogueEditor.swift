@@ -8,6 +8,7 @@ struct VoiceDialogueEditor: View {
   @State private var selected: UUID?
   @State private var showSpeakers = false
   @State private var showPerformance = false
+  @State private var showDirection = false
   var draft: VoiceDraft { store.project.voiceDraft ?? VoiceDraft() }
   var dialogue: VoiceDialogue { draft.dialogue ?? VoiceDialogue(speakers: [], turns: []) }
   var current: VoiceTurn? { dialogue.turns.first { $0.id == selected } ?? dialogue.turns.first }
@@ -64,6 +65,15 @@ struct VoiceDialogueEditor: View {
             QwenVoiceStyleControls(speaker: .constant(nil), instructions: turn(\.instructions, default: nil), showSpeaker: false)
           }
         } else {
+        if draft.engine == .fishS2Pro {
+          Toggle("Override speaker voice direction for this line", isOn: Binding(get: { current.fishDirection != nil }, set: { enabled in
+            turn(\.fishDirection, default: nil).wrappedValue = enabled
+              ? (dialogue.speakers.first { $0.id == current.speakerID }?.fishDirection ?? FishVoiceDirection()) : nil
+          }))
+          if current.fishDirection != nil {
+            Button("Edit line’s voice direction…") { showDirection = true }.font(.caption)
+          }
+        }
         HStack {
           Button(current.reference == nil ? "Use a different performance sample…" : "Edit line’s performance sample…") { showPerformance = true }
             .disabled(dialogue.speakers.first { $0.id == current.speakerID }?.referenceMode == .synthetic)
@@ -74,6 +84,12 @@ struct VoiceDialogueEditor: View {
       }
     }
     .sheet(isPresented: $showSpeakers) { VoiceSpeakersView().environmentObject(store) }
+    .sheet(isPresented: $showDirection) {
+      VStack(alignment: .leading, spacing: 14) {
+        HStack { Text("This line’s voice direction").font(.title2); Spacer(); Button("Done") { showDirection = false } }
+        FishVoiceDirectionControls(direction: turn(\.fishDirection, default: nil), showsTitle: false, resetKeepsOverride: true)
+      }.padding(24).frame(width: 560).textFieldStyle(.roundedBorder)
+    }
     .sheet(isPresented: $showPerformance) {
       if let current {
         VoicePerformanceSheet(reference: turn(\.reference, default: nil),
@@ -122,7 +138,9 @@ struct VoiceSpeakersView: View {
         }.disabled(speakers.count >= 64)
         Button("Done") { dismiss() }
       }
+      ScrollView {
       if let current {
+        VStack(alignment: .leading, spacing: 14) {
         Picker("Edit speaker", selection: Binding(get: { current.id }, set: { selected = $0 })) {
           ForEach(speakers) { Text($0.name).tag($0.id) }
         }
@@ -141,11 +159,16 @@ struct VoiceSpeakersView: View {
           if store.project.voiceDraft?.engine == .fishS2Pro { Text("Synthetic voice").tag(VoiceReferenceMode.synthetic) }
           else { Text("Speaker identity only").tag(VoiceReferenceMode.speakerIdentityOnly) }
         }
+        if store.project.voiceDraft?.engine == .fishS2Pro {
+          FishVoiceDirectionControls(direction: field(\.fishDirection, default: nil))
+        }
         if current.referenceMode != .synthetic {
           VoiceSampleControls(reference: field(\.reference, default: nil), mode: current.referenceMode).id(current.id)
         } else { Text("Use a reference sample for a consistent character voice across lines.").font(.caption).foregroundStyle(.secondary) }
         }
+        }
       }
+      }.frame(maxHeight: 560)
     }.padding(24).frame(width: 630).textFieldStyle(.roundedBorder)
       .onDisappear { store.musicPlayer.pause() }
   }

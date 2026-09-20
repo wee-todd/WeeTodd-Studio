@@ -78,6 +78,21 @@ Changing the range does not rewrite the transcript. Save a reference preset to r
 project. Qwen's speaker-identity-only mode accepts audio without a transcript, with potentially
 weaker matching. Fish's synthetic mode needs no sample.
 
+**Fish voice direction:** use **Pitch**, **Pace**, **Timbre**, **Accent** and **Voice description**
+to guide a voice with or without reference audio. Describe vocal character, age or other qualities
+in your own words. **Applied Fish instructions** shows the free-form tags sent before the script;
+your script and reference transcript remain unchanged. These are model instructions, not fixed
+acoustic measurements, and adherence varies. Set each character's direction under **Speakers**;
+a line can override it. Clearing all fields leaves the model unguided. Switching to Qwen retains
+the stored Fish settings without sending them to Qwen.
+
+**Generation settings** has visible labels for Seed, Temperature, Top P, Top K and Maximum audio
+tokens; hover over a field for its range and meaning. The dice button varies the seed. A seed does
+not lock speaker identity across scripts. To reuse a generated voice, select its take under
+**Audio + transcript → Use existing audio**, enter the words in the selected sample range, and
+save a reference preset. Qwen CustomVoice offers its own preset speakers and delivery instructions;
+Qwen VoiceDesign remains a separate, unsupported checkpoint in this release.
+
 **Fish delivery tags:** use **Add tag** or the quick buttons above the script to insert square-bracket
 instructions at the cursor. Emotion, delivery, timing and reactions are grouped; **Custom delivery**
 accepts a short description. Tags remain editable in the script. **Auto Tag** uses the configured local
@@ -612,6 +627,48 @@ from the basic image preset and do not require a spatial upscaler for that singl
 
 These routes reuse shared renderer validation and remain subject to adapter and memory constraints.
 First-frame success on 36 GB does not establish MSR/control memory fit or reference quality.
+
+## LTX 2.5 Ripple Director
+
+Ripple restyles an existing video using edited versions of its source frames. Configure
+**Runtime Settings → LTX Ripple video restyling** with an installed
+[LTX25_Ripple_v11.safetensors](https://huggingface.co/WepeNerd/LTX-Ripple) adapter and
+compatible LTX 2.5 distilled components. Automatic selection uses a compatible installed
+profile. Models are runtime settings shared by clips. Studio validates adapter identity
+and component compatibility before loading weights; it uses the shared local MLX renderer.
+
+1. Select a video clip and open **LTX 2.5 Ripple → Open Ripple Director…** in its inspector.
+2. Edit the required first-frame reference. Use **Edit with Draw Things…** to open the
+   image workspace with the extracted source frame on its canvas, or import an edited image.
+3. Scrub the full-width timeline and choose **Add reference at playhead…** for additional
+   frames. Each reference targets a distinct source frame; there are at most nine total.
+4. Click a timeline thumbnail to reopen its editor. Right-click and choose
+   **Delete reference frame clip** to remove an additional reference. The first-frame slot
+   stays at frame zero; replace its image to change it.
+5. Adjust the prompt, resolution, seed, **Ripple LoRA strength**, and audio policy, then
+   generate a new take. Preview it and explicitly apply it when satisfied.
+
+The IC-LoRA strength starts at **1.35** and is editable. The prompt starts with the
+[author's workflow instruction](https://huggingface.co/WepeNerd/LTX-Ripple#prompting)
+for preserving source motion, timing, camera movement, composition and unchanged content
+while propagating the first-frame edit. Add a brief description of your visual change
+when needed. The compact clip inspector and Director edit the same saved settings.
+
+Frame numbers are relative to the clip's captured trim interval. Studio adopts the source
+frame rate and extracts matching frames without resampling. Use a constant-frame-rate source;
+variable-frame-rate clips are rejected before inference to preserve motion and audio timing.
+The first edited frame primes
+the IC guide; additional references use native timed image conditioning. Multiple references
+are an experimental Studio extension, not an author-qualified nine-frame workflow.
+The render uses eight full-resolution Euler steps with the distilled checkpoint.
+
+**Preserve source audio** keeps the source interval's soundtrack, re-encoded for the
+published movie; generated audio is discarded. Silent source clips are valid. Choose
+**Silent output** to omit audio. New takes retain their inputs and receipts, preserve the
+original source until explicit application, and remain reviewable when settings change.
+Collect Media includes the source, references and retained takes. To restyle a changed timeline
+source or trim, start a new draft and reassign references; the existing draft retains its original
+interval.
 
 ## Reference inputs by purpose
 
@@ -1975,7 +2032,7 @@ shown separately. Unlock the relevant descriptions and rerun coverage to apply t
 
 Use **Find missing object links & reusable matches** on existing completed subject checkpoints to
 run this pass without repeating extraction. Saved execution inputs remain frozen; refreshing the
-review catalog does not invalidate the original job. The pass processes at most 24 objects, with
+review catalog does not invalidate the original job. The pass processes at most 64 objects, with
 two attempts each and saved per-object progress for resume. The catalog contains at most 64 metadata
 records; each model request uses at most eight compatible library candidates.
 

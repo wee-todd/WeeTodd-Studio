@@ -796,7 +796,7 @@ class LTX25GenerationConfig:
                 self.stage1_steps != 8
                 or self.stage2_steps != (0 if self.ic_lora_single_stage else 3)
                 or self.stage1_sampler
-                not in {"euler_ancestral", "euler_ancestral_cfg_pp"}
+                not in {"euler", "euler_ancestral", "euler_ancestral_cfg_pp"}
                 or self.stage2_sampler != "euler"
             ):
                 raise ValueError(
@@ -809,8 +809,13 @@ class LTX25GenerationConfig:
                     "Euler ancestral CFG++ is currently validated for the official "
                     "single-stage IC-LoRA workflow only."
                 )
-            if self.stage1_eta != 1.0 or self.stage1_s_noise != 1.0:
-                raise ValueError("LTX 2.5 distilled stage one requires eta=1.0 and s_noise=1.0.")
+            if self.stage1_sampler == "euler" and not self.ic_lora_single_stage:
+                raise ValueError("Deterministic distilled Euler requires single-stage mode.")
+            expected_eta = 0.0 if self.stage1_sampler == "euler" else 1.0
+            if self.stage1_eta != expected_eta or self.stage1_s_noise != 1.0:
+                raise ValueError(
+                    f"LTX 2.5 {self.stage1_sampler} requires eta={expected_eta} and s_noise=1.0."
+                )
             if self.ancestral_seed_offset != 10000:
                 raise ValueError(
                     "LTX 2.5 distilled requires the stage-one noise seed offset 10000."

@@ -20,9 +20,11 @@ public struct VoiceRequest: Codable, Equatable {
   public var turns: [VoiceTurnRequest]? = nil
   public var speaker: String? = nil
   public var instruct: String? = nil
+  public var voiceDirection: [String]? = nil
   enum CodingKeys: String, CodingKey {
     case engine, modelPath = "model_path", precision, text, referenceMode = "reference_mode"
     case reference, language, seed, sampling, turns, speaker, instruct
+    case voiceDirection = "voice_direction"
   }
 }
 public struct VoiceDraft: Codable, Equatable, Identifiable {
@@ -43,14 +45,17 @@ public struct VoiceDraft: Codable, Equatable, Identifiable {
   public var dialogue: VoiceDialogue?
   public var presetVoice: String?
   public var instructions: String?
+  public var fishDirection: FishVoiceDirection?
   public init() {}
   public func request() throws -> VoiceRequest {
     if usesDialogue == true { return try dialogueRequest() }
+    let direction = engine == .fishS2Pro ? try fishDirection?.tags() ?? [] : []
+    let directionBytes = direction.map { "[\($0)] " }.joined().utf8.count
     if engine == .qwen3TTS && FishVoiceTags.containsTags(text) {
       throw StudioError.invalid("Qwen does not support inline delivery tags. Remove bracket tags; use a Base performance sample or CustomVoice delivery instructions.")
     }
     guard !modelPath.isEmpty, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-      text.utf8.count <= 32000, seed >= 0, seed < 4_294_967_296, ["auto", "bf16", "8bit"].contains(precision),
+      text.utf8.count + directionBytes <= 32000, seed >= 0, seed < 4_294_967_296, ["auto", "bf16", "8bit"].contains(precision),
       sampling.temperature.isFinite, (0...2).contains(sampling.temperature),
       sampling.topP.isFinite, sampling.topP > 0, sampling.topP <= 1,
       (1...1000).contains(sampling.topK), (1...4096).contains(sampling.maxTokens) else {
@@ -74,7 +79,8 @@ public struct VoiceDraft: Codable, Equatable, Identifiable {
       referenceMode: referenceMode, reference: [.synthetic, .customVoice].contains(referenceMode) ? nil : reference,
       language: language, seed: seed, sampling: sampling,
       speaker: referenceMode == .customVoice ? (presetVoice ?? "ryan") : nil,
-      instruct: referenceMode == .customVoice ? (instructions ?? "") : nil)
+      instruct: referenceMode == .customVoice ? (instructions ?? "") : nil,
+      voiceDirection: direction.isEmpty ? nil : direction)
   }
 }
 public struct VoiceGeneration: Codable, Equatable {

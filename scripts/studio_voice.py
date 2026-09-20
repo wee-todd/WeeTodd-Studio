@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from wee_todd_mlx.audio_mix.plan import number
+from wee_todd_mlx.fish_voice_direction import conditioned_text, normalize_voice_direction
 from wee_todd_mlx.speech_reference import digest_file, prepare_reference
 
 
@@ -19,18 +20,20 @@ def validate_request(value):
     mode = request.get("reference_mode", "audioAndTranscript")
     if engine not in {"fishS2Pro", "qwen3TTS"}:
         raise ValueError("Choose Fish S2 Pro or Qwen3-TTS")
+    direction = normalize_voice_direction(request.get("voice_direction"))
+    if direction:
+        if engine != "fishS2Pro":
+            raise ValueError("Voice direction tags require Fish S2 Pro")
+        request["voice_direction"] = direction
+    else:
+        request.pop("voice_direction", None)
     if mode not in (
         {"audioAndTranscript", "synthetic"}
         if engine == "fishS2Pro"
         else {"audioAndTranscript", "speakerIdentityOnly", "customVoice"}
     ):
         raise ValueError("This speech engine does not support the selected reference mode")
-    if (
-        not isinstance(request.get("text"), str)
-        or not request["text"].strip()
-        or len(request["text"].encode()) > 32000
-    ):
-        raise ValueError("Enter a speech script of at most 32,000 UTF-8 bytes")
+    conditioned_text(request.get("text"), direction)
     if engine == "qwen3TTS" and re.search(r"\[[^\[\]\r\n]+\]", request["text"]):
         raise ValueError("Qwen3-TTS Base does not support Fish inline delivery tags")
     if not isinstance(request.get("model_path"), str) or not request["model_path"].strip():

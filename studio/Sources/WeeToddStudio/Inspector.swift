@@ -82,6 +82,7 @@ struct ClipInspector: View {
         Circle().fill(Theme.engine(clip.engine)).frame(width: 6, height: 6)
         Text(clip.displayTask).font(.system(size: 10)).foregroundStyle(.secondary)
       }
+      if !clip.sourcePath.isEmpty { RippleClipInspector(clip: clip) }
       if clip.engine != .movie {
         field("GENERATION") {
           Picker("Generation", selection: Binding(get: { clip.generationProvider }, set: { provider in

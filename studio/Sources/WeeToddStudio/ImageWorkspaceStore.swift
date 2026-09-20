@@ -25,13 +25,13 @@ extension StudioStore {
   }
   func selectImageConnection(_ id: String) {
     guard imageDraft != nil else { return }
-    if imageDraft?.referenceSheet != nil {
+    if imageDraft?.referenceSheet != nil || imageDraft?.rippleReference != nil {
       imageWorkspaceLibrary.referenceConnectionID = id
     }
     imageDraft?.selectConnection(id); imageEstimate = nil
   }
   private func referenceImageOperationKey(_ draft: DrawThingsImageDraft) -> String? {
-    guard draft.referenceSheet != nil else { return nil }
+    guard draft.referenceSheet != nil || draft.rippleReference != nil else { return nil }
     return documentSessionID.uuidString + ":" + (activeReferenceLease?.id.uuidString ?? "")
       + ":" + draft.storageKey + ":" + draft.profileID
   }

@@ -534,6 +534,16 @@ def inspect_ltx25_lora(path: str | Path) -> dict[str, Any]:
     if not is_msr and "reference_downscale_factor" not in metadata:
         adapter_family = "standard"
         classification_basis = "no task-conditioning metadata or auxiliary tensors"
+    # The author v11 checkpoint has no metadata. Its complete pinned file identity
+    # supplies the missing IC task declaration; rank/filename are never sufficient.
+    is_ripple = False
+    if not metadata and pairs == 480 and adapter_ranks == {64}:
+        from .ripple import is_verified_ripple
+
+        is_ripple = is_verified_ripple(source)
+        if is_ripple:
+            adapter_family = "ripple_edit"
+            classification_basis = "pinned author Ripple v11 SHA256 and LTX 2.5 target shapes"
     scaling = contract["declared_scaling"]
     global_rank = scaling["rank"]
     global_alpha = scaling["alpha"]
@@ -563,7 +573,7 @@ def inspect_ltx25_lora(path: str | Path) -> dict[str, Any]:
         "classification_basis": classification_basis,
         "adapter_role": (
             "ic_lora"
-            if is_msr or "reference_downscale_factor" in metadata
+            if is_msr or is_ripple or "reference_downscale_factor" in metadata
             else "transformer_lora"
         ),
         "ic_lora_task": (
@@ -571,7 +581,8 @@ def inspect_ltx25_lora(path: str | Path) -> dict[str, Any]:
             if adapter_family == "pixel_spatial_upscaler"
             else "multi_subject_reference"
             if is_msr
-            else ("reference_conditioning" if "reference_downscale_factor" in metadata else None)
+            else ("reference_conditioning"
+                  if is_ripple or "reference_downscale_factor" in metadata else None)
         ),
         "lora_rank": global_rank,
         "lora_alpha": global_alpha,

@@ -52,7 +52,11 @@ def validate_request(value):
                 reference_mode=turn.get("reference_mode", "audioAndTranscript"),
                 reference=copy.deepcopy(turn.get("reference")),
                 seed=(seed + index) % 2**32,
-                **{key: turn[key] for key in ("speaker", "instruct") if key in turn},
+                **{
+                    key: turn[key]
+                    for key in ("speaker", "instruct", "voice_direction")
+                    if key in turn
+                },
             )
         )
         normalized.append(
@@ -64,7 +68,11 @@ def validate_request(value):
                 reference_mode=request["reference_mode"],
                 reference=request.get("reference"),
                 gap_after=gap,
-                **{key: request[key] for key in ("speaker", "instruct") if key in request},
+                **{
+                    key: request[key]
+                    for key in ("speaker", "instruct", "voice_direction")
+                    if key in request
+                },
             )
         )
         requests.append(request)
