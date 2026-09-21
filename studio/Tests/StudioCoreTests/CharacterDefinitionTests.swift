@@ -2,6 +2,40 @@ import XCTest
 @testable import StudioCore
 
 final class CharacterDefinitionTests: XCTestCase {
+  func testNaturalSkinFieldsDiagnoseExplicitIncompatibleCovering() {
+    let catalog = CharacterFieldCatalog.shared
+    var appearance = CharacterAppearance()
+    for covering in ["fur", "scales", "metal"] {
+      appearance.setText("face.covering", covering)
+      XCTAssertTrue(catalog.validate(.value(.text("pores")), at: "face.skinTexture",
+        appearance: appearance).contains { $0.code == "skin.coveringConflict" })
+      XCTAssertTrue(catalog.validate(.value(.color(.init(red: 0.5, green: 0.4, blue: 0.3, displayValue: "tan"))),
+        at: "face.skinTone", appearance: appearance).contains { $0.code == "skin.coveringConflict" })
+      XCTAssertTrue(catalog.validate(.init(state: .unspecified), at: "face.skinTexture", appearance: appearance).isEmpty)
+    }
+    for covering in ["skin", "fur with exposed facial skin", "custom"] {
+      appearance.setText("face.covering", covering)
+      XCTAssertTrue(catalog.validate(.value(.text("pores")), at: "face.skinTexture", appearance: appearance).isEmpty)
+    }
+  }
+  func testVisibleScalpAndSkinFieldsAreExtractableWithoutInferringAncestry() throws {
+    let catalog = CharacterFieldCatalog.shared
+    for key in ["hair.scalpCoverage", "face.skinTone", "face.skinTexture"] {
+      let field = try XCTUnwrap(catalog.field(for: key))
+      XCTAssertTrue(field.extractionRoles.contains("character"))
+      XCTAssertFalse(field.extractionRoles.contains("style"))
+    }
+    XCTAssertEqual(catalog.field(for: "face.skinTone")?.valueKind, .color)
+    XCTAssertFalse(catalog.field(for: "identity.authoredAncestry")!.extractionRoles.contains("character"))
+    var definition = CharacterSheetDefinition.newDraft()
+    definition.appearance.setText("hair.scalpCoverage", "bald top with residual hair at sides and back")
+    definition.appearance.setText("hair.length", "short at sides and back")
+    definition.appearance.setText("face.skinTexture", "visible fine lines and uneven surface texture")
+    let compiled = CharacterSheetCompiler.compile(definition)
+    let hair = compiled.sections.first { $0.index == 5 }!.text
+    XCTAssertTrue(hair.hasPrefix("hair scalp coverage: bald top"))
+    XCTAssertTrue(compiled.prompt.contains("visible fine lines and uneven surface texture"))
+  }
   func testStyleExtractionOnlyIncludesRenderingCameraAndLighting() {
     let fields = CharacterFieldCatalog.shared.fields.filter { $0.extractionRoles.contains("style") }
     XCTAssertFalse(fields.isEmpty)

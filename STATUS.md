@@ -11,7 +11,10 @@ provenance retains panel settings and reference hashes. Follow-up qualification 
 local Krea generation and the four-panel
 Klein/BFS/detail pass have completed with live previews and verified completed-panel reuse. Vision
 preserves separate foreground instances and combines body detections to handle unequal panel widths.
-Head consistency and composition remain experimental; these runs do not establish general performance
+New documents now default to separate eight-step BFS-only and HighResolution9B-only passes;
+saved recipe settings are preserved. Qwen character extraction includes bounded Vision head/scalp
+details and dedicated visible skin texture fields. Head consistency, surface realism and composition
+remain experimental; the earlier combined-pass runs do not establish general performance
 or peak-memory guarantees. See the
 [Character Director guide](studio/README.md#character-director) for current controls and limits.
 

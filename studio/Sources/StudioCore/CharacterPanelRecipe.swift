@@ -38,13 +38,20 @@ public struct CharacterPanelPromptContext: Codable, Equatable {
         ? "head_swap: replace the head with the reference head. high quality. Image 1 is the target facial close-up; Image 2 supplies the reference head. Match the reference head identity and hair to the target head rotation, expression and lighting."
         : "high quality. Refine the facial close-up in Image 1, preserving the subject's identity."
       return start + " Preserve the exact tight face/head crop and subject scale of Image 1, including the head position, eye-level frontal view and plain solid white background. Do not zoom out or reveal torso, legs or feet. Preserve any existing clothing only where it is already visible at the crop edge. Improve visible facial and hair surface detail without adding marks, accessories or changing the design. "
-        + sections + ". Output one facial close-up only, no collage, no additional views or panel labels."
+        + sections + photographicTextureInstruction + ". Output one facial close-up only, no collage, no additional views or panel labels."
     }
     let start = replacesHead
       ? "head_swap: replace the head with the reference head. high quality. Image 1 is the target character panel; Image 2 supplies the reference head. Match the reference head identity and hair to the target head rotation and blend the head/body junction."
       : "high quality. Refine the single character image in Image 1, preserving the subject's identity."
     return start + " Preserve the \(role.orientationInstruction), pose, silhouette, body anatomy, outfit construction, local colors and plain solid white background. Improve visible surface detail without adding marks, accessories or changing the design. "
-      + sections + ". Output one image of this view only, no collage, no additional views or panel labels."
+      + sections + photographicTextureInstruction + ". Output one image of this view only, no collage, no additional views or panel labels."
+  }
+
+  private var photographicTextureInstruction: String {
+    guard ["photograph", "cinematicPhotograph"].contains(definition.settings.stylePresetID) else { return "" }
+    // Texture preservation applies even when a replacement head owns appearance and
+    // canonical face fields are deliberately omitted from the refinement prompt.
+    return ". Preserve the reference images' visible surface texture and tonal variation at natural scale; no beauty retouching, airbrushing or waxy smoothing. Retain visible pores, fine lines and skin color variation where present, without inventing or exaggerating them"
   }
 
   /// Keep authored detail only when it belongs to the visible head. Unlocated
@@ -133,9 +140,23 @@ public struct CharacterPanelPromptContext: Codable, Equatable {
 }
 
 public enum CharacterPanelRecipe {
+  public static func headOnlyDraft(from source: DrawThingsImageDraft) throws -> DrawThingsImageDraft {
+    guard var context = source.characterPanel, context.replacesHead,
+      let headID = context.headLoRAID,
+      let head = source.loras.first(where: { $0.modelID == headID && $0.isEnabled && $0.weight > 0 }) else {
+      throw StudioError.invalid("The head-only pass requires its enabled BFS adapter and reference head.")
+    }
+    var result = source
+    context.detailLoRAID = headID
+    result.characterPanel = context; result.loras = [head]; result.prompt = context.prompt
+    if let issue = result.managedCharacterPromptIssue { throw StudioError.invalid(issue) }
+    return result
+  }
+
   public static func makeDraft(role: CharacterPanelRole, definition: CharacterSheetDefinition,
     settings: CharacterRefinementSettings, profileID: String, panelPath: String, headPath: String?,
-    width: Int, height: Int, documentID: UUID, seed: Int) throws -> DrawThingsImageDraft {
+    width: Int, height: Int, documentID: UUID, seed: Int,
+    preservesInputHead: Bool = false) throws -> DrawThingsImageDraft {
     let compiled = CharacterSheetCompiler.compile(definition)
     guard compiled.canGenerate else {
       throw StudioError.invalid(compiled.diagnostics.first?.message ?? "Resolve the required character fields.")
@@ -163,7 +184,7 @@ public enum CharacterPanelRecipe {
       draft.loras.append(DrawThingsLoRA(modelID: settings.headLoRAID, weight: settings.headStrength))
     }
     draft.characterPanel = CharacterPanelPromptContext(role: role, definition: definition,
-      replacesHead: settings.replaceFaces, detailLoRAID: settings.detailLoRAID,
+      preservesInputHead: preservesInputHead, replacesHead: settings.replaceFaces, detailLoRAID: settings.detailLoRAID,
       headLoRAID: settings.replaceFaces ? settings.headLoRAID : nil)
     draft.prompt = draft.characterPanel!.prompt
     return draft

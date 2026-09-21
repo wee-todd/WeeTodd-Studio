@@ -275,8 +275,9 @@ See the [music-video guide](studio/README.md#create-a-music-video) and
 **Director → New Character Director** opens structured character fields, forensic image/style
 analysis and a read-only four-view prompt. The local recipe creates a 1920 × 1088 Krea 2 Turbo sheet,
 uses Apple Vision to propose actual panel crops, then refines each 2× Lanczos input sequentially with
-FLUX.2 klein 9B and HighResolution9B. Optional reference-head background removal and BFS replacement
-share the same saved document, progress, previews, completed-stage reuse and reviewed retry. This experimental
+FLUX.2 klein 9B and HighResolution9B. With optional reference-head replacement, new documents use
+a BFS-only pass followed by HighResolution9B-only detail, defaulting to eight steps each. Background
+removal and refinement share the same saved document, progress, previews, completed-stage reuse and reviewed retry. This experimental
 pipeline requires the installed models and LoRAs. Local generation, live previews and completed-panel
 reuse have been exercised; head consistency and composition still require visual review.
 See the [Character Director guide](studio/README.md#character-director).

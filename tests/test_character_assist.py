@@ -64,19 +64,32 @@ def test_inventory_preserves_single_slot_collections(tmp_path, monkeypatch):
     value["sourceText"] = "A jacket, trousers, and a bracelet."
     value["fields"] = [field("garments[].type", 6), field("accessories[].type", 7)]
     value["requestedFields"] = [
-        "garments[first].type", "garments[second].type", "accessories[only].type"
+        "garments[first].type",
+        "garments[second].type",
+        "accessories[only].type",
     ]
 
     def fake_assist(payload, **_):
         prompt = json.loads(payload["textRequest"]["prompt"])
         if "collections" in prompt:
-            return {"text": json.dumps({"records": [
-                {"collection": "garments", "slot": 1, "excerpt": "jacket"},
-                {"collection": "garments", "slot": 2, "excerpt": "trousers"},
-            ]}), "truncated": False}
+            return {
+                "text": json.dumps(
+                    {
+                        "records": [
+                            {"collection": "garments", "slot": 1, "excerpt": "jacket"},
+                            {"collection": "garments", "slot": 2, "excerpt": "trousers"},
+                        ]
+                    }
+                ),
+                "truncated": False,
+            }
         alias = prompt["allowedFields"][0]
-        return completion(alias, {"garment1.type": "jacket", "garment2.type": "trousers",
-                                  "accessory1.type": "bracelet"}[alias])
+        return completion(
+            alias,
+            {"garment1.type": "jacket", "garment2.type": "trousers", "accessory1.type": "bracelet"}[
+                alias
+            ],
+        )
 
     monkeypatch.setattr(service, "assist", fake_assist)
     result = service.extract_fields(value)
@@ -95,8 +108,10 @@ def test_conflicting_fields_after_repair_are_all_omitted_and_cache_stays_clean(
 
     def fake_assist(payload, **_):
         calls.append(payload)
-        proposals = [json.loads(completion("hair.color", color)["text"])["proposals"][0]
-                     for color in ("red", "blue")]
+        proposals = [
+            json.loads(completion("hair.color", color)["text"])["proposals"][0]
+            for color in ("red", "blue")
+        ]
         proposals += json.loads(completion("hair.length", "short")["text"])["proposals"]
         return {"text": json.dumps({"proposals": proposals}), "truncated": False}
 
@@ -151,6 +166,195 @@ def completion(field_id, value="brown"):
     }
 
 
+def test_head_detail_is_hashed_and_only_sent_to_face_hair_batch(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    detail = tmp_path / "head.jpg"
+    detail.write_bytes(b"bounded head detail")
+    value["sourceDetailImages"] = [
+        {
+            "path": str(detail),
+            "label": "primary head and face detail",
+            "sha256": hashlib.sha256(b"bounded head detail").hexdigest(),
+        }
+    ]
+    value["fields"] = [
+        field("body.build", 3),
+        field("face.skinTone", 4, "color"),
+        field("face.skinTexture", 4),
+        field("hair.scalpCoverage", 5),
+        field("hair.length", 5),
+    ]
+    value["requestedFields"] = [item["id"] for item in value["fields"]]
+    calls = []
+
+    def fake_assist(payload, **_):
+        calls.append(payload["textRequest"])
+        return {"text": '{"proposals":[]}', "truncated": False}
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    service.extract_fields(value)
+    assert len(calls) == 3
+    body = calls[0]
+    skin = next(
+        call for call in calls if "face.skinTone" in json.loads(call["prompt"])["allowedFields"]
+    )
+    head = next(
+        call
+        for call in calls
+        if "hair.scalpCoverage" in json.loads(call["prompt"])["allowedFields"]
+    )
+    assert len(body["images"]) == 1
+    assert len(skin["images"]) == 2
+    assert [image["path"] for image in head["images"]] == [
+        value["sourceImage"]["path"],
+        str(detail),
+    ]
+    prompt = json.loads(head["prompt"])
+    skin_prompt = json.loads(skin["prompt"])
+    assert "bald or sparse crown" in prompt["fieldRules"]["hair.scalpCoverage"]["meaning"]
+    assert "never infer ancestry" in skin_prompt["fieldRules"]["face.skinTone"]["meaning"]
+    assert "never describe smoothing" in skin_prompt["fieldRules"]["face.skinTexture"]["meaning"]
+    assert (
+        "never call a bald or sparse crown short" in prompt["fieldRules"]["hair.length"]["meaning"]
+    )
+    assert "do not beautify" in head["systemPrompt"]
+
+
+def test_skin_forensics_are_a_standalone_head_detail_batch(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    detail = tmp_path / "head.jpg"
+    detail.write_bytes(b"head")
+    value["sourceDetailImages"] = [
+        {
+            "path": str(detail),
+            "label": "primary head and face detail",
+            "sha256": hashlib.sha256(b"head").hexdigest(),
+        }
+    ]
+    fields = [
+        "face.shape",
+        "face.covering",
+        "face.skinTone",
+        "face.skinTexture",
+        "eyes.color",
+        "hair.scalpCoverage",
+        "hair.style",
+    ]
+    value["fields"] = [
+        field(
+            item, 5 if item.startswith("hair.") else 4, "color" if item.endswith("Tone") else "text"
+        )
+        for item in fields
+    ]
+    value["requestedFields"] = fields
+    calls = []
+
+    def fake_assist(payload, **_):
+        calls.append(payload["textRequest"])
+        return {"text": '{"proposals":[]}', "truncated": False}
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    service.extract_fields(value)
+    allowed = [json.loads(call["prompt"])["allowedFields"] for call in calls]
+    assert [item for item in allowed if set(item) & service.FORENSIC_SKIN_FIELDS] == [
+        ["face.covering", "face.skinTone", "face.skinTexture"]
+    ]
+    skin_call = calls[allowed.index(["face.covering", "face.skinTone", "face.skinTexture"])]
+    assert len(skin_call["images"]) == 2
+    assert all(field_name not in skin_call["prompt"] for field_name in ("face.shape", "eyes.color"))
+
+
+def test_hair_location_and_musculature_rules_are_explicit(tmp_path):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    value["fields"] = [field("hair.style", 5), field("body.musculature", 3)]
+    rules = service._field_rules(value, ["hair.style", "body.musculature"])
+    assert "value itself must name its location" in rules["hair.style"]["meaning"]
+    assert "soft tissue" in rules["body.musculature"]["meaning"]
+
+
+def test_head_detail_contract_and_hash_are_strict(tmp_path):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    detail = tmp_path / "head.jpg"
+    detail.write_bytes(b"detail")
+    value["sourceDetailImages"] = [
+        {"path": str(detail), "label": "Head", "sha256": hashlib.sha256(b"detail").hexdigest()}
+    ]
+    with pytest.raises(ValueError, match="hash does not match"):
+        service.extract_fields(value)
+
+
+def test_head_detail_participates_in_cache_and_mutation_identity(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    detail = tmp_path / "head.jpg"
+    detail.write_bytes(b"first")
+    value["sourceDetailImages"] = [
+        {
+            "path": str(detail),
+            "label": "primary head and face detail",
+            "sha256": hashlib.sha256(b"first").hexdigest(),
+        }
+    ]
+
+    def mutate_detail(*_args, **_kwargs):
+        detail.write_bytes(b"changed")
+        return {"text": '{"proposals":[]}', "truncated": False}
+
+    monkeypatch.setattr(service, "assist", mutate_detail)
+    with pytest.raises(ValueError, match="source detail changed"):
+        service.extract_fields(value)
+
+
+@pytest.mark.parametrize("face_field_count", [0, 12])
+def test_character_hair_forensics_are_one_atomic_batch(tmp_path, monkeypatch, face_field_count):
+    import studio_character_assist as service
+
+    hair = [
+        "hair.length",
+        "hair.color",
+        "hair.scalpCoverage",
+        "hair.facialHair",
+        "hair.style",
+        "hair.texture",
+        "hair.hairline",
+    ]
+    face = [f"face.fact{index}" for index in range(face_field_count)]
+    value = request(tmp_path)
+    value["fields"] = [field(item, 4) for item in face] + [field(item, 5) for item in hair]
+    value["requestedFields"] = face + hair
+    calls = []
+
+    def fake_assist(payload, **_):
+        calls.append(json.loads(payload["textRequest"]["prompt"])["allowedFields"])
+        return {"text": '{"proposals":[]}', "truncated": False}
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    service.extract_fields(value)
+    hair_calls = [allowed for allowed in calls if set(allowed) & set(hair)]
+    assert hair_calls == [hair]
+
+
+def test_character_hair_atomic_batch_fails_if_output_budget_cannot_hold_it(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    hair = sorted(service.FORENSIC_HAIR_FIELDS)
+    value = request(tmp_path)
+    value["fields"] = [field("face.shape", 4)] + [field(item, 5) for item in hair]
+    value["requestedFields"] = ["face.shape", *hair]
+    monkeypatch.setattr(service, "MAX_FIELDS_PER_BATCH", len(hair) - 1)
+    with pytest.raises(ValueError, match="record cannot fit"):
+        service.extract_fields(value)
+
+
 def test_model_json_fence_is_unwrapped_without_repair(tmp_path, monkeypatch):
     import studio_character_assist as service
 
@@ -168,9 +372,7 @@ def test_model_json_fence_is_unwrapped_without_repair(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
-def test_character_uses_three_visible_only_passes_and_never_offers_authored_fields(
-    tmp_path, monkeypatch
-):
+def test_character_groups_face_and_hair_and_never_offers_authored_fields(tmp_path, monkeypatch):
     import studio_character_assist as service
 
     seen = []
@@ -448,7 +650,7 @@ def test_real_catalog_shape_allows_text_role_even_when_extraction_roles_are_char
     assert result["metadata"] == {
         "schemaVersion": 1,
         "extractionVersion": 1,
-        "promptVersion": 7,
+        "promptVersion": 9,
         "modelFingerprint": "qwen-test-model-v1",
     }
 
@@ -702,7 +904,7 @@ def test_full_swift_catalog_and_uuid_pools_are_split_into_bounded_text_batches(
             )
             == 11
         )
-    assert result["metadata"]["promptVersion"] == 7
+    assert result["metadata"]["promptVersion"] == 9
 
 
 def test_repeat_aliases_map_back_to_exact_host_uuid_paths(tmp_path, monkeypatch):

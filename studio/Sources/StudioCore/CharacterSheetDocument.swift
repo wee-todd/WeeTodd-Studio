@@ -74,8 +74,8 @@ public struct CharacterRefinementSettings: Codable, Equatable {
   public var headLoRAID = ""
   public var headStrength = 1.0
   public var replaceFaces = false
-  public var twoPass = false
-  public var steps = 4
+  public var twoPass = true
+  public var steps = 8
   public var guidance = 1.0
   public var seed = 0
   public init() {}

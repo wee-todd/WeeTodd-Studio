@@ -95,7 +95,17 @@ import XCTest
         try await controller.refinePanels()
         XCTAssertEqual(controller.document.candidates.last?.width, 3840)
         XCTAssertEqual(controller.document.candidates.last?.height, 2176)
-        XCTAssertEqual(controller.document.candidates.last?.generation?.characterAssembly?.panelTakes.count, 4)
+        let takes = controller.document.candidates.last?.generation?.characterAssembly?.panelTakes ?? []
+        let separated = controller.document.refinement.twoPass && controller.document.refinement.replaceFaces
+        XCTAssertEqual(takes.count, separated ? 8 : 4)
+        if separated {
+          for index in stride(from: 0, to: takes.count, by: 2) {
+            XCTAssertEqual(takes[index].loras.map(\.modelID), [controller.document.refinement.headLoRAID])
+            XCTAssertEqual(takes[index + 1].loras.map(\.modelID), [controller.document.refinement.detailLoRAID])
+            XCTAssertEqual(takes[index].steps, controller.document.refinement.steps)
+            XCTAssertEqual(takes[index + 1].steps, controller.document.refinement.steps)
+          }
+        }
         if mode == "resume" { XCTAssertEqual(controller.document.pipeline.stages.count, before) }
       default: throw StudioError.invalid("Unknown live qualification mode")
       }
@@ -104,8 +114,10 @@ import XCTest
     if mode == "apply" {
       let file = try XCTUnwrap(environment["WEETODD_CHARACTER_REVIEWED_IDS"])
       let ids = try JSONDecoder().decode([String].self, from: Data(contentsOf: URL(fileURLWithPath: file)))
-      let batch = try XCTUnwrap(controller.document.proposals.last)
-      controller.applyProposals(batchID: batch.id, selectedIDs: Set(ids))
+      if !ids.isEmpty {
+        let batch = try XCTUnwrap(controller.document.proposals.last)
+        controller.applyProposals(batchID: batch.id, selectedIDs: Set(ids))
+      }
       if let edits = environment["WEETODD_CHARACTER_REVIEWED_FIELDS"] {
         let fields = try JSONDecoder().decode([String: String].self,
           from: Data(contentsOf: URL(fileURLWithPath: edits)))

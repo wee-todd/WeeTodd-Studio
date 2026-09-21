@@ -1935,7 +1935,15 @@ Comic, Oil Painting, Concept Art, Clay and Sculpture use the same appearance fie
 style image and authored-text analysis use the configured app-owned Qwen3.5 4B model; character and
 style may share one image. Bounded calls propose forensic visible details with evidence and uncertainty.
 Large references are analyzed as orientation-correct overviews capped at 512 pixels per edge;
-the original files are retained. Apple Vision separately uses bounded previews for panel detection
+the original files are retained. Character analysis also uses Apple Vision to prepare one bounded
+head-and-scalp detail, at most 512 pixels per edge, when exactly one suitable face is detected.
+Only the face/hair calls receive that detail; ambiguous or missing faces fall back to the overview
+with a review diagnostic. Detection uses a 1600-pixel preview and crop preparation decodes at most
+2048 pixels per edge, with streaming hashes and source-change checks.
+Scalp coverage, hairline, residual hair length and style are analyzed together. Dedicated visible
+skin-tone and skin-texture fields preserve observations without inferring ancestry; ancestry remains
+authored information. The compiled hair section places coverage before residual hair details.
+Apple Vision separately uses bounded previews for panel detection
 (1600-pixel edge) and reference-head masking (2048-pixel edge), mapping crops back to source pixels.
 Review and select proposals before applying them. Invalid, unsupported and stale proposals remain
 unappliable. Image analysis does not infer authored demographic identity fields. Legacy descriptions
@@ -1962,12 +1970,18 @@ inputs; detected crops may have different widths.
 A separate **Reference face** input uses local Vision background removal, retaining the original,
 head crop, mask, RGBA cutout and white-matted transport image. Ambiguous faces require a manual crop.
 **Replace faces** enables the exact `bfs_head_v1_flux-klein_9b_step3750_rank64` adapter and begins each
-panel prompt with `head_swap: replace the head with the reference head.` The target panel is reference
-1 and the head is reference 2. BFS may replace hair as well as the face. One combined head/detail
-pass is the default; **Experimental two pass** compares a head-only pass followed by detail without
-another upscale. The back-view instructions preserve rear orientation; output quality still needs review.
+head-swap prompt with `head_swap: replace the head with the reference head.` The target panel is reference
+1 and the head is reference 2. BFS may replace hair as well as the face. A combined head/detail
+pass remains available for comparison. New documents default to **BFS, then HighResolution9B**:
+only BFS runs in the first pass, then only HighResolution9B details that result, retaining its head
+and the same 2× dimensions without another upscale. Each FLUX pass defaults to **eight steps**.
+Existing saved recipe choices and step counts are preserved; select the separate recipe and eight
+steps per pass to compare an older document. The back-view instructions preserve rear orientation; output quality still needs review.
 Facial close-up refinement instructs the model to preserve the input head crop and omits full-body proportions and clothing
 descriptions that could otherwise make the edit model zoom out.
+Photographic refinement retains instructions to preserve source texture and tonal variation, avoiding
+airbrushing and waxy smoothing even when a replacement head supplies appearance. These instructions
+do not guarantee likeness or photographic quality from the selected model and LoRA combination.
 
 Progress and available live previews appear in the window. Cancel stops the active local operation;
 completed panels are retained and reused when their execution inputs and output hashes still match.
@@ -1976,8 +1990,8 @@ allowing retry, preventing automatic duplicate submissions. Closing a busy windo
 or Cancel Job. Render settings, ordered input hashes, head preprocessing and individual panel takes
 remain in the final sheet's provenance. Choose **Use reviewed candidate**, then approve references separately.
 
-Local qualification exercised initial Krea generation, all four serial Klein/BFS/detail passes,
-live previews, head masking, assembly and completed-panel reuse. One 8-bit run took about 101 seconds
+Earlier combined-pass qualification exercised initial Krea generation, all four serial Klein/BFS/detail passes,
+live previews, head masking, assembly and completed-panel reuse. One 8-bit, four-step-per-panel run took about 101 seconds
 for the initial sheet and 778 seconds for refinement; a sampled Draw Things process footprint during
 the largest panel was about 23 GB. These are observations from one Apple M3 Ultra with 256 GB, not
 general speed or peak-memory guarantees. Head consistency and composition still require visual

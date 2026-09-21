@@ -17,7 +17,7 @@ public struct CompiledCharacterSheet: Equatable {
 }
 
 public enum CharacterSheetCompiler {
-  public static let compilerVersion = 1
+  public static let compilerVersion = 2
   public static let sectionLabels = [
     "Required LoRA trigger / layout", "Character identity", "Body / proportions", "Face / head", "Hair",
     "Clothing", "Accessories / distinctive features", "Materials / surface detail", "Style / rendering",
@@ -106,7 +106,9 @@ public enum CharacterSheetCompiler {
     for section in 2...11 {
       var clauses: [String] = []
       if section == 9 { clauses += preset?.clauses.map(\.text) ?? [] }
+      let scalpOrder = ["hair.scalpCoverage": 0, "hair.hairline": 1, "hair.style": 2]
       let scalarFields = catalog.fields.filter { $0.section == section && !$0.key.contains("[]") }
+        .sorted { (scalpOrder[$0.key] ?? 3, $0.key) < (scalpOrder[$1.key] ?? 3, $1.key) }
       for field in scalarFields {
         guard !(section == 9 && definition.settings.stylePresetID == "photograph" && diagnostics.contains(where: { $0.code == "style.conflict" && $0.fieldPath == field.key })) else { continue }
         if let clause = render(definition.entry(at: field.key), key: field.key) { clauses.append(clause) }

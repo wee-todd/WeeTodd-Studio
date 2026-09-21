@@ -161,8 +161,8 @@ import StudioCore
       status = "Refining \(panel.role.label.lowercased()) · \(index + 1)/4"
       if settings.twoPass && settings.replaceFaces {
         // Head-first pass excludes the detail adapter, then runs the ordinary detail recipe.
-        draft.characterPanel?.detailLoRAID = settings.headLoRAID
-        draft.loras = [DrawThingsLoRA(modelID: settings.headLoRAID, weight: settings.headStrength)]
+        draft = try CharacterPanelRecipe.headOnlyDraft(from: draft)
+        status = "Replacing head \(panel.role.label.lowercased()) · pass 1/2 · \(index + 1)/4"
       }
       usedStageKeys.append(key + ":" + identity)
       var asset = try await generate(draft, stageKey: key + ":" + identity)
@@ -170,9 +170,9 @@ import StudioCore
         settings.replaceFaces = false
         draft = try CharacterPanelRecipe.makeDraft(role: panel.role, definition: document.definition, settings: settings,
           profileID: document.draft.profileID, panelPath: asset.path, headPath: nil,
-          width: dimensions[0], height: dimensions[1], documentID: id, seed: settings.seed + index + 1000)
-        draft.characterPanel?.preservesInputHead = true; draft.prompt = draft.characterPanel!.prompt
-        status = "Detailing \(panel.role.label.lowercased()) · pass 2 · \(index + 1)/4"
+          width: dimensions[0], height: dimensions[1], documentID: id, seed: settings.seed + index + 1000,
+          preservesInputHead: true)
+        status = "Detailing \(panel.role.label.lowercased()) · pass 2/2 · \(index + 1)/4"
         usedStageKeys.append(key + ":detail:" + identity)
         asset = try await generate(draft, stageKey: key + ":detail:" + identity)
       }

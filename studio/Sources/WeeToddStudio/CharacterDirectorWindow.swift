@@ -243,11 +243,14 @@ struct CharacterDirectorWindow: View {
       if controller.document.refinement.replaceFaces {
         loraPicker("BFS rank-64", id: Binding(get: { controller.document.refinement.headLoRAID }, set: { value in controller.edit { $0.refinement.headLoRAID = value } }), strength: Binding(get: { controller.document.refinement.headStrength }, set: { value in controller.edit { $0.refinement.headStrength = value } }))
       }
-      Picker("Recipe", selection: Binding(get: { controller.document.refinement.twoPass }, set: { value in controller.edit { $0.refinement.twoPass = value } })) {
-        Text("Combined single pass").tag(false); Text("Experimental two pass").tag(true)
-      }.pickerStyle(.segmented)
+      if controller.document.refinement.replaceFaces {
+        Picker("Recipe", selection: Binding(get: { controller.document.refinement.twoPass }, set: { value in controller.edit { $0.refinement.twoPass = value } })) {
+          Text("BFS, then HighResolution9B").tag(true); Text("Combined (comparison)").tag(false)
+        }.pickerStyle(.segmented)
+        Text("Separate passes use only BFS first, then only HighResolution9B. Each pass uses the step count below; the detail pass keeps the same 2× dimensions.").font(.caption).foregroundStyle(.secondary)
+      }
       HStack {
-        Stepper("Steps \(controller.document.refinement.steps)", value: Binding(get: { controller.document.refinement.steps }, set: { value in controller.edit { $0.refinement.steps = value } }), in: 1...100)
+        Stepper("Steps per pass \(controller.document.refinement.steps)", value: Binding(get: { controller.document.refinement.steps }, set: { value in controller.edit { $0.refinement.steps = value } }), in: 1...100)
         TextField("CFG", value: Binding(get: { controller.document.refinement.guidance }, set: { value in controller.edit { $0.refinement.guidance = value } }), format: .number).frame(width: 80)
         TextField("Seed", value: Binding(get: { controller.document.refinement.seed }, set: { value in controller.edit { $0.refinement.seed = value } }), format: .number).frame(width: 120)
         Button("Refine four panels") { controller.launch { try await controller.refinePanels() } }.buttonStyle(.borderedProminent)

@@ -43,6 +43,13 @@ public struct CharacterFieldCatalog: Codable, Equatable {
     }
     guard entry.state == .value, let value = entry.value else { return [] }
     var issues: [CharacterFieldValidationIssue] = []
+    if ["face.skinTone", "face.skinTexture"].contains(path),
+      let covering = appearance.entry(at: "face.covering"), covering.state == .value,
+      let name = covering.value?.displayString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+      ["fur", "scales", "metal"].contains(name) {
+      issues.append(.init("skin.coveringConflict", path,
+        "Natural skin details conflict with the selected face covering. Review the covering or clear this skin field."))
+    }
     let strings: [String]
     switch value {
     case .text(let text): strings = [text]; if definition.valueKind != .text && definition.valueKind != .choice { issues.append(.init("value.type", path, "Use the field's expected value type.")) }
@@ -102,7 +109,10 @@ public struct CharacterFieldCatalog: Codable, Equatable {
     add(4, ["head.shape", "face.shape", "face.jaw", "face.cheekbones", "face.noseMuzzleBeak", "face.mouth", "face.lips", "eyes.shape", "eyes.spacing", "brows.shape", "ears.shape"])
     add(4, ["eyes.color"], kind: .color, suggestions: ["Blue", "Brown", "Hazel", "Green", "Black", "Amber", "Gray"])
     add(4, ["face.covering"], kind: .choice, suggestions: ["skin", "fur", "scales", "metal"], applicability: ["anatomy"])
+    add(4, ["face.skinTone"], kind: .color, applicability: ["naturalSkin"])
+    add(4, ["face.skinTexture"], applicability: ["naturalSkin"])
     add(4, ["face.expression"], ownership: .settings)
+    add(5, ["hair.scalpCoverage"], suggestions: ["Full coverage", "Thinning at crown", "Receding hairline", "Bald on top; hair at sides and back", "Fully bald", "Shaved scalp"], applicability: ["hair"])
     add(5, ["hair.color"], kind: .color, applicability: ["hair"], absent: true)
     add(5, ["hair.length", "hair.texture", "hair.style", "hair.hairline", "hair.facialHair"], applicability: ["hair"], absent: true)
     add(5, ["covering.pattern", "covering.growthDirection"], applicability: ["bodyCovering"])

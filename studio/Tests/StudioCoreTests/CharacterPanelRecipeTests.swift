@@ -2,6 +2,54 @@ import XCTest
 @testable import StudioCore
 
 final class CharacterPanelRecipeTests: XCTestCase {
+  func testDefaultSeparatePassesUseEightStepsAndExclusiveAdapters() throws {
+    var settings = CharacterRefinementSettings()
+    XCTAssertTrue(settings.twoPass)
+    XCTAssertEqual(settings.steps, 8)
+    settings.modelID = "klein9"; settings.detailLoRAID = "detail"; settings.headLoRAID = "head"
+    settings.replaceFaces = true
+    let combined = try CharacterPanelRecipe.makeDraft(role: .closeUp, definition: definition(), settings: settings,
+      profileID: "local", panelPath: "/panel-2x.png", headPath: "/head.png", width: 960, height: 2176,
+      documentID: UUID(), seed: 42)
+    let head = try CharacterPanelRecipe.headOnlyDraft(from: combined)
+    XCTAssertEqual(head.loras.map(\.modelID), ["head"])
+    XCTAssertEqual(head.moodboard.map(\.path), ["/panel-2x.png", "/head.png"])
+    XCTAssertEqual(head.steps, 8)
+    XCTAssertNil(head.managedCharacterPromptIssue)
+    XCTAssertTrue(head.prompt.hasPrefix("head_swap: replace the head with the reference head."))
+    settings.replaceFaces = false
+    let detail = try CharacterPanelRecipe.makeDraft(role: .closeUp, definition: definition(), settings: settings,
+      profileID: "local", panelPath: "/head-pass-output.png", headPath: nil, width: 960, height: 2176,
+      documentID: UUID(), seed: 1042, preservesInputHead: true)
+    XCTAssertEqual(detail.loras.map(\.modelID), ["detail"])
+    XCTAssertEqual(detail.moodboard.map(\.path), ["/head-pass-output.png"])
+    XCTAssertEqual(detail.steps, 8)
+    XCTAssertEqual(detail.width, head.width)
+    XCTAssertEqual(detail.height, head.height)
+    XCTAssertTrue(detail.characterPanel?.preservesInputHead == true)
+    XCTAssertTrue(detail.prompt.hasPrefix("high quality."))
+    XCTAssertFalse(detail.prompt.contains("head_swap:"))
+    XCTAssertNil(detail.managedCharacterPromptIssue)
+    XCTAssertThrowsError(try CharacterPanelRecipe.headOnlyDraft(from: detail))
+    var legacy = settings; legacy.twoPass = false; legacy.steps = 4
+    XCTAssertEqual(try JSONDecoder().decode(CharacterRefinementSettings.self,
+      from: JSONEncoder().encode(legacy)), legacy)
+  }
+  func testPhotographicHeadReplacementPreservesReferenceTextureWithoutCanonicalSkinLeak() {
+    var value = definition()
+    value.appearance.setText("face.skinTexture", "canonical head has painted porcelain cracks")
+    for role in CharacterPanelRole.allCases {
+      let prompt = CharacterPanelPromptContext(role: role, definition: value,
+        replacesHead: true, detailLoRAID: "detail", headLoRAID: "head").prompt
+      XCTAssertTrue(prompt.contains("Preserve the reference images' visible surface texture and tonal variation"))
+      XCTAssertTrue(prompt.contains("no beauty retouching, airbrushing or waxy smoothing"))
+      XCTAssertFalse(prompt.contains("painted porcelain cracks"))
+    }
+    value.settings.stylePresetID = "clay"
+    let clay = CharacterPanelPromptContext(role: .front, definition: value,
+      replacesHead: true, detailLoRAID: "detail", headLoRAID: "head").prompt
+    XCTAssertFalse(clay.contains("no beauty retouching"))
+  }
   func testCloseUpKeepsExactInputFramingWithoutFullBodyOrOutfitInstructions() {
     var value = definition()
     value.appearance.setText("body.build", "broad muscular physique")

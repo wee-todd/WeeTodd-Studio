@@ -269,6 +269,7 @@ import StudioCore
   func analyze(role: String, modelPath: String) async throws {
     status = "Analyzing \(role)…"
     let captured = document.revision
+    var preparationDiagnostics: [CharacterProposalDiagnostic] = []
     let sourcePath = role == "style" && document.styleUsesCharacterImage ? document.sources["character"] : document.sources[role]
     var payload: [String: Any] = ["role": role, "modelPath": modelPath,
       "capturedTarget": ["documentID": id.uuidString, "revision": captured],
@@ -298,11 +299,24 @@ import StudioCore
       guard let sourcePath else { throw StudioError.invalid("Choose an image for \(role) analysis.") }
       let hash = try await Task.detached { try CharacterArtifactHash.file(sourcePath) }.value
       payload["sourceImage"] = ["path": sourcePath, "label": role, "sha256": hash]
+      if role == "character" {
+        status = "Preparing bounded face and scalp detail…"
+        let detail = try await CharacterDetailImagePreparation().prepare(
+          source: URL(fileURLWithPath: sourcePath),
+          outputDirectory: storage.directory(id: id).appendingPathComponent("Analysis Inputs"))
+        try checkCancellation()
+        guard detail.sourceSHA256 == hash else { throw StudioError.invalid("The character image changed during analysis preparation.") }
+        payload["sourceDetailImages"] = detail.sourceDetailImages.map {
+          ["path": $0.path, "label": $0.label, "sha256": $0.sha256]
+        }
+        preparationDiagnostics = detail.diagnostics.map { .init(code: "image.detail", message: $0) }
+        status = "Analyzing character…"
+      }
     }
     let result = try await bridge.invoke("character-analyze", runtime: store.runtime, payload: payload)
     try checkCancellation()
     var proposals: [CharacterFieldProposal] = []
-    var diagnostics = Self.extractionDiagnostics(result)
+    var diagnostics = preparationDiagnostics + Self.extractionDiagnostics(result)
     let rawProposals = result["proposals"] as? [Any]
     if rawProposals == nil {
       diagnostics.append(.init(code: "proposal.schema",
