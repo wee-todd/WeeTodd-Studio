@@ -24,6 +24,8 @@ public struct PlanningSubject: Codable, Equatable, Identifiable {
   public var referenceAssetIDs: [UUID] = []
   public var approvedRevision: String?
   public var approvedReferenceRevision: String?
+  public var characterAppearance: CharacterAppearance?
+  public var originalAppearanceDescription: String?
   public var descriptionReview: SubjectDescriptionReview?
   public var relationships: [ObjectRelationship]?
   public var relationshipReview: ObjectRelationshipReview?
@@ -36,10 +38,30 @@ public struct PlanningSubject: Codable, Equatable, Identifiable {
   public init(name: String, kind: PlanningSubjectKind) { self.name = name; self.kind = kind }
   public var revision: String {
     let legacy = planningDigest([name, kind.rawValue, aliases, details, evidence, suggestions])
-    guard !(relationships ?? []).isEmpty || environmentID != nil || !(descriptionMentions ?? []).isEmpty else { return legacy }
-    var parts = [legacy, planningDigest(relationships ?? []), environmentID?.uuidString ?? ""]
-    if !(descriptionMentions ?? []).isEmpty { parts += [planningDigest(descriptionMentions), mentionSourceDescription ?? ""] }
-    return planningDigest(parts)
+    let relational: String
+    if !(relationships ?? []).isEmpty || environmentID != nil || !(descriptionMentions ?? []).isEmpty {
+      var parts = [legacy, planningDigest(relationships ?? []), environmentID?.uuidString ?? ""]
+      if !(descriptionMentions ?? []).isEmpty { parts += [planningDigest(descriptionMentions), mentionSourceDescription ?? ""] }
+      relational = planningDigest(parts)
+    } else { relational = legacy }
+    guard let characterAppearance else { return relational }
+    return planningDigest([relational, planningDigest(characterAppearance)])
+  }
+
+  public static func descriptionProjection(for appearance: CharacterAppearance) -> String {
+    // Reuse the compiler's labelled appearance clauses, including explicit absence and named
+    // material targets, while excluding generation/style/camera/layout instructions.
+    let definition = CharacterSheetDefinition(appearance: appearance,
+      settings: CharacterSheetSettings(stylePresetID: "photograph"))
+    return CharacterSheetCompiler.compile(definition).sections
+      .filter { (2...8).contains($0.index) && !$0.text.isEmpty }
+      .map(\.text).joined(separator: ". ")
+  }
+
+  public mutating func applyAcceptedAppearance(_ appearance: CharacterAppearance, sourceDescription: String?) {
+    characterAppearance = appearance
+    originalAppearanceDescription = sourceDescription
+    details = Self.descriptionProjection(for: appearance)
   }
 }
 

@@ -176,7 +176,7 @@ private struct WorkflowSubjectCard: View {
       if individualApprovals { coverageNotes }
       Text("Reference images").font(.subheadline.bold())
       if onReferenceSave != nil {
-        Button("Create reference…") {
+        Button(kind == .character ? "Create character sheet…" : "Create reference…") {
           sheetContext = ReferenceSheetContext(subjectKey: subjectScope + ":" + subject.id,
             name: name, kind: kind, description: description,
             linkedDefinitions: ReferenceSheetLinks.definitions(relationships: relationships ?? [], inventory: inventory))
@@ -264,7 +264,11 @@ private struct WorkflowSubjectCard: View {
       .disabled(saving)
       .sheet(item: $sheetContext) { context in
       ReferenceSheetGenerator(context: context, referencePaths: imagePaths) { asset in
-        guard let onReferenceSave else { return false }
+        guard let onReferenceSave, description == context.description, name == context.name,
+          kind == context.kind, asset.generation?.referenceSheet?.subjectKey == context.subjectKey,
+          asset.generation?.referenceSheet?.description == description else {
+          error = "The subject changed. Reopen Character Director before using a candidate."; return false
+        }
         let paths = imagePaths.contains(asset.path) ? imagePaths : imagePaths + [asset.path]
         guard paths.count <= 8, await onReferenceSave(subject.id, paths) else { return false }
         imagePaths = paths

@@ -28,6 +28,7 @@ import StudioCore
     } catch { self.error = error.localizedDescription }
   }
   func imagePayload(_ draft: DrawThingsImageDraft, connection: DrawThingsConnection?) async throws -> [String: Any] {
+    if let issue = draft.managedCharacterPromptIssue ?? characterSheetIssue(draft) { throw StudioError.invalid(issue) }
     // Hash captured files away from MainActor. Return encoded data across the concurrency boundary.
     if draft.executionProvider == .nativeMLX {
       let data = try await Task.detached(priority: .userInitiated) {

@@ -53,9 +53,13 @@ public struct DrawThingsImageDraft: Codable, Equatable {
   public var moodboard: [ImageWorkspaceInput] = []
   public var loras: [DrawThingsLoRA] = []
   public var referenceSheet: ReferenceSheetContext?
+  public var characterPanel: CharacterPanelPromptContext?
+  public var characterSheetLoRAID: String?
+  public var characterSheetModelPending: Bool?
   public var rippleReference: RippleImageContext?
   public var storageKey: String {
     destination.storageKey + (referenceSheet.map { ":reference:" + $0.subjectKey } ?? "")
+      + (referenceSheet?.template == .characterSheet ? ":four-view" : "")
       + (rippleReference.map { ":ripple:" + $0.referenceID.uuidString } ?? "")
   }
   public init(destination: ImageAssetDestination) { self.destination = destination }
@@ -76,7 +80,25 @@ public struct DrawThingsImageDraft: Codable, Equatable {
     if let shift { value["shift"] = shift }
     return value
   }
+  public var characterSheetRequestIssue: String? {
+    guard referenceSheet?.template == .characterSheet else { return nil }
+    guard referenceSheet?.characterDefinition != nil else {
+      return "Map and review this legacy character description in Character Director before generating a new sheet."
+    }
+    guard executionProvider == .drawThings else {
+      return "Four-panel character sheets require the Draw Things LoRA. Choose Draw Things or another reference template."
+    }
+    guard prompt.hasPrefix(ReferenceSheetTemplate.characterSheetPrefix) else {
+      return "The character-sheet prompt must begin with the four-view turnaround instruction. Apply the template to restore it."
+    }
+    guard let id = characterSheetLoRAID,
+      loras.contains(where: { $0.modelID == id && $0.isEnabled && $0.weight > 0 }) else {
+      return "Choose and enable the installed four-panel LoRA for this character sheet."
+    }
+    return nil
+  }
   public func request(id: String) throws -> [String: Any] {
+    if let issue = managedCharacterPromptIssue ?? characterSheetRequestIssue { throw StudioError.invalid(issue) }
     guard executionProvider == .drawThings else { throw StudioError.invalid("Use the native image request for Local MLX.") }
     guard imageInputIssue == nil, strength.isFinite, (0...1).contains(strength) else {
       throw StudioError.invalid("Use up to eight mood-board images and a generation strength from 0–100%.")

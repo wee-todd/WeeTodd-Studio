@@ -14,6 +14,22 @@ extension StudioStore {
        saved.draft.referenceSheet?.name == context.name {
       return saved.draft
     }
+    if context.template == .characterSheet {
+      let local = drawThingsConnections.filter {
+        $0.route == "grpc" && ["127.0.0.1", "localhost", "::1", "[::1]"].contains($0.host.lowercased())
+      }
+      draft.profileID = local.first { $0.id == imageWorkspaceLibrary.referenceConnectionID }?.id
+        ?? local.first?.id ?? ""
+      if previousDraft?.executionProvider == .drawThings,
+        previousDraft?.profileID == draft.profileID, !draft.profileID.isEmpty {
+        draft.modelID = previousDraft?.modelID ?? ""
+        draft.steps = previousDraft?.steps ?? draft.steps
+        draft.guidance = previousDraft?.guidance ?? draft.guidance
+        draft.sampler = previousDraft?.sampler; draft.shift = previousDraft?.shift
+      }
+      configureCharacterSheetAdapter(&draft)
+      return draft
+    }
     if imageWorkspaceLibrary.referenceProvider == .nativeMLX {
       draft.selectProvider(.nativeMLX); draft.nativeImage = imageWorkspaceLibrary.referenceNativeImage ?? NativeImageSettings()
       return draft

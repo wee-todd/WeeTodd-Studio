@@ -31,10 +31,12 @@ public enum ReferenceSheetLinks {
 }
 
 public enum ReferenceSheetTemplate: String, Codable, CaseIterable, Identifiable {
-  case character, portrait, prop, environment, set, clothing, custom
+  case characterSheet, character, portrait, prop, environment, set, clothing, custom
+  public static let characterSheetPrefix = "4-view turnaround of a character, front view, side view, back view, facial close-up, plain solid white background"
   public var id: String { rawValue }
   public var label: String {
     switch self {
+    case .characterSheet: return "Character sheet · four views"
     case .character: return "Character · front, close-up, profile"
     case .portrait: return "Character · portrait"
     case .prop: return "Prop · three views"
@@ -46,7 +48,7 @@ public enum ReferenceSheetTemplate: String, Codable, CaseIterable, Identifiable 
   }
   public static func suggested(for kind: PlanningSubjectKind) -> Self {
     switch kind {
-    case .character: return .character
+    case .character: return .characterSheet
     case .prop: return .prop
     case .environment: return .environment
     case .set, .location: return .set
@@ -55,6 +57,8 @@ public enum ReferenceSheetTemplate: String, Codable, CaseIterable, Identifiable 
   }
   public var layout: String {
     switch self {
+    case .characterSheet:
+      return Self.characterSheetPrefix + "\nFour clearly separated panels of the SAME character: full-body front, full-body side, full-body back, and an enlarged facial close-up. Keep body views at equal scale, entire body and feet visible. Keep identity, anatomy, proportions, clothing and accessories identical across all views. Show the described face, hair or fur, eyes, markings, silhouette, clothing, materials and colors faithfully. Adapt stance to the subject's species; a quadruped stays on four legs. Soft even lighting, no scenery, no text labels."
     case .character:
       return "Production character reference sheet on a clean neutral backdrop with soft even lighting. Three clearly separated views of the SAME character: left full-body front view; center head-and-shoulders face close-up showing facial structure and distinctive identity features; right full-body side profile at 90 degrees. Keep the two body views at equal scale, entire body and feet visible. Enlarge the center close-up for facial detail. Keep identity, anatomy, proportions, clothing and accessories identical across all views. Adapt stance to the subject's species; a quadruped stays on four legs. No text labels."
     case .portrait:
@@ -81,6 +85,7 @@ public struct ReferenceSheetContext: Codable, Equatable, Identifiable {
   public var description: String
   public var linkedDefinitions: String
   public var template: ReferenceSheetTemplate
+  public var characterDefinition: CharacterSheetDefinition?
   public var style = "Realistic cinematic"
   public var direction = ""
   public var id: String { subjectKey }
@@ -90,6 +95,7 @@ public struct ReferenceSheetContext: Codable, Equatable, Identifiable {
     self.linkedDefinitions = linkedDefinitions; self.template = .suggested(for: kind)
   }
   public var prompt: String {
+    if template == .characterSheet, let characterDefinition { return CharacterSheetCompiler.compile(characterDefinition).prompt }
     var text = template.layout + "\nVisual style: " + style + "\nSubject: " + name + ".\n" + description
     text += "\nUse the subject description as the authoritative baseline identity and appearance. Preserve ordinary authored clothing and equipment. Linked definitions provide context, not an instruction to display every linked object: honor each relationship's role and placement / state. Do not incorporate conditional or future transfers, damage, held objects or poses into the baseline unless explicitly requested in the sheet instructions. Preserve explicitly defined state variants."
     text += "\nIf visual references are supplied, preserve the depicted subject's identity and design while applying the requested views and sheet layout; temporary image states must not override the defined baseline or relationship conditions."
@@ -98,12 +104,23 @@ public struct ReferenceSheetContext: Codable, Equatable, Identifiable {
     return text
   }
   public func apply(to draft: inout DrawThingsImageDraft) {
+    if template != .characterSheet, let adapter = draft.characterSheetLoRAID {
+      draft.loras.removeAll { $0.modelID == adapter }
+      if var saved = draft.providerSettings {
+        for key in saved.keys { saved[key]?.loras.removeAll { $0.modelID == adapter } }
+        draft.providerSettings = saved
+      }
+      draft.characterSheetLoRAID = nil
+      draft.characterSheetModelPending = nil
+    } else if template == .characterSheet, draft.referenceSheet?.template != .characterSheet {
+      draft.characterSheetModelPending = true
+    }
     draft.name = name + " · " + template.label
     draft.prompt = prompt
-    let framingErrors = template == .character ? "cropped full-body views" : "cropped subject"
+    let framingErrors = [.character, .characterSheet].contains(template) ? "cropped full-body views" : "cropped subject"
     draft.negativePrompt = "inconsistent identity, mismatched views, inconsistent materials, \(framingErrors), distorted anatomy, unwanted text, watermark, clutter"
-    draft.width = template == .portrait ? 768 : 1280
-    draft.height = template == .portrait ? 1024 : 768
+    draft.width = template == .characterSheet ? 1920 : template == .portrait ? 768 : 1280
+    draft.height = template == .characterSheet ? 1088 : template == .portrait ? 1024 : 768
     draft.referenceSheet = self
   }
 }

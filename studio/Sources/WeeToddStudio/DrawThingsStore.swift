@@ -172,6 +172,9 @@ extension StudioStore {
       return try await discoveryBridge.invoke("dt-discover", runtime: settings,
         payload: ["connection": try connection.object()])
     }
+    if drawThingsConnections.contains(connection), imageDraft?.profileID == connection.id {
+      configureCharacterSheetAdapter()
+    }
   }
   func drawThingsModels(_ profileID: String, operation: String, task: String? = nil) -> [(id: String, name: String)] {
     guard let catalog = drawThingsCatalogs[profileID], let rules = catalog["capabilities"] as? [String: Any] else { return [] }

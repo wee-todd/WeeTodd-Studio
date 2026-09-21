@@ -140,7 +140,7 @@ struct DrawThingsConfigImportView: View {
           case .integer(let fps) = result.configuration["fps"] { project.clips[index].duration = Double(frames) / Double(fps) }
       }
     } else if var draft = store.imageDraft {
-      result.apply(to: &draft, includePrompt: includePrompt)
+      result.apply(to: &draft, includePrompt: includePrompt && !draft.hasManagedCharacterPrompt)
       store.imageDraft = draft; store.imageEstimate = nil
     }
     store.notice = "Imported \(result.name). Prepare to validate the complete request."

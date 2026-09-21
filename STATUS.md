@@ -1,5 +1,16 @@
 # WeeTodd Studio implementation status
 
+Structured Character Director 2026-09-20 (experimental): a dedicated movie-independent window and
+shared character-reference editor now use typed appearance fields, a deterministic thirteen-section
+prompt, forensic Qwen proposals, versioned style presets and separate portable documents. The local
+Krea 2 Turbo recipe requests a 1920×1088 four-panel row; Vision proposes actual panel crops for review,
+then exact 2× Lanczos inputs feed serial FLUX.2 klein 9B detail/BFS recipes and a 3840×2176 assembly.
+Reference-head masking retains RGBA and white-matted derivatives. Progress, previews, cancellation,
+content-hashed completed-panel reuse and explicit uncertain-submission retry are wired. Assembly
+provenance retains panel settings and reference hashes. Full model generations, output quality and
+end-to-end performance/memory qualification have not been run for this pipeline. See the
+[Character Director guide](studio/README.md#character-director) for current controls and limits.
+
 Native Qwen-Image-2.1 2026-09-20 (experimental): the existing image workspace now selects an
 app-owned MLX image engine with up to ten total ordered references, 8-bit model preparation,
 approximate live previews, stage/step/layer progress, cancellation, staged unloading and shared

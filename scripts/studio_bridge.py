@@ -1425,7 +1425,7 @@ def main():
             "music-analysis-setup", "music-analyze",
             "assistant-model-catalog", "assistant-model-inspect",
             "assistant-model-download", "assistant-model-health",
-            "assist-prompt",
+            "assist-prompt", "character-analyze", "character-panel-prepare", "character-reassemble",
             "workflow-catalog", "workflow-validate", "workflow-run", "workflow-review",
             "image-preflight", "image-generate", "image-model-prepare",
             "dt-discover", "dt-estimate", "dt-generate-image",
@@ -1540,6 +1540,31 @@ def main():
             signal.signal(number, stop_workflow)
         result = dispatch(args.command, request, cancelled=lambda: stopped,
                           progress=lambda event: emit(event="progress", **event))
+    elif args.command == "character-panel-prepare":
+        from wee_todd_mlx.character_panel_media import prepare_panel
+
+        if args.output is None:
+            raise ValueError("Panel preparation requires an output directory")
+        result = prepare_panel(request["source"], request["rect"], args.output)
+    elif args.command == "character-reassemble":
+        from wee_todd_mlx.character_panel_assembly import assemble_panels
+
+        if args.output is None:
+            raise ValueError("Panel assembly requires an output directory")
+        result = assemble_panels(request, args.output)
+    elif args.command == "character-analyze":
+        from studio_character_assist import extract_fields
+
+        character_stopped = False
+
+        def stop_character(_number, _frame):
+            nonlocal character_stopped
+            character_stopped = True
+
+        for number in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(number, stop_character)
+        result = extract_fields(request, cancelled=lambda: character_stopped,
+                                progress=lambda message: emit(event="progress", message=message))
     elif args.command == "assist-prompt":
         from studio_prompt_assist import assist
 

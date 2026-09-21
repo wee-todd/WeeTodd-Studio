@@ -13,6 +13,70 @@ final class ReferenceImageWorkspaceTests: XCTestCase {
   private func context(_ key: String = "actor") -> ReferenceSheetContext {
     ReferenceSheetContext(subjectKey: key, name: key, kind: .character, description: "Reviewed identity")
   }
+  private func mappedContext() -> ReferenceSheetContext {
+    var result = context()
+    var definition = CharacterSheetDefinition.newDraft()
+    definition.appearance.setText("identity.species", "human")
+    definition.appearance.setText("identity.type", "human")
+    result.characterDefinition = definition
+    return result
+  }
+  @MainActor func testNewCharacterSheetDefaultsToLocalDespiteCloudAndNativePreferences() throws {
+    let store = StudioStore(dataDirectory: try directory(), restoreSession: false)
+    store.drawThingsConnections = [DrawThingsConnection(id: "cloud", route: "dtCloud", host: "compute.drawthings.ai"),
+      DrawThingsConnection(id: "local", name: "Draw Things Local", selfHostedConfirmed: true)]
+    store.imageWorkspaceLibrary.referenceProvider = .nativeMLX
+    store.imageWorkspaceLibrary.referenceConnectionID = "cloud"
+    var previous = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: store.project.id))
+    previous.selectProvider(.nativeMLX)
+    let result = store.makeReferenceImageDraft(context(), previousDraft: previous)
+    XCTAssertEqual(result.executionProvider, .drawThings)
+    XCTAssertEqual(result.profileID, "local")
+  }
+
+  @MainActor func testNewCharacterSheetNeverDefaultsToCloudWhenLocalIsMissing() throws {
+    let store = StudioStore(dataDirectory: try directory(), restoreSession: false)
+    store.drawThingsConnections = [DrawThingsConnection(id: "cloud", route: "dtCloud", host: "compute.drawthings.ai")]
+    var previous = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: store.project.id))
+    previous.profileID = "cloud"
+    XCTAssertEqual(store.makeReferenceImageDraft(context(), previousDraft: previous).profileID, "")
+  }
+
+  @MainActor func testCharacterSheetAddsOnlyCompatibleFourPanelAdapterFromCatalog() async throws {
+    let store = StudioStore(dataDirectory: try directory(), restoreSession: false)
+    let local = DrawThingsConnection(id: "local", name: "Draw Things Local", selfHostedConfirmed: true)
+    store.drawThingsConnections = [local]
+    await store.drawThingsDiscovery.load(local) { [
+      "models": [["id": "flux", "name": "FLUX", "family": "flux"]],
+      "capabilities": ["flux": ["operations": ["image": [:]]]],
+      "loras": [
+        ["id": "four_panel_flux.ckpt", "name": "4-panel character sheet", "family": "flux", "compatibleModelIDs": ["flux"]],
+        ["id": "four_panel_other.ckpt", "name": "4 Panel", "family": "other", "compatibleModelIDs": ["other"]]]
+    ] }
+    var ordinary = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: store.project.id))
+    ordinary.profileID = "local"; ordinary.modelID = "flux"; ordinary.steps = 4
+    let sheet = store.makeReferenceImageDraft(mappedContext(), previousDraft: ordinary)
+    XCTAssertEqual(sheet.modelID, "flux")
+    XCTAssertEqual(sheet.loras.map(\.modelID), ["four_panel_flux.ckpt"])
+    let request = try sheet.request(id: "sheet")
+    XCTAssertEqual((request["loras"] as? [[String: Any]])?.first?["weight"] as? Double, 1)
+    XCTAssertEqual(ordinary.loras, [])
+  }
+
+  @MainActor func testCharacterSheetCannotPrepareWithoutItsFourPanelAdapter() async throws {
+    let store = StudioStore(dataDirectory: try directory(), restoreSession: false)
+    let local = DrawThingsConnection(id: "local")
+    store.drawThingsConnections = [local]
+    var draft = store.makeReferenceImageDraft(mappedContext(), previousDraft: nil)
+    draft.modelID = "flux"
+    do {
+      _ = try await store.imagePayload(draft, connection: local)
+      XCTFail("Character-sheet preparation must require the four-panel adapter")
+    } catch {
+      XCTAssertTrue(error.localizedDescription.localizedCaseInsensitiveContains("four-panel"))
+    }
+  }
+
   @MainActor func testExplicitReferenceConnectionSurvivesOrdinaryWorkspaceRestoreAndPersistence() throws {
     let dir = try directory(), store = StudioStore(dataDirectory: dir, restoreSession: false)
     store.restoringImageWorkspace = false
@@ -59,15 +123,16 @@ final class ReferenceImageWorkspaceTests: XCTestCase {
     XCTAssertEqual(restored.referenceSheet?.description, original.description)
   }
   @MainActor func testRemovedReferencePreferenceDoesNotSilentlyChooseCloud() throws {
+    var legacy = context(); legacy.template = .portrait
     let store = StudioStore(dataDirectory: try directory(), restoreSession: false)
     store.drawThingsConnections = [DrawThingsConnection(id: "cloud")]
     store.imageWorkspaceLibrary.referenceConnectionID = "removed-local"
     var ordinary = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: store.project.id))
     ordinary.profileID = "cloud"
-    XCTAssertEqual(store.makeReferenceImageDraft(context(), previousDraft: ordinary).profileID, "")
+    XCTAssertEqual(store.makeReferenceImageDraft(legacy, previousDraft: ordinary).profileID, "")
     store.imageWorkspaceLibrary.referenceConnectionID = nil
-    XCTAssertEqual(store.makeReferenceImageDraft(context(), previousDraft: nil).profileID, "")
-    XCTAssertEqual(store.makeReferenceImageDraft(context(), previousDraft: ordinary).profileID, "cloud")
+    XCTAssertEqual(store.makeReferenceImageDraft(legacy, previousDraft: nil).profileID, "")
+    XCTAssertEqual(store.makeReferenceImageDraft(legacy, previousDraft: ordinary).profileID, "cloud")
   }
   func testOlderImageWorkspaceLibraryNeedsNoMigration() throws {
     let library = try JSONDecoder().decode(ImageWorkspaceLibrary.self, from: Data(#"{"version":1,"sessions":{}}"#.utf8))
@@ -81,6 +146,7 @@ final class ReferenceImageWorkspaceTests: XCTestCase {
     })
     store.drawThingsConnections = [DrawThingsConnection(id: "local")]
     var draft = store.makeReferenceImageDraft(context(), previousDraft: nil)
+    draft.referenceSheet?.template = .portrait
     draft.profileID = "local"; draft.modelID = "test-model"; store.imageDraft = draft
     store.error = "Unrelated project error"
     await store.prepareImageGeneration()
@@ -151,6 +217,7 @@ final class ReferenceImageWorkspaceTests: XCTestCase {
     })
     store.drawThingsConnections = [DrawThingsConnection(id: "local")]
     var draft = store.makeReferenceImageDraft(context(), previousDraft: nil)
+    draft.referenceSheet?.template = .portrait
     draft.profileID = "local"; draft.modelID = "test-model"
     var library = ImageWorkspaceLibrary()
     library.record(draft, preview: "/saved-candidate.png")

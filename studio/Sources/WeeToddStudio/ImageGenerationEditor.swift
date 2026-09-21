@@ -44,7 +44,7 @@ struct ImageGenerationEditor: View {
         Menu("Tools") {
         Button("Prompt Assistant…") {
           if let draft { assistant = PromptAssistantContext(projectID: store.project.id, image: draft, documentSessionID: store.documentSessionID) }
-        }.disabled(store.bridge.busy)
+        }.disabled(store.bridge.busy || draft?.hasManagedCharacterPrompt == true)
         Button("Import Config…") { store.configImportClipID = nil; configOpen = true }.disabled(isNative)
         Link("Draw Things presets", destination: DrawThingsConfigImport.presetsURL)
         Button("Export Headless Job…") { store.exportDrawThingsImageJob() }.disabled(store.bridge.busy || store.preparingImageRequest || draft?.modelID.isEmpty != false)
@@ -125,11 +125,15 @@ struct ImageGenerationEditor: View {
             Button(promptExpanded ? "Hide prompt" : "Show prompt") { promptExpanded.toggle() }.font(.caption)
           }
           if promptExpanded {
+          if draft?.hasManagedCharacterPrompt == true {
+            ScrollView { Text(draft?.prompt ?? "").textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 180)
+          } else {
           TextEditor(text: binding(\.prompt, fallback: "")).font(.system(size: 14))
             .scrollContentBackground(.hidden).padding(10).background(Theme.raised, in: RoundedRectangle(cornerRadius: 8))
             .frame(minHeight: 120, idealHeight: 180, maxHeight: 210).overlay(alignment: .topLeading) {
               if draft?.prompt.isEmpty != false { Text("Describe the image or edit…").foregroundStyle(.secondary).padding(15).allowsHitTesting(false) }
             }
+          }
           }
         }.padding(16).frame(minWidth: 470, maxWidth: .infinity)
         if moodboardVisible { moodboard.frame(minWidth: 205, idealWidth: 235, maxWidth: 290) }
@@ -209,6 +213,8 @@ struct ImageGenerationEditor: View {
           let compatible: Set<String>? = hasCatalog
             ? Set(store.drawThingsLoRAs(profileID: draft?.profileID ?? "", modelID: id).map(\.id)) : nil
           store.imageDraft?.selectModel(id, compatibleLoRAIDs: compatible); store.imageEstimate = nil
+          store.imageDraft?.characterSheetModelPending = false
+          store.configureCharacterSheetAdapter()
         })) {
           Text("Choose an image model").tag("")
           if let id = draft?.modelID, !id.isEmpty, !models.contains(where: { $0.id == id }) {

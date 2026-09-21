@@ -270,6 +270,16 @@ and open production directly. Review takes and continuity before exporting the f
 See the [music-video guide](studio/README.md#create-a-music-video) and
 [production guide](studio/README.md#resumable-movie-production) for setup and qualification limits.
 
+## Character sheets without a movie
+
+**Director → New Character Director** opens structured character fields, forensic image/style
+analysis and a read-only four-view prompt. The local recipe creates a 1920 × 1088 Krea 2 Turbo sheet,
+uses Apple Vision to propose actual panel crops, then refines each 2× Lanczos input sequentially with
+FLUX.2 klein 9B and HichResolution9B. Optional reference-head background removal and BFS replacement
+share the same saved document, progress, previews, completed-stage reuse and reviewed retry. This experimental
+pipeline requires the installed models and LoRAs; image quality and end-to-end performance remain
+unqualified. See the [Character Director guide](studio/README.md#character-director).
+
 ## Reuse models you already have
 
 Shared model storage is a core design priority: link compatible files in place, preserve originals,

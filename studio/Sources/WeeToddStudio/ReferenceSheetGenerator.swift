@@ -21,6 +21,13 @@ struct ReferenceSheetGenerator: View {
   }
   var body: some View {
     Group {
+      if subject.template == .characterSheet {
+        CharacterSheetEmbeddedHost(context: subject, onUse: onUse)
+      } else { legacyBody }
+    }
+  }
+  private var legacyBody: some View {
+    Group {
     if started {
     ImageGenerationEditor(onClose: { dismiss() }, onUseReference: { asset in
       Task { @MainActor in
@@ -58,6 +65,20 @@ struct ReferenceSheetGenerator: View {
           }
         }.disabled(!store.project.assets.contains { $0.generation?.referenceSheet?.subjectKey == subject.subjectKey })
       }
+      if store.imageDraft?.referenceSheet?.template == .characterSheet {
+        Picker("Four-panel LoRA", selection: Binding(get: { store.imageDraft?.characterSheetLoRAID ?? "" },
+          set: { store.selectCharacterSheetAdapter($0) })) {
+          Text("Choose the installed four-panel LoRA").tag("")
+          ForEach(store.drawThingsLoRAs(profileID: store.imageDraft?.profileID ?? "", modelID: store.imageDraft?.modelID ?? ""), id: \.id) {
+            Text($0.name).tag($0.id)
+          }
+        }
+        if let draft = store.imageDraft, let issue = store.characterSheetIssue(draft) {
+          Text(issue).font(.caption).foregroundStyle(.orange)
+        }
+        Text("Choose a compatible image model. A uniquely named four-panel LoRA is selected automatically; use the picker for other names or multiple matches. Its strength is editable in LoRAs & Groups.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
       if setupExpanded {
       HStack(spacing: 16) {
         Picker("Template", selection: $context.template) {
@@ -66,7 +87,7 @@ struct ReferenceSheetGenerator: View {
         TextField("Visual style", text: $context.style).textFieldStyle(.roundedBorder)
         Spacer()
         Button("Apply template") {
-          if var draft = store.imageDraft { context.apply(to: &draft); store.imageDraft = draft; store.imageEstimate = nil }
+          if var draft = store.imageDraft { context.apply(to: &draft); store.configureCharacterSheetAdapter(&draft); store.imageDraft = draft; store.imageEstimate = nil }
         }
         Menu("Starting settings") {
           Button("Krea Turbo · 8 steps") { store.imageDraft?.steps = 8; store.imageEstimate = nil }
@@ -78,7 +99,7 @@ struct ReferenceSheetGenerator: View {
       }
       TextField("Pose / camera instructions (optional)", text: $context.direction, axis: .vertical)
         .lineLimit(1...3).textFieldStyle(.roundedBorder)
-      Text("Apply template rebuilds the prompt. Starting settings change steps/CFG only; choose your model and LoRAs separately.")
+      Text("Apply template rebuilds the prompt. Starting settings change steps/CFG only; choose a compatible model. Four-view character sheets also require their four-panel LoRA.")
         .font(.caption).foregroundStyle(.secondary)
       }
       if referencesExpanded && !referencePaths.isEmpty {

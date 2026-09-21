@@ -63,11 +63,17 @@ struct ProjectPlanningView: View {
         let subject = plan.subjects.first { store.project.id.uuidString + ":" + $0.id.uuidString == context.subjectKey }
         ReferenceSheetGenerator(context: context, referencePaths: (subject?.referenceAssetIDs ?? []).compactMap { id in store.allAssets.first { $0.id == id }?.path }) { asset in
           guard let subject, let current = store.planning.subjects.first(where: { $0.id == subject.id }),
-            current.details == context.description, current.name == context.name else {
+            current.details == context.description, current.name == context.name,
+            asset.generation?.referenceSheet?.subjectKey == context.subjectKey,
+            asset.generation?.referenceSheet?.description == current.details else {
             error = "The subject changed. Review it before attaching the generated image."; return false
           }
           do {
             var updated = store.project
+            if let appearance = asset.generation?.referenceSheet?.characterDefinition?.appearance,
+              let index = updated.planning?.subjects.firstIndex(where: { $0.id == subject.id }) {
+              updated.planning?.subjects[index].applyAcceptedAppearance(appearance, sourceDescription: current.details)
+            }
             _ = try updated.attachPlanningReference(asset, subjectID: subject.id)
             store.change { $0 = updated }; return true
           } catch { self.error = error.localizedDescription; return false }
@@ -325,10 +331,14 @@ struct ProjectPlanningView: View {
         }
         HStack {
           Button("Import images…") { store.importPlanningReferences(subjectID: subject.id) }
-          Button("Create reference…") {
+          Button(subject.kind == .character ? "Create character sheet…" : "Create reference…") {
             sheetContext = ReferenceSheetContext(subjectKey: store.project.id.uuidString + ":" + subject.id.uuidString,
               name: subject.name, kind: subject.kind, description: subject.details,
               linkedDefinitions: ReferenceSheetLinks.definitions(subject: subject, inventory: plan.subjects))
+            if let appearance = subject.characterAppearance {
+              var definition = CharacterSheetDefinition.newDraft(); definition.appearance = appearance
+              sheetContext?.characterDefinition = definition
+            }
           }.disabled(store.bridge.busy || subject.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
           Menu("Choose project/global image") {
             ForEach(store.allAssets.filter { $0.kind == .image && !subject.referenceAssetIDs.contains($0.id) }) { asset in
@@ -344,7 +354,7 @@ struct ProjectPlanningView: View {
             store.change { $0.planning = value }
           } }.disabled(subject.referenceAssetIDs.isEmpty)
         }
-        Text("Create reference opens sheet templates in the Draw Things image editor. Inspect a candidate and use it as a reference; approve your references separately.")
+        Text("Create character sheet uses local Draw Things and an installed four-panel LoRA. Other subjects offer reference templates. Inspect a candidate and use it as a reference; approve your references separately.")
           .font(.caption).foregroundStyle(.secondary)
         Menu("Merge into another subject") {
           ForEach(plan.subjects.filter { $0.id != subject.id && $0.kind == subject.kind }) { target in

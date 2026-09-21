@@ -1910,7 +1910,67 @@ A drafting call proposes a fuller design, and a separate critique checks only th
 There are at most two rounds per subject (four model calls); unresolved or malformed reviews remain
 **Needs attention**. The agent never grants human approval.
 
-**Create reference…** is available in workflow subject review and the project's subject editor.
+### Character Director
+
+Open **Director → New Character Director** for a dedicated window without a movie project.
+**Create character sheet…** opens the same editor wherever Director or project subject review offers
+character references. Documents autosave separately from movies; **Recent** reopens saved characters,
+and **Export… / Import…** moves a folder containing the document and its media. A corrupt document
+reports an error instead of being replaced. Exported media do not grant subject or reference approval.
+
+Edit individual fields with common-value menus, custom values, Required flags, and field states: Value,
+Unspecified, Absent and applicability-gated N/A. Empty fields are omitted. Required species, character type and rendering
+preset start enabled. Clothing, accessories, distinctive features and surface descriptions have
+repeatable records. Undo/redo preserves the document's revision history for stale-analysis checks.
+The prompt is read-only and compiles in this order: layout, identity, body, face/head, hair, clothing,
+accessories/features, materials, style, camera, lighting, consistency and composition. It begins exactly:
+
+```text
+4-view turnaround of a character, front view, side view, back view, facial close-up, plain solid white background
+```
+
+**Photograph** is a versioned photography preset with anatomy-appropriate skin, hair and material
+clauses, rather than a single appended word. Cinematic Photograph, Realistic 3D, Stylized 3D, Anime,
+Comic, Oil Painting, Concept Art, Clay and Sculpture use the same appearance fields. Character image,
+style image and authored-text analysis use the configured app-owned Qwen3.5 4B model; character and
+style may share one image. Bounded calls propose forensic visible details with evidence and uncertainty.
+Review and select proposals before applying them. Invalid, unsupported and stale proposals remain
+unappliable. Image analysis does not infer authored demographic identity fields. Legacy descriptions
+remain available for mapping; legacy character-sheet prompts must be mapped before regeneration.
+
+The initial recipe requires **Draw Things Local**, installed **Krea 2 Turbo**, and its compatible
+four-view LoRA, starting at eight steps, CFG 1 and **1920 × 1088**. Discovery selects an unambiguous
+installed pair; missing or ambiguous models/adapters require explicit selection. The sheet requests
+four panels in one row. Apple Vision analyzes foreground groups and gutters on a bounded preview,
+then maps crops back into source pixels. It never silently substitutes equal quarters. Review actual
+crop boundaries and roles; uncertain detection supports manual crop creation/correction.
+
+Each approved panel is cropped, enlarged exactly **2× with Lanczos**, and white-padded to multiples
+of 64 for **FLUX.2 klein 9B** with **HichResolution9B** and `high quality` in its managed prompt.
+Panels render serially. The combined outputs are reassembled at **3840 × 2176**, removing transport
+padding while preserving the reviewed crop placement. Four equal-width crops would use 960 × 2176
+inputs; detected crops may have different widths.
+
+A separate **Reference face** input uses local Vision background removal, retaining the original,
+head crop, mask, RGBA cutout and white-matted transport image. Ambiguous faces require a manual crop.
+**Replace faces** enables the exact `bfs_head_v1_flux-klein_9b_step3750_rank64` adapter and begins each
+panel prompt with `head_swap: replace the head with the reference head.` The target panel is reference
+1 and the head is reference 2. BFS may replace hair as well as the face. One combined head/detail
+pass is the default; **Experimental two pass** compares a head-only pass followed by detail without
+another upscale. The back-view instructions preserve rear orientation; output quality still needs review.
+
+Progress and available live previews appear in the window. Cancel stops the active local operation;
+completed panels are retained and reused when their execution inputs and output hashes still match.
+Interrupted submissions are marked uncertain and require inspecting saved output and explicitly
+allowing retry, preventing automatic duplicate submissions. Closing a busy window offers Keep Running
+or Cancel Job. Render settings, ordered input hashes, head preprocessing and individual panel takes
+remain in the final sheet's provenance. Choose **Use reviewed candidate**, then approve references separately.
+
+This pipeline is experimental: contract/unit tests and packaging do not qualify Krea/BFS generation
+quality, exact Draw Things conditioning behavior, or end-to-end speed and peak memory. The installed
+model/LoRA combination must pass Draw Things preflight before rendering.
+
+**Create reference…** remains available for other subject types in workflow and project review.
 It opens the existing Draw Things image workspace with editable character turnaround, portrait,
 prop, environment, set, wardrobe and custom-reference templates. The prompt uses the current
 saved description and linked object definitions. Apply a template to rebuild the prompt, then

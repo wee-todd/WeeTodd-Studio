@@ -501,7 +501,11 @@ Reimport matches the workflow source and stable subject ID even after reclassifi
 existing project edits and references. Ambiguous legacy duplicates must be merged before reimport.
 Project reference
 images are ordinary Project Assets linked by ID; the source file is not copied. Planning JSON export
-is separate from an executable workflow job. Reference creation uses the separate image workspace;
+is separate from an executable workflow job. Character subjects offer **Create character sheet…**
+through the structured [Character Director](../../studio/README.md#character-director), also available
+without a movie. Saved descriptions can be mapped into field proposals for review; generated prompts are read-only.
+The experimental local Krea/FLUX panel pipeline keeps image candidates separate from reference approval.
+Other reference creation uses the separate image workspace;
 automatic sheet/endpoint generation is not a planning operation. Studio's Shot List can explicitly
 apply approved shots to the timeline and hand them to production.
 

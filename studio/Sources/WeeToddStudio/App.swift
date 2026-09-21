@@ -51,6 +51,19 @@ import SwiftUI
         Button("Duplicate Clip") { store.duplicateClip() }.keyboardShortcut("d")
         Button("Delete Clip") { store.deleteClip() }
       }
+      CommandMenu("Director") {
+        Button("New Character Director…") { store.characterDirector.open() }
+        Button("Open Character Director…") {
+          let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
+          if panel.runModal() == .OK, let url = panel.url {
+            do {
+              let storage = CharacterSheetDocumentStore(root: store.dataDirectory.appendingPathComponent("Character Director"))
+              let document = try storage.importDocument(from: url)
+              store.characterDirector.open(documentID: document.id)
+            } catch { store.error = error.localizedDescription }
+          }
+        }
+      }
       CommandMenu("Movie") {
         Button("Create music video…") { store.showMusicVideoWorkflow = true }
         Button("Produce movie…") { store.showMusicVideoProduction = true }

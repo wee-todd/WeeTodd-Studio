@@ -371,7 +371,9 @@ extension Encodable {
   @Published private(set) var activeNativeRequest: UUID?
   private(set) var documentSessionID = UUID()
   @Published var preparingDrawThings = false
-  var operationBusy: Bool { bridge.busy || preparingImageRequest || activeNativeRequest != nil || preparingDrawThings || acceptingContinuousScene || connectingContinuousScene }
+  @Published var characterDirectorBusy = false
+  lazy var characterDirector = CharacterDirectorCoordinator(store: self)
+  var operationBusy: Bool { characterDirectorBusy || bridge.busy || preparingImageRequest || activeNativeRequest != nil || preparingDrawThings || acceptingContinuousScene || connectingContinuousScene }
   var preparedFingerprint: String?
   var motionPromptSession: MotionPromptEditorSession?
   private var undoStates: [StudioProject] = []

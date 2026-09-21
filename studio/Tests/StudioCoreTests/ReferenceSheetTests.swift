@@ -2,6 +2,19 @@ import XCTest
 @testable import StudioCore
 
 final class ReferenceSheetTests: XCTestCase {
+  func testRestoredLegacyFourViewSheetIsReadOnlyAndRequiresMappingBeforeGeneration() throws {
+    var draft = DrawThingsImageDraft(destination: .init(scope: .global, projectID: UUID()))
+    ReferenceSheetContext(subjectKey: "legacy", name: "Legacy", kind: .character,
+      description: "Original authored appearance").apply(to: &draft)
+    draft.characterSheetLoRAID = "four-view"; draft.loras = [.init(modelID: "four-view")]
+    let restored = try JSONDecoder().decode(DrawThingsImageDraft.self, from: JSONEncoder().encode(draft))
+    XCTAssertNil(restored.referenceSheet?.characterDefinition)
+    XCTAssertTrue(restored.hasManagedCharacterPrompt)
+    XCTAssertNotNil(restored.managedCharacterPromptIssue)
+    XCTAssertNotNil(restored.characterSheetRequestIssue)
+    XCTAssertThrowsError(try restored.request(id: "regenerate"))
+    XCTAssertTrue(restored.prompt.contains("Original authored appearance"))
+  }
   func testLinkedContextPreservesConditionalPlacementAndMultipleRolesInBothPaths() throws {
     var ring = PlanningSubject(name: "Arm-ring", kind: .prop)
     ring.details = "Gold ring worn by the old king before the handover."
@@ -79,9 +92,35 @@ final class ReferenceSheetTests: XCTestCase {
       XCTAssertEqual(try JSONDecoder().decode(DrawThingsImageDraft.self, from: JSONEncoder().encode(draft)), draft)
     }
   }
+  func testLeavingSheetOnNativeBackendDoesNotRestoreAdapterLater() {
+    var context = ReferenceSheetContext(subjectKey: "one", name: "Character", kind: .character, description: "A blue robot.")
+    var draft = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: UUID()))
+    context.apply(to: &draft)
+    draft.characterSheetLoRAID = "four-panel"
+    draft.loras = [DrawThingsLoRA(modelID: "four-panel"), DrawThingsLoRA(modelID: "style", weight: 0.3)]
+    draft.selectProvider(.nativeMLX)
+    context.template = .portrait; context.apply(to: &draft)
+    draft.selectProvider(.drawThings)
+    XCTAssertEqual(draft.loras.map(\.modelID), ["style"])
+    XCTAssertEqual(draft.loras.first?.weight, 0.3)
+  }
+
+  func testNewCharacterSheetPromptStartsWithExactFourViewTriggerAndKeepsDetails() {
+    let details = "Mira is a tall woman with warm brown skin, green eyes, short silver curls, a scar over her left eyebrow, a navy coat and brass boots."
+    let context = ReferenceSheetContext(subjectKey: "mira", name: "Mira", kind: .character, description: details)
+    var draft = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: UUID()))
+    context.apply(to: &draft)
+    XCTAssertTrue(draft.prompt.hasPrefix("4-view turnaround of a character, front view, side view, back view, facial close-up, plain solid white background"))
+    XCTAssertTrue(draft.prompt.contains(details))
+    XCTAssertEqual(context.template.rawValue, "characterSheet")
+    XCTAssertFalse(draft.prompt.contains("Three clearly separated views"))
+    XCTAssertNotEqual(draft.storageKey, draft.destination.storageKey + ":reference:mira")
+  }
+
   func testCharacterTemplatePairsFullBodyViewsWithFaceCloseUp() {
-    let context = ReferenceSheetContext(subjectKey: "one", name: "Character", kind: .character,
+    var context = ReferenceSheetContext(subjectKey: "one", name: "Character", kind: .character,
       description: "Keep this exact face and wardrobe.")
+    context.template = .character // Preserve the existing saved three-view template.
     var draft = DrawThingsImageDraft(destination: ImageAssetDestination(scope: .project, projectID: UUID()))
     context.apply(to: &draft)
     XCTAssertEqual(context.template.label, "Character · front, close-up, profile")
