@@ -3,6 +3,16 @@ import XCTest
 import StudioCore
 
 @MainActor final class CharacterDirectorSessionTests: XCTestCase {
+  func testExtractionOmissionsRemainVisibleForReview() {
+    let diagnostics = CharacterSheetSessionController.extractionDiagnostics([
+      "diagnostics": [["code": "proposal.invalid", "field": "body.height",
+        "message": "Omitted an unsupported height measurement.", "index": 2]]
+    ])
+    XCTAssertEqual(diagnostics.count, 1)
+    XCTAssertEqual(diagnostics.first?.field, "body.height")
+    XCTAssertEqual(diagnostics.first?.message, "body.height: Omitted an unsupported height measurement.")
+    XCTAssertNil(diagnostics.first?.proposalID)
+  }
   func testStandaloneEditsDoNotChangeMovieDraftAndStaleProposalsDoNotApply() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

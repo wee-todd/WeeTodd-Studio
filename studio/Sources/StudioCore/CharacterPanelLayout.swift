@@ -69,7 +69,7 @@ public struct CharacterPanelDetection: Codable, Equatable, Sendable {
 }
 
 public enum CharacterPanelLayout {
-  public static let detectorVersion = "vision-panels-v1"
+  public static let detectorVersion = "vision-panels-v3"
 
   public static func detect(imageWidth: Int, imageHeight: Int,
     foregroundComponents: [PanelPixelRect], edgeColumns: [Double],

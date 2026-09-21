@@ -1934,19 +1934,27 @@ clauses, rather than a single appended word. Cinematic Photograph, Realistic 3D,
 Comic, Oil Painting, Concept Art, Clay and Sculpture use the same appearance fields. Character image,
 style image and authored-text analysis use the configured app-owned Qwen3.5 4B model; character and
 style may share one image. Bounded calls propose forensic visible details with evidence and uncertainty.
+Large references are analyzed as orientation-correct overviews capped at 512 pixels per edge;
+the original files are retained. Apple Vision separately uses bounded previews for panel detection
+(1600-pixel edge) and reference-head masking (2048-pixel edge), mapping crops back to source pixels.
 Review and select proposals before applying them. Invalid, unsupported and stale proposals remain
 unappliable. Image analysis does not infer authored demographic identity fields. Legacy descriptions
 remain available for mapping; legacy character-sheet prompts must be mapped before regeneration.
 
 The initial recipe requires **Draw Things Local**, installed **Krea 2 Turbo**, and its compatible
 four-view LoRA, starting at eight steps, CFG 1 and **1920 × 1088**. Discovery selects an unambiguous
-installed pair; missing or ambiguous models/adapters require explicit selection. The sheet requests
-four panels in one row. Apple Vision analyzes foreground groups and gutters on a bounded preview,
-then maps crops back into source pixels. It never silently substitutes equal quarters. Review actual
+installed pair; missing or ambiguous models/adapters require explicit selection.
+Enable **Model Browsing** in the Draw Things local server settings so Studio can discover its models
+and LoRAs, and turn **Bridge Mode off** for local inference. A localhost connection can still forward
+jobs to Cloud Compute when Bridge Mode is enabled. The sheet requests four panels in one row.
+Apple Vision preserves separate foreground instances, combines body detections and measures image
+gutters on a bounded preview, then maps crops back into source pixels.
+It never silently substitutes equal quarters. Review actual
 crop boundaries and roles; uncertain detection supports manual crop creation/correction.
 
 Each approved panel is cropped, enlarged exactly **2× with Lanczos**, and white-padded to multiples
-of 64 for **FLUX.2 klein 9B** with **HichResolution9B** and `high quality` in its managed prompt.
+of 64 for **FLUX.2 klein 9B** with **HighResolution9B** (also recognizing the spelling
+**HichResolution9B**) and `high quality` in its managed prompt.
 Panels render serially. The combined outputs are reassembled at **3840 × 2176**, removing transport
 padding while preserving the reviewed crop placement. Four equal-width crops would use 960 × 2176
 inputs; detected crops may have different widths.
@@ -1958,6 +1966,8 @@ panel prompt with `head_swap: replace the head with the reference head.` The tar
 1 and the head is reference 2. BFS may replace hair as well as the face. One combined head/detail
 pass is the default; **Experimental two pass** compares a head-only pass followed by detail without
 another upscale. The back-view instructions preserve rear orientation; output quality still needs review.
+Facial close-up refinement instructs the model to preserve the input head crop and omits full-body proportions and clothing
+descriptions that could otherwise make the edit model zoom out.
 
 Progress and available live previews appear in the window. Cancel stops the active local operation;
 completed panels are retained and reused when their execution inputs and output hashes still match.
@@ -1966,9 +1976,13 @@ allowing retry, preventing automatic duplicate submissions. Closing a busy windo
 or Cancel Job. Render settings, ordered input hashes, head preprocessing and individual panel takes
 remain in the final sheet's provenance. Choose **Use reviewed candidate**, then approve references separately.
 
-This pipeline is experimental: contract/unit tests and packaging do not qualify Krea/BFS generation
-quality, exact Draw Things conditioning behavior, or end-to-end speed and peak memory. The installed
-model/LoRA combination must pass Draw Things preflight before rendering.
+Local qualification exercised initial Krea generation, all four serial Klein/BFS/detail passes,
+live previews, head masking, assembly and completed-panel reuse. One 8-bit run took about 101 seconds
+for the initial sheet and 778 seconds for refinement; a sampled Draw Things process footprint during
+the largest panel was about 23 GB. These are observations from one Apple M3 Ultra with 256 GB, not
+general speed or peak-memory guarantees. Head consistency and composition still require visual
+review, and the optional two-pass mode has not been qualified. The installed model/LoRA combination
+must pass Draw Things preflight before rendering.
 
 **Create reference…** remains available for other subject types in workflow and project review.
 It opens the existing Draw Things image workspace with editable character turnaround, portrait,

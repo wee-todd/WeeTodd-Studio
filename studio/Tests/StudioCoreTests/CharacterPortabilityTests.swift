@@ -39,6 +39,10 @@ final class CharacterPortabilityTests: XCTestCase {
       sourceSHA256: "original-hash", preprocessingVersion: "head-v1")
     document.pipeline.record(key: "front", inputDigest: "pipeline-input", state: .completed,
       outputPath: pipeline, outputHash: "pipeline-hash", draft: document.draft)
+    let detection = CharacterPanelDetection(sourceSHA256: "sheet-hash", sourceOrientation: 1,
+      detectorVersion: "vision-v1", candidates: [], status: .detected, diagnostics: [])
+    document.candidates[0].generation?.characterAssembly = CharacterAssemblyProvenance(
+      detection: detection, head: document.headReference, stages: document.pipeline.stages)
 
     let store = CharacterSheetDocumentStore(root: storeRoot)
     try store.export(document, to: exportRoot)
@@ -59,6 +63,8 @@ final class CharacterPortabilityTests: XCTestCase {
     XCTAssertEqual(imported.pipeline.stages[0].inputDigest, "pipeline-input")
     XCTAssertEqual(imported.pipeline.stages[0].outputHash, "pipeline-hash")
     XCTAssertEqual(imported.candidates[0].generation?.requestFingerprint, "request-hash")
+    XCTAssertEqual(imported.candidates[0].generation?.characterAssembly?.detection, detection)
+    XCTAssertEqual(imported.candidates[0].generation?.characterAssembly?.headSourceSHA256, "original-hash")
     for path in [imported.sources["character"], imported.initialSheetPath,
                  imported.headReference?.headCropPath, imported.pipeline.stages[0].outputPath].compactMap({ $0 }) {
       XCTAssertTrue(path.hasPrefix(store.directory(id: imported.id).path + "/"))
@@ -73,6 +79,24 @@ final class CharacterPortabilityTests: XCTestCase {
     document.sources["character"] = workspace.appendingPathComponent("missing.png").path
     XCTAssertThrowsError(try CharacterSheetDocumentStore(root: workspace.appendingPathComponent("store"))
       .export(document, to: workspace.appendingPathComponent("export")))
+  }
+
+  func testExportImportPreservesCapturedSubjectContextIdentity() throws {
+    let workspace = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    let store = CharacterSheetDocumentStore(root: workspace.appendingPathComponent("library"))
+    let document = CharacterSheetDocument(title: "Edited Ada")
+    try store.save(document)
+    let signature = store.directory(id: document.id).appendingPathComponent("subject-context.sha256")
+    let captured = String(repeating: "a", count: 64)
+    try Data((captured + "\n").utf8).write(to: signature)
+    let package = workspace.appendingPathComponent("Ada.character")
+
+    try store.export(document, to: package)
+    let imported = try store.importDocument(from: package)
+
+    XCTAssertEqual(try String(contentsOf: store.directory(id: imported.id)
+      .appendingPathComponent("subject-context.sha256"), encoding: .utf8), captured + "\n")
   }
 
   func testImportRejectsTraversalWithoutReadingOutsideExport() throws {

@@ -7,8 +7,12 @@ Krea 2 Turbo recipe requests a 1920×1088 four-panel row; Vision proposes actual
 then exact 2× Lanczos inputs feed serial FLUX.2 klein 9B detail/BFS recipes and a 3840×2176 assembly.
 Reference-head masking retains RGBA and white-matted derivatives. Progress, previews, cancellation,
 content-hashed completed-panel reuse and explicit uncertain-submission retry are wired. Assembly
-provenance retains panel settings and reference hashes. Full model generations, output quality and
-end-to-end performance/memory qualification have not been run for this pipeline. See the
+provenance retains panel settings and reference hashes. Follow-up qualification on 2026-09-21:
+local Krea generation and the four-panel
+Klein/BFS/detail pass have completed with live previews and verified completed-panel reuse. Vision
+preserves separate foreground instances and combines body detections to handle unequal panel widths.
+Head consistency and composition remain experimental; these runs do not establish general performance
+or peak-memory guarantees. See the
 [Character Director guide](studio/README.md#character-director) for current controls and limits.
 
 Native Qwen-Image-2.1 2026-09-20 (experimental): the existing image workspace now selects an

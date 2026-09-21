@@ -42,6 +42,8 @@ struct DrawThingsSettings: View {
           if draft.route == "grpc" {
             Toggle("This server has cloud offload disabled", isOn: Binding(
               get: { draft.selfHostedConfirmed ?? false }, set: { draft.selfHostedConfirmed = $0 }))
+            Text("In Draw Things → Advanced → API Server, turn off Bridge Mode for local inference and turn on Enable Model Browsing for model discovery. A localhost address alone does not prevent cloud offload.")
+              .font(.caption).foregroundStyle(.secondary)
           }
           SecureField(draft.route == "dtCloud" ? "API key" : "Shared secret (optional)", text: $credential)
           Text("Credentials stay in Keychain. Authorized access is reused until you quit or clear session access. Leave blank to keep the saved credential.")

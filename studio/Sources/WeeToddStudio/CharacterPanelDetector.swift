@@ -54,39 +54,42 @@ public struct CharacterPanelDetector: Sendable {
       let orientation = (CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any])?[kCGImagePropertyOrientation] as? Int ?? 1
       try Task.checkCancellation()
       let foregroundRequest = VNGenerateForegroundInstanceMaskRequest()
-      let contourRequest = VNDetectContoursRequest()
-      contourRequest.contrastAdjustment = 1.0
+      let humanRequest = VNDetectHumanRectanglesRequest()
+      humanRequest.upperBodyOnly = false
       let rectangleRequest = VNDetectRectanglesRequest()
       rectangleRequest.maximumObservations = 8
       rectangleRequest.minimumAspectRatio = 0.12
       let handler = VNImageRequestHandler(cgImage: image, orientation: .up)
       try await withTaskCancellationHandler(operation: {
-        try handler.perform([foregroundRequest, contourRequest, rectangleRequest])
+        try handler.perform([foregroundRequest, humanRequest, rectangleRequest])
       }, onCancel: {
-        foregroundRequest.cancel(); contourRequest.cancel(); rectangleRequest.cancel()
+        foregroundRequest.cancel(); humanRequest.cancel(); rectangleRequest.cancel()
       })
 
       var foreground = [PanelPixelRect]()
-      var edgeColumns = Array(repeating: 0.0, count: image.width)
+      let edgeColumns = try Self.horizontalEdgeColumns(image)
       if let observation = foregroundRequest.results?.first {
-        let buffer = try observation.generateScaledMaskForImage(forInstances: observation.allInstances, from: handler)
-        foreground = Self.horizontalComponents(in: buffer)
-      }
-      if let contours = contourRequest.results?.first {
-        for contour in contours.topLevelContours {
-          let points = contour.normalizedPoints
-          guard let first = points.first else { continue }
-          var minX = first.x, maxX = first.x, minY = first.y, maxY = first.y
-          for point in points.dropFirst() {
-            minX = min(minX, point.x); maxX = max(maxX, point.x)
-            minY = min(minY, point.y); maxY = max(maxY, point.y)
+        guard observation.allInstances.count <= 16 else {
+          return CharacterPanelDetection(sourceSHA256: sourceHash, sourceOrientation: orientation,
+            detectorVersion: CharacterPanelLayout.detectorVersion, candidates: [], status: .needsReview,
+            diagnostics: ["Too many foreground instances for reliable four-panel detection; review crop boundaries."])
+        }
+        // Keep Vision's instance separation: gap filling within a single silhouette
+        // must never bridge the narrow real gutter between neighboring instances.
+        for instance in observation.allInstances {
+          try Task.checkCancellation()
+          foreground += try autoreleasepool {
+            let buffer = try observation.generateScaledMaskForImage(forInstances: IndexSet(integer: instance), from: handler)
+            return Self.horizontalComponents(in: buffer)
           }
-          let rect = Self.pixelRect(CGRect(x: CGFloat(minX), y: CGFloat(minY),
-            width: CGFloat(maxX - minX), height: CGFloat(maxY - minY)),
-            imageWidth: image.width, imageHeight: image.height)
-          for x in max(0, rect.x)..<min(image.width, rect.maxX) { edgeColumns[x] += Double(max(1, rect.height)) / Double(image.height) }
         }
       }
+      // Saliency may select only the large close-up. Full-body detections supply
+      // smaller figures without imposing equal panel widths or inferred positions.
+      let humans = (humanRequest.results ?? []).filter { $0.confidence >= 0.5 }.map {
+        Self.pixelRect($0.boundingBox, imageWidth: image.width, imageHeight: image.height)
+      }
+      foreground = Self.mergedForegroundComponents(foreground + humans)
       let rectangles = (rectangleRequest.results ?? []).map {
         Self.pixelRect($0.boundingBox, imageWidth: image.width, imageHeight: image.height)
       }
@@ -158,6 +161,42 @@ public struct CharacterPanelDetector: Sendable {
           let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
     let orientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
     return (5...8).contains(orientation) ? (height, width) : (width, height)
+  }
+
+  static func mergedForegroundComponents(_ components: [PanelPixelRect]) -> [PanelPixelRect] {
+    var merged = [PanelPixelRect]()
+    for rect in components.sorted(by: { $0.x < $1.x }) {
+      if let previous = merged.last, rect.x < previous.maxX {
+        merged[merged.count - 1] = PanelPixelRect(x: previous.x, y: min(previous.y, rect.y),
+          width: max(previous.maxX, rect.maxX) - previous.x,
+          height: max(previous.maxY, rect.maxY) - min(previous.y, rect.y))
+      } else { merged.append(rect) }
+    }
+    return merged
+  }
+
+  /// Measure actual vertical edge occupancy, rather than filling contour bounding
+  /// boxes that can span several figures and incorrectly cover their empty gutters.
+  static func horizontalEdgeColumns(_ image: CGImage) throws -> [Double] {
+    let width = image.width, height = image.height
+    guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else {
+      throw CharacterPanelDetectorError.unreadableImage
+    }
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    guard let data = context.data?.assumingMemoryBound(to: UInt8.self) else {
+      throw CharacterPanelDetectorError.unreadableImage
+    }
+    var columns = Array(repeating: 0.0, count: width)
+    for y in 0..<height { for x in 1..<width {
+      let offset = (y * width + x) * 4
+      let difference = max(abs(Int(data[offset]) - Int(data[offset - 4])),
+        abs(Int(data[offset + 1]) - Int(data[offset - 3])),
+        abs(Int(data[offset + 2]) - Int(data[offset - 2])))
+      if difference > 20 { columns[x] += 1.0 / Double(height) }
+    }}
+    return columns
   }
 
   private static func horizontalComponents(in buffer: CVPixelBuffer) -> [PanelPixelRect] {

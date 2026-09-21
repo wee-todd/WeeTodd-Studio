@@ -238,7 +238,7 @@ struct CharacterDirectorWindow: View {
       Picker("FLUX.2 klein 9B", selection: Binding(get: { controller.document.refinement.modelID }, set: { value in controller.edit { $0.refinement.modelID = value } })) {
         Text("Choose exact 9B edit model").tag(""); ForEach(controller.models, id: \.id) { Text($0.name).tag($0.id) }
       }
-      loraPicker("HichResolution9B", id: Binding(get: { controller.document.refinement.detailLoRAID }, set: { value in controller.edit { $0.refinement.detailLoRAID = value } }), strength: Binding(get: { controller.document.refinement.detailStrength }, set: { value in controller.edit { $0.refinement.detailStrength = value } }))
+      loraPicker("HighResolution9B", id: Binding(get: { controller.document.refinement.detailLoRAID }, set: { value in controller.edit { $0.refinement.detailLoRAID = value } }), strength: Binding(get: { controller.document.refinement.detailStrength }, set: { value in controller.edit { $0.refinement.detailStrength = value } }))
       Toggle("Replace faces (head and hair may change)", isOn: Binding(get: { controller.document.refinement.replaceFaces }, set: { value in controller.edit { $0.refinement.replaceFaces = value } })).toggleStyle(.checkbox)
       if controller.document.refinement.replaceFaces {
         loraPicker("BFS rank-64", id: Binding(get: { controller.document.refinement.headLoRAID }, set: { value in controller.edit { $0.refinement.headLoRAID = value } }), strength: Binding(get: { controller.document.refinement.headStrength }, set: { value in controller.edit { $0.refinement.headStrength = value } }))
@@ -323,16 +323,23 @@ struct CharacterDirectorWindow: View {
   private func addManualCrop() {
     controller.edit { document in
       guard var detection = document.panels, detection.candidates.count < 4 else { return }
-      let used = Set(detection.candidates.map(\.role))
-      let role = CharacterPanelRole.allCases.first { !used.contains($0) } ?? .front
-      detection.candidates.append(DetectedCharacterPanel(role: role,
-        sourcePixelRect: PanelPixelRect(x: 0, y: 0, width: 240, height: 400),
-        evidence: CharacterPanelEvidence(foregroundBounds: []), detectionRevision: document.revision + 1))
-      detection.status = .needsReview
-      detection.diagnostics.append("Manual crop added. Position and size it to the actual panel before approval.")
+      guard Self.addManualCrop(to: &detection, revision: document.revision + 1) else { return }
       document.panels = detection
       document.cropsApproved = false
     }
+  }
+
+  @discardableResult static func addManualCrop(to detection: inout CharacterPanelDetection,
+                                                revision: Int) -> Bool {
+    guard detection.candidates.count < 4 else { return false }
+    let used = Set(detection.candidates.map(\.role))
+    let role = CharacterPanelRole.allCases.first { !used.contains($0) } ?? .front
+    detection.candidates.append(DetectedCharacterPanel(role: role,
+      sourcePixelRect: PanelPixelRect(x: 0, y: 0, width: 240, height: 400),
+      evidence: CharacterPanelEvidence(foregroundBounds: []), detectionRevision: revision))
+    detection.status = .needsReview
+    detection.diagnostics.append("Manual crop added. Position and size it to the actual panel before approval.")
+    return true
   }
 
   private func removeCrop(_ id: UUID) {

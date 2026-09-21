@@ -35,6 +35,81 @@ CATALOG = [
 ]
 
 
+def test_inventory_inference_enforces_deadline(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path, "text")
+    value["sourceText"] = "A jacket and trousers."
+    value["fields"] = [field("garments[].type", 6)]
+    value["requestedFields"] = ["garments[first].type", "garments[second].type"]
+    now = [0.0]
+    stopped = []
+    monkeypatch.setattr(service.time, "monotonic", lambda: now[0])
+
+    def fake_assist(payload, *, cancelled, **_):
+        now[0] = service.CALL_TIMEOUT_SECONDS + 1
+        stopped.append(cancelled())
+        return {"text": '{"records":[]}', "truncated": False}
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    with pytest.raises(TimeoutError, match="timed out"):
+        service.extract_fields(value)
+    assert stopped == [True]
+
+
+def test_inventory_preserves_single_slot_collections(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path, "text")
+    value["sourceText"] = "A jacket, trousers, and a bracelet."
+    value["fields"] = [field("garments[].type", 6), field("accessories[].type", 7)]
+    value["requestedFields"] = [
+        "garments[first].type", "garments[second].type", "accessories[only].type"
+    ]
+
+    def fake_assist(payload, **_):
+        prompt = json.loads(payload["textRequest"]["prompt"])
+        if "collections" in prompt:
+            return {"text": json.dumps({"records": [
+                {"collection": "garments", "slot": 1, "excerpt": "jacket"},
+                {"collection": "garments", "slot": 2, "excerpt": "trousers"},
+            ]}), "truncated": False}
+        alias = prompt["allowedFields"][0]
+        return completion(alias, {"garment1.type": "jacket", "garment2.type": "trousers",
+                                  "accessory1.type": "bracelet"}[alias])
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    result = service.extract_fields(value)
+    assert {item["field"] for item in result["proposals"]} == set(value["requestedFields"])
+
+
+def test_conflicting_fields_after_repair_are_all_omitted_and_cache_stays_clean(
+    tmp_path, monkeypatch
+):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    value["fields"] = [field("hair.color", 5), field("hair.length", 5)]
+    value["requestedFields"] = ["hair.color", "hair.length"]
+    calls = []
+
+    def fake_assist(payload, **_):
+        calls.append(payload)
+        proposals = [json.loads(completion("hair.color", color)["text"])["proposals"][0]
+                     for color in ("red", "blue")]
+        proposals += json.loads(completion("hair.length", "short")["text"])["proposals"]
+        return {"text": json.dumps({"proposals": proposals}), "truncated": False}
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    first = service.extract_fields(value)
+    assert [item["field"] for item in first["proposals"]] == ["hair.length"]
+    assert first["diagnostics"]
+    assert {item["field"] for item in first["diagnostics"]} == {"hair.color"}
+    second = service.extract_fields(value)
+    assert second["proposals"] == first["proposals"]
+    assert len(calls) == 2
+
+
 def request(tmp_path, role="character"):
     image = tmp_path / "source.png"
     image.write_bytes(b"source")
@@ -76,6 +151,23 @@ def completion(field_id, value="brown"):
     }
 
 
+def test_model_json_fence_is_unwrapped_without_repair(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    calls = []
+
+    def fenced(payload, **_):
+        calls.append(payload)
+        result = completion("style.presetID", "photograph")
+        result["text"] = "```json\n" + result["text"] + "\n```"
+        return result
+
+    monkeypatch.setattr(service, "assist", fenced)
+    result = service.extract_fields(request(tmp_path, "style"))
+    assert result["proposals"][0]["value"] == "photograph"
+    assert len(calls) == 1
+
+
 def test_character_uses_three_visible_only_passes_and_never_offers_authored_fields(
     tmp_path, monkeypatch
 ):
@@ -112,8 +204,9 @@ def test_style_pass_cannot_return_character_fields(tmp_path, monkeypatch):
     import studio_character_assist as service
 
     monkeypatch.setattr(service, "assist", lambda *_args, **_kwargs: completion("eyes.color"))
-    with pytest.raises(ValueError, match="field"):
-        service.extract_fields(request(tmp_path, "style"))
+    result = service.extract_fields(request(tmp_path, "style"))
+    assert result["proposals"] == []
+    assert result["diagnostics"][0]["field"] == "eyes.color"
 
 
 def test_malformed_response_gets_one_repair_then_stops(tmp_path, monkeypatch):
@@ -278,7 +371,11 @@ def test_text_mapping_covers_all_appearance_fields_and_exact_host_repeat_paths(
 
     monkeypatch.setattr(service, "assist", fake_assist)
     result = service.extract_fields(value)
-    assert seen == ["eyes.color", "garments[coat-uuid].color"]
+    assert seen == ["eyes.color", "garment1.color"]
+    assert [item["field"] for item in result["proposals"]] == [
+        "eyes.color",
+        "garments[coat-uuid].color",
+    ]
     assert result["proposals"][0]["state"] == "value"
 
 
@@ -351,7 +448,7 @@ def test_real_catalog_shape_allows_text_role_even_when_extraction_roles_are_char
     assert result["metadata"] == {
         "schemaVersion": 1,
         "extractionVersion": 1,
-        "promptVersion": 1,
+        "promptVersion": 7,
         "modelFingerprint": "qwen-test-model-v1",
     }
 
@@ -420,3 +517,408 @@ def test_catalog_kinds_reject_unconvertible_display_values(kind, value):
             allowed_fields={"test.field"},
             catalog=[{"key": "test.field", "valueKind": kind, "maxLength": 240}],
         )
+
+
+def test_full_swift_catalog_and_uuid_pools_are_split_into_bounded_text_batches(
+    tmp_path, monkeypatch
+):
+    import studio_character_assist as service
+
+    scalar_sections = {
+        2: [
+            "identity.species",
+            "identity.type",
+            "identity.authoredAge",
+            "identity.authoredSexGender",
+            "identity.authoredAncestry",
+            "identity.designClass",
+        ],
+        3: [
+            "body.plan",
+            "body.height",
+            "body.scale",
+            "body.build",
+            "body.shoulders",
+            "body.torso",
+            "body.arms",
+            "body.legs",
+            "body.musculature",
+            "body.massDistribution",
+            "body.posture",
+            "body.pose",
+        ],
+        4: [
+            "head.shape",
+            "face.shape",
+            "face.jaw",
+            "face.cheekbones",
+            "face.noseMuzzleBeak",
+            "face.mouth",
+            "face.lips",
+            "eyes.shape",
+            "eyes.color",
+            "eyes.spacing",
+            "brows.shape",
+            "ears.shape",
+            "face.covering",
+            "face.expression",
+        ],
+        5: [
+            "hair.color",
+            "hair.length",
+            "hair.texture",
+            "hair.style",
+            "hair.hairline",
+            "hair.facialHair",
+            "covering.pattern",
+            "covering.growthDirection",
+        ],
+    }
+    repeat_sections = {
+        6: (
+            "garments",
+            [
+                "type",
+                "bodyRegion",
+                "layer",
+                "fit",
+                "cut",
+                "color",
+                "closures",
+                "seams",
+                "trim",
+                "condition",
+                "placement",
+            ],
+            3,
+        ),
+        7: (
+            "accessories",
+            ["type", "color", "placement", "side", "orientation", "shape", "condition"],
+            2,
+        ),
+        17: (
+            "features",
+            ["type", "shape", "color", "placement", "side", "orientation", "asymmetry"],
+            2,
+        ),
+        8: (
+            "surfaces",
+            ["target", "material", "finish", "texture", "pattern", "wear", "detailScale"],
+            3,
+        ),
+    }
+    catalog = []
+    requested = []
+    for section, keys in scalar_sections.items():
+        for key in keys:
+            catalog.append(
+                {
+                    "key": key,
+                    "section": section,
+                    "valueKind": "text",
+                    "extractionRoles": ["character", "text"],
+                    "maxLength": 240,
+                }
+            )
+            requested.append(key)
+    for section_key, (collection, names, count) in repeat_sections.items():
+        section = 7 if section_key == 17 else section_key
+        for name in names:
+            catalog.append(
+                {
+                    "key": f"{collection}[].{name}",
+                    "section": section,
+                    "valueKind": "text",
+                    "extractionRoles": ["character", "text"],
+                    "maxLength": 240,
+                }
+            )
+        for index in range(count):
+            record_id = f"00000000-0000-0000-0000-{section:02d}{index:010d}"
+            requested.extend(f"{collection}[{record_id}].{name}" for name in names)
+
+    value = request(tmp_path, "text")
+    value.pop("sourceImage")
+    value["sourceText"] = "A person has short black hair. They wear a dark blue coat."
+    value["fields"] = catalog
+    value["requestedFields"] = requested
+    calls = []
+
+    def fake_assist(payload, **_):
+        text_request = payload["textRequest"]
+        calls.append(text_request)
+        assert (
+            len(text_request["systemPrompt"].encode()) + len(text_request["prompt"].encode())
+            <= service.MAX_ASSIST_INPUT_BYTES
+        )
+        prompt = json.loads(text_request["prompt"])
+        if "collections" in prompt:
+            return {
+                "text": '{"records":[{"collection":"garments","slot":1,'
+                '"excerpt":"dark blue coat"}]}',
+                "truncated": False,
+            }
+        return {"text": '{"proposals":[]}', "truncated": False}
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    result = service.extract_fields(value)
+    detail_calls = [call for call in calls if "allowedFields" in json.loads(call["prompt"])]
+    sent = [
+        field_id
+        for call in detail_calls
+        for field_id in json.loads(call["prompt"])["allowedFields"]
+    ]
+    assert len(calls) > 1
+    assert all("00000000-" not in path for path in sent)
+    assert "garment1.type" in sent
+    assert {"garment2.type", "garment3.type"}.isdisjoint(sent)
+    assert all(
+        len(json.loads(call["prompt"])["allowedFields"]) <= service.MAX_FIELDS_PER_BATCH
+        for call in detail_calls
+    )
+    assert all(requested[0] not in call["systemPrompt"] for call in detail_calls)
+    rules = {
+        path: rule
+        for call in detail_calls
+        for path, rule in json.loads(call["prompt"])["fieldRules"].items()
+    }
+    assert {rule["recordSlot"] for path, rule in rules.items() if path.startswith("garment")} == {
+        "garments#1"
+    }
+    for slot in ("garment1",):
+        containing = [
+            call
+            for call in detail_calls
+            if any(
+                path.startswith(slot + ".") for path in json.loads(call["prompt"])["allowedFields"]
+            )
+        ]
+        assert len(containing) == 1
+        assert (
+            sum(
+                path.startswith(slot + ".")
+                for path in json.loads(containing[0]["prompt"])["allowedFields"]
+            )
+            == 11
+        )
+    assert result["metadata"]["promptVersion"] == 7
+
+
+def test_repeat_aliases_map_back_to_exact_host_uuid_paths(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    first = "11111111-1111-1111-1111-111111111111"
+    second = "22222222-2222-2222-2222-222222222222"
+    value = request(tmp_path, "text")
+    value.pop("sourceImage")
+    value["sourceText"] = "A blue jacket and gray trousers."
+    value["fields"] = [
+        {"key": "garments[].type", "section": 6, "valueKind": "text", "maxLength": 240},
+        {"key": "garments[].color", "section": 6, "valueKind": "color", "maxLength": 240},
+    ]
+    value["requestedFields"] = [
+        f"garments[{first}].type",
+        f"garments[{first}].color",
+        f"garments[{second}].type",
+        f"garments[{second}].color",
+    ]
+
+    def fake_assist(payload, **_):
+        prompt = json.loads(payload["textRequest"]["prompt"])
+        if "collections" in prompt:
+            return {
+                "text": json.dumps(
+                    {
+                        "records": [
+                            {"collection": "garments", "slot": 1, "excerpt": "blue jacket"},
+                            {
+                                "collection": "garments",
+                                "slot": 2,
+                                "excerpt": "gray trousers",
+                            },
+                        ]
+                    }
+                ),
+                "truncated": False,
+            }
+        allowed = prompt["allowedFields"]
+        slot = "garment1" if "garment1.type" in allowed else "garment2"
+        scope = "garments#1" if slot == "garment1" else "garments#2"
+        assert "earlier or later item" in prompt["recordScope"][scope]
+        assert prompt["sourceText"] == ("blue jacket" if slot == "garment1" else "gray trousers")
+        return {
+            "text": json.dumps(
+                {
+                    "proposals": [
+                        {
+                            "field": f"{slot}.type",
+                            "value": "jacket" if slot == "garment1" else "trousers",
+                            "evidence": prompt["sourceText"],
+                            "uncertainty": "",
+                        },
+                    ]
+                }
+            ),
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    result = service.extract_fields(value)
+    assert [item["field"] for item in result["proposals"]] == [
+        f"garments[{first}].type",
+        f"garments[{second}].type",
+    ]
+
+
+def test_measurement_batch_declares_type_and_repair_receives_validation_error(
+    tmp_path, monkeypatch
+):
+    import studio_character_assist as service
+
+    value = request(tmp_path, "text")
+    value.pop("sourceImage")
+    value["sourceText"] = "The character is 170 cm tall."
+    value["fields"] = [
+        {
+            "key": "body.height",
+            "section": 3,
+            "valueKind": "measurement",
+            "suggestions": [],
+            "extractionRoles": ["character", "text"],
+            "maxLength": 240,
+        }
+    ]
+    value["requestedFields"] = ["body.height"]
+    prompts = []
+    systems = []
+
+    def fake_assist(payload, **_):
+        prompt = json.loads(payload["textRequest"]["prompt"])
+        prompts.append(prompt)
+        systems.append(payload["textRequest"]["systemPrompt"])
+        if len(prompts) == 1:
+            return completion("body.height", "tall")
+        return completion("body.height", "170 cm")
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    result = service.extract_fields(value)
+    assert prompts[0]["fieldRules"]["body.height"] == {
+        "kind": "measurement",
+        "format": "positive number + mm|cm|m|in|ft",
+        "omitUnless": "source explicitly states both number and unit",
+    }
+    assert "number and unit" in prompts[1]["validationError"]
+    assert "Remove any proposal" in systems[1]
+    assert result["proposals"][0]["value"] == "170 cm"
+
+
+def test_invalid_value_after_repair_is_omitted_with_diagnostic(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path, "text")
+    value.pop("sourceImage")
+    value["sourceText"] = "The character is tall and has short hair."
+    value["fields"] = [
+        {"key": "body.height", "section": 3, "valueKind": "measurement", "maxLength": 240},
+        {"key": "hair.length", "section": 5, "valueKind": "text", "maxLength": 240},
+    ]
+    value["requestedFields"] = ["body.height", "hair.length"]
+    bad = {
+        "text": json.dumps(
+            {
+                "proposals": [
+                    {
+                        "field": "body.height",
+                        "value": "tall",
+                        "evidence": "word tall",
+                        "uncertainty": "",
+                    },
+                    {
+                        "field": "hair.length",
+                        "value": "short",
+                        "evidence": "explicit",
+                        "uncertainty": "",
+                    },
+                ]
+            }
+        ),
+        "truncated": False,
+    }
+    monkeypatch.setattr(service, "assist", lambda *_args, **_kwargs: bad)
+    result = service.extract_fields(value)
+    assert [item["field"] for item in result["proposals"]] == ["hair.length"]
+    assert result["diagnostics"] == [
+        {
+            "code": "proposal.invalid",
+            "field": "body.height",
+            "message": "body.height: Proposal measurement value must include a number and unit",
+            "index": 0,
+        }
+    ]
+
+
+def test_unknown_placeholders_are_omitted_with_field_diagnostic(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path, "text")
+    value.pop("sourceImage")
+    value["sourceText"] = "An adult character."
+    value["fields"] = [{"key": "body.arms", "section": 3, "valueKind": "text", "maxLength": 240}]
+    value["requestedFields"] = ["body.arms"]
+    answer = completion("body.arms", "unknown")
+    monkeypatch.setattr(service, "assist", lambda *_args, **_kwargs: answer)
+    result = service.extract_fields(value)
+    assert result["proposals"] == []
+    assert result["diagnostics"][0]["field"] == "body.arms"
+    assert "omitted" in result["diagnostics"][0]["message"]
+
+
+def test_default_model_fingerprint_is_stable_string_and_changes_with_stat(tmp_path):
+    import studio_character_assist as service
+
+    model = tmp_path / "model.ckpt"
+    model.write_bytes(b"one")
+    value = {"modelPath": str(model)}
+    first = service._model_fingerprint(value, model)
+    second = service._model_fingerprint(value, model)
+    assert first == second
+    assert isinstance(first, str) and len(first) == 64
+    model.write_bytes(b"changed-size")
+    assert service._model_fingerprint(value, model) != first
+
+
+def test_cache_validates_more_than_sixty_four_proposals_by_original_batches(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path, "text")
+    value.pop("sourceImage")
+    value["sourceText"] = "Explicit catalog facts."
+    value["fields"] = [
+        {"key": f"body.fact{index}", "section": 3, "valueKind": "text", "maxLength": 240}
+        for index in range(70)
+    ]
+    value["requestedFields"] = [item["key"] for item in value["fields"]]
+    calls = 0
+
+    def fake_assist(payload, **_):
+        nonlocal calls
+        calls += 1
+        allowed = json.loads(payload["textRequest"]["prompt"])["allowedFields"]
+        return {
+            "text": json.dumps(
+                {
+                    "proposals": [
+                        {"field": path, "value": "explicit", "evidence": "text", "uncertainty": ""}
+                        for path in allowed
+                    ]
+                }
+            ),
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    assert len(service.extract_fields(value)["proposals"]) == 70
+    first_calls = calls
+    assert len(service.extract_fields(value)["proposals"]) == 70
+    assert calls == first_calls

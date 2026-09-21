@@ -2,6 +2,50 @@ import XCTest
 @testable import StudioCore
 
 final class CharacterPanelRecipeTests: XCTestCase {
+  func testCloseUpKeepsExactInputFramingWithoutFullBodyOrOutfitInstructions() {
+    var value = definition()
+    value.appearance.setText("body.build", "broad muscular physique")
+    value.appearance.setText("eyes.color", "amber")
+    value.appearance.setText("hair.style", "short auburn curls")
+    func record(_ fields: [String: String]) -> CharacterRepeatableRecord {
+      .init(order: 0, fields: fields.mapValues { .value(.text($0)) })
+    }
+    value.appearance.garments = [record(["type": "gray trousers", "bodyRegion": "legs"]),
+      record(["type": "brown ankle boots", "bodyRegion": "feet"])]
+    value.appearance.features = [record(["type": "small eyebrow scar", "placement": "left eyebrow"]),
+      record(["type": "large calf tattoo", "placement": "right calf"])]
+    for replacesHead in [false, true] {
+      let context = CharacterPanelPromptContext(role: .closeUp, definition: value,
+        replacesHead: replacesHead, detailLoRAID: "detail", headLoRAID: replacesHead ? "head" : nil)
+      let prompt = context.prompt
+      XCTAssertTrue(prompt.contains("Preserve the exact tight face/head crop and subject scale of Image 1"))
+      XCTAssertTrue(prompt.contains("Do not zoom out or reveal torso, legs or feet"))
+      for omitted in ["broad muscular physique", "gray trousers", "brown ankle boots", "large calf tattoo",
+        "body anatomy", "outfit construction", "head/body junction"] {
+        XCTAssertFalse(prompt.contains(omitted), omitted)
+      }
+      if replacesHead {
+        XCTAssertTrue(prompt.hasPrefix("head_swap: replace the head with the reference head. high quality."))
+        XCTAssertTrue(prompt.contains("Image 2 supplies the reference head"))
+        XCTAssertFalse(prompt.contains("short auburn curls"))
+        XCTAssertFalse(prompt.contains("small eyebrow scar"))
+      } else {
+        XCTAssertTrue(prompt.contains("short auburn curls"))
+        XCTAssertTrue(prompt.contains("small eyebrow scar"))
+      }
+      XCTAssertEqual(context.definition, value)
+      for role in [CharacterPanelRole.front, .side, .back] {
+        let full = CharacterPanelPromptContext(role: role, definition: value,
+          replacesHead: replacesHead, detailLoRAID: "detail", headLoRAID: replacesHead ? "head" : nil).prompt
+        XCTAssertTrue(full.contains("gray trousers"))
+        XCTAssertTrue(full.contains("brown ankle boots"))
+        XCTAssertTrue(full.contains("broad muscular physique"))
+        XCTAssertTrue(full.contains("body anatomy, outfit construction"))
+        XCTAssertFalse(full.contains("Do not zoom out or reveal torso"))
+      }
+    }
+  }
+
   private func definition() -> CharacterSheetDefinition {
     var value = CharacterSheetDefinition.newDraft()
     value.appearance.setText("identity.species", "human")

@@ -38,6 +38,10 @@ public extension CharacterSheetDocumentStore {
     let manifest = (try? JSONDecoder().decode(CharacterDocumentPortableManifest.self,
       from: Data(contentsOf: inherited))) ?? CharacterDocumentPortableManifest(originalRoot: root.path)
     try encoder.encode(manifest).write(to: staging.appendingPathComponent("portability.json"), options: .atomic)
+    if let signature = try portableContextSignature(at: directory(id: document.id)
+      .appendingPathComponent("subject-context.sha256")) {
+      try Data((signature + "\n").utf8).write(to: staging.appendingPathComponent("subject-context.sha256"), options: .atomic)
+    }
     try FileManager.default.moveItem(at: staging, to: destination)
   }
 
@@ -87,12 +91,27 @@ public extension CharacterSheetDocumentStore {
         from: Data(contentsOf: sourceManifest))) ?? CharacterDocumentPortableManifest(originalRoot: packageRoot.path)
       let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
       try encoder.encode(manifest).write(to: target.appendingPathComponent("portability.json"), options: .atomic)
+      if let signature = try portableContextSignature(at: packageRoot.appendingPathComponent("subject-context.sha256")) {
+        try Data((signature + "\n").utf8).write(to: target.appendingPathComponent("subject-context.sha256"), options: .atomic)
+      }
       return document
     } catch {
       try? FileManager.default.removeItem(at: target)
       throw error
     }
   }
+}
+
+private func portableContextSignature(at url: URL) throws -> String? {
+  guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+  let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+  guard size <= 256 else { throw StudioError.invalid("The character context identity is invalid.") }
+  let value = try String(contentsOf: url, encoding: .utf8)
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+  guard value.count == 64, value.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else {
+    throw StudioError.invalid("The character context identity is invalid.")
+  }
+  return value
 }
 
 private extension CharacterSheetDocument {

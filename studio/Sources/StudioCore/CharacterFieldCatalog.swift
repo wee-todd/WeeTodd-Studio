@@ -89,7 +89,7 @@ public struct CharacterFieldCatalog: Codable, Equatable {
         defaultValue: nil, canBeAbsent: absent,
         extractionRoles: ownership == .appearance
           ? (key.hasPrefix("identity.authored") ? ["text"] : ["character", "text"])
-          : ["style"],
+          : ((9...11).contains(section) ? ["style"] : ["text"]),
         maxLength: 240, ownership: ownership)) }
     }
     add(2, ["identity.species", "identity.type"], kind: .choice,

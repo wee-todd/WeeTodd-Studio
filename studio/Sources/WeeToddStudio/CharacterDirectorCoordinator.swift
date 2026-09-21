@@ -7,6 +7,8 @@ private struct CharacterDirectorContextIdentity: Codable {
   var definition: CharacterSheetDefinition?
 }
 
+enum CharacterDirectorCloseChoice { case keepRunning, cancelJob }
+
 /// Owns the standalone Character Director sessions and their windows.
 /// Documents live outside movie storage and never borrow `StudioStore.imageDraft`.
 @MainActor final class CharacterDirectorCoordinator: NSObject, NSWindowDelegate {
@@ -97,8 +99,14 @@ private struct CharacterDirectorContextIdentity: Codable {
     alert.alertStyle = .warning
     alert.addButton(withTitle: "Keep Running")
     alert.addButton(withTitle: "Cancel Job")
-    if alert.runModal() == .alertSecondButtonReturn { controller.cancel() }
+    applyCloseChoice(alert.runModal() == .alertSecondButtonReturn ? .cancelJob : .keepRunning,
+      to: controller)
     return true
+  }
+
+  func applyCloseChoice(_ choice: CharacterDirectorCloseChoice,
+                        to controller: CharacterSheetSessionController) {
+    if choice == .cancelJob { controller.cancel() }
   }
 
   func windowWillClose(_ notification: Notification) {
@@ -154,15 +162,24 @@ struct CharacterSheetEmbeddedHost: View {
       .environmentObject(store)
       .onAppear {
         controller.onUse = { asset in
-          guard let candidate = asset.generation?.referenceSheet,
-                candidate.subjectKey == context.subjectKey,
-                candidate.characterDefinition == controller.document.definition else {
-            controller.error = "This candidate was generated from an older character definition. Keep it as a saved take or generate a new candidate from the current fields."
+          if let issue = Self.candidateIssue(asset, context: context,
+                                             definition: controller.document.definition) {
+            controller.error = issue
             return false
           }
           return await onUse(asset)
         }
       }
       .onDisappear { controller.onUse = nil }
+  }
+
+  static func candidateIssue(_ asset: MediaAsset, context: ReferenceSheetContext,
+                             definition: CharacterSheetDefinition) -> String? {
+    guard let candidate = asset.generation?.referenceSheet,
+          candidate.subjectKey == context.subjectKey,
+          candidate.characterDefinition == definition else {
+      return "This candidate was generated from an older character definition. Keep it as a saved take or generate a new candidate from the current fields."
+    }
+    return nil
   }
 }

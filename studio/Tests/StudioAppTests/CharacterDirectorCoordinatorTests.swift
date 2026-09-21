@@ -110,4 +110,51 @@ final class CharacterDirectorCoordinatorTests: XCTestCase {
     XCTAssertEqual(first.document.definition.entry(at: "hair.color")?.displayString, "Black")
     XCTAssertEqual(second.document.definition.entry(at: "hair.color")?.displayString, "Silver")
   }
+
+  @MainActor func testEmbeddedCandidateMustMatchSubjectAndCurrentDefinition() throws {
+    var active = context()
+    active.characterDefinition = .newDraft()
+    var matching = MediaAsset(name: "Current", kind: .image)
+    var generation = ImageGeneration(provider: "drawThings", requestFingerprint: "hash",
+      modelID: "model", prompt: "prompt")
+    generation.referenceSheet = active
+    matching.generation = generation
+    XCTAssertNil(CharacterSheetEmbeddedHost.candidateIssue(matching, context: active,
+      definition: active.characterDefinition!))
+
+    var stale = matching
+    stale.generation?.referenceSheet?.characterDefinition?.appearance.setText("hair.color", "Silver")
+    XCTAssertNotNil(CharacterSheetEmbeddedHost.candidateIssue(stale, context: active,
+      definition: active.characterDefinition!))
+    var wrongSubject = matching
+    wrongSubject.generation?.referenceSheet?.subjectKey = "other"
+    XCTAssertNotNil(CharacterSheetEmbeddedHost.candidateIssue(wrongSubject, context: active,
+      definition: active.characterDefinition!))
+  }
+
+  func testManualCropRecoveryAddsUnusedRoleAndNeverFabricatesQuarterLayout() {
+    var detection = CharacterPanelDetection(sourceSHA256: "source", sourceOrientation: 1,
+      detectorVersion: "vision", candidates: [], status: .needsReview, diagnostics: [])
+    XCTAssertTrue(CharacterDirectorWindow.addManualCrop(to: &detection, revision: 3))
+    XCTAssertEqual(detection.candidates[0].role, .front)
+    XCTAssertEqual(detection.candidates[0].sourcePixelRect, PanelPixelRect(x: 0, y: 0, width: 240, height: 400))
+    XCTAssertEqual(detection.status, .needsReview)
+    XCTAssertTrue(CharacterDirectorWindow.addManualCrop(to: &detection, revision: 4))
+    XCTAssertEqual(detection.candidates[1].role, .side)
+    XCTAssertNotEqual(detection.candidates[0].sourcePixelRect.width, 480)
+  }
+
+  @MainActor func testCloseChoiceKeepsOrCancelsOnlySelectedSession() throws {
+    let root = try directory()
+    let store = StudioStore(dataDirectory: root, restoreSession: false)
+    let coordinator = CharacterDirectorCoordinator(store: store)
+    let keep = coordinator.session(context: context("keep"))
+    let cancel = coordinator.session(context: context("cancel"))
+
+    coordinator.applyCloseChoice(.keepRunning, to: keep)
+    XCTAssertFalse(keep.cancelled)
+    coordinator.applyCloseChoice(.cancelJob, to: cancel)
+    XCTAssertTrue(cancel.cancelled)
+    XCTAssertFalse(keep.cancelled)
+  }
 }

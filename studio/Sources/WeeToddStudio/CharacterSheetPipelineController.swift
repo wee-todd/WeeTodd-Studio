@@ -5,6 +5,9 @@ import StudioCore
 @MainActor extension CharacterSheetSessionController {
   func validateRecipeDependencies() async throws {
     guard let connection, connection.route == "grpc" else { throw StudioError.invalid("Choose a Draw Things Local connection.") }
+    if let failure = catalogFailure, failure.connectionID == connection.id {
+      throw StudioError.invalid(failure.message)
+    }
     let initialName = models.first { $0.id == document.draft.modelID }?.name.lowercased().filter { $0.isLetter || $0.isNumber } ?? ""
     guard initialName.contains("krea2"), initialName.contains("turbo") else { throw StudioError.invalid("Choose the installed Krea 2 Turbo model for the initial sheet.") }
     guard let sheetLoRA = document.draft.characterSheetLoRAID,
@@ -17,8 +20,8 @@ import StudioCore
     }
     func adapterKey(_ item: (id: String, name: String)) -> String { (item.id + item.name).lowercased().filter { $0.isLetter || $0.isNumber } }
     let available = loras(model: document.refinement.modelID)
-    guard available.contains(where: { $0.id == document.refinement.detailLoRAID && adapterKey($0).contains("hichresolution9b") }) else {
-      throw StudioError.invalid("Choose the compatible HichResolution9B detail LoRA.")
+    guard available.contains(where: { $0.id == document.refinement.detailLoRAID && Self.isCharacterDetailLoRA($0) }) else {
+      throw StudioError.invalid("Choose the compatible HighResolution9B detail LoRA.")
     }
     guard (0...(Int(UInt32.max) - 1003)).contains(document.refinement.seed) else {
       throw StudioError.invalid("Use a panel seed between 0 and 4294966292.")

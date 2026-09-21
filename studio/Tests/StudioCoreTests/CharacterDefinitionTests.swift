@@ -2,6 +2,13 @@ import XCTest
 @testable import StudioCore
 
 final class CharacterDefinitionTests: XCTestCase {
+  func testStyleExtractionOnlyIncludesRenderingCameraAndLighting() {
+    let fields = CharacterFieldCatalog.shared.fields.filter { $0.extractionRoles.contains("style") }
+    XCTAssertFalse(fields.isEmpty)
+    XCTAssertTrue(fields.allSatisfy { (9...11).contains($0.section) })
+    XCTAssertFalse(fields.contains { ["body.pose", "face.expression"].contains($0.key) })
+    XCTAssertEqual(CharacterFieldCatalog.shared.field(for: "body.pose")?.extractionRoles, ["text"])
+  }
   func testNewDraftDoesNotInventIdentityAndRoundTrips() throws {
     let sheet = CharacterSheetDefinition.newDraft()
     XCTAssertEqual(sheet.settings.stylePresetID, "photograph")

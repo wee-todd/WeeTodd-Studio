@@ -23,17 +23,63 @@ public struct CharacterPanelPromptContext: Codable, Equatable {
   public var detailLoRAID: String
   public var headLoRAID: String?
   public var prompt: String {
-    let compiled = CharacterSheetCompiler.compile((replacesHead || preservesInputHead) ? bodyDefinition : definition)
+    let referenceOwnsHead = replacesHead || preservesInputHead
+    let scopedDefinition = role == .closeUp ? closeUpDefinition : referenceOwnsHead ? bodyDefinition : definition
+    let compiled = CharacterSheetCompiler.compile(scopedDefinition)
     let sections = compiled.sections.filter { section in
       // The reference head supplies identity when swapping. No four-panel/collage instructions leak here.
-      let included = (replacesHead || preservesInputHead) ? [3, 6, 7, 8, 9, 11] : Array(2...9) + [11]
+      let included = role == .closeUp
+        ? (referenceOwnsHead ? [9, 11] : [2, 4, 5, 7, 8, 9, 11])
+        : (referenceOwnsHead ? [3, 6, 7, 8, 9, 11] : Array(2...9) + [11])
       return included.contains(section.index)
     }.map(\.text).filter { !$0.isEmpty }.joined(separator: ". ")
+    if role == .closeUp {
+      let start = replacesHead
+        ? "head_swap: replace the head with the reference head. high quality. Image 1 is the target facial close-up; Image 2 supplies the reference head. Match the reference head identity and hair to the target head rotation, expression and lighting."
+        : "high quality. Refine the facial close-up in Image 1, preserving the subject's identity."
+      return start + " Preserve the exact tight face/head crop and subject scale of Image 1, including the head position, eye-level frontal view and plain solid white background. Do not zoom out or reveal torso, legs or feet. Preserve any existing clothing only where it is already visible at the crop edge. Improve visible facial and hair surface detail without adding marks, accessories or changing the design. "
+        + sections + ". Output one facial close-up only, no collage, no additional views or panel labels."
+    }
     let start = replacesHead
       ? "head_swap: replace the head with the reference head. high quality. Image 1 is the target character panel; Image 2 supplies the reference head. Match the reference head identity and hair to the target head rotation and blend the head/body junction."
       : "high quality. Refine the single character image in Image 1, preserving the subject's identity."
     return start + " Preserve the \(role.orientationInstruction), pose, silhouette, body anatomy, outfit construction, local colors and plain solid white background. Improve visible surface detail without adding marks, accessories or changing the design. "
       + sections + ". Output one image of this view only, no collage, no additional views or panel labels."
+  }
+
+  /// Keep authored detail only when it belongs to the visible head. Unlocated
+  /// records and full outfits can otherwise make an edit model expand the crop.
+  private var closeUpDefinition: CharacterSheetDefinition {
+    var result = definition
+    let headWords: Set<String> = ["head", "face", "facial", "scalp", "forehead", "temple", "temples",
+      "eye", "eyes", "eyebrow", "eyebrows", "eyelid", "eyelids", "ear", "ears", "nose", "muzzle",
+      "beak", "mouth", "lip", "lips", "chin", "cheek", "cheeks", "jaw", "beard", "mustache",
+      "moustache", "hair", "neck", "throat"]
+    func isHeadLocation(_ value: String) -> Bool {
+      !Set(value.lowercased().split { !$0.isLetter }.map(String.init)).isDisjoint(with: headWords)
+    }
+    func text(_ record: CharacterRepeatableRecord, _ key: String) -> String {
+      record.fields[key]?.state == .value ? record.fields[key]?.displayString ?? "" : ""
+    }
+    result.appearance.garments = []
+    result.appearance.accessories.removeAll { !isHeadLocation(text($0, "placement")) }
+    result.appearance.features.removeAll { !isHeadLocation(text($0, "placement")) }
+    let retainedTargets = Set(result.appearance.accessories.map(\.id))
+    result.appearance.surfaces.removeAll { record in
+      let target = text(record, "target")
+      let targetID: UUID?
+      if case .choice(let id, _)? = record.fields["target"]?.value { targetID = UUID(uuidString: id) ?? UUID(uuidString: target) }
+      else { targetID = UUID(uuidString: target) }
+      if let targetID { return !retainedTargets.contains(targetID) }
+      return !isHeadLocation(target)
+    }
+    if replacesHead || preservesInputHead {
+      result.appearance.fields = result.appearance.fields.filter { key, _ in
+        guard let section = CharacterFieldCatalog.shared.field(for: key)?.section else { return true }
+        return section != 4 && section != 5
+      }
+    }
+    return result
   }
 
   /// Scope the prompt only; the accepted definition and its provenance stay intact.

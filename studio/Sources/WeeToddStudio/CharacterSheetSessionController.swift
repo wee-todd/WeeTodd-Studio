@@ -12,6 +12,7 @@ import StudioCore
   @Published var error: String?
   @Published var previewPath: String?
   @Published var catalog: [String: Any] = [:]
+  private(set) var catalogFailure: (connectionID: String, message: String)?
   let bridge: Bridge
   let store: StudioStore
   let storage: CharacterSheetDocumentStore
@@ -181,13 +182,21 @@ import StudioCore
   func checkCancellation() throws { if cancelled || Task.isCancelled { throw CancellationError() } }
   func refreshCatalog() async {
     guard let connection else { error = "Add a Draw Things Local connection in Studio Settings."; return }
-    catalog = [:]
+    catalog = [:]; catalogFailure = nil; error = nil
     let discovery = bridge.independent()
     do {
       let result = try await discovery.invoke("dt-discover", runtime: store.runtime, payload: ["connection": try connection.object()])
       guard self.connection?.id == connection.id else { return }
+      guard !(result["models"] as? [[String: Any]] ?? []).isEmpty else {
+        throw StudioError.invalid("Draw Things returned no models. Turn on Enable Model Browsing in its local server settings, then refresh the model catalog.")
+      }
       catalog = result; selectCatalogDefaults(); save()
-    } catch { if self.connection?.id == connection.id { self.error = error.localizedDescription } }
+    } catch {
+      if self.connection?.id == connection.id {
+        catalogFailure = (connection.id, error.localizedDescription)
+        self.error = error.localizedDescription
+      }
+    }
   }
   var models: [(id: String, name: String)] {
     let rules = catalog["capabilities"] as? [String: Any] ?? [:]
@@ -204,6 +213,10 @@ import StudioCore
       return (id, name)
     }.sorted { $0.name < $1.name }
   }
+  static func isCharacterDetailLoRA(_ item: (id: String, name: String)) -> Bool {
+    let key = (item.id + item.name).lowercased().filter { $0.isLetter || $0.isNumber }
+    return key.contains("highresolution9b") || key.contains("hichresolution9b")
+  }
   private func selectCatalogDefaults() {
     func key(_ text: String) -> String { text.lowercased().filter { $0.isLetter || $0.isNumber } }
     func unique(_ values: [(id: String, name: String)], _ term: String) -> String? {
@@ -216,7 +229,10 @@ import StudioCore
       if matches.count == 1 { document.refinement.modelID = matches[0].id }
     }
     let options = loras(model: document.refinement.modelID)
-    if document.refinement.detailLoRAID.isEmpty { document.refinement.detailLoRAID = unique(options, "hichresolution9b") ?? "" }
+    if document.refinement.detailLoRAID.isEmpty {
+      let matches = options.filter(Self.isCharacterDetailLoRA)
+      if matches.count == 1 { document.refinement.detailLoRAID = matches[0].id }
+    }
     if document.refinement.headLoRAID.isEmpty { document.refinement.headLoRAID = unique(options, "bfsheadv1fluxklein9bstep3750rank64") ?? "" }
   }
   func importSource(_ url: URL, role: CharacterSourceRole) async {
@@ -241,6 +257,15 @@ import StudioCore
     guard document.sources["face"] == captured else { throw StudioError.invalid("The reference face changed.") }
     document.headReference = result; save()
   }
+  static func extractionDiagnostics(_ result: [String: Any]) -> [CharacterProposalDiagnostic] {
+    (result["diagnostics"] as? [[String: Any]] ?? []).compactMap { value in
+      guard let message = value["message"] as? String, !message.isEmpty else { return nil }
+      let field = value["field"] as? String
+      return .init(code: value["code"] as? String ?? "proposal.invalid",
+        field: field, message: field.map { "\($0): \(message)" } ?? message)
+    }
+  }
+
   func analyze(role: String, modelPath: String) async throws {
     status = "Analyzing \(role)…"
     let captured = document.revision
@@ -277,7 +302,7 @@ import StudioCore
     let result = try await bridge.invoke("character-analyze", runtime: store.runtime, payload: payload)
     try checkCancellation()
     var proposals: [CharacterFieldProposal] = []
-    var diagnostics: [CharacterProposalDiagnostic] = []
+    var diagnostics = Self.extractionDiagnostics(result)
     let rawProposals = result["proposals"] as? [Any]
     if rawProposals == nil {
       diagnostics.append(.init(code: "proposal.schema",

@@ -31,9 +31,10 @@ struct RuntimeSettings: Codable {
 
   static func restoring(_ data: Data?, defaults: Self) -> Self {
     var value = data.flatMap { try? JSONDecoder().decode(Self.self, from: $0) } ?? defaults
-    if value.drawThingsHelperPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      ?? true {
-      value.drawThingsHelperPath = defaults.drawThingsHelperPath
+    let savedHelper = value.drawThingsHelperPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !FileManager.default.isExecutableFile(atPath: savedHelper) {
+      let bundledHelper = defaults.drawThingsHelperPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      value.drawThingsHelperPath = FileManager.default.isExecutableFile(atPath: bundledHelper) ? bundledHelper : nil
     }
     return value
   }
