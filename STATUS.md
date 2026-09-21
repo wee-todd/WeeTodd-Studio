@@ -13,9 +13,17 @@ local Krea generation and the four-panel
 Klein/BFS/detail pass have completed with live previews and verified completed-panel reuse. Vision
 preserves separate foreground instances and combines body detections to handle unequal panel widths.
 New documents now default to separate eight-step BFS-only and HighResolution9B-only passes,
-preferring an unambiguous installed 9B KV model; saved recipe settings are preserved. A complete
+preferring an unambiguous installed 9B KV model; saved recipe settings are preserved. New prompt presets
+separate trigger-only BFS from concise HighResolution quality wording. Legacy prompt contexts and
+explicit strengths retain their behavior; strength controls show percentages. Qwen wardrobe analysis
+uses a bounded torso/lap detail, an initial item inventory and literal condition-evidence checks,
+with surface targets tied to observed garments. These checks do not establish visual correctness. A complete
 8-bit KV run with native-size BFS before 2× detail took 600.5 seconds with 40 live preview revisions
 on an M3 Ultra / 256 GB. The close-up still invented top hair and exaggerated skin texture.
+A subsequent minimal-prompt comparison at 0.80 detail strength improved shirt/denim consistency,
+but BFS turned the back-view head toward the camera and the close-up still exaggerated skin contrast
+and changed lens tint. The back-view error exists before upscaling; this recipe has not passed visual
+acceptance. The generic detail-strength default remains 1.0 pending stronger quality evidence.
 Qwen character extraction includes bounded Vision head/scalp details and dedicated visible skin texture fields. Head consistency, surface realism and composition
 remain experimental; the earlier combined-pass runs do not establish general performance
 or peak-memory guarantees. See the

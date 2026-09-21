@@ -64,6 +64,40 @@ final class CharacterDetailImagePreparationTests: XCTestCase {
       URL(fileURLWithPath: detail.path).deletingLastPathComponent().appendingPathComponent("manifest.json").path))
   }
 
+  func testFourKClothingDetailIsBoundedAndRequiresUniqueWearer() async throws {
+    let source = try makeJPEG(width: 4000, height: 3000)
+    defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+    let output = source.deletingLastPathComponent().appendingPathComponent("details")
+    let face = CGRect(x: 0.2, y: 0.65, width: 0.15, height: 0.2)
+    let person = CGRect(x: 0.05, y: 0.05, width: 0.65, height: 0.9)
+    let prepared = try await CharacterDetailImagePreparation.prepare(
+      source: source, outputDirectory: output, normalizedFaces: [face], normalizedPeople: [person])
+    let clothing = try XCTUnwrap(prepared.clothingDetailImage)
+    XCTAssertEqual(prepared.sourceDetailImages.count, 2)
+    XCTAssertEqual(clothing.label, "primary torso and lap detail")
+    let image = try XCTUnwrap(CGImageSourceCreateWithURL(URL(fileURLWithPath: clothing.path) as CFURL, nil))
+    let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(image, 0, nil) as? [CFString: Any])
+    XCTAssertLessThanOrEqual(properties[kCGImagePropertyPixelWidth] as? Int ?? 9999, 512)
+    XCTAssertLessThanOrEqual(properties[kCGImagePropertyPixelHeight] as? Int ?? 9999, 512)
+    let ambiguous = try await CharacterDetailImagePreparation.prepare(
+      source: source, outputDirectory: output, normalizedFaces: [face],
+      normalizedPeople: [person, CGRect(x: 0.45, y: 0.05, width: 0.4, height: 0.7)])
+    XCTAssertNil(ambiguous.clothingDetailImage)
+    XCTAssertNotNil(ambiguous.detailImage)
+    XCTAssertTrue(ambiguous.diagnostics.contains { $0.contains("ambiguous") })
+  }
+
+  func testClothingCropKeepsTorsoAndLapWithoutFaceOrOutsidePixels() {
+    let crop = CharacterDetailImagePreparation.clothingContextRect(
+      normalizedVisionFace: CGRect(x: 0.2, y: 0.65, width: 0.15, height: 0.2),
+      normalizedPeople: [CGRect(x: 0.05, y: 0.05, width: 0.65, height: 0.9)],
+      imageWidth: 4000, imageHeight: 3000)
+    XCTAssertEqual(crop, CGRect(x: 200, y: 1050, width: 2600, height: 1800))
+    XCTAssertNil(CharacterDetailImagePreparation.clothingContextRect(
+      normalizedVisionFace: CGRect(x: 0.2, y: 0.65, width: 0.15, height: 0.2),
+      normalizedPeople: [], imageWidth: 4000, imageHeight: 3000))
+  }
+
   private func makeJPEG(width: Int, height: Int, orientation: Int = 1) throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

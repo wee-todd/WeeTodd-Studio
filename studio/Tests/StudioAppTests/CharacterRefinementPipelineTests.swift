@@ -31,7 +31,7 @@ import XCTest
       detectorVersion: "test", candidates: panels, status: .detected, diagnostics: [])
 
     struct PrepareCall { let source: String; let rect: [String: Int]; let scale: Int }
-    struct GenerationCall { let width: Int; let height: Int; let loras: [String]; let inputs: [String]; let outputPath: String }
+    struct GenerationCall { let width: Int; let height: Int; let loras: [String]; let weights: [Double]; let inputs: [String]; let outputPath: String }
     var prepareCalls: [PrepareCall] = []
     var generationCalls: [GenerationCall] = []
     var estimates = 0
@@ -49,7 +49,7 @@ import XCTest
         let width = Self.ceil64(rect["width"]! * scale), height = Self.ceil64(rect["height"]! * scale)
         let directory = try XCTUnwrap(output)
         let path = try self.artifact(directory.appendingPathComponent("prepared.png"),
-          contents: "prepared:\(rect["width"]!):\(rect["height"]!):\(scale)")
+          contents: "prepared:\(try CharacterArtifactHash.file(source)):\(rect["width"]!):\(rect["height"]!):\(scale)")
         return ["padded_path": path.path, "padded_dimensions": [width, height],
           "padded_sha256": "prepared-\(rect["width"]!)-\(rect["height"]!)-\(scale)"]
       case "dt-estimate":
@@ -61,11 +61,12 @@ import XCTest
         let width = try XCTUnwrap(configuration["width"] as? Int)
         let height = try XCTUnwrap(configuration["height"] as? Int)
         let loras = (request["loras"] as? [[String: Any]] ?? []).compactMap { $0["modelID"] as? String }
+        let weights = (request["loras"] as? [[String: Any]] ?? []).compactMap { $0["weight"] as? Double }
         let inputs = (request["inputs"] as? [[String: Any]] ?? []).compactMap { $0["path"] as? String }
         generationSerial += 1
         let directory = try XCTUnwrap(output)
         let path = try self.artifact(directory.appendingPathComponent("generated.png"), contents: "generation-\(generationSerial)")
-        generationCalls.append(.init(width: width, height: height, loras: loras, inputs: inputs,
+        generationCalls.append(.init(width: width, height: height, loras: loras, weights: weights, inputs: inputs,
           outputPath: path.path))
         return ["asset": ["path": path.path, "width": width, "height": height],
           "fingerprint": "generation-\(generationSerial)", "normalizedRequest": request]
@@ -160,6 +161,18 @@ import XCTest
     XCTAssertEqual(reassemblies, 2)
     XCTAssertEqual(Array(commands.dropFirst(commandCount)),
       Array(repeating: "character-panel-prepare", count: 8) + ["character-reassemble"])
+
+    controller.document.refinement.detailStrength = 0.8
+    try await controller.refinePanels()
+    XCTAssertEqual(generationCalls.count, submissions + 4, "Changing detail weight must reuse every native BFS result.")
+    for call in generationCalls.dropFirst(submissions) {
+      XCTAssertEqual(call.loras, ["high-resolution-9b"])
+      XCTAssertEqual(call.weights, [0.8])
+    }
+    let afterWeight = generationCalls.count
+    controller.document.refinement.headPromptStyle = .qualityOnly
+    try await controller.refinePanels()
+    XCTAssertEqual(generationCalls.count, afterWeight + 8, "A changed BFS output must invalidate its downstream detail input.")
   }
 
   private static func ceil64(_ value: Int) -> Int { ((value + 63) / 64) * 64 }

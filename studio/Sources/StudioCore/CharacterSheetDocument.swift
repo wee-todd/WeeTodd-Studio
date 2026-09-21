@@ -67,6 +67,18 @@ public struct CharacterProposalBatch: Codable, Equatable, Identifiable {
   }
 }
 
+public enum CharacterRefinementPromptStyle: String, Codable, CaseIterable, Identifiable {
+  case legacy, triggerOnly, qualityOnly
+  public var id: String { rawValue }
+  public var label: String {
+    switch self {
+    case .legacy: return "Legacy descriptive prompt"
+    case .triggerOnly: return "Trigger only"
+    case .qualityOnly: return "Trigger + quality descriptors"
+    }
+  }
+}
+
 public struct CharacterRefinementSettings: Codable, Equatable {
   public var modelID = ""
   public var detailLoRAID = ""
@@ -78,6 +90,9 @@ public struct CharacterRefinementSettings: Codable, Equatable {
   public var steps = 8
   public var guidance = 1.0
   public var seed = 0
+  // Missing keys retain historical behavior; only newly created settings get new presets.
+  public var headPromptStyle: CharacterRefinementPromptStyle? = .triggerOnly
+  public var detailPromptStyle: CharacterRefinementPromptStyle? = .qualityOnly
   public init() {}
 }
 

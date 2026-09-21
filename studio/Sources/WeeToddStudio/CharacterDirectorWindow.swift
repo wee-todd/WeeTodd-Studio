@@ -239,9 +239,16 @@ struct CharacterDirectorWindow: View {
         Text("Choose exact 9B edit model").tag(""); ForEach(controller.models, id: \.id) { Text($0.name).tag($0.id) }
       }
       loraPicker("HighResolution9B", id: Binding(get: { controller.document.refinement.detailLoRAID }, set: { value in controller.edit { $0.refinement.detailLoRAID = value } }), strength: Binding(get: { controller.document.refinement.detailStrength }, set: { value in controller.edit { $0.refinement.detailStrength = value } }))
+      Picker("Detail prompt", selection: Binding(get: { controller.document.refinement.detailPromptStyle ?? .legacy }, set: { value in controller.edit { $0.refinement.detailPromptStyle = value } })) {
+        Text("Trigger + quality descriptors").tag(CharacterRefinementPromptStyle.qualityOnly)
+        Text("Legacy descriptive prompt").tag(CharacterRefinementPromptStyle.legacy)
+      }
       Toggle("Replace faces (head and hair may change)", isOn: Binding(get: { controller.document.refinement.replaceFaces }, set: { value in controller.edit { $0.refinement.replaceFaces = value } })).toggleStyle(.checkbox)
       if controller.document.refinement.replaceFaces {
         loraPicker("BFS rank-64", id: Binding(get: { controller.document.refinement.headLoRAID }, set: { value in controller.edit { $0.refinement.headLoRAID = value } }), strength: Binding(get: { controller.document.refinement.headStrength }, set: { value in controller.edit { $0.refinement.headStrength = value } }))
+        Picker("BFS prompt", selection: Binding(get: { controller.document.refinement.headPromptStyle ?? .legacy }, set: { value in controller.edit { $0.refinement.headPromptStyle = value } })) {
+          ForEach(CharacterRefinementPromptStyle.allCases) { Text($0.label).tag($0) }
+        }
       }
       if controller.document.refinement.replaceFaces {
         Picker("Recipe", selection: Binding(get: { controller.document.refinement.twoPass }, set: { value in controller.edit { $0.refinement.twoPass = value } })) {
@@ -380,7 +387,7 @@ struct CharacterDirectorWindow: View {
   }
 
   private func loraPicker(_ title: String, id: Binding<String>, strength: Binding<Double>) -> some View {
-    HStack { Picker(title, selection: id) { Text("Choose installed LoRA").tag(""); ForEach(controller.loras(model: controller.document.refinement.modelID), id: \.id) { Text($0.name).tag($0.id) } }; TextField("Strength", value: strength, format: .number).frame(width: 90) }
+    HStack { Picker(title, selection: id) { Text("Choose installed LoRA").tag(""); ForEach(controller.loras(model: controller.document.refinement.modelID), id: \.id) { Text($0.name).tag($0.id) } }; TextField("Strength", value: strength, format: .percent).frame(width: 90).help("LoRA strength: 80% is a weight of 0.80. This does not change image strength or guidance.") }
   }
 
   private func chooseSource(_ role: CharacterSourceRole) {

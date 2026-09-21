@@ -81,11 +81,41 @@ import XCTest
         try await controller.detectPanels()
         XCTAssertEqual(controller.document.panels?.candidates.count, 4)
         XCTAssertEqual(controller.document.panels?.status, .detected)
+      case "experiment":
+        // Replay an exact saved input/configuration, changing only explicitly named controls.
+        let file = try XCTUnwrap(environment["WEETODD_CHARACTER_EXPERIMENT"])
+        let experiment = try JSONDecoder().decode(PanelExperiment.self,
+          from: Data(contentsOf: URL(fileURLWithPath: file)))
+        let stage = try XCTUnwrap(controller.document.pipeline.stages.first { $0.key == experiment.sourceStage })
+        var draft = try XCTUnwrap(stage.draft)
+        if let weight = experiment.detailWeight {
+          let id = try XCTUnwrap(draft.characterPanel?.detailLoRAID)
+          XCTAssertFalse(draft.characterPanel?.replacesHead ?? true)
+          let index = try XCTUnwrap(draft.loras.firstIndex { $0.modelID == id })
+          draft.loras[index].weight = weight
+        }
+        if let seed = experiment.seed { draft.seed = seed }
+        if let style = experiment.promptStyle {
+          draft.characterPanel?.version = style == .legacy ? 1 : 2
+          draft.characterPanel?.promptStyle = style == .legacy ? nil : style
+          draft.prompt = try XCTUnwrap(draft.characterPanel).prompt
+        }
+        draft.name = experiment.name
+        XCTAssertNil(draft.managedCharacterPromptIssue)
+        _ = try await controller.generate(draft, stageKey: "experiment:" + experiment.name)
       case "face":
         let image = try XCTUnwrap(environment["WEETODD_CHARACTER_SOURCE_IMAGE"])
         controller.document.sources["face"] = image
         try await controller.prepareHead()
         XCTAssertNotNil(controller.document.headReference)
+      case "panel":
+        await controller.refreshCatalog()
+        controller.approveCrops()
+        XCTAssertTrue(controller.document.cropsApproved)
+        try await controller.validateRecipeDependencies()
+        let role = try XCTUnwrap(CharacterPanelRole(rawValue: environment["WEETODD_CHARACTER_PANEL_ROLE"] ?? "front"))
+        let offset = Int(environment["WEETODD_CHARACTER_SEED_OFFSET"] ?? "0") ?? 0
+        try await self.qualifyPanel(role, seedOffset: offset, controller: controller, storage: storage)
       case "refine", "resume":
         await controller.refreshCatalog()
         controller.approveCrops()
@@ -137,10 +167,58 @@ import XCTest
     try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
       .write(to: root.appendingPathComponent("live-\(mode)-report.json"), options: .atomic)
     XCTAssertNil(controller.error)
-    if ["sheet", "refine"].contains(mode), controller.error == nil {
+    if ["sheet", "refine", "experiment", "panel"].contains(mode), controller.error == nil {
       XCTAssertGreaterThan(previews.count, 0, "Live generation must deliver preview updates.")
     }
     XCTAssertEqual(store.project, originalProject)
     XCTAssertNil(store.imageDraft)
   }
+
+  /// Run one reviewed pair before qualifying the rest. Canonical keys let the full
+  /// pipeline prove it can reuse the exact same head/detail requests afterward.
+  private func qualifyPanel(_ role: CharacterPanelRole, seedOffset: Int,
+    controller: CharacterSheetSessionController, storage: CharacterSheetDocumentStore) async throws {
+    let document = controller.document
+    let detection = try XCTUnwrap(document.panels)
+    let index = try XCTUnwrap(detection.candidates.firstIndex { $0.role == role })
+    let panel = detection.candidates[index], rect = panel.sourcePixelRect
+    let source = try XCTUnwrap(document.initialSheetPath)
+    let head = try XCTUnwrap(document.headReference)
+    var settings = document.refinement
+    XCTAssertTrue(settings.twoPass && settings.replaceFaces)
+    let directory = storage.directory(id: document.id).appendingPathComponent("Panels/\(panel.id.uuidString)")
+    let prepared = try await controller.bridge.invoke("character-panel-prepare", runtime: controller.store.runtime,
+      payload: ["source": source, "rect": ["x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height], "scale": 1], output: directory)
+    let input = try XCTUnwrap(prepared["padded_path"] as? String)
+    let dimensions = try XCTUnwrap(prepared["padded_dimensions"] as? [Int])
+    var draft = try CharacterPanelRecipe.makeDraft(role: role, definition: document.definition, settings: settings,
+      profileID: document.draft.profileID, panelPath: input, headPath: head.whiteMattePath,
+      width: dimensions[0], height: dimensions[1], documentID: document.id, seed: settings.seed + index + seedOffset)
+    draft = try CharacterPanelRecipe.headOnlyDraft(from: draft)
+    let identity = try CharacterArtifactHash.value(["source": CharacterArtifactHash.file(source),
+      "rect": CharacterArtifactHash.value(rect), "head": CharacterArtifactHash.file(head.whiteMattePath),
+      "mode": "native-head-then-2x-detail-v2", "input": prepared["padded_sha256"] as? String ?? ""])
+    let suffix = seedOffset == 0 ? "" : ":seed-\(seedOffset)"
+    let key = "panel-\(panel.id.uuidString)"
+    let swapped = try await controller.generate(draft, stageKey: key + ":" + identity + suffix)
+    let detail = try await controller.bridge.invoke("character-panel-prepare", runtime: controller.store.runtime,
+      payload: ["source": swapped.path, "rect": ["x": 0, "y": 0, "width": rect.width, "height": rect.height], "scale": 2],
+      output: directory.appendingPathComponent(seedOffset == 0 ? "Detail Input" : "Detail Input Seed \(seedOffset)"))
+    let detailPath = try XCTUnwrap(detail["padded_path"] as? String)
+    let detailDimensions = try XCTUnwrap(detail["padded_dimensions"] as? [Int])
+    settings.replaceFaces = false
+    draft = try CharacterPanelRecipe.makeDraft(role: role, definition: document.definition, settings: settings,
+      profileID: document.draft.profileID, panelPath: detailPath, headPath: nil,
+      width: detailDimensions[0], height: detailDimensions[1], documentID: document.id,
+      seed: settings.seed + index + 1000 + seedOffset, preservesInputHead: true)
+    _ = try await controller.generate(draft, stageKey: key + ":detail:" + identity + suffix)
+  }
+}
+
+private struct PanelExperiment: Decodable {
+  var name: String
+  var sourceStage: String
+  var detailWeight: Double?
+  var seed: Int?
+  var promptStyle: CharacterRefinementPromptStyle?
 }

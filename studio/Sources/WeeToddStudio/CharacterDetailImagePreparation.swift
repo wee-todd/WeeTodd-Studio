@@ -17,15 +17,17 @@ public struct CharacterSourceDetailImage: Codable, Equatable, Sendable {
 public struct CharacterDetailImagePreparationResult: Codable, Equatable, Sendable {
   public var sourceSHA256: String
   public var detailImage: CharacterSourceDetailImage?
+  public var clothingDetailImage: CharacterSourceDetailImage?
   public var diagnostics: [String]
   public var preprocessingVersion: String
   public init(sourceSHA256: String, detailImage: CharacterSourceDetailImage?, diagnostics: [String],
-              preprocessingVersion: String) {
+              preprocessingVersion: String, clothingDetailImage: CharacterSourceDetailImage? = nil) {
     self.sourceSHA256 = sourceSHA256; self.detailImage = detailImage
+    self.clothingDetailImage = clothingDetailImage
     self.diagnostics = diagnostics; self.preprocessingVersion = preprocessingVersion
   }
 
-  public var sourceDetailImages: [CharacterSourceDetailImage] { detailImage.map { [$0] } ?? [] }
+  public var sourceDetailImages: [CharacterSourceDetailImage] { [detailImage, clothingDetailImage].compactMap { $0 } }
 }
 
 public enum CharacterDetailImagePreparationError: Error, Equatable {
@@ -33,8 +35,9 @@ public enum CharacterDetailImagePreparationError: Error, Equatable {
 }
 
 public struct CharacterDetailImagePreparation: Sendable {
-  public static let preprocessingVersion = "vision-primary-head-detail-v1"
+  public static let preprocessingVersion = "vision-primary-head-wardrobe-detail-v2"
   public static let detailLabel = "primary head and face detail"
+  public static let clothingDetailLabel = "primary torso and lap detail"
   public init() {}
 
   public func prepare(source: URL, outputDirectory: URL) async throws -> CharacterDetailImagePreparationResult {
@@ -47,13 +50,16 @@ public struct CharacterDetailImagePreparation: Sendable {
         throw CharacterDetailImagePreparationError.unreadableImage
       }
       let request = VNDetectFaceRectanglesRequest()
+      let peopleRequest = VNDetectHumanRectanglesRequest()
+      peopleRequest.upperBodyOnly = false
       let handler = VNImageRequestHandler(cgImage: preview, orientation: .up)
-      try await withTaskCancellationHandler(operation: { try handler.perform([request]) },
-        onCancel: { request.cancel() })
+      try await withTaskCancellationHandler(operation: { try handler.perform([request, peopleRequest]) },
+        onCancel: { request.cancel(); peopleRequest.cancel() })
       try Task.checkCancellation()
       let faces = (request.results ?? []).map(\.boundingBox)
       let result = try Self.prepare(imageSource: imageSource, sourceHash: sourceHash,
-        outputDirectory: outputDirectory, normalizedFaces: faces)
+        outputDirectory: outputDirectory, normalizedFaces: faces,
+        normalizedPeople: (peopleRequest.results ?? []).map(\.boundingBox))
       guard try CharacterArtifactHash.file(source.path) == sourceHash else {
         throw CharacterDetailImagePreparationError.staleSource
       }
@@ -67,7 +73,7 @@ public struct CharacterDetailImagePreparation: Sendable {
   }
 
   static func prepare(source: URL, outputDirectory: URL,
-    normalizedFaces: [CGRect]) async throws -> CharacterDetailImagePreparationResult {
+    normalizedFaces: [CGRect], normalizedPeople: [CGRect]? = nil) async throws -> CharacterDetailImagePreparationResult {
     let worker = Task.detached(priority: .userInitiated) {
       try Task.checkCancellation()
       let sourceHash = try CharacterArtifactHash.file(source.path)
@@ -75,7 +81,7 @@ public struct CharacterDetailImagePreparation: Sendable {
         throw CharacterDetailImagePreparationError.unreadableImage
       }
       let result = try prepare(imageSource: imageSource, sourceHash: sourceHash,
-        outputDirectory: outputDirectory, normalizedFaces: normalizedFaces)
+        outputDirectory: outputDirectory, normalizedFaces: normalizedFaces, normalizedPeople: normalizedPeople)
       guard try CharacterArtifactHash.file(source.path) == sourceHash else {
         throw CharacterDetailImagePreparationError.staleSource
       }
@@ -98,8 +104,32 @@ public struct CharacterDetailImagePreparation: Sendable {
     return CGRect(x: left, y: top, width: max(0, right - left), height: max(0, bottom - top))
   }
 
+  static func clothingContextRect(normalizedVisionFace face: CGRect,
+    normalizedPeople: [CGRect], imageWidth: Int, imageHeight: Int) -> CGRect? {
+    let bounds = CGRect(x: 0, y: 0, width: 1, height: 1)
+    guard face.width > 0, face.height > 0, bounds.contains(face) else { return nil }
+    let candidates = normalizedPeople.enumerated().filter { _, person in
+      person.contains(CGPoint(x: face.midX, y: face.midY))
+    }
+    guard candidates.count == 1, let (index, person) = candidates.first else { return nil }
+    let body = person.intersection(bounds)
+    let bottom = body.minY
+    let top = min(face.minY, body.maxY)
+    let region = CGRect(x: body.minX, y: bottom, width: body.width, height: max(0, top - bottom))
+    guard region.width > 0, region.height >= face.height else { return nil }
+    // A face alone does not prove which visible limbs belong to that person.
+    // Skip intersecting people instead of supplying a misleading close crop.
+    guard !normalizedPeople.enumerated().contains(where: { otherIndex, other in
+      otherIndex != index && !region.intersection(other).isNull
+        && region.intersection(other).width * region.intersection(other).height > 0
+    }) else { return nil }
+    return CGRect(x: region.minX * CGFloat(imageWidth),
+      y: (1 - region.maxY) * CGFloat(imageHeight),
+      width: region.width * CGFloat(imageWidth), height: region.height * CGFloat(imageHeight)).integral
+  }
+
   private static func prepare(imageSource: CGImageSource, sourceHash: String, outputDirectory: URL,
-    normalizedFaces: [CGRect]) throws -> CharacterDetailImagePreparationResult {
+    normalizedFaces: [CGRect], normalizedPeople: [CGRect]?) throws -> CharacterDetailImagePreparationResult {
     try Task.checkCancellation()
     guard normalizedFaces.count == 1, let face = normalizedFaces.first else {
       let message = normalizedFaces.isEmpty
@@ -129,9 +159,22 @@ public struct CharacterDetailImagePreparation: Sendable {
     let detailURL = artifactDirectory.appendingPathComponent("primary-head-face.jpg")
     try writeJPEG(resized, to: detailURL)
     let detailHash = try CharacterArtifactHash.file(detailURL.path)
-    let result = CharacterDetailImagePreparationResult(sourceSHA256: sourceHash,
+    var result = CharacterDetailImagePreparationResult(sourceSHA256: sourceHash,
       detailImage: .init(path: detailURL.path, label: detailLabel, sha256: detailHash), diagnostics: [],
       preprocessingVersion: preprocessingVersion)
+    if let normalizedPeople {
+      if let rect = clothingContextRect(normalizedVisionFace: face, normalizedPeople: normalizedPeople,
+          imageWidth: boundedSource.width, imageHeight: boundedSource.height),
+         rect.width >= 32, rect.height >= 32,
+         let crop = boundedSource.cropping(to: rect), let clothing = resizedTo512(crop) {
+        let clothingURL = artifactDirectory.appendingPathComponent("primary-torso-lap.jpg")
+        try writeJPEG(clothing, to: clothingURL)
+        result.clothingDetailImage = .init(path: clothingURL.path, label: clothingDetailLabel,
+          sha256: try CharacterArtifactHash.file(clothingURL.path))
+      } else {
+        result.diagnostics.append("The primary wearer's torso/lap is unavailable or ambiguous; wardrobe analysis will use the overview only.")
+      }
+    }
     let manifest = artifactDirectory.appendingPathComponent("manifest.json")
     let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     try encoder.encode(result).write(to: manifest, options: .atomic)

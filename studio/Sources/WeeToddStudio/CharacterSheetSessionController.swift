@@ -302,7 +302,7 @@ import StudioCore
       let hash = try await Task.detached { try CharacterArtifactHash.file(sourcePath) }.value
       payload["sourceImage"] = ["path": sourcePath, "label": role, "sha256": hash]
       if role == "character" {
-        status = "Preparing bounded face and scalp detail…"
+        status = "Preparing bounded face and clothing detail…"
         let detail = try await CharacterDetailImagePreparation().prepare(
           source: URL(fileURLWithPath: sourcePath),
           outputDirectory: storage.directory(id: id).appendingPathComponent("Analysis Inputs"))

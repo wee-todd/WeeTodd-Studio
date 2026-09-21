@@ -22,7 +22,16 @@ public struct CharacterPanelPromptContext: Codable, Equatable {
   public var replacesHead: Bool
   public var detailLoRAID: String
   public var headLoRAID: String?
+  public var promptStyle: CharacterRefinementPromptStyle?
   public var prompt: String {
+    if version == 2, let promptStyle, promptStyle != .legacy {
+      if replacesHead {
+        let trigger = "head_swap: replace the head with the reference head."
+        return promptStyle == .triggerOnly ? trigger
+          : trigger + " 4k, realistic skin texture, realistic hair."
+      }
+      return "High Resolution. high quality, realistic skin texture, realistic hair, 4k."
+    }
     let referenceOwnsHead = replacesHead || preservesInputHead
     let scopedDefinition = role == .closeUp ? closeUpDefinition : referenceOwnsHead ? bodyDefinition : definition
     let compiled = CharacterSheetCompiler.compile(scopedDefinition)
@@ -186,6 +195,14 @@ public enum CharacterPanelRecipe {
     draft.characterPanel = CharacterPanelPromptContext(role: role, definition: definition,
       preservesInputHead: preservesInputHead, replacesHead: settings.replaceFaces, detailLoRAID: settings.detailLoRAID,
       headLoRAID: settings.replaceFaces ? settings.headLoRAID : nil)
+    let style = (settings.replaceFaces ? settings.headPromptStyle : settings.detailPromptStyle) ?? .legacy
+    if style != .legacy {
+      guard settings.replaceFaces || style == .qualityOnly else {
+        throw StudioError.invalid("Choose the quality preset or legacy prompt for detail refinement.")
+      }
+      draft.characterPanel?.version = 2
+      draft.characterPanel?.promptStyle = style
+    }
     draft.prompt = draft.characterPanel!.prompt
     return draft
   }
@@ -196,7 +213,10 @@ public extension DrawThingsImageDraft {
     if let context = characterPanel {
       let compiled = CharacterSheetCompiler.compile(context.definition)
       guard compiled.canGenerate else { return compiled.diagnostics.first?.message ?? "Resolve the required character fields." }
-      guard context.version == 1, prompt == context.prompt else { return "This panel's managed prompt changed. Rebuild it from the character fields." }
+      let legacy = context.version == 1 && context.promptStyle == nil
+      let minimal = context.version == 2 && (context.promptStyle == .qualityOnly
+        || (context.replacesHead && context.promptStyle == .triggerOnly))
+      guard (legacy || minimal), prompt == context.prompt else { return "This panel's managed prompt changed. Rebuild it from the character fields." }
       guard executionProvider == .drawThings, canvas == nil,
         moodboard.filter({ $0.enabled && $0.strength > 0 }).count == (context.replacesHead ? 2 : 1) else {
         return "Panel refinement requires the ordered target image and, when enabled, reference head."

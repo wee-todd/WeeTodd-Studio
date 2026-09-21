@@ -1887,8 +1887,9 @@ planning document alongside existing media and timeline data; older projects sti
 3. **Import images…** or **Choose project/global image** links existing character sheets, prop views
    or setting images into Project Assets without copying media. **Approve references** is separate
    from approving a description. Missing, relinked or modified files require reference review.
-   Images already made in Studio's Draw Things editor can be selected here. Dedicated versioned
-   sheet-generation workflows are not wired to these records yet.
+   Images already made in Studio's Draw Things editor can be selected here. **Create character sheet…**
+   opens structured Character Director for character records; selecting a candidate and approving its
+   reference remain explicit review steps.
 4. In **Workflows**, choose **Add to project** after movie clip planning to import the detailed shots.
    Repeating an import adds missing records and preserves existing edits/approvals; it does not
    refresh an existing shot from a changed workflow result. The original source text is preserved.
@@ -1937,9 +1938,16 @@ style may share one image. Bounded calls propose forensic visible details with e
 Large references are analyzed as orientation-correct overviews capped at 512 pixels per edge;
 the original files are retained. Character analysis also uses Apple Vision to prepare one bounded
 head-and-scalp detail, at most 512 pixels per edge, when exactly one suitable face is detected.
-Only the face/hair calls receive that detail; ambiguous or missing faces fall back to the overview
-with a review diagnostic. Detection uses a 1600-pixel preview and crop preparation decodes at most
-2048 pixels per edge, with streaming hashes and source-change checks.
+Only the face/hair calls receive that detail. Wardrobe calls may receive one separate torso/lap
+detail, also capped at 512 pixels, when Vision finds an unambiguous person region containing the
+face. Overlapping or missing people fall back to the overview with a review diagnostic. Detection
+uses a 1600-pixel preview and crop preparation decodes at most 2048 pixels per edge, with streaming
+hashes and source-change checks. A bounded visual inventory assigns distinct items to record slots
+before field extraction, omits unused slots and binds material records to named targets. Clothing
+analysis carries garment identity into material calls,
+omits unobserved footwear and requires literal evidence for condition: fading and creases must not
+be generalized into damage. Structured or negated evidence is checked before a proposal can be applied;
+model observations still require human review.
 Scalp coverage, hairline, residual hair length and style are analyzed together. Dedicated visible
 skin-tone and skin-texture fields preserve observations without inferring ancestry; ancestry remains
 authored information. The compiled hair section places coverage before residual hair details.
@@ -1979,12 +1987,22 @@ back to the original panel bounds, enlarged exactly **2× with Lanczos**, then p
 **HighResolution9B-only** detail pass. BFS never receives the enlarged input in this separate recipe.
 Each FLUX pass defaults to **eight steps**.
 Existing saved recipe choices and step counts are preserved; select the separate recipe and eight
-steps per pass to compare an older document. The back-view instructions preserve rear orientation; output quality still needs review.
-Facial close-up refinement instructs the model to preserve the input head crop and omits full-body proportions and clothing
-descriptions that could otherwise make the edit model zoom out.
-Photographic refinement retains instructions to preserve source texture and tonal variation, avoiding
-airbrushing and waxy smoothing even when a replacement head supplies appearance. These instructions
-do not guarantee likeness or photographic quality from the selected model and LoRA combination.
+steps per pass to compare an older document. LoRA strength is shown as a percentage: **80% = 0.80**,
+independent of image strength and CFG. New documents use versioned minimal prompt presets:
+
+- **BFS — Trigger only:** `head_swap: replace the head with the reference head.`
+- **BFS — Trigger + quality descriptors:** the same trigger followed by
+  `4k, realistic skin texture, realistic hair.`
+- **Detail — Trigger + quality descriptors:**
+  `High Resolution. high quality, realistic skin texture, realistic hair, 4k.`
+
+BFS defaults to trigger-only. The minimal presets omit the character fields, Photograph preset,
+wardrobe descriptions and camera instructions; the ordered images supply the edit context.
+The HighResolution prompt style is shared across 4B/9B, while this recipe still requires the installed
+9B adapter. Initial-sheet generation retains the full structured prompt. Existing documents keep
+**Legacy descriptive prompt** until a preset is explicitly selected; saved strengths, prompts and
+historical outputs are preserved. Detail-strength changes reuse matching BFS stages. A changed BFS
+prompt invalidates its own stage and dependent detail. Presets do not guarantee likeness or realism.
 
 Progress and available live previews appear in the window. Cancel stops the active local operation;
 completed panels are retained and reused when their execution inputs and output hashes still match.
@@ -2002,6 +2020,15 @@ review. A follow-up eight-step KV run on the same machine completed all eight se
 passes in 600.5 seconds, with 40 live preview revisions. BFS used native panel dimensions before
 2× detail preparation. The front view retained a balding scalp, but the close-up still invented top
 hair and exaggerated skin texture; this qualifies execution, not general likeness or realism.
+A September 21 minimal-prompt comparison used eight-step KV passes, BFS at 1.0 and
+HighResolution9B at **0.80**. The corrected initial sheet and refinement retained a plain crew-neck
+shirt and blue jeans without the previous invented tears or shirt placket. The front pair took
+105.1 seconds; the remaining six passes and assembly took 353.6 seconds, reusing that pair exactly.
+This run failed visual acceptance: BFS placed a forward-facing head on the back-view body, and the
+close-up retained exaggerated skin contrast and changed lens tint. The orientation error was already
+present before the detail pass. Review native BFS outputs as well as the final assembly; shorter
+prompts and 80% detail strength do not establish reliable turnaround geometry or photorealism.
+The 0.80 comparison is a test setting, not a change to the generic 1.0 detail-strength default.
 The installed model/LoRA combination must pass Draw Things preflight before rendering.
 
 **Create reference…** remains available for other subject types in workflow and project review.

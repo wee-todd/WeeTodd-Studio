@@ -2,6 +2,51 @@ import XCTest
 @testable import StudioCore
 
 final class CharacterPanelRecipeTests: XCTestCase {
+  func testMinimalPresetsEmitOnlyAdapterTriggerAndQualityWords() throws {
+    var original = CharacterRefinementSettings()
+    original.modelID = "klein9"; original.detailLoRAID = "detail"; original.headLoRAID = "head"
+    original.replaceFaces = true; original.detailStrength = 0.8
+    var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+    for (style, expected) in [
+      ("triggerOnly", "head_swap: replace the head with the reference head."),
+      ("qualityOnly", "head_swap: replace the head with the reference head. 4k, realistic skin texture, realistic hair.")
+    ] {
+      json["headPromptStyle"] = style; json["detailPromptStyle"] = "qualityOnly"
+      var settings = try JSONDecoder().decode(CharacterRefinementSettings.self, from: JSONSerialization.data(withJSONObject: json))
+      let combined = try CharacterPanelRecipe.makeDraft(role: .closeUp, definition: definition(), settings: settings,
+        profileID: "local", panelPath: "/native.png", headPath: "/head.png", width: 768, height: 1088,
+        documentID: UUID(), seed: 83103)
+      let head = try CharacterPanelRecipe.headOnlyDraft(from: combined)
+      XCTAssertEqual(head.prompt, expected)
+      XCTAssertEqual(head.loras.map(\.weight), [1])
+      XCTAssertEqual(head.moodboard.map(\.path), ["/native.png", "/head.png"])
+      XCTAssertNil(head.managedCharacterPromptIssue)
+      settings.replaceFaces = false
+      let detail = try CharacterPanelRecipe.makeDraft(role: .closeUp, definition: definition(), settings: settings,
+        profileID: "local", panelPath: "/enlarged.png", headPath: nil, width: 1536, height: 2176,
+        documentID: UUID(), seed: 84103, preservesInputHead: true)
+      XCTAssertEqual(detail.prompt, "High Resolution. high quality, realistic skin texture, realistic hair, 4k.")
+      XCTAssertEqual(detail.loras.map(\.weight), [0.8])
+      XCTAssertEqual(detail.steps, 8); XCTAssertEqual(detail.guidance, 1); XCTAssertEqual(detail.strength, 1)
+      XCTAssertNil(detail.managedCharacterPromptIssue)
+      XCTAssertEqual(try JSONDecoder().decode(DrawThingsImageDraft.self, from: JSONEncoder().encode(detail)).prompt, detail.prompt)
+    }
+  }
+
+  func testLegacySettingsWithoutPromptPresetsKeepTheirPromptAndExplicitStrength() throws {
+    var original = CharacterRefinementSettings()
+    original.modelID = "klein9"; original.detailLoRAID = "detail"; original.detailStrength = 1
+    var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+    json.removeValue(forKey: "headPromptStyle"); json.removeValue(forKey: "detailPromptStyle")
+    let settings = try JSONDecoder().decode(CharacterRefinementSettings.self, from: JSONSerialization.data(withJSONObject: json))
+    let draft = try CharacterPanelRecipe.makeDraft(role: .front, definition: definition(), settings: settings,
+      profileID: "local", panelPath: "/panel.png", headPath: nil, width: 960, height: 2176, documentID: UUID(), seed: 1)
+    XCTAssertEqual(draft.loras.map(\.weight), [1])
+    XCTAssertTrue(draft.prompt.hasPrefix("high quality. Refine the single character image in Image 1"))
+    XCTAssertEqual(draft.characterPanel?.version, 1)
+    XCTAssertNil(draft.managedCharacterPromptIssue)
+  }
+
   func testDefaultSeparatePassesUseEightStepsAndExclusiveAdapters() throws {
     var settings = CharacterRefinementSettings()
     XCTAssertTrue(settings.twoPass)
@@ -27,7 +72,7 @@ final class CharacterPanelRecipeTests: XCTestCase {
     XCTAssertEqual([head.width, head.height], [512, 1088])
     XCTAssertEqual([detail.width, detail.height], [960, 2176])
     XCTAssertTrue(detail.characterPanel?.preservesInputHead == true)
-    XCTAssertTrue(detail.prompt.hasPrefix("high quality."))
+    XCTAssertTrue(detail.prompt.hasPrefix("High Resolution. high quality,"))
     XCTAssertFalse(detail.prompt.contains("head_swap:"))
     XCTAssertNil(detail.managedCharacterPromptIssue)
     XCTAssertThrowsError(try CharacterPanelRecipe.headOnlyDraft(from: detail))
@@ -104,6 +149,7 @@ final class CharacterPanelRecipeTests: XCTestCase {
     var settings = CharacterRefinementSettings()
     settings.modelID = "klein9"; settings.detailLoRAID = "detail"; settings.headLoRAID = "head"
     settings.replaceFaces = true
+    settings.headPromptStyle = .legacy; settings.twoPass = false
     let draft = try CharacterPanelRecipe.makeDraft(role: .back, definition: definition(), settings: settings,
       profileID: "local", panelPath: "/panel.png", headPath: "/head.png", width: 960, height: 2176,
       documentID: UUID(), seed: 42)

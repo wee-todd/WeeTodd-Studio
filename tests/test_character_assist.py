@@ -650,7 +650,7 @@ def test_real_catalog_shape_allows_text_role_even_when_extraction_roles_are_char
     assert result["metadata"] == {
         "schemaVersion": 1,
         "extractionVersion": 1,
-        "promptVersion": 9,
+        "promptVersion": 12,
         "modelFingerprint": "qwen-test-model-v1",
     }
 
@@ -904,7 +904,7 @@ def test_full_swift_catalog_and_uuid_pools_are_split_into_bounded_text_batches(
             )
             == 11
         )
-    assert result["metadata"]["promptVersion"] == 9
+    assert result["metadata"]["promptVersion"] == 12
 
 
 def test_repeat_aliases_map_back_to_exact_host_uuid_paths(tmp_path, monkeypatch):
@@ -1124,3 +1124,305 @@ def test_cache_validates_more_than_sixty_four_proposals_by_original_batches(tmp_
     first_calls = calls
     assert len(service.extract_fields(value)["proposals"]) == 70
     assert calls == first_calls
+
+
+def test_clothing_detail_only_reaches_garment_accessory_and_surface_calls(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    details = []
+    for name, label in [
+        ("head", "primary head and face detail"),
+        ("clothing", "primary torso and lap detail"),
+    ]:
+        image = tmp_path / f"{name}.jpg"
+        image.write_bytes(name.encode())
+        details.append(
+            {
+                "path": str(image),
+                "label": label,
+                "sha256": hashlib.sha256(name.encode()).hexdigest(),
+            }
+        )
+    value["sourceDetailImages"] = details
+    value["fields"] = [
+        field("hair.length", 5),
+        field("garments[].type", 6),
+        field("accessories[].type", 7),
+        field("features[].type", 7),
+        field("surfaces[].material", 8),
+    ]
+    value["requestedFields"] = [
+        "hair.length",
+        "garments[shirt].type",
+        "accessories[watch].type",
+        "features[scar].type",
+        "surfaces[denim].material",
+    ]
+    calls = []
+
+    def fake_assist(payload, **_):
+        calls.append(payload["textRequest"])
+        return {"text": '{"proposals":[]}', "truncated": False}
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    service.extract_fields(value)
+    for call in calls:
+        fields = json.loads(call["prompt"])["allowedFields"]
+        labels = [item["label"] for item in call["images"]]
+        if any(key.startswith(("garment", "accessory", "surface")) for key in fields):
+            assert labels[-1] == "primary torso and lap detail"
+            assert "primary head and face detail" not in labels
+        elif "hair.length" in fields:
+            assert labels[-1] == "primary head and face detail"
+        else:
+            assert len(labels) == 1
+
+
+@pytest.mark.parametrize("role,expected", [("character", []), ("text", ["worn"])])
+def test_image_condition_cannot_generalize_fading_into_wear_but_authored_wear_survives(
+    tmp_path, monkeypatch, role, expected
+):
+    import studio_character_assist as service
+
+    value = request(tmp_path, role)
+    if role == "text":
+        value["sourceText"] = "A worn shirt."
+    value["fields"] = [field("garments[].condition", 6)]
+    value["requestedFields"] = ["garments[shirt].condition"]
+    monkeypatch.setattr(
+        service,
+        "assist",
+        lambda *_args, **_kwargs: {
+            "text": json.dumps(
+                {
+                    "proposals": [
+                        {
+                            "field": "garment1.condition",
+                            "value": "worn",
+                            "evidence": "The shirt is slightly faded and creased.",
+                            "uncertainty": "",
+                        }
+                    ]
+                }
+            ),
+            "truncated": False,
+        },
+    )
+    result = service.extract_fields(value)
+    assert [item["value"] for item in result["proposals"]] == expected
+    if role == "character":
+        assert any("literal" in item["message"] for item in result["diagnostics"])
+
+
+def test_accepted_garment_identity_is_carried_to_material_call(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    value["fields"] = [field("garments[].type", 6), field("surfaces[].material", 8)]
+    value["requestedFields"] = ["garments[jeans].type", "surfaces[denim].material"]
+    calls = []
+
+    def fake_assist(payload, **_):
+        prompt = json.loads(payload["textRequest"]["prompt"])
+        calls.append(prompt)
+        return {
+            "text": json.dumps(
+                {
+                    "proposals": (
+                        [
+                            {
+                                "field": "garment1.type",
+                                "value": "jeans",
+                                "evidence": "Blue trousers on the primary person's lap",
+                                "uncertainty": "",
+                            }
+                        ]
+                        if "garment1.type" in prompt["allowedFields"]
+                        else []
+                    )
+                }
+            ),
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    service.extract_fields(value)
+    assert calls[1]["observedWardrobe"] == {"garment1.type": "jeans"}
+
+
+def test_visual_inventory_binds_records_before_details_and_omits_unused_slots(
+    tmp_path, monkeypatch
+):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    value["fields"] = [field("garments[].type", 6), field("surfaces[].material", 8)]
+    value["requestedFields"] = [
+        "garments[shirt].type",
+        "garments[jeans].type",
+        "garments[unused].type",
+        "surfaces[shirt].material",
+        "surfaces[jeans].material",
+    ]
+    calls = []
+
+    def fake_assist(payload, **_):
+        text = payload["textRequest"]
+        prompt = json.loads(text["prompt"])
+        calls.append(prompt)
+        if "collections" in prompt:
+            assert len(text["images"]) == 1
+            return {
+                "text": json.dumps(
+                    {
+                        "records": [
+                            {
+                                "collection": "garments",
+                                "slot": 1,
+                                "excerpt": "brown crew-neck T-shirt on torso",
+                            },
+                            {
+                                "collection": "garments",
+                                "slot": 2,
+                                "excerpt": "blue jeans on primary person's lap",
+                            },
+                            {
+                                "collection": "surfaces",
+                                "slot": 1,
+                                "excerpt": "brown crew-neck T-shirt on torso",
+                            },
+                            {
+                                "collection": "surfaces",
+                                "slot": 2,
+                                "excerpt": "blue jeans on primary person's lap",
+                            },
+                        ]
+                    }
+                ),
+                "truncated": False,
+            }
+        return {"text": '{"proposals":[]}', "truncated": False}
+
+    monkeypatch.setattr(service, "assist", fake_assist)
+    service.extract_fields(value)
+    assert "collections" in calls[0], (
+        "Identify distinct visible items before independent record calls."
+    )
+    assert all("garment3.type" not in call.get("allowedFields", []) for call in calls[1:])
+    jeans = next(call for call in calls[1:] if "surface2.material" in call["allowedFields"])
+    assert (
+        "blue jeans on primary person's lap"
+        in jeans["fieldRules"]["surface2.material"]["recordAnchor"]
+    )
+
+
+def test_long_prior_wardrobe_context_keeps_repair_within_input_budget(tmp_path):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    names = [
+        "type",
+        "bodyRegion",
+        "layer",
+        "fit",
+        "cut",
+        "color",
+        "closures",
+        "seams",
+        "trim",
+        "condition",
+        "placement",
+    ]
+    value["fields"] = [field(f"garments[].{name}", 6) for name in names]
+    value["requestedFields"] = [f"garments[shirt].{name}" for name in names]
+    value["_observedWardrobe"] = {f"garment{index}.type": "á" * 100 for index in range(12)}
+    payload = service._payload(
+        value,
+        "character",
+        Path(value["modelPath"]),
+        value["requestedFields"],
+        repair_text="x" * 2000,
+        repair_error="x" * 400,
+    )
+    text_request = payload["textRequest"]
+    assert len(text_request["systemPrompt"].encode()) + len(text_request["prompt"].encode()) <= 8000
+    assert json.loads(text_request["prompt"])["observedWardrobe"]
+
+
+@pytest.mark.parametrize(
+    "candidate,evidence,accepted",
+    [
+        ("slightly faded and creased", "The shirt is slightly faded and creased.", True),
+        ("worn", {"summary": "The shirt is slightly faded and creased."}, False),
+        ("torn", "The shirt is not torn or stained.", False),
+        ("stained", "The shirt is not torn or stained.", False),
+        ("worn", "The shirt is unworn.", False),
+        ("torn", {"summary": "The shirt has a torn sleeve."}, True),
+        ("faded", "The shirt has no holes but is faded.", True),
+    ],
+)
+def test_literal_visible_condition_is_retained(
+    tmp_path, monkeypatch, candidate, evidence, accepted
+):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    value["fields"] = [field("garments[].condition", 6)]
+    value["requestedFields"] = ["garments[shirt].condition"]
+    monkeypatch.setattr(
+        service,
+        "assist",
+        lambda *_args, **_kwargs: {
+            "text": json.dumps(
+                {
+                    "proposals": [
+                        {
+                            "field": "garment1.condition",
+                            "value": candidate,
+                            "evidence": evidence,
+                            "uncertainty": "",
+                        }
+                    ]
+                }
+            ),
+            "truncated": False,
+        },
+    )
+    result = service.extract_fields(value)
+    assert [item["value"] for item in result["proposals"]] == ([candidate] if accepted else [])
+    if not accepted:
+        assert any(item["code"] == "proposal.invalid" for item in result["diagnostics"])
+
+
+def test_visual_inventory_rejects_truncated_partial_records(tmp_path):
+    import studio_character_assist as service
+
+    response = {
+        "text": '{"records":[{"collection":"garments","slot":1,"excerpt":"shirt"}]}',
+        "truncated": True,
+    }
+    with pytest.raises(ValueError, match="truncated"):
+        service._parse_inventory(response, request(tmp_path), {"garments": 3})
+
+
+def test_visual_surface_slots_reuse_observed_garment_targets_when_inventory_omits_them(tmp_path):
+    import studio_character_assist as service
+
+    response = {
+        "text": json.dumps(
+            {
+                "records": [
+                    {"collection": "garments", "slot": 1, "excerpt": "brown T-shirt on torso"},
+                    {"collection": "garments", "slot": 2, "excerpt": "blue jeans on lap"},
+                ]
+            }
+        ),
+        "truncated": False,
+    }
+    inventory = service._parse_inventory(
+        response, request(tmp_path), {"garments": 3, "surfaces": 3}
+    )
+    assert inventory["surfaces#1"] == "brown T-shirt on torso"
+    assert inventory["surfaces#2"] == "blue jeans on lap"
+    assert "surfaces#3" not in inventory
