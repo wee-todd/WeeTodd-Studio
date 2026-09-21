@@ -4,16 +4,19 @@ Structured Character Director 2026-09-20 (experimental): a dedicated movie-indep
 shared character-reference editor now use typed appearance fields, a deterministic thirteen-section
 prompt, forensic Qwen proposals, versioned style presets and separate portable documents. The local
 Krea 2 Turbo recipe requests a 1920×1088 four-panel row; Vision proposes actual panel crops for review,
-then exact 2× Lanczos inputs feed serial FLUX.2 klein 9B detail/BFS recipes and a 3840×2176 assembly.
+then serial FLUX.2 klein 9B refinement produces a 3840×2176 assembly. Separate head replacement
+runs BFS at native panel size before exact 2× Lanczos preparation for HighResolution9B detail.
 Reference-head masking retains RGBA and white-matted derivatives. Progress, previews, cancellation,
 content-hashed completed-panel reuse and explicit uncertain-submission retry are wired. Assembly
 provenance retains panel settings and reference hashes. Follow-up qualification on 2026-09-21:
 local Krea generation and the four-panel
 Klein/BFS/detail pass have completed with live previews and verified completed-panel reuse. Vision
 preserves separate foreground instances and combines body detections to handle unequal panel widths.
-New documents now default to separate eight-step BFS-only and HighResolution9B-only passes;
-saved recipe settings are preserved. Qwen character extraction includes bounded Vision head/scalp
-details and dedicated visible skin texture fields. Head consistency, surface realism and composition
+New documents now default to separate eight-step BFS-only and HighResolution9B-only passes,
+preferring an unambiguous installed 9B KV model; saved recipe settings are preserved. A complete
+8-bit KV run with native-size BFS before 2× detail took 600.5 seconds with 40 live preview revisions
+on an M3 Ultra / 256 GB. The close-up still invented top hair and exaggerated skin texture.
+Qwen character extraction includes bounded Vision head/scalp details and dedicated visible skin texture fields. Head consistency, surface realism and composition
 remain experimental; the earlier combined-pass runs do not establish general performance
 or peak-memory guarantees. See the
 [Character Director guide](studio/README.md#character-director) for current controls and limits.

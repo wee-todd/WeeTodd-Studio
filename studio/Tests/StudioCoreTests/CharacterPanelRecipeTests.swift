@@ -9,23 +9,23 @@ final class CharacterPanelRecipeTests: XCTestCase {
     settings.modelID = "klein9"; settings.detailLoRAID = "detail"; settings.headLoRAID = "head"
     settings.replaceFaces = true
     let combined = try CharacterPanelRecipe.makeDraft(role: .closeUp, definition: definition(), settings: settings,
-      profileID: "local", panelPath: "/panel-2x.png", headPath: "/head.png", width: 960, height: 2176,
+      profileID: "local", panelPath: "/panel-native.png", headPath: "/head.png", width: 512, height: 1088,
       documentID: UUID(), seed: 42)
     let head = try CharacterPanelRecipe.headOnlyDraft(from: combined)
     XCTAssertEqual(head.loras.map(\.modelID), ["head"])
-    XCTAssertEqual(head.moodboard.map(\.path), ["/panel-2x.png", "/head.png"])
+    XCTAssertEqual(head.moodboard.map(\.path), ["/panel-native.png", "/head.png"])
     XCTAssertEqual(head.steps, 8)
     XCTAssertNil(head.managedCharacterPromptIssue)
     XCTAssertTrue(head.prompt.hasPrefix("head_swap: replace the head with the reference head."))
     settings.replaceFaces = false
     let detail = try CharacterPanelRecipe.makeDraft(role: .closeUp, definition: definition(), settings: settings,
-      profileID: "local", panelPath: "/head-pass-output.png", headPath: nil, width: 960, height: 2176,
+      profileID: "local", panelPath: "/head-pass-output-2x.png", headPath: nil, width: 960, height: 2176,
       documentID: UUID(), seed: 1042, preservesInputHead: true)
     XCTAssertEqual(detail.loras.map(\.modelID), ["detail"])
-    XCTAssertEqual(detail.moodboard.map(\.path), ["/head-pass-output.png"])
+    XCTAssertEqual(detail.moodboard.map(\.path), ["/head-pass-output-2x.png"])
     XCTAssertEqual(detail.steps, 8)
-    XCTAssertEqual(detail.width, head.width)
-    XCTAssertEqual(detail.height, head.height)
+    XCTAssertEqual([head.width, head.height], [512, 1088])
+    XCTAssertEqual([detail.width, detail.height], [960, 2176])
     XCTAssertTrue(detail.characterPanel?.preservesInputHead == true)
     XCTAssertTrue(detail.prompt.hasPrefix("high quality."))
     XCTAssertFalse(detail.prompt.contains("head_swap:"))

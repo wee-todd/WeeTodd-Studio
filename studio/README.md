@@ -1960,10 +1960,11 @@ gutters on a bounded preview, then maps crops back into source pixels.
 It never silently substitutes equal quarters. Review actual
 crop boundaries and roles; uncertain detection supports manual crop creation/correction.
 
-Each approved panel is cropped, enlarged exactly **2× with Lanczos**, and white-padded to multiples
+For detail refinement, each approved panel is cropped, enlarged exactly **2× with Lanczos**, and white-padded to multiples
 of 64 for **FLUX.2 klein 9B** with **HighResolution9B** (also recognizing the spelling
 **HichResolution9B**) and `high quality` in its managed prompt.
-Panels render serially. The combined outputs are reassembled at **3840 × 2176**, removing transport
+Discovery prefers an unambiguous installed **9B KV** variant for new documents; explicit saved
+model selections are preserved. Panels render serially. The combined outputs are reassembled at **3840 × 2176**, removing transport
 padding while preserving the reviewed crop placement. Four equal-width crops would use 960 × 2176
 inputs; detected crops may have different widths.
 
@@ -1973,8 +1974,10 @@ head crop, mask, RGBA cutout and white-matted transport image. Ambiguous faces r
 head-swap prompt with `head_swap: replace the head with the reference head.` The target panel is reference
 1 and the head is reference 2. BFS may replace hair as well as the face. A combined head/detail
 pass remains available for comparison. New documents default to **BFS, then HighResolution9B**:
-only BFS runs in the first pass, then only HighResolution9B details that result, retaining its head
-and the same 2× dimensions without another upscale. Each FLUX pass defaults to **eight steps**.
+only BFS runs at the **original panel resolution**, padded to multiples of 64. Its output is cropped
+back to the original panel bounds, enlarged exactly **2× with Lanczos**, then padded for the
+**HighResolution9B-only** detail pass. BFS never receives the enlarged input in this separate recipe.
+Each FLUX pass defaults to **eight steps**.
 Existing saved recipe choices and step counts are preserved; select the separate recipe and eight
 steps per pass to compare an older document. The back-view instructions preserve rear orientation; output quality still needs review.
 Facial close-up refinement instructs the model to preserve the input head crop and omits full-body proportions and clothing
@@ -1995,8 +1998,11 @@ live previews, head masking, assembly and completed-panel reuse. One 8-bit, four
 for the initial sheet and 778 seconds for refinement; a sampled Draw Things process footprint during
 the largest panel was about 23 GB. These are observations from one Apple M3 Ultra with 256 GB, not
 general speed or peak-memory guarantees. Head consistency and composition still require visual
-review, and the optional two-pass mode has not been qualified. The installed model/LoRA combination
-must pass Draw Things preflight before rendering.
+review. A follow-up eight-step KV run on the same machine completed all eight separate head/detail
+passes in 600.5 seconds, with 40 live preview revisions. BFS used native panel dimensions before
+2× detail preparation. The front view retained a balding scalp, but the close-up still invented top
+hair and exaggerated skin texture; this qualifies execution, not general likeness or realism.
+The installed model/LoRA combination must pass Draw Things preflight before rendering.
 
 **Create reference…** remains available for other subject types in workflow and project review.
 It opens the existing Draw Things image workspace with editable character turnaround, portrait,

@@ -6,6 +6,32 @@ from PIL import Image
 from wee_todd_mlx.character_panel_media import prepare_panel
 
 
+def test_native_head_then_exact_2x_detail_discards_first_pass_padding(tmp_path):
+    source = tmp_path / "source.png"
+    image = Image.new("RGB", (1920, 1088), "navy")
+    image.putpixel((455, 0), (255, 0, 0))
+    image.save(source)
+    native = prepare_panel(source, (455, 0, 291, 1088), tmp_path / "head", scale=1)
+    assert native["master_dimensions"] == [291, 1088]
+    assert native["padded_dimensions"] == [320, 1088]
+    assert Image.open(native["master_path"]).getpixel((0, 0)) == (255, 0, 0)
+    swapped = Image.open(native["padded_path"])
+    swapped.paste("magenta", (291, 0, 320, 1088))
+    swapped.save(tmp_path / "swapped.png")
+    detail = prepare_panel(tmp_path / "swapped.png", (0, 0, 291, 1088), tmp_path / "detail")
+    assert detail["master_dimensions"] == [582, 2176]
+    assert detail["padded_dimensions"] == [640, 2176]
+    assert Image.open(detail["master_path"]).getpixel((581, 100)) == (0, 0, 128)
+
+
+@pytest.mark.parametrize("scale", [0, 3, 1.5, True, "1"])
+def test_prepare_panel_rejects_unsupported_scale(tmp_path, scale):
+    source = tmp_path / "source.png"
+    Image.new("RGB", (3, 2), "white").save(source)
+    with pytest.raises(ValueError):
+        prepare_panel(source, (0, 0, 3, 2), tmp_path / "out", scale=scale)
+
+
 def test_prepare_panel_exact_2x_then_white_pads_to_64(tmp_path: Path):
     source = tmp_path / "source.png"
     image = Image.new("RGB", (477, 1083), (250, 250, 250))

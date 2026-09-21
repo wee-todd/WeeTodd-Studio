@@ -165,7 +165,7 @@ public enum CharacterPanelRecipe {
       throw StudioError.invalid("Choose FLUX.2 klein 9B and its compatible HichResolution9B LoRA.")
     }
     guard width > 0, height > 0, width <= 4096, height <= 4096, width % 64 == 0, height % 64 == 0 else {
-      throw StudioError.invalid("Prepare the exact 2× panel with white padding to 64-pixel dimensions.")
+      throw StudioError.invalid("Prepare the panel at its pass resolution with white padding to 64-pixel dimensions.")
     }
     guard (0...Int(UInt32.max)).contains(seed), (1...100).contains(settings.steps),
       settings.guidance.isFinite, (0...30).contains(settings.guidance) else {

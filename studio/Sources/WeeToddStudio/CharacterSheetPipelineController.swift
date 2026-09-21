@@ -15,7 +15,7 @@ import StudioCore
       throw StudioError.invalid("Choose the installed compatible four-panel character LoRA.")
     }
     let refineName = models.first { $0.id == document.refinement.modelID }?.name.lowercased().filter { $0.isLetter || $0.isNumber } ?? ""
-    guard refineName.contains("klein"), refineName.contains("9b"), !refineName.contains("base"), !refineName.contains("kv") else {
+    guard refineName.contains("klein"), refineName.contains("9b"), !refineName.contains("base") else {
       throw StudioError.invalid("Choose FLUX.2 klein 9B for panel refinement.")
     }
     func adapterKey(_ item: (id: String, name: String)) -> String { (item.id + item.name).lowercased().filter { $0.isLetter || $0.isNumber } }
@@ -143,13 +143,17 @@ import StudioCore
     var assembly: [[String: Any]] = []
     var usedStageKeys: [String] = []
     for (index, panel) in detection.candidates.enumerated() {
-      try checkCancellation(); status = "Upscaling \(panel.role.label.lowercased()) · \(index + 1)/4"
+      try checkCancellation()
       let rect = panel.sourcePixelRect
+      var settings = document.refinement
+      let separated = settings.twoPass && settings.replaceFaces
+      status = separated ? "Preparing native-size \(panel.role.label.lowercased()) · \(index + 1)/4"
+        : "Upscaling \(panel.role.label.lowercased()) · \(index + 1)/4"
       let prepared = try await bridge.invoke("character-panel-prepare", runtime: store.runtime,
-        payload: ["source": source, "rect": ["x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height]],
+        payload: ["source": source, "rect": ["x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height],
+          "scale": separated ? 1 : 2],
         output: storage.directory(id: id).appendingPathComponent("Panels/\(panel.id.uuidString)"))
       guard let input = prepared["padded_path"] as? String, let dimensions = prepared["padded_dimensions"] as? [Int], dimensions.count == 2 else { throw StudioError.invalid("Panel preparation did not return valid dimensions.") }
-      var settings = document.refinement
       let key = "panel-\(panel.id.uuidString)"
       var draft = try CharacterPanelRecipe.makeDraft(role: panel.role, definition: document.definition, settings: settings,
         profileID: document.draft.profileID, panelPath: input, headPath: document.headReference?.whiteMattePath,
@@ -157,7 +161,7 @@ import StudioCore
       // Source/crop/ref/mode fingerprints distinguish same-path derivative replacements.
       let identity = try CharacterArtifactHash.value(["source": currentHash, "rect": try CharacterArtifactHash.value(rect),
         "head": settings.replaceFaces ? (try CharacterArtifactHash.file(document.headReference!.whiteMattePath)) : "",
-        "mode": settings.twoPass ? "two" : "one", "input": prepared["padded_sha256"] as? String ?? ""])
+        "mode": separated ? "native-head-then-2x-detail-v2" : "one", "input": prepared["padded_sha256"] as? String ?? ""])
       status = "Refining \(panel.role.label.lowercased()) · \(index + 1)/4"
       if settings.twoPass && settings.replaceFaces {
         // Head-first pass excludes the detail adapter, then runs the ordinary detail recipe.
@@ -168,9 +172,19 @@ import StudioCore
       var asset = try await generate(draft, stageKey: key + ":" + identity)
       if settings.twoPass && settings.replaceFaces {
         settings.replaceFaces = false
+        status = "Upscaling swapped \(panel.role.label.lowercased()) · \(index + 1)/4"
+        // Remove native transport padding before the one and only 2× enlargement.
+        let detailInput = try await bridge.invoke("character-panel-prepare", runtime: store.runtime,
+          payload: ["source": asset.path, "rect": ["x": 0, "y": 0, "width": rect.width, "height": rect.height], "scale": 2],
+          output: storage.directory(id: id).appendingPathComponent("Panels/\(panel.id.uuidString)/Detail Input"))
+        try checkCancellation()
+        guard let detailPath = detailInput["padded_path"] as? String,
+          let detailDimensions = detailInput["padded_dimensions"] as? [Int], detailDimensions.count == 2 else {
+          throw StudioError.invalid("Detail preparation did not return valid 2× dimensions.")
+        }
         draft = try CharacterPanelRecipe.makeDraft(role: panel.role, definition: document.definition, settings: settings,
-          profileID: document.draft.profileID, panelPath: asset.path, headPath: nil,
-          width: dimensions[0], height: dimensions[1], documentID: id, seed: settings.seed + index + 1000,
+          profileID: document.draft.profileID, panelPath: detailPath, headPath: nil,
+          width: detailDimensions[0], height: detailDimensions[1], documentID: id, seed: settings.seed + index + 1000,
           preservesInputHead: true)
         status = "Detailing \(panel.role.label.lowercased()) · pass 2/2 · \(index + 1)/4"
         usedStageKeys.append(key + ":detail:" + identity)

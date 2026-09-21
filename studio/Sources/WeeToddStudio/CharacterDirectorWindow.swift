@@ -247,7 +247,7 @@ struct CharacterDirectorWindow: View {
         Picker("Recipe", selection: Binding(get: { controller.document.refinement.twoPass }, set: { value in controller.edit { $0.refinement.twoPass = value } })) {
           Text("BFS, then HighResolution9B").tag(true); Text("Combined (comparison)").tag(false)
         }.pickerStyle(.segmented)
-        Text("Separate passes use only BFS first, then only HighResolution9B. Each pass uses the step count below; the detail pass keeps the same 2× dimensions.").font(.caption).foregroundStyle(.secondary)
+        Text("BFS runs at the original panel size. Its result is enlarged 2× with Lanczos, then refined with HighResolution9B only. Both passes use the step count below.").font(.caption).foregroundStyle(.secondary)
       }
       HStack {
         Stepper("Steps per pass \(controller.document.refinement.steps)", value: Binding(get: { controller.document.refinement.steps }, set: { value in controller.edit { $0.refinement.steps = value } }), in: 1...100)

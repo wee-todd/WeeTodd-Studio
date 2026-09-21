@@ -1545,7 +1545,9 @@ def main():
 
         if args.output is None:
             raise ValueError("Panel preparation requires an output directory")
-        result = prepare_panel(request["source"], request["rect"], args.output)
+        result = prepare_panel(
+            request["source"], request["rect"], args.output, scale=request.get("scale", 2)
+        )
     elif args.command == "character-reassemble":
         from wee_todd_mlx.character_panel_assembly import assemble_panels
 

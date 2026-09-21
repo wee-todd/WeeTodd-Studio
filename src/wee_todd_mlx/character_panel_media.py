@@ -26,9 +26,15 @@ def _rect(value: Mapping[str, int] | Sequence[int]) -> tuple[int, int, int, int]
 
 
 def prepare_panel(
-    source: str | Path, rect: Mapping[str, int] | Sequence[int], destination: str | Path
+    source: str | Path,
+    rect: Mapping[str, int] | Sequence[int],
+    destination: str | Path,
+    *,
+    scale: int = 2,
 ) -> dict:
-    """Crop orientation-normalized pixels, resize once at exact 2x, then white-pad."""
+    """Crop oriented pixels, optionally enlarge exactly 2x, then white-pad."""
+    if type(scale) is not int or scale not in (1, 2):
+        raise ValueError("Panel scale must be 1 for native head swap or 2 for detail")
     source_path = Path(source)
     destination_path = Path(destination)
     x, y, width, height = _rect(rect)
@@ -44,11 +50,13 @@ def prepare_panel(
         ):
             raise ValueError("crop rectangle is outside the orientation-normalized source")
         crop = image.crop((x, y, x + width, y + height))
-        master = crop.resize((width * 2, height * 2), Image.Resampling.LANCZOS)
+        master = (
+            crop if scale == 1 else crop.resize((width * 2, height * 2), Image.Resampling.LANCZOS)
+        )
 
     destination_path.mkdir(parents=True, exist_ok=True)
-    master_path = destination_path / "panel-2x.png"
-    padded_path = destination_path / "panel-2x-padded.png"
+    master_path = destination_path / f"panel-{scale}x.png"
+    padded_path = destination_path / f"panel-{scale}x-padded.png"
     master.save(master_path, format="PNG", optimize=False)
     padded_width = ((master.width + 63) // 64) * 64
     padded_height = ((master.height + 63) // 64) * 64
@@ -66,5 +74,7 @@ def prepare_panel(
         "source_sha256": _sha256(source_path),
         "master_sha256": _sha256(master_path),
         "padded_sha256": _sha256(padded_path),
-        "preprocessing_version": "pillow-lanczos-2x-white64-v1",
+        "preprocessing_version": "pillow-native-white64-v1"
+        if scale == 1
+        else "pillow-lanczos-2x-white64-v1",
     }

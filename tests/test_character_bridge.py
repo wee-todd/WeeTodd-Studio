@@ -2,15 +2,25 @@ import json
 import subprocess
 import sys
 
+import pytest
 from PIL import Image
 
 
-def test_bridge_prepares_detected_crop_without_a_movie(tmp_path):
+@pytest.mark.parametrize(
+    "scale,master,padded", [(1, [473, 1079], [512, 1088]), (2, [946, 2158], [960, 2176])]
+)
+def test_bridge_prepares_detected_crop_without_a_movie(tmp_path, scale, master, padded):
     source = tmp_path / "sheet.png"
     Image.new("RGB", (1920, 1088), "white").save(source)
     request = tmp_path / "request.json"
     request.write_text(
-        json.dumps({"source": str(source), "rect": {"x": 10, "y": 0, "width": 473, "height": 1079}})
+        json.dumps(
+            {
+                "source": str(source),
+                "rect": {"x": 10, "y": 0, "width": 473, "height": 1079},
+                "scale": scale,
+            }
+        )
     )
     run = subprocess.run(
         [
@@ -27,6 +37,6 @@ def test_bridge_prepares_detected_crop_without_a_movie(tmp_path):
     )
     assert run.returncode == 0, run.stdout + run.stderr
     result = json.loads(run.stdout.splitlines()[-1])["result"]
-    assert result["master_dimensions"] == [946, 2158]
-    assert result["padded_dimensions"] == [960, 2176]
-    assert Image.open(result["master_path"]).size == (946, 2158)
+    assert result["master_dimensions"] == master
+    assert result["padded_dimensions"] == padded
+    assert Image.open(result["master_path"]).size == tuple(master)

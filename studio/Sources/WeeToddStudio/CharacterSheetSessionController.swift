@@ -225,8 +225,10 @@ import StudioCore
     if document.draft.modelID.isEmpty { document.draft.modelID = unique(models, "krea2turbo") ?? "" }
     if document.draft.characterSheetLoRAID == nil { document.draft.characterSheetLoRAID = unique(loras(model: document.draft.modelID), "krea2characterdesign4viewv1") }
     if document.refinement.modelID.isEmpty {
-      let matches = models.filter { key($0.name + $0.id).contains("klein") && key($0.name + $0.id).contains("9b") && !key($0.name + $0.id).contains("base") && !key($0.name + $0.id).contains("kv") }
-      if matches.count == 1 { document.refinement.modelID = matches[0].id }
+      let matches = models.filter { key($0.name + $0.id).contains("klein") && key($0.name + $0.id).contains("9b") && !key($0.name + $0.id).contains("base") }
+      let kv = matches.filter { key($0.name + $0.id).contains("kv") }
+      let preferred = kv.isEmpty ? matches : kv
+      if preferred.count == 1 { document.refinement.modelID = preferred[0].id }
     }
     let options = loras(model: document.refinement.modelID)
     if document.refinement.detailLoRAID.isEmpty {

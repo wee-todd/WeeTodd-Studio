@@ -99,11 +99,17 @@ import XCTest
         let separated = controller.document.refinement.twoPass && controller.document.refinement.replaceFaces
         XCTAssertEqual(takes.count, separated ? 8 : 4)
         if separated {
-          for index in stride(from: 0, to: takes.count, by: 2) {
+          for index in stride(from: 0, to: takes.count - takes.count % 2, by: 2) {
             XCTAssertEqual(takes[index].loras.map(\.modelID), [controller.document.refinement.headLoRAID])
             XCTAssertEqual(takes[index + 1].loras.map(\.modelID), [controller.document.refinement.detailLoRAID])
             XCTAssertEqual(takes[index].steps, controller.document.refinement.steps)
             XCTAssertEqual(takes[index + 1].steps, controller.document.refinement.steps)
+            let crop = try XCTUnwrap(controller.document.panels?.candidates.first { $0.role == takes[index].context.role })
+            let rect = crop.sourcePixelRect
+            XCTAssertEqual([takes[index].width, takes[index].height],
+              [((rect.width + 63) / 64) * 64, ((rect.height + 63) / 64) * 64])
+            XCTAssertEqual([takes[index + 1].width, takes[index + 1].height],
+              [((rect.width * 2 + 63) / 64) * 64, ((rect.height * 2 + 63) / 64) * 64])
           }
         }
         if mode == "resume" { XCTAssertEqual(controller.document.pipeline.stages.count, before) }
