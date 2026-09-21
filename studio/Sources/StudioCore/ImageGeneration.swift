@@ -5,6 +5,7 @@ public struct ImageGeneration: Codable, Equatable {
   public var requestFingerprint: String
   public var modelID: String
   public var prompt: String
+  public var nativeRequest: [String: JSONValue]?
   public var profileID: String?
   public var negativePrompt: String?
   public var configuration: [String: JSONValue]?

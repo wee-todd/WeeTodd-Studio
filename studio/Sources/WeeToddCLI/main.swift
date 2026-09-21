@@ -23,7 +23,7 @@ do {
   }
   let url = URL(fileURLWithPath: arguments[index + 1])
   guard let job = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any],
-    ["weetodd-studio-job-v1", "weetodd-studio-job-v2", "weetodd-studio-job-v3"].contains(
+    ["weetodd-studio-job-v1", "weetodd-studio-job-v2", "weetodd-studio-job-v3", "weetodd-studio-job-v4"].contains(
       job["format"] as? String ?? ""),
     let runtime = job["runtime"] as? [String: Any], let python = runtime["pythonPath"] as? String,
     let root = runtime["root"] as? String,

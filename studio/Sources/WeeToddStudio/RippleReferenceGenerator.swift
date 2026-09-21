@@ -113,6 +113,11 @@ struct RippleReferenceGenerator: View {
     if let saved = imageWorkspaceLibrary.sessions[draft.storageKey], saved.draft.rippleReference == context {
       return saved.draft
     }
+    if imageWorkspaceLibrary.referenceProvider == .nativeMLX {
+      draft.selectProvider(.nativeMLX); draft.nativeImage = imageWorkspaceLibrary.referenceNativeImage ?? NativeImageSettings()
+      draft.width = width; draft.height = height
+      return draft
+    }
     if let preferred = imageWorkspaceLibrary.referenceConnectionID {
       draft.profileID = drawThingsConnections.contains { $0.id == preferred } ? preferred : ""
     } else if !drawThingsConnections.contains(where: { $0.id == draft.profileID }) {

@@ -1427,6 +1427,7 @@ def main():
             "assistant-model-download", "assistant-model-health",
             "assist-prompt",
             "workflow-catalog", "workflow-validate", "workflow-run", "workflow-review",
+            "image-preflight", "image-generate", "image-model-prepare",
             "dt-discover", "dt-estimate", "dt-generate-image",
             "dt-prepare-clip", "dt-generate-clip",
             "setup-catalog",
@@ -1456,7 +1457,20 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     request = json.loads(args.request.read_text())
-    if args.command.startswith("ripple-"):
+    if args.command.startswith("image-"):
+        from studio_image import dispatch
+        stopped = False
+        def stop_image(_number, _frame):
+            nonlocal stopped
+            stopped = True
+        for number in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(number, stop_image)
+        try:
+            result = dispatch(args.command, request, args.output,
+                              progress=lambda event: emit(**event), cancelled=lambda: stopped)
+        except InterruptedError as exc:
+            raise KeyboardInterrupt() from exc
+    elif args.command.startswith("ripple-"):
         from studio_ripple import dispatch
 
         stopped = False
@@ -1617,7 +1631,18 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal.default_int_handler)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
-        main()
+        from contextlib import nullcontext
+
+        from wee_todd_mlx.inference_lease import InferenceLease
+        weighted = {"voice-generate", "voice-dialogue", "music-generate",
+                    "music-plan", "music-resynthesize", "music-decode", "music-analyze",
+                    "music-reference-analyze", "ripple-generate"}
+        lease = (
+            InferenceLease(progress=lambda event: emit(**event))
+            if len(sys.argv) > 1 and sys.argv[1] in weighted else nullcontext()
+        )
+        with lease:
+            main()
     except KeyboardInterrupt:
         emit(status="cancelled")
         sys.exit(130)

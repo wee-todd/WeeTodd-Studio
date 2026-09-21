@@ -25,7 +25,20 @@ class SubmissionUncertain(RuntimeError):
         )
 
 
-def invoke_helper(
+
+def invoke_helper(command, payload, *, helper, cancelled, timeout=3600):
+    # Only the text operation loads model weights in the app-owned helper.
+    # Remote generation and weight-free discovery keep their existing behavior.
+    from contextlib import nullcontext
+
+    from wee_todd_mlx.inference_lease import InferenceLease
+    lease = InferenceLease(cancel=cancelled) if command == "text" else nullcontext()
+    with lease:
+        yield from _invoke_helper(
+            command, payload, helper=helper, cancelled=cancelled, timeout=timeout
+        )
+
+def _invoke_helper(
     command: str,
     payload: dict,
     *,

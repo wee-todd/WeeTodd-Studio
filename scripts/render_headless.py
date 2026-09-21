@@ -740,6 +740,15 @@ def render_ltx(recipe, target, *, checkpoint_directory=None):
             audio_interval_dir.cleanup()
 
 
+
+def execute_native_render(recipe, output, *, checkpoint_directory=None):
+    from wee_todd_mlx.inference_lease import InferenceLease
+    from wee_todd_mlx.progress import render_progress
+    with InferenceLease(progress=lambda event: render_progress("waiting", event["message"])):
+        if recipe["engine"] == "h3":
+            return render_h3(recipe, output)
+        return render_ltx(recipe, output, checkpoint_directory=checkpoint_directory)
+
 def main():
     if "--job" in sys.argv[1:]:
         from studio_job import cli as run_studio_job
@@ -806,11 +815,8 @@ def main():
             )
             print(json.dumps({"status": record["status"], "output": str(output)}), flush=True)
             return
-        if recipe["engine"] == "h3":
-            record.update(render_h3(recipe, output / "render.mp4"))
-        else:
-            record.update(render_ltx(recipe, output / "render.mp4",
-                                     checkpoint_directory=args.checkpoint_directory))
+        record.update(execute_native_render(recipe, output / "render.mp4",
+                                            checkpoint_directory=args.checkpoint_directory))
         record["seconds"] = time.perf_counter() - started
         if any(record["runtime_loaded"]):
             raise RuntimeError("A weighted runtime was not released")

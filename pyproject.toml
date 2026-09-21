@@ -45,6 +45,7 @@ packages = [
   "src/yue2_mlx",
   "src/fish_speech_mlx",
   "src/qwen3_tts_mlx",
+  "src/qwen_image21_mlx",
   "src/mlx_preprocessors",
   "src/wee_todd_mlx",
   "src/wee_todd_remote",
@@ -54,7 +55,7 @@ packages = [
 allow-direct-references = true
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "scripts"]
 testpaths = ["tests"]
 
 [tool.ruff]

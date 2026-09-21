@@ -14,6 +14,14 @@ extension StudioStore {
        saved.draft.referenceSheet?.name == context.name {
       return saved.draft
     }
+    if imageWorkspaceLibrary.referenceProvider == .nativeMLX {
+      draft.selectProvider(.nativeMLX); draft.nativeImage = imageWorkspaceLibrary.referenceNativeImage ?? NativeImageSettings()
+      return draft
+    }
+    if imageWorkspaceLibrary.referenceProvider == nil, previousDraft?.executionProvider == .nativeMLX {
+      draft.selectProvider(.nativeMLX); draft.nativeImage = previousDraft?.nativeImage
+      return draft
+    }
     let ids = Set(drawThingsConnections.map(\.id))
     if let preferred = imageWorkspaceLibrary.referenceConnectionID {
       // A removed explicit preference must not silently select a different service.
@@ -52,7 +60,13 @@ extension StudioStore {
   }
   func persistImageWorkspace() {
     guard !restoringImageWorkspace else { return }
-    if let draft = imageDraft { imageWorkspaceLibrary.record(draft, preview: imagePreviewPath) }
+    if let draft = imageDraft {
+      imageWorkspaceLibrary.record(draft, preview: imagePreviewPath)
+      if draft.referenceSheet != nil || draft.rippleReference != nil {
+        imageWorkspaceLibrary.referenceProvider = draft.executionProvider
+        if draft.executionProvider == .nativeMLX { imageWorkspaceLibrary.referenceNativeImage = draft.nativeImage }
+      }
+    }
     else { imageWorkspaceLibrary.activeKey = nil }
     do { try imageWorkspaceLibrary.write(to: dataDirectory.appendingPathComponent("image-workspaces.json")) }
     catch { notice = "Image draft could not be saved: \(error.localizedDescription)" }
@@ -94,8 +108,8 @@ extension StudioStore {
   func loadImageInputs(_ urls: [URL], canvas: Bool) {
     guard imageDraft != nil else { return }
     guard !canvas || urls.count == 1 else { error = "Drop one image onto the canvas."; return }
-    guard canvas || (imageDraft?.moodboard.count ?? 0) + urls.count <= 8 else {
-      error = "Use up to eight mood-board references in this initial version."; return
+    guard canvas || (imageDraft?.moodboard.count ?? 0) + urls.count <= 100 else {
+      error = "The mood board can store 100 images. Disable images to meet the selected model’s active input limit."; return
     }
     for url in urls {
       guard url.isFileURL, let source = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(source) > 0 else {
@@ -110,7 +124,8 @@ extension StudioStore {
   func dropImageInputs(_ providers: [NSItemProvider], canvas: Bool) -> Bool {
     guard !providers.isEmpty, !canvas || providers.count == 1 else { return false }
     // Process a multi-file drop in provider order, not asynchronous completion order.
-    let destination = imageDraft?.destination
+    let captured = imageDraft
+    let session = documentSessionID
     Task { @MainActor in
       var urls: [URL] = []
       for provider in providers {
@@ -133,7 +148,7 @@ extension StudioStore {
         guard let url else { error = "Drop image files or image assets here."; return }
         urls.append(url)
       }
-      guard imageDraft?.destination == destination else { return }
+      guard imageDraft == captured, documentSessionID == session else { return }
       loadImageInputs(urls, canvas: canvas)
     }
     return true

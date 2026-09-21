@@ -160,7 +160,8 @@ def test_secret_scan_covers_entire_v3_candidate(tmp_path):
 
 def test_v1_v2_formats_remain_allowed():
     assert studio_job.SUPPORTED_JOB_FORMATS == {
-        "weetodd-studio-job-v1", "weetodd-studio-job-v2", "weetodd-studio-job-v3"
+        "weetodd-studio-job-v1", "weetodd-studio-job-v2",
+        "weetodd-studio-job-v3", "weetodd-studio-job-v4"
     }
 
 

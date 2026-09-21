@@ -13,6 +13,7 @@ The standalone app runs without ComfyUI.
 [Create a music video](#create-a-music-video) ·
 [Connect shots](#connect-shots-with-continuity) ·
 [Draw Things setup](studio/README.md#draw-things--experimental) ·
+[Local Qwen images](studio/README.md#native-qwen-image-21--experimental) ·
 [Model reuse](#reuse-models-you-already-have) · [ComfyUI nodes](#comfyui-nodes) ·
 [Implementation status](STATUS.md)
 
@@ -59,7 +60,8 @@ Studio is the interface in each case. The engine choice determines where inferen
 | Route | Best starting point | What to know |
 | --- | --- | --- |
 | **Draw Things inference** | Fast image/video generation with models and tasks supported by your connection. | Studio sends jobs through its Draw Things adapter to a self-hosted gRPC server or supported Cloud API route. Model availability and controls come from that endpoint and the installed helper. |
-| **Native MLX inference** | LTX 2.5, advanced conditioning and other native features beyond the Draw Things integration. | Choose **WeeTodd (local)**, then H3, LTX 2.3 or LTX 2.5 and its task. Compatible components are selected automatically and load in stages. Custom recipes remain available under Advanced generation. |
+| **Native MLX video inference** | LTX 2.5, advanced conditioning and other native video features beyond the Draw Things integration. | Choose **WeeTodd (local)**, then H3, LTX 2.3 or LTX 2.5 and its task. Compatible components are selected automatically and load in stages. Custom recipes remain available under Advanced generation. |
+| **Native MLX image inference** | Qwen-Image-2.1 generation and editing with up to ten ordered image inputs. | In **Generate Image…**, choose **Local MLX** and prepare the 8-bit model. Studio runs inference, reports progress and live previews, and unloads model stages. Experimental; the checkpoint has a noncommercial research license. |
 | **Native inference with compatible Draw Things weights** | Use an existing supported model installation without another large checkpoint copy. | Selected H3 components can be read directly from Draw Things files. This runs WeeTodd's native sampler, not Draw Things inference, and has its own task and performance limits. |
 
 ComfyUI and headless jobs use these same shared adapters where supported. Selecting a different
@@ -71,6 +73,14 @@ on the stereo Music track or use a sample-accurate excerpt to drive a supported 
 Advanced controls include score composition, separate token samplers, acoustic steps, guidance,
 seeds and saved-stage reuse. No external YuE runtime or ComfyUI installation is required.
 See [music generation](studio/README.md#native-yue2-music) for checkpoint and license limits.
+
+**Native Qwen-Image-2.1** adds local image generation and editing to the existing image workspace.
+Choose **Local MLX**, prepare the 8-bit model, and use up to ten ordered image inputs (including
+the canvas), with live previews and stage/step progress. Studio owns inference and staged model
+unloading. **Lower memory** trades speed for reduced attention memory, and reference resolution
+can be reduced explicitly. Native LoRAs and masks are not yet supported. This experimental
+checkpoint uses a noncommercial research license; see
+[setup, controls and qualification](studio/README.md#native-qwen-image-21--experimental).
 
 ### Use image, movie and audio references
 
@@ -158,7 +168,7 @@ tasks, auxiliary files and validation limits.
 
 Open **LTX 2.5 Ripple → Open Ripple Director…** on an existing video clip. Scrub the
 large source preview, add a reference at the playhead, and restyle the captured frame in
-Draw Things or import an edited image. The first frame is required; add up to eight
+Draw Things or native Qwen, or import an edited image. The first frame is required; add up to eight
 additional references at distinct frames. Timeline thumbnails reopen their editors,
 and their context menus delete additional references.
 

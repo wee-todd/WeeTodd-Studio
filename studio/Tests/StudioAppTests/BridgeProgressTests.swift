@@ -5,6 +5,7 @@ import StudioCore
 
 final class BridgeProgressTests: XCTestCase {
   @MainActor func testPreviewIsLiveRequestScopedAndClearedOnSuccessFailureAndCancel() async throws {
+    for command in ["dt-generate-image", "image-generate"] {
     for mode in ["success", "failure", "cancel"] {
       let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       defer { try? FileManager.default.removeItem(at: root) }
@@ -30,7 +31,7 @@ final class BridgeProgressTests: XCTestCase {
       let delivered = expectation(description: "Preview before completion: \(mode)")
       let observation = bridge.$message.sink { if $0 == "Foreign path" { delivered.fulfill() } }
       defer { observation.cancel() }
-      let task = Task { try await bridge.invoke("dt-generate-image", runtime: settings, payload: [:], output: root) }
+      let task = Task { try await bridge.invoke(command, runtime: settings, payload: [:], output: root) }
       await fulfillment(of: [delivered], timeout: 5)
       XCTAssertTrue(bridge.busy)
       XCTAssertEqual(bridge.livePreview?.previewRevision, 1)
@@ -41,6 +42,7 @@ final class BridgeProgressTests: XCTestCase {
       catch { XCTAssertNotEqual(mode, "success") }
       XCTAssertNil(bridge.livePreview)
       XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("live-preview.png").path))
+    }
     }
   }
 

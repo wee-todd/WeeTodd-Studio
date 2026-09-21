@@ -68,9 +68,9 @@ public struct PromptAssistantContext: Identifiable {
     self.projectID = projectID; clipID = nil; imageDestination = image.destination
     original = image.prompt; workflow = "Image: \(image.modelID)."
     var references = [PromptAssistantImage]()
-    if let canvas = image.canvas, canvas.enabled { references.append(PromptAssistantImage(path: canvas.path, label: "Canvas")) }
-    for (index, reference) in image.moodboard.enumerated() where reference.enabled && reference.strength > 0 {
-      references.append(PromptAssistantImage(path: reference.path, label: "Mood-board reference \(index + 1)"))
+    for reference in image.activeImageInputs {
+      references.append(PromptAssistantImage(path: reference.input.path,
+        label: image.executionProvider == .nativeMLX ? "<image\(reference.index)>" : "\(reference.role) · \(reference.index)"))
     }
     images = references
   }

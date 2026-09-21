@@ -25,6 +25,17 @@ them on reopening, validates imported jobs before replacing the session, and ret
 outputs after cancellation or failure. **Set up assistant…** can download the pinned Qwen3.5 4B
 checkpoint independently of the Draw Things app; see [setup](../../studio/README.md#local-qwen35-prompt-assistant).
 
+## Native image generation boundary
+
+The image workspace can execute Qwen-Image-2.1 through the app-owned MLX renderer. Image exports
+use `weetodd-studio-job-v4` with `nativeImageJobs`; remote-only v1–v3 jobs retain their existing
+contracts. These are render jobs, distinct from this guide's planning definitions. Native image
+jobs capture an ordered set of up to ten input files and validate their hashes, model manifest and
+memory before inference. Native outputs can supply downstream remote image inputs; dynamic input
+bindings into a native image job are not yet supported. Local planning, native video/audio and
+native image execution share weighted-job admission so they cannot load competing models at once.
+See [native image controls and licensing](../../studio/README.md#native-qwen-image-21--experimental).
+
 ## Try the examples
 
 Use the project's configured Python environment, with project dependencies installed:

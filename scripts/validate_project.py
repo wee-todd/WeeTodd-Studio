@@ -76,6 +76,7 @@ def build_checks(project: Path, profiles: list[str], python: str) -> list[list[s
         lint_paths.update({"scripts/studio_bridge.py", "scripts/studio_references.py",
                            "scripts/studio_lora.py", "scripts/studio_music.py",
                            "scripts/studio_voice.py", "scripts/studio_audio.py",
+                           "scripts/studio_image.py", "scripts/benchmark_qwen_image21.py",
                            "scripts/studio_dialogue.py", "scripts/studio_ripple.py",
                            "scripts/studio_production.py",
                            "scripts/build_studio_app.py",

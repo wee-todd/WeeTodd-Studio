@@ -22,7 +22,7 @@ struct ImageGenerationEditor: View {
   var draft: DrawThingsImageDraft? { store.imageDraft }
   var livePreview: BridgeProgressEvent? { store.bridge.busy ? store.bridge.livePreview : nil }
   var connection: DrawThingsConnection? {
-    store.drawThingsConnections.first { $0.id == draft?.profileID }
+    isNative ? nil : store.drawThingsConnections.first { $0.id == draft?.profileID }
   }
   func binding<T>(_ key: WritableKeyPath<DrawThingsImageDraft, T>, fallback: T) -> Binding<T> {
     Binding(get: { store.imageDraft?[keyPath: key] ?? fallback }, set: { value in
@@ -45,9 +45,9 @@ struct ImageGenerationEditor: View {
         Button("Prompt Assistant…") {
           if let draft { assistant = PromptAssistantContext(projectID: store.project.id, image: draft, documentSessionID: store.documentSessionID) }
         }.disabled(store.bridge.busy)
-        Button("Import Config…") { store.configImportClipID = nil; configOpen = true }
+        Button("Import Config…") { store.configImportClipID = nil; configOpen = true }.disabled(isNative)
         Link("Draw Things presets", destination: DrawThingsConfigImport.presetsURL)
-        Button("Export Headless Job…") { store.exportDrawThingsImageJob() }.disabled(store.bridge.busy || draft?.modelID.isEmpty != false)
+        Button("Export Headless Job…") { store.exportDrawThingsImageJob() }.disabled(store.bridge.busy || store.preparingImageRequest || draft?.modelID.isEmpty != false)
         }
       }.padding(16)
       Divider()
@@ -112,9 +112,9 @@ struct ImageGenerationEditor: View {
           HStack {
             if draft?.canvas != nil {
               Toggle("Use canvas", isOn: Binding(get: { draft?.canvas?.enabled ?? false }, set: { store.imageDraft?.canvas?.enabled = $0; store.imageEstimate = nil }))
-              Picker("Placement", selection: Binding(get: { draft?.canvas?.fit ?? "fit" }, set: { store.imageDraft?.canvas?.fit = $0; store.imageEstimate = nil })) {
+              if !isNative { Picker("Placement", selection: Binding(get: { draft?.canvas?.fit ?? "fit" }, set: { store.imageDraft?.canvas?.fit = $0; store.imageEstimate = nil })) {
                 Text("Fit · preserve image").tag("fit"); Text("Fill · crop edges").tag("fill")
-              }.frame(maxWidth: 190)
+              }.frame(maxWidth: 190) }
               Button("Clear") { store.imageDraft?.canvas = nil; store.imageEstimate = nil }
             }
             Spacer()
@@ -137,7 +137,7 @@ struct ImageGenerationEditor: View {
       Divider()
       HStack {
         if store.bridge.busy {
-          ProgressView().controlSize(.small)
+          ProgressView(value: store.bridge.fraction).frame(width: 90)
           Text(store.bridge.message).font(.caption)
           Button("Cancel") { store.bridge.cancel() }
         } else { Text("Ready · saves to \(draft?.destination.scope.rawValue ?? "project") assets").font(.caption).foregroundStyle(.secondary) }
@@ -147,9 +147,9 @@ struct ImageGenerationEditor: View {
             if let asset = usableReference { onUseReference(asset) }
           }.disabled(store.bridge.busy || usableReference == nil)
         }
-        Button("Check Settings & CU") { Task { await store.prepareImageGeneration() } }.disabled(store.bridge.busy || draft?.modelID.isEmpty != false)
+        Button(isNative ? "Check Settings" : "Check Settings & CU") { Task { await store.prepareImageGeneration() } }.disabled(store.bridge.busy || store.preparingImageRequest || draft?.modelID.isEmpty != false)
         Button("Generate Image") { Task { await store.generateImageAsset() } }.buttonStyle(.borderedProminent)
-          .disabled(store.bridge.busy || store.imageEstimate?["eligibility"] as? String != "allowed")
+          .disabled(store.bridge.busy || store.preparingImageRequest || store.imageEstimate?["eligibility"] as? String != "allowed")
       }.padding(16)
     }.background(Theme.background).frame(maxWidth: .infinity, maxHeight: .infinity)
       .sheet(item: $assistant) { PromptAssistantView(context: $0).environmentObject(store) }
@@ -174,6 +174,8 @@ struct ImageGenerationEditor: View {
   }
   var settings: some View {
     Form {
+      backendPicker
+      if isNative { nativeSettings } else {
       Section("Draw Things") {
         Picker("Connection", selection: Binding(get: { draft?.profileID ?? "" }, set: { id in
           store.selectImageConnection(id)
@@ -222,13 +224,14 @@ struct ImageGenerationEditor: View {
             .font(.caption).foregroundStyle(.orange)
         }
       }
+      }
       Section("Generation") {
         TextField("Width", value: binding(\.width, fallback: 512), format: .number.grouping(.never))
         TextField("Height", value: binding(\.height, fallback: 512), format: .number.grouping(.never))
-        Text("Dimensions: multiples of 64").font(.caption2).foregroundStyle(.secondary)
+        Text(isNative ? "Dimensions: multiples of 32" : "Dimensions: multiples of 64").font(.caption2).foregroundStyle(.secondary)
         TextField("Steps", value: binding(\.steps, fallback: 4), format: .number.grouping(.never))
-        TextField("CFG", value: binding(\.guidance, fallback: 1), format: .number)
-        if draft?.canvas?.enabled == true {
+        TextField("CFG", value: binding(\.guidance, fallback: 1), format: .number).disabled(isNative)
+        if !isNative, draft?.canvas?.enabled == true {
           Text("Generation strength · \(Int((draft?.strength ?? 1) * 100))%")
           Slider(value: binding(\.strength, fallback: 1), in: 0...1)
           Text("Higher values allow more regeneration. Editing models also use the canvas as a reference.").font(.caption2).foregroundStyle(.secondary)
@@ -244,6 +247,7 @@ struct ImageGenerationEditor: View {
           Text("The same seed and settings reproduce the same image. Enter −1 or choose Random each generation for variations.").font(.caption2).foregroundStyle(.secondary)
           Button("New fixed seed") { store.imageDraft?.seed = Int.random(in: 0...Int(UInt32.max)); store.imageEstimate = nil }
         }
+        if isNative { Text("Euler · automatic shift").font(.caption) } else {
         Picker("Sampler", selection: binding(\.sampler, fallback: nil)) {
           Text("Server default").tag(nil as Int?)
           ForEach(Array(Self.samplers.enumerated()), id: \.offset) { index, name in Text(name).tag(Optional(index)) }
@@ -251,14 +255,16 @@ struct ImageGenerationEditor: View {
         Toggle("Override Shift", isOn: Binding(get: { draft?.shift != nil }, set: { store.imageDraft?.shift = $0 ? 1 : nil; store.imageEstimate = nil }))
         if draft?.shift != nil { TextField("Shift", value: Binding(get: { draft?.shift ?? 1 }, set: { store.imageDraft?.shift = $0; store.imageEstimate = nil }), format: .number) }
         DisclosureGroup("Negative prompt") { TextField("Negative prompt", text: binding(\.negativePrompt, fallback: ""), axis: .vertical) }
+        }
       }
-      Section("LoRAs & Groups") { loraControls }
+      if !isNative { Section("LoRAs & Groups") { loraControls } }
       Section("Preflight") {
         if let estimate = store.imageEstimate {
-          Text("Estimated CU: \(number(estimate["estimateCU"]))")
-          Text(estimate["limitMode"] as? String == "notApplicable" ? "Self-hosted · no cloud CU limit" : "CU eligibility checked for this request").font(.caption)
-          ForEach(Array((estimate["issues"] as? [[String: Any]] ?? []).enumerated()), id: \.offset) { _, issue in Text(issue["message"] as? String ?? "Connection needs attention").font(.caption) }
-        } else { Text("Check Settings & CU after changing inputs or settings.").font(.caption).foregroundStyle(.secondary) }
+          if !isNative { Text("Estimated CU: \(number(estimate["estimateCU"]))")
+          Text(estimate["limitMode"] as? String == "notApplicable" ? "Self-hosted · no cloud CU limit" : "CU eligibility checked for this request").font(.caption) }
+          if isNative, let memory = estimate["memorySummary"] as? String { Text(memory).font(.caption) }
+          ForEach(Array(store.imagePreflightIssues.enumerated()), id: \.offset) { _, message in Text(message).font(.caption) }
+        } else { Text(isNative ? "Check settings after changing inputs or settings." : "Check Settings & CU after changing inputs or settings.").font(.caption).foregroundStyle(.secondary) }
       }
     }.formStyle(.grouped)
   }
@@ -266,26 +272,34 @@ struct ImageGenerationEditor: View {
     VStack(alignment: .leading, spacing: 12) {
       HStack { Text("MOOD BOARD").font(.caption.bold()); Spacer(); Button { store.chooseImageInputs(canvas: false) } label: { Image(systemName: "plus") } }
       assetsMenu(canvas: false)
-      Text("Ordered references · up to 8").font(.caption2).foregroundStyle(.secondary)
+      Text(isNative ? "\(draft?.activeImageInputs.count ?? 0) / 10 active images including canvas" : "Ordered references · up to 8 active").font(.caption2).foregroundStyle(.secondary)
+      if let issue = draft?.imageInputIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
+      if isNative { Text("Order defines <image1> through <image10>. Review numbered prompts after changing inputs.").font(.caption2) }
       ScrollView {
-        VStack(spacing: 14) {
+        LazyVStack(spacing: 14) {
           ForEach(Array((draft?.moodboard ?? []).enumerated()), id: \.element.id) { index, item in
             VStack(spacing: 6) {
-              PreviewableImage(path: item.path, title: "Mood board · Reference \(index + 1)").frame(height: 115).background(.black.opacity(0.15)).clipped()
+              CachedImageThumbnail(path: item.path, maximumPixelSize: 512).frame(height: 115).background(.black.opacity(0.15)).clipped()
               HStack {
-                Toggle("Reference \(index + 1)", isOn: referenceBinding(item.id, \.enabled, item.enabled))
+                Toggle(referenceLabel(item), isOn: Binding(get: { item.enabled && (!isNative || item.strength > 0) }, set: { enabled in
+                  guard let index = store.imageDraft?.moodboard.firstIndex(where: { $0.id == item.id }) else { return }
+                  store.imageDraft?.moodboard[index].enabled = enabled
+                  if isNative && enabled && item.strength == 0 { store.imageDraft?.moodboard[index].strength = 1 }
+                  store.imageEstimate = nil
+                }))
                 Spacer()
                 Button { store.imageDraft?.moodboard.removeAll { $0.id == item.id }; store.imageEstimate = nil } label: { Image(systemName: "xmark") }
               }
               Text(URL(fileURLWithPath: item.path).lastPathComponent).font(.caption2).lineLimit(1)
+              Button("Inspect…") { inspection = ImagePreviewSelection(path: item.path, title: referenceLabel(item)) }
               Button("Replace…") { store.replaceImageReference(item.id) }
               HStack {
-                Text("Strength \(Int(item.strength * 100))%")
+                if !isNative { Text("Strength \(Int(item.strength * 100))%") }
                 Spacer()
                 Button { moveReference(index, -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0)
                 Button { moveReference(index, 1) } label: { Image(systemName: "arrow.down") }.disabled(index == (draft?.moodboard.count ?? 0) - 1)
               }
-              Slider(value: referenceBinding(item.id, \.strength, item.strength), in: 0...1)
+              if !isNative { Slider(value: referenceBinding(item.id, \.strength, item.strength), in: 0...1) }
             }.font(.caption).padding(9).background(Theme.raised, in: RoundedRectangle(cornerRadius: 8)).opacity(item.enabled ? 1 : 0.5)
               .draggable("mood:" + item.id.uuidString)
               .onDrop(of: [UTType.text.identifier], isTargeted: nil) { providers in
@@ -307,7 +321,7 @@ struct ImageGenerationEditor: View {
           if draft?.moodboard.isEmpty != false { Text("Drop reference images here").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 140) }
         }
       }.onDrop(of: [UTType.fileURL.identifier, UTType.text.identifier], isTargeted: nil) { store.dropImageInputs($0, canvas: false) }
-      Text("FLUX.2/Klein treats positive reference weights as enabled images. Weight is sent unchanged, but may not scale influence. 0% omits the reference.").font(.caption2).foregroundStyle(.secondary)
+      if !isNative { Text("FLUX.2/Klein treats positive reference weights as enabled images. Weight is sent unchanged, but may not scale influence. 0% omits the reference.").font(.caption2).foregroundStyle(.secondary) }
     }.padding(14)
   }
   func referenceBinding<T>(_ id: UUID, _ key: WritableKeyPath<ImageWorkspaceInput, T>, _ fallback: T) -> Binding<T> {

@@ -25,6 +25,9 @@ public struct ImageWorkspaceInput: Codable, Equatable, Identifiable {
 }
 
 public struct DrawThingsImageDraft: Codable, Equatable {
+  public var provider: ImageExecutionProvider?
+  public var nativeImage: NativeImageSettings?
+  public var providerSettings: [String: ImageProviderSettings]?
   public var destination: ImageAssetDestination
   public var name = "Generated image"
   public var profileID = ""
@@ -74,7 +77,8 @@ public struct DrawThingsImageDraft: Codable, Equatable {
     return value
   }
   public func request(id: String) throws -> [String: Any] {
-    guard moodboard.count <= 8, strength.isFinite, (0...1).contains(strength) else {
+    guard executionProvider == .drawThings else { throw StudioError.invalid("Use the native image request for Local MLX.") }
+    guard imageInputIssue == nil, strength.isFinite, (0...1).contains(strength) else {
       throw StudioError.invalid("Use up to eight mood-board images and a generation strength from 0–100%.")
     }
     var inputs: [[String: Any]] = []

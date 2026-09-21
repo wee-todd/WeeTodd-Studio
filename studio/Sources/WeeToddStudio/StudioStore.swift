@@ -105,6 +105,17 @@ struct BridgeResponseBuffer {
     cancellationRequested = true
     message = "Cancelling and releasing render resources…"
     process?.interrupt()
+    let cancelledProcess = process
+    DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+      guard let self, let cancelledProcess, self.process === cancelledProcess,
+        self.cancellationRequested, cancelledProcess.isRunning else { return }
+      cancelledProcess.terminate()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+        guard let self, self.process === cancelledProcess, self.cancellationRequested,
+          cancelledProcess.isRunning else { return }
+        kill(cancelledProcess.processIdentifier, SIGKILL)
+      }
+    }
   }
   func invoke(
     _ command: String, runtime: RuntimeSettings, payload: [String: Any], output: URL? = nil
@@ -130,7 +141,8 @@ struct BridgeResponseBuffer {
     fraction = 0
     log = ""
     livePreview = nil
-    let previewFile = command == "dt-generate-image" ? output?.appendingPathComponent("live-preview.png") : nil
+    let previewFile = ["dt-generate-image", "image-generate"].contains(command)
+      ? output?.appendingPathComponent("live-preview.png") : nil
     defer {
       busy = false; process = nil; livePreview = nil
       if let previewFile { try? FileManager.default.removeItem(at: previewFile) }
@@ -195,6 +207,7 @@ struct BridgeResponseBuffer {
           let text = String(decoding: part, as: UTF8.self)
           let events = progressStream.append(part)
           DispatchQueue.main.async {
+            guard self.process === task else { return }
             self.log = String((self.log + text).suffix(30000))
             self.lastOutputAt = Date()
             for event in events {
@@ -354,10 +367,11 @@ extension Encodable {
   let bridge: Bridge
   let descriptionBridge: Bridge
   let dataDirectory: URL
+  @Published var preparingImageRequest = false
   @Published private(set) var activeNativeRequest: UUID?
   private(set) var documentSessionID = UUID()
   @Published var preparingDrawThings = false
-  var operationBusy: Bool { bridge.busy || activeNativeRequest != nil || preparingDrawThings || acceptingContinuousScene || connectingContinuousScene }
+  var operationBusy: Bool { bridge.busy || preparingImageRequest || activeNativeRequest != nil || preparingDrawThings || acceptingContinuousScene || connectingContinuousScene }
   var preparedFingerprint: String?
   var motionPromptSession: MotionPromptEditorSession?
   private var undoStates: [StudioProject] = []

@@ -1596,12 +1596,72 @@ in 1.07 seconds. The endpoint comparison recognized the dragon appearing but inf
 incorrect pose/setting details; review the proposed text before applying it. Broad text quality,
 small-detail/OCR accuracy and the 9B vision path remain unqualified.
 
+### Native Qwen-Image-2.1 — experimental
+
+Open **Generate Image…** from an asset store and set **Run with → Local MLX**. The same image
+workspace supplies prompt, canvas, mood board, dimensions, steps, seed, result reuse and export.
+Use **Download & prepare 8-bit model…** to select a model-library folder, or **Choose prepared
+model…** to open an existing manifest. Setup pins and verifies the official
+[Qwen/Qwen-Image-2.1 checkpoint](https://huggingface.co/Qwen/Qwen-Image-2.1), preserves its vision
+encoder, converts the transformer/text encoder to 8-bit and calibrates the lightweight preview.
+Source downloads occupy about 33 GB in addition to the prepared weights. Interrupted setup can
+resume in the same folder. No Draw Things connection, cloud account or ComfyUI is required;
+generation uses the app-managed Python/MLX renderer after setup.
+
+The [Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE) permits
+noncommercial research use. Commercial use requires a separate license from Qwen. Model terms
+are separate from WeeTodd's source license.
+
+**References:** up to ten active inputs total. An enabled canvas is image1; enabled mood-board
+cards follow in their displayed order. Without a canvas, the first enabled card is image1.
+Refer to inputs as `<image1>` through `<image10>` in the prompt. Disabled and zero-strength cards
+remain saved but are omitted. Native cards use enable/disable, not fractional strength. Reordering
+cards changes their prompt numbers. Switching to Draw Things preserves all cards and restores
+that backend's settings; its existing eight-card limit still applies. Studio blocks excess active
+inputs rather than silently discarding them. Prompt Assistant has a separate eight-image vision
+limit and explicitly reports it when the image request contains more.
+
+**Controls:** native flow-Euler scheduling, steps, dimensions and seed are supported. CFG is fixed
+at 1. Negative prompts, generation strength, masks, custom samplers and native LoRAs are not
+implemented for this engine. **Automatic** can retain request-local prefix attention; **Lower
+memory** recomputes it, trading speed for memory. **Reference resolution** selects a 512 or 1024
+area budget while preserving aspect ratio. Lowering it can weaken fine details. Memory preparation
+is conservative and uncalibrated across hardware; it never reduces your input count or resolution
+silently. The VAE is currently untiled, so large images may fail memory admission. Its allocator cache is
+disabled during encode/decode and restored afterward; large convolution working sets still count
+toward admission.
+
+**Progress and previews:** loading, image/text encoding, attention preparation, sampling step/layer,
+final decoding and saving report progress. Approximate latent previews update at most once every
+two seconds plus the last step, without reloading the VAE or changing sampling randomness. Final
+PNG output retains RGBA. Previews are temporary and removed on completion, failure or cancellation.
+Weighted local jobs share a cancellable cross-process queue; each component unloads before the
+next weighted stage. Cancellation checks run between shards, encoder/transformer layers and VAE
+blocks, with a process termination fallback if a worker stalls.
+
+Completed assets retain model/component hashes, ordered input hashes, resolved seed, preprocessing,
+scheduler, cache mode and runtime identity. Reference-sheet and Ripple still-image editing can use
+the same native provider preference. **Export Headless Job** writes v4 native image entries;
+legacy remote-only exports remain compatible. Native entries currently capture explicit input
+files; native outputs may feed downstream remote jobs. Dynamic upstream-to-native image bindings
+are not implemented. Future Draw Things Qwen support still requires verified capability/transport
+mapping; discovering the model at an endpoint does not enable this native adapter there.
+
+Qualification includes real 8-bit 512-pixel editing and a ten-reference 1024-pixel, 40-step render,
+plus tiny FP32 encoder/transformer/RGBA-VAE numerical comparisons to pinned upstream references.
+These are experimental results, not full-checkpoint numerical parity or a broad quality guarantee.
+The ten-reference badge test retained all numbers but changed some colors. Broad identity, fine
+text and transparency quality still need further review. See [implementation status](../STATUS.md)
+for measured cases and remaining qualification.
+
 ### Images, clips, and LoRAs
 
 Use the **+ → Generate Image…** action on Global, Project, or Clip Assets. The whole-window prompt
-editor provides a central canvas, a separate ordered mood board (up to eight references), left-side
-settings, CU preparation, result preview, and headless image-job export. Import files, drop image
-assets, or choose **From Assets**. Canvas images support fit/fill placement and **Generation strength**
+editor provides a central canvas, a separate ordered mood board (eight active Draw Things cards
+or ten total native Qwen inputs), left-side settings, preparation, result preview, and headless
+image-job export. Import files, drop image assets, or choose **From Assets**.
+
+For **Draw Things**, canvas images support fit/fill placement and **Generation strength**
 from 0–100%. Mood-board thumbnails have independent enable and strength controls; zero strength
 omits a reference. FLUX.2/Klein currently treats positive reference weights as enabled references,
 so intermediate weights are transmitted but are not a promise of proportionally reduced influence.
@@ -1634,9 +1694,11 @@ Image drafts now recover across restarts, separately for Global, Project and ind
 stores. Studio saves linked paths, prompts, settings, references, LoRA strengths and the latest
 preview path in its application-support directory. It does not copy source media or save API
 keys in drafts. Missing files remain linked for replacement. Reopening a draft requires fresh
-CU/eligibility preparation; an old estimate is not treated as authorization.
+settings/eligibility preparation; Draw Things also refreshes CU estimates. An old estimate is not
+treated as authorization.
 
-**Import Config…** is available in both the image workspace and Draw Things clip inspector.
+**Import Config…** is available with Draw Things selected in the image workspace and in the
+Draw Things clip inspector.
 Open an exported JSON file or paste a configuration, then choose **Preview Import**. Named
 `configuration` objects and arrays of presets are supported. The adjacent **Draw Things presets**
 link opens the [official preset directory](https://github.com/drawthingsai/community-models/tree/main/configs);

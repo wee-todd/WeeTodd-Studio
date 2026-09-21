@@ -16,7 +16,7 @@ from pathlib import Path
 import studio_bridge as bridge
 
 SUPPORTED_JOB_FORMATS = {
-    "weetodd-studio-job-v1", "weetodd-studio-job-v2", "weetodd-studio-job-v3"
+    "weetodd-studio-job-v1", "weetodd-studio-job-v2", "weetodd-studio-job-v3", "weetodd-studio-job-v4"
 }
 _SECRET_FIELDS = {
     "apikey", "token", "authorization", "sharedsecret", "password", "clientsecret",
@@ -37,13 +37,15 @@ def _reject_secrets(value, location="remote job"):
             _reject_secrets(child, location)
 
 
-def validate_remote_jobs(values, project):
+def validate_remote_jobs(values, project, *, ordered_jobs=None):
     from wee_todd_remote.jobs import validate_job_dependencies
 
-    ordered = validate_job_dependencies(values)
+    ordered = validate_job_dependencies(values) if ordered_jobs is None else ordered_jobs
     indexed = {job["id"]: job for job in ordered}
     destinations = set()
     for job in ordered:
+        if job.get("provider") == "nativeMLX":
+            continue
         _reject_secrets(job)
         if job.get("kind") not in {"image", "clip"}:
             raise ValueError(f"remote job {job['id']} kind must be image or clip")
@@ -96,6 +98,38 @@ def validate_remote_jobs(values, project):
                     f"Draw Things job {job['id']} profileID/modelID must match its clip selection"
                 )
     return ordered
+
+
+def validate_image_jobs(remote, native, project):
+    import re
+    from wee_todd_mlx.image_contracts import validate_image_request
+    from wee_todd_remote.contracts import validate_request
+    from wee_todd_remote.jobs import validate_job_dependencies
+    if not isinstance(remote, list) or not isinstance(native, list):
+        raise ValueError("Image jobs must be arrays")
+    if not native:
+        return [dict(value, provider="drawThings") for value in validate_remote_jobs(remote, project)]
+    records = []
+    for values, provider in ((remote, "drawThings"), (native, "nativeMLX")):
+        for raw in values:
+            job = copy.deepcopy(raw)
+            if not isinstance(job, dict) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", job.get("id", "")):
+                raise ValueError("Image job ID must use letters, digits, underscores or hyphens")
+            _reject_secrets(job)
+            job["provider"] = provider
+            if provider == "nativeMLX":
+                if job.get("kind") != "image" or job.get("inputBindings"):
+                    raise ValueError("Native jobs require explicit captured image inputs")
+                validate_image_request(job["request"])
+            else:
+                job["request"] = validate_request(job["request"])
+            records.append(job)
+    skeletons = [{"id": j["id"], "dependsOn": j.get("dependsOn", [])} for j in records]
+    ordered = validate_job_dependencies(skeletons)
+    indexed = {j["id"]: j for j in records}
+    result = [dict(indexed[j["id"]], dependsOn=j["dependsOn"]) for j in ordered]
+    validate_remote_jobs(remote, project, ordered_jobs=result)
+    return result
 
 
 def bind_remote_inputs(remote, results):
@@ -205,6 +239,7 @@ def renderer_fingerprint():
             "studio_bridge.py",
             "studio_lora.py",
             "studio_job.py",
+            "studio_image.py",
             "motion_fidelity.py",
         )
     ]
@@ -258,8 +293,9 @@ def _export_job(request, target, input_directory):
             if continuity.get("sourceClipID") in generating:
                 raise ValueError("Render and accept the continuity source first, "
                                  "then export the dependent clip's job.")
+    native_jobs = copy.deepcopy(request.get("nativeImageJobs", []))
     image_jobs = copy.deepcopy(request.get("drawThingsImageJobs", []))
-    if not request["project"]["clips"] and not image_jobs:
+    if not request["project"]["clips"] and not image_jobs and not native_jobs:
         raise ValueError("Add a clip before exporting a job.")
     recipes = {}
     remote_jobs = image_jobs
@@ -296,9 +332,12 @@ def _export_job(request, target, input_directory):
             motion_recipes[clip["id"]] = bridge.motion_request(dict(request, clipID=clip["id"]))[
                 "recipe"
             ]
-    remote_jobs = validate_remote_jobs(remote_jobs, request["project"]) if remote_jobs else []
+    if native_jobs:
+        validate_image_jobs(remote_jobs, native_jobs, request["project"])
+    else:
+        remote_jobs = validate_remote_jobs(remote_jobs, request["project"]) if remote_jobs else []
     job = {
-        "format": ("weetodd-studio-job-v3" if remote_jobs else
+        "format": ("weetodd-studio-job-v4" if native_jobs else "weetodd-studio-job-v3" if remote_jobs else
                    "weetodd-studio-job-v2" if motion_recipes else "weetodd-studio-job-v1"),
         "scope": "clip" if request.get("clipOnly") else "movie",
         "project": request["project"],
@@ -307,6 +346,7 @@ def _export_job(request, target, input_directory):
         "recipes": recipes,
         **({"motionRecipes": motion_recipes} if motion_recipes else {}),
         **({"remoteJobs": remote_jobs} if remote_jobs else {}),
+        **({"nativeImageJobs": native_jobs} if native_jobs else {}),
         "execution": {
             "parallelGenerations": 1,
             "rendererSHA256": renderer_fingerprint(),
@@ -314,7 +354,7 @@ def _export_job(request, target, input_directory):
             "finishingOrder": ["upscale", "interpolate", "assemble"],
         },
     }
-    if job["format"] == "weetodd-studio-job-v3":
+    if job["format"] in {"weetodd-studio-job-v3", "weetodd-studio-job-v4"}:
         _reject_secrets(job, "v3 job")
     job["manifestSHA256"] = digest(job)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -376,6 +416,7 @@ def inputs_fingerprint(job):
         "rifePath",
         "metalPath",
         "manifest",
+        "modelManifestPath",
         "source_context",
     }
 
@@ -395,6 +436,11 @@ def inputs_fingerprint(job):
     walk(job["recipes"])
     walk(job.get("motionRecipes", {}))
     walk(job.get("remoteJobs", []))
+    walk(job.get("nativeImageJobs", []))
+    for native in job.get("nativeImageJobs", []):
+        manifest = Path(native["request"]["modelManifestPath"])
+        if manifest.is_file():
+            paths.add(manifest.parent.resolve())
     walk(job.get("globalAssets", []))
     walk(job["runtime"])
     observations = []
@@ -436,7 +482,13 @@ def preflight(job, output, *, prepare_remote=True):
         )
     output.mkdir(parents=True, exist_ok=True)
     scene_owners = scene_recipe_owners(job)
-    remote_jobs = validate_remote_jobs(job.get("remoteJobs", []), job["project"])
+    image_jobs = validate_image_jobs(job.get("remoteJobs", []), job.get("nativeImageJobs", []), job["project"])
+    remote_jobs = [value for value in image_jobs if value["provider"] != "nativeMLX"]
+    for native in (value for value in image_jobs if value["provider"] == "nativeMLX"):
+        from wee_todd_mlx.image_service import prepare_image
+        prepared = prepare_image(native["request"])
+        if prepared["eligibility"] != "allowed":
+            raise ValueError("; ".join(prepared["issues"]))
     remote_clip_ids = {
         remote.get("clipID") for remote in remote_jobs if remote.get("kind") == "clip"
     }
@@ -512,7 +564,8 @@ def preflight(job, output, *, prepare_remote=True):
     return {
         "status": "preflight_passed",
         "clips": len(job["project"]["clips"]),
-        "generations": len(job["recipes"]) + len(remote_jobs),
+        "generations": len(job["recipes"]) + len(image_jobs),
+        "nativeImageGenerations": len(image_jobs) - len(remote_jobs),
         "remoteGenerations": len(remote_jobs),
     }
 
@@ -552,7 +605,26 @@ def _execute_locked(job, output, resume):
     try:
         preflight(job, output / "preflight", prepare_remote=False)
         remote_results = {}
-        for remote in validate_remote_jobs(job.get("remoteJobs", []), job["project"]):
+        for remote in validate_image_jobs(job.get("remoteJobs", []), job.get("nativeImageJobs", []), job["project"]):
+            if remote["provider"] == "nativeMLX":
+                import uuid
+                from wee_todd_mlx.image_service import generate_image
+                key = "native-image-" + remote["id"]
+                previous = state["completed"].get(key, {})
+                artifact = Path(previous.get("path", ""))
+                if artifact.is_file() and artifact_hash(artifact) == previous.get("sha256"):
+                    result = previous
+                    bridge.emit(event="resume", message=f"Reusing local image {remote['id']}")
+                else:
+                    folder = output / "native-images" / remote["id"] / uuid.uuid4().hex
+                    rendered = generate_image(remote["request"], folder, progress=lambda event: bridge.emit(**event))
+                    artifact = Path(rendered["asset"]["path"])
+                    result = {"path": str(artifact), "sha256": artifact_hash(artifact),
+                              "requestSHA256": digest(remote["request"])}
+                    state["completed"][key] = result
+                    atomic_json(state_path, state)
+                remote_results[remote["id"]] = result
+                continue
             key = "remote-" + remote["id"]
             previous = state["completed"].get(key)
             artifact = (

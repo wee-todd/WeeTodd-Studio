@@ -15,6 +15,8 @@ public struct ImageWorkspaceLibrary: Codable {
   public var version = 1
   public var sessions: [String: ImageWorkspaceSession] = [:]
   public var activeKey: String?
+  public var referenceProvider: ImageExecutionProvider?
+  public var referenceNativeImage: NativeImageSettings?
   public var referenceConnectionID: String?
   public init() {}
   public mutating func record(_ draft: DrawThingsImageDraft, preview: String?) {

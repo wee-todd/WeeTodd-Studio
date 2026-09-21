@@ -1,5 +1,37 @@
 # WeeTodd Studio implementation status
 
+Native Qwen-Image-2.1 2026-09-20 (experimental): the existing image workspace now selects an
+app-owned MLX image engine with up to ten total ordered references, 8-bit model preparation,
+approximate live previews, stage/step/layer progress, cancellation, staged unloading and shared
+weighted-job admission. Native settings and excess cards survive backend switches. Reference/Ripple
+image editing and v4 headless jobs share the same validated renderer. Draw Things retains its
+existing transport and limits; future Qwen 2.1 remote support is not claimed.
+
+Official revision `b3179ad355be050328e483a9dfdd9e60cd62adfa` was prepared with its vision tower intact.
+Tiny FP32 comparisons against pinned upstream implementations reached maximum absolute errors
+of 5.22e-8 for encoder features, 7.38e-7 for transformer trajectories and 1.44e-6 for VAE output.
+This does not establish full-checkpoint 8-bit parity. A 512×512, 40-step red-to-blue teapot edit
+completed in 51.2 s including initial verification, with 8.82 GiB peak MLX allocation and 14 previews.
+A ten-reference 1024×1024, 40-step badge render took 390.4 s inside the renderer, with 34.74 GiB
+peak MLX allocation and 40 previews. Both released MLX active allocations to about 1 KiB and
+reported no swap growth on the Apple M3 Ultra with 256 GiB unified memory. Process footprint and MLX
+allocation are distinct measurements; these single cases are not minimum-RAM recommendations.
+All ten badge numbers appeared in order, but some colors changed. Broad identity/text/alpha quality,
+lower-memory hardware qualification and full-checkpoint numerical parity remain open. Native LoRAs,
+tiled VAE, persistent warm models and dynamic upstream-to-native image bindings are not included.
+The checkpoint's noncommercial Qwen Research License requires separate commercial permission.
+A follow-up allocator-cache limit during VAE execution preserved a byte-identical 512-pixel test
+image and reduced its post-render physical footprint from about 7.0 to 1.2 GiB. A 2048-square
+four-step run completed with 45.5 GiB peak active MLX allocation and 40.3 GiB physical footprint;
+it qualifies allocation/decode behavior, not final image quality. Memory admission now reserves
+16 KiB per output/reference pixel for the untiled VAE working set, provisionally above observed
+512–2048 peaks. Ten sequential completed/cancelled jobs returned to 1,068 active MLX bytes each;
+five cancellations at stage boundaries released within 0.13 s. Arbitrary mid-kernel cancellation
+may take longer and retains the worker termination fallback.
+
+See [native image setup](studio/README.md#native-qwen-image-21--experimental).
+
+
 LTX Ripple editing 2026-09-19: Studio adds a general clip inspector and a dedicated Ripple
 Director with a resizable source preview, frame scrubbing and clickable reference thumbnails.
 Frame zero is required; up to eight additional distinct references can be added. The frame editor
