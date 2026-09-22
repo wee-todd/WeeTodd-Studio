@@ -13,6 +13,8 @@ Character values request supported descriptive clauses while retaining separate 
 schema repairs preserve valid fields. Physical measurements remain manual or authored-text inputs.
 Optional visual records require an observed inventory item, including a single feature slot.
 These controls improve preparation and validation, but proposals still require visual review.
+Inventory parsing now requests one bounded correction for malformed JSON; both attempts share the
+same source guards and deadline. Truncated or still-invalid inventories cannot apply partial records.
 
 Installed 8-bit 4B qualification on M3 Ultra / 256 GiB used the same isolated character inputs and
 18-call extraction job: one-shot took 128.8 seconds, session reuse took 84.9 seconds (34% less time).

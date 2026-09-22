@@ -384,7 +384,7 @@ def _needed_inventory_collections(request, role):
     }
 
 
-def _inventory_payload(request, model, collections):
+def _inventory_payload(request, model, collections, *, repair_text=None):
     visual = request.get("role") == "character"
     prompt = {
         "sourceText": "" if visual else request["sourceText"],
@@ -419,6 +419,21 @@ def _inventory_payload(request, model, collections):
             "maxTokens": MAX_OUTPUT_TOKENS,
         },
     }
+    if repair_text is not None:
+        prompt["invalidResponse"] = _truncate_utf8(repair_text, MAX_REPAIR_BYTES)
+        prompt["validationError"] = "Item inventory returned invalid JSON"
+        text_request = payload["textRequest"]
+        text_request["systemPrompt"] = (
+            "Schema repair: return one complete JSON object with its closing brace. "
+            "Correct the invalid inventory using the original source; omit unsupported items "
+            "and never invent missing facts. " + text_request["systemPrompt"]
+        )
+        text_request["prompt"] = json.dumps(prompt, ensure_ascii=False, separators=(",", ":"))
+        if (
+            len(text_request["systemPrompt"].encode()) + len(text_request["prompt"].encode())
+            > MAX_ASSIST_INPUT_BYTES
+        ):
+            raise ValueError("Item inventory repair exceeds the conservative input budget")
     if visual:
         image = request["sourceImage"]
         payload["textRequest"]["images"] = [
@@ -1049,10 +1064,38 @@ def _extract_fields(
             raise InterruptedError("Character extraction cancelled")
         if time.monotonic() >= inventory_deadline:
             raise TimeoutError("Character extraction inventory timed out")
-        request = {
-            **request,
-            "_recordInventory": _parse_inventory(inventory_result, request, collections),
-        }
+        try:
+            inventory = _parse_inventory(inventory_result, request, collections)
+        except ValueError as error:
+            # An EOS-complete model response can still contain malformed JSON.
+            # Request one correction; never infer punctuation or accept partial records.
+            if not isinstance(error.__cause__, json.JSONDecodeError):
+                raise
+            progress("Repairing inventory response…")
+            inventory_result = _call_assist(
+                _inventory_payload(
+                    request, model, collections, repair_text=inventory_result.get("text", "")
+                ),
+                request=request,
+                role=role,
+                source_hash=source_hash,
+                source_request=source_request,
+                progress=progress,
+                cancelled=inventory_stopped,
+                session=session,
+            )
+            if cancelled():
+                raise InterruptedError("Character extraction cancelled") from error
+            if time.monotonic() >= inventory_deadline:
+                raise TimeoutError("Character extraction inventory timed out") from error
+            try:
+                inventory = _parse_inventory(inventory_result, request, collections)
+            except ValueError as repair_error:
+                raise ValueError(
+                    "Qwen returned an invalid item inventory after one repair. "
+                    "No character fields were changed; try analyzing the reference again."
+                ) from repair_error
+        request = {**request, "_recordInventory": inventory}
         inventory = request["_recordInventory"]
 
         def inventoried_or_unrestricted(field):

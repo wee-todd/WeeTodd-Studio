@@ -35,6 +35,81 @@ CATALOG = [
 ]
 
 
+def test_inventory_missing_closing_brace_is_repaired_before_field_extraction(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    value["fields"] = [field("garments[].type", 6)]
+    value["requestedFields"] = ["garments[shirt].type"]
+    valid = '{"records":[{"collection":"garments","slot":1,"excerpt":"blue shirt"}]}'
+    calls = []
+    messages = []
+
+    def generate(payload, **_):
+        calls.append(payload)
+        if len(calls) == 1:
+            return {"text": valid[:-1], "truncated": False}
+        if len(calls) == 2:
+            return {"text": valid, "truncated": False}
+        return completion("garment1.type", "blue shirt")
+
+    monkeypatch.setattr(service, "assist", generate)
+    result = service.extract_fields(value, progress=messages.append)
+    assert [(item["field"], item["value"]) for item in result["proposals"]] == [
+        ("garments[shirt].type", "blue shirt")
+    ]
+    assert len(calls) == 3
+    repair = calls[1]["textRequest"]
+    assert repair["images"] == calls[0]["textRequest"]["images"]
+    assert json.loads(repair["prompt"])["invalidResponse"] == valid[:-1]
+    assert any("Repairing inventory" in message for message in messages)
+
+
+@pytest.mark.parametrize("truncated,expected_calls", [(False, 2), (True, 1)])
+def test_inventory_repair_is_bounded_and_never_accepts_partial_records(
+    tmp_path, monkeypatch, truncated, expected_calls
+):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    value["fields"] = [field("garments[].type", 6)]
+    value["requestedFields"] = ["garments[shirt].type"]
+    calls = []
+
+    def generate(payload, **_):
+        calls.append(payload)
+        return {"text": '{"records":[]', "truncated": truncated}
+
+    monkeypatch.setattr(service, "assist", generate)
+    with pytest.raises(ValueError, match="inventory"):
+        service.extract_fields(value)
+    assert len(calls) == expected_calls
+    assert not list(Path(value["cacheDirectory"]).glob("*.json"))
+
+
+def test_inventory_repair_keeps_the_original_deadline(tmp_path, monkeypatch):
+    import studio_character_assist as service
+
+    value = request(tmp_path)
+    value["fields"] = [field("garments[].type", 6)]
+    value["requestedFields"] = ["garments[shirt].type"]
+    now = [0.0]
+    calls = []
+    monkeypatch.setattr(service.time, "monotonic", lambda: now[0])
+
+    def generate(payload, **_):
+        calls.append(payload)
+        if len(calls) == 1:
+            return {"text": '{"records":[]', "truncated": False}
+        now[0] = service.CALL_TIMEOUT_SECONDS + 1
+        return {"text": '{"records":[]}', "truncated": False}
+
+    monkeypatch.setattr(service, "assist", generate)
+    with pytest.raises(TimeoutError, match="inventory timed out"):
+        service.extract_fields(value)
+    assert len(calls) == 2
+
+
 def test_inventory_inference_enforces_deadline(tmp_path, monkeypatch):
     import studio_character_assist as service
 

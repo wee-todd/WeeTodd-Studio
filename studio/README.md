@@ -1948,6 +1948,8 @@ Descriptive values include supported shape, location, proportions, texture and v
 two clauses; simple facts can remain short. Evidence and uncertainty stay separate and concise.
 Smaller field batches reserve room for detail without raising the 1,024-token output limit.
 Schema repair preserves independently validated descriptions when repairing a different field.
+Malformed inventory JSON gets one correction pass using the same source and deadline before any
+attribute extraction. A second invalid response stops safely without applying partial records.
 Physical height/scale measurements come from manual fields or authored text, not guesses from pixels.
 
 Apple Vision selects the foreground instance containing one unambiguous face, removes the background
