@@ -264,8 +264,13 @@ def _h3_candidate(key, path, task):
             allow_fl2va_weights_for_ref2va=False,
         )
         return
+    from minimax_h3_mlx.comfy_h3_checkpoint import is_comfy_h3_checkpoint
     from minimax_h3_mlx.dt_h3_checkpoint import is_dt_checkpoint
     from minimax_h3_mlx.dt_source import dt_source
+
+    if key == "transformer" and path.is_file() and is_comfy_h3_checkpoint(path):
+        _component_report(key, path)
+        return
 
     if (key == "transformer" and path.is_file() and is_dt_checkpoint(path)) or (
         key in {"text_encoder", "video_vae", "audio_vae"} and dt_source(path, key)

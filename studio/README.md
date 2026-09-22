@@ -391,6 +391,23 @@ python scripts/render_headless.py --recipe /path/to/recipes/created-recipe.json 
 Use the tokenizer folder returned by the download/scan and the recipe filename returned by setup.
 The model files stay in the DT model store. The tokenizer download retains its pinned source terms.
 
+## H3 INT8 finetunes
+
+Supported Comfy H3 `int8_tensorwise` safetensors files, including Singularity Ref2VA v1.3 INT8,
+can be selected as the transformer in the existing H3 setup presets. Keep the matching H3 task
+manifest, Qwen3-VL encoder, processor/tokenizer and video/audio VAEs; those components are shared
+in place. A finetune remains an ordinary H3 recipe in Studio, with the same conditioning and
+generation controls. Tensor architecture validation does not establish a finetune's training-task
+support: use the task recommended by its publisher.
+
+The loader validates the complete file and quantization metadata, reverses supported ConvRot
+encoding, and adapts attention layouts in memory. It reads the original file without creating a
+converted checkpoint. The default retains fixed weights and one decoded transformer block;
+preflight includes temporary decoding space. Explicit paging-cache budgets can retain decoded
+blocks to reduce repeated reads, at increased RAM use. Staged unloading remains the default.
+Native execution uses BF16/FP32 and does not reproduce Comfy's CUDA W8A8 activation quantization
+or imply the same speed, memory use or output. This route remains experimental.
+
 ## Guided model setup
 
 For remote generation, see [Draw Things](#draw-things--experimental). Local model recipes below
@@ -581,12 +598,14 @@ includes encoding, model loading, sampling and latent upscaling; H3 reports tran
 
 For H3, **Advanced generation → H3 page cache** offers Recipe default, Off, or 4/8/12/16 GB.
 The recipe setting is `config.paging_cache_gb` (0–16 decimal GB; default 0). This is extra retained
-raw transformer weight memory, not a limit on total generation memory or a promise of fit.
+transformer weight memory, not a limit on total generation memory or a promise of fit.
 Start with Off versus 4 GB using identical prompt, seed, dimensions, schedule and storage. Compare
 the measured process/MLX peaks as well as wall time; return to Off if memory pressure increases.
-The cache pins a bounded subset of quantized pages between evaluations and releases it after each
-sampling run, including cancellation/failure. It requires a paged transformer and cannot be
-combined with full block residency. A page larger than the remaining budget is bypassed.
+The cache retains native checkpoint pages in their stored precision; direct Draw Things and Comfy
+INT8 sources instead retain decoded BF16/FP32 blocks, counted at their decoded size. It releases
+retained weights after each sampling run, including cancellation/failure. It requires a paged or
+supported direct transformer and cannot be combined with full block residency. A block larger than
+the remaining budget is bypassed.
 
 ComfyUI exposes the same setting through **H3 Paging Settings (Experimental)** between Generation
 Config and the composable H3 Sampler. Headless movie/clip jobs carry the selected value. H3

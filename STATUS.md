@@ -1,5 +1,21 @@
 # WeeTodd Studio implementation status
 
+H3 INT8 finetunes 2026-09-22 (experimental): standard H3 model setup and shared sampling now
+accept supported Comfy `int8_tensorwise` transformer files directly, including Singularity Ref2VA
+v1.3 INT8. Bounded active-block decoding reverses ConvRot and maps contiguous Q/K/V rows to native
+per-head ordering, including the fixed token refiner. Original weights remain read-only; shared
+encoder/VAEs are reused and no converted checkpoint is written. Optional paging retention counts
+decoded BF16/FP32 bytes; staged unloading remains the default. This is native BF16/FP32 execution,
+not CUDA W8A8 activation-quantization parity.
+
+Installed-checkpoint checks matched the Comfy-kitchen inverse-rotation oracle exactly across
+419,328 sampled elements. A native Ref2VA run with 20 schedule points / 19 Euler evaluations,
+320×192 output and 2.5-second requested duration produced 73 frames (3.04 seconds) plus stereo
+32 kHz audio; sampled frames showed coherent subject/reference content, and all five model stages
+reported unloaded. It took 285.5 seconds on M3 Ultra / 256 GiB, with other validation work active;
+this is a functional result, not an isolated performance benchmark. Full-resolution creative
+quality, finetune-specific A2V/extension behavior and cross-device performance remain unqualified.
+
 Character proposal application 2026-09-21: new analysis batches capture role-specific field and input
 fingerprints. Importing a separate style reference no longer blocks character values from being
 applied. Source changes and relevant field edits remain guarded, selected values update the saved

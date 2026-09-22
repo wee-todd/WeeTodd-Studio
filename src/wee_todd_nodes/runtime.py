@@ -102,7 +102,15 @@ class H3GenerationConfig:
             return
         if block_residency != "checkpoint_default":
             raise ValueError("paging_cache_gb requires checkpoint_default block residency.")
-        if not (Path(transformer).expanduser() / "paged_manifest.json").is_file():
+        from minimax_h3_mlx.comfy_h3_checkpoint import is_comfy_h3_checkpoint
+        from minimax_h3_mlx.dt_h3_checkpoint import is_dt_checkpoint
+
+        source = Path(transformer).expanduser()
+        if not (
+            (source / "paged_manifest.json").is_file()
+            or is_dt_checkpoint(source)
+            or is_comfy_h3_checkpoint(source)
+        ):
             raise ValueError("paging_cache_gb requires a paged H3 transformer.")
 
     @property

@@ -300,6 +300,10 @@ can run in the native renderer.
   conditioning modes need separate implementation and qualification. Setup creates small metadata
   references, keeps original weights read-only and creates no persistent converted weight copy.
   See [supported files and measured limits](studio/README.md#reuse-local-draw-things-h3-models).
+- **H3 INT8 finetunes:** supported Comfy H3 INT8/ConvRot transformers, including Singularity,
+  load directly from their original safetensors file. They use the existing H3 recipes and shared
+  encoder/VAEs. Native inference decodes active blocks to BF16/FP32 without writing a converted
+  checkpoint. See [setup and limits](studio/README.md#h3-int8-finetunes).
 - **Local assistance:** Director and the Prompt Assistant can reuse installed Draw Things Qwen3.5
   checkpoints or download the supported 4B checkpoint independently.
   The current 4B route supports selected reference images; 9B is text-only. Generated text remains
@@ -1942,7 +1946,7 @@ This table is generated from the registered node contracts. Run
 <!-- BEGIN GENERATED NODE CATALOG -->
 | Node | Notes | Category | Status |
 | --- | --- | --- | --- |
-| H3 Component Loader | Describe native H3 components, including experimental DT-file T2V references. This node does not load tensor weights. | H3 — Loaders | Recommended |
+| H3 Component Loader | Describe native H3 components, including experimental DT-file T2V references and supported Comfy INT8 transformer files. This node does not load tensor weights. | H3 — Loaders | Recommended |
 | H3 Model Preview Override | Attach a true-color TAE preview and optional collapse guard to H3 sampling. Core ML can keep preview decoding on the Apple Neural Engine; MLX remains the fallback. Place this node between the component loader and sampler. | H3 — Sampling and acceleration | Experimental |
 | H3 Quantized Transformer Loader | Select and validate a named mixed-precision H3 transformer without loading weights. Both q8 profiles are approximate and keep BlockCache disabled by default. | H3 — Loaders | Experimental |
 | H3 Component Preflight | Validate MiniMax H3 components and estimate staged memory from file headers. Vision-capable paged Qwen is supported; reference workspace is not included. Set available memory to zero when unknown. | H3 — Loaders | Recommended |
@@ -1990,7 +1994,7 @@ This table is generated from the registered node contracts. Run
 | H3 Direct Publish Chained Timeline (MLX) | Decode an H3 latent chain by VAE stage, remove duplicated joins, force exact 24 fps / 32 kHz duration, and atomically publish one MP4. | H3 — Output | Experimental |
 | H3 Model Loader (MLX) | Describe an MLX MiniMax H3 checkpoint. Weights load lazily at generation time. | H3 — Core and convenience | Legacy/convenience |
 | H3 Generation Config | Choose a clearly labeled aspect ratio and move the short-edge size slider, or use exact dimensions. The canvas stays on H3's 32-pixel grid. Optional hot-path experiments default off. | H3 — Core and convenience | Recommended |
-| H3 Paging Settings (Experimental) | Experimental bounded raw-page retention trades extra memory for fewer repeated H3 checkpoint loads. Disabled by default; original quantization is preserved. | H3 — Sampling and acceleration | Experimental |
+| H3 Paging Settings (Experimental) | Experimental bounded weight retention trades extra memory for fewer repeated H3 checkpoint loads. Disabled by default; native pages retain their storage precision, while direct DT/Comfy sources cache decoded BF16/FP32 blocks. | H3 — Sampling and acceleration | Experimental |
 | H3 Low-Memory Tuning (MLX) | Apply optional MLX attention-head and feed-forward row chunking without invalidating older Generation Config workflows. | H3 — Sampling and acceleration | Supported |
 | H3 Generate Video + Audio | Generate synchronized H3 video and audio from text-only prompts through staged encoding, sampling, and direct MP4 publication. Every component unloads after use. | H3 — Core and convenience | Legacy/convenience |
 | H3 Unload MLX Runtime | Release state held by the monolithic H3 runtime. | H3 — Core and convenience | Legacy/convenience |

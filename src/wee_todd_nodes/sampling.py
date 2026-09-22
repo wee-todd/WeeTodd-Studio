@@ -173,10 +173,16 @@ def _default_sampler_factory(spec: H3TransformerSpec):
 
     pipeline_config = PipelineConfig.from_model_index(Path(spec.checkpoint) / "model_index.json")
     transformer = Path(spec.transformer)
+    from minimax_h3_mlx.comfy_h3_checkpoint import (
+        is_comfy_h3_checkpoint,
+        load_comfy_h3_dit,
+    )
     from minimax_h3_mlx.dt_h3_checkpoint import is_dt_checkpoint, load_dt_h3_dit
 
     if is_dt_checkpoint(transformer):
         dit = load_dt_h3_dit(transformer)
+    elif is_comfy_h3_checkpoint(transformer):
+        dit = load_comfy_h3_dit(transformer)
     elif (transformer / "paged_manifest.json").is_file():
         from minimax_h3_mlx.paged_checkpoint import load_paged_dit
 

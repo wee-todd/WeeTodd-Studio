@@ -157,6 +157,7 @@ class ComponentReport:
     paging_fixed_bytes: int = 0
     paging_window_bytes: int = 0
     paging_vision_bytes: int = 0
+    paging_decode_workspace_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -470,7 +471,29 @@ def _component_report(
         )
 
     if name == "transformer" and path.is_file():
+        from minimax_h3_mlx.comfy_h3_checkpoint import (
+            describe_comfy_h3,
+            is_comfy_h3_checkpoint,
+        )
         from minimax_h3_mlx.dt_h3_checkpoint import describe_dt_h3, is_dt_checkpoint
+
+        if is_comfy_h3_checkpoint(path):
+            description = describe_comfy_h3(path)
+            return ComponentReport(
+                name=name,
+                path=str(path),
+                files=(path.name,),
+                disk_bytes=path.stat().st_size,
+                tensor_bytes=description["tensor_bytes"],
+                tensor_count=description["tensor_count"],
+                dtypes=("BF16", "F32"),
+                quantization="Comfy INT8 (native BF16/FP32 execution)",
+                adaln_bytes=description["adaln_bytes"],
+                paging_format="weetodd-h3-comfy-direct-v1",
+                paging_fixed_bytes=description["fixed_bytes"],
+                paging_window_bytes=description["window_bytes"],
+                paging_decode_workspace_bytes=description["decode_workspace_bytes"],
+            )
 
         if is_dt_checkpoint(path):
             description = describe_dt_h3(path)
@@ -759,7 +782,11 @@ def preflight_components(
     qwen_stage = qwen_weights + request.prompt_tokens * 5120 * 2 * 4
     transformer = by_name["transformer"]
     if transformer.paging_format is not None:
-        transformer_weights = transformer.paging_fixed_bytes + transformer.paging_window_bytes
+        transformer_weights = (
+            transformer.paging_fixed_bytes
+            + transformer.paging_window_bytes
+            + transformer.paging_decode_workspace_bytes
+        )
         sample_resident = transformer_weights
     else:
         transformer_weights = transformer.tensor_bytes
@@ -814,6 +841,12 @@ def preflight_components(
         warnings.append(
             "DT direct transformer estimates include fixed weights and a decoded block "
             "with a loading buffer. Original files are read repeatedly during sampling."
+        )
+    elif transformer.paging_format == "weetodd-h3-comfy-direct-v1":
+        warnings.append(
+            "Comfy INT8 direct transformer estimates include fixed weights, one decoded block "
+            "and chunk decoding workspace. Original weights are read repeatedly during sampling; "
+            "native BF16/FP32 execution does not reproduce CUDA W8A8 activation quantization."
         )
     elif transformer.paging_format is not None:
         warnings.append(

@@ -794,7 +794,8 @@ class WeeToddH3ComponentLoader:
     FUNCTION = "specify"
     CATEGORY = "WeeTodd/H3/loaders"
     DESCRIPTION = (
-        "Describe native H3 components, including experimental DT-file T2V references. "
+        "Describe native H3 components, including experimental DT-file T2V references "
+        "and supported Comfy INT8 transformer files. "
         "This node does not load tensor weights."
     )
 
@@ -5092,8 +5093,9 @@ class WeeToddH3PagingSettings:
     FUNCTION = "apply"
     CATEGORY = "WeeTodd/H3/sampling"
     DESCRIPTION = (
-        "Experimental bounded raw-page retention trades extra memory for fewer repeated H3 "
-        "checkpoint loads. Disabled by default; original quantization is preserved."
+        "Experimental bounded weight retention trades extra memory for fewer repeated H3 "
+        "checkpoint loads. Disabled by default; native pages retain their storage precision, "
+        "while direct DT/Comfy sources cache decoded BF16/FP32 blocks."
     )
 
     def apply(self, config, paging_cache_gb):
