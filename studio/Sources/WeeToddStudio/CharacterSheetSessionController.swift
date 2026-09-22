@@ -117,15 +117,39 @@ import StudioCore
       doc.definition.settings.requiredFieldPaths = doc.definition.settings.requiredFieldPaths.filter { !$0.contains(id.uuidString) }
     }
   }
-  func applyProposals(batchID: UUID, selectedIDs: Set<String>) {
+  func applyProposals(batchID: UUID, selectedIDs: Set<String>) async {
     guard !running, let index = document.proposals.firstIndex(where: { $0.id == batchID }) else { return }
     let batch = document.proposals[index]
-    guard batch.documentID == id, batch.revision == document.revision else {
-      document.proposals[index].stale = true; error = "The character changed. Rerun this analysis before applying its proposals."; save(); return
+    guard batch.proposals.contains(where: { selectedIDs.contains($0.id) }) else { return }
+    // Hash off the UI thread, then recheck the batch and all relevant state after suspension.
+    let sourceHash = batch.sourcePath.isEmpty ? nil : await Task.detached {
+      try? CharacterArtifactHash.file(batch.sourcePath)
+    }.value
+    guard !running, let currentIndex = document.proposals.firstIndex(where: { $0.id == batchID }),
+      document.proposals[currentIndex] == batch else { return }
+    func stale(_ message: String) {
+      document.proposals[currentIndex].stale = true
+      error = message; status = "No values applied — analysis needs refreshing"; save()
     }
-    if !batch.sourcePath.isEmpty, (try? CharacterArtifactHash.file(batch.sourcePath)) != batch.sourceHash {
-      document.proposals[index].stale = true; error = "The source image changed. Analyze it again."; save(); return
+    guard batch.documentID == id else {
+      stale("This analysis belongs to another character. Analyze this character again."); return
     }
+    if let context = batch.context {
+      guard (try? CharacterProposalContext.capture(document, role: batch.role)) == context else {
+        stale("Fields or inputs for this analysis changed. Analyze it again before applying values."); return
+      }
+    } else if batch.revision != document.revision {
+      stale("This older analysis cannot be checked against the changed character. Analyze it again before applying values."); return
+    }
+    if !batch.sourcePath.isEmpty {
+      let sourceRole = batch.context?.sourceRole ?? Self.analysisSourceRole(role: batch.role,
+        styleUsesCharacterImage: document.styleUsesCharacterImage)
+      guard document.sources[sourceRole] == batch.sourcePath, sourceHash == batch.sourceHash else {
+        stale("The source image changed. Analyze it again."); return
+      }
+    }
+    error = nil
+    var appliedIDs = Set<String>()
     edit { doc in
       var rejected: [CharacterFieldProposal] = []
       var diagnostics = batch.diagnostics ?? []
@@ -151,7 +175,9 @@ import StudioCore
             appearance: doc.definition.appearance)) != nil else {
             reject("proposal.value", "The proposed style preset is unavailable."); continue
           }
-          doc.definition.settings.stylePresetID = proposal.value; continue
+          doc.definition.settings.stylePresetID = proposal.value
+          doc.definition.settings.stylePresetVersion = 1
+          appliedIDs.insert(proposal.id); continue
         }
         var entry = Self.entry(proposal.value, path: proposal.field, source: batch.role == "text" ? .legacyMapping : .imageAnalysis)
         entry.revision = (doc.definition.entry(at: proposal.field)?.revision ?? 0) + 1
@@ -162,14 +188,23 @@ import StudioCore
           reject("proposal.value", issues.map(\.message).joined(separator: " ")); continue
         }
         doc.definition.setEntry(entry, at: proposal.field)
+        appliedIDs.insert(proposal.id)
       }
-      if rejected.isEmpty { doc.proposals.removeAll { $0.id == batchID } }
+      let remaining = batch.proposals.filter { !appliedIDs.contains($0.id) }
+      if remaining.isEmpty { doc.proposals.removeAll { $0.id == batchID } }
       else if let current = doc.proposals.firstIndex(where: { $0.id == batchID }) {
-        doc.proposals[current].proposals = rejected
+        doc.proposals[current].proposals = remaining
         doc.proposals[current].diagnostics = diagnostics
+        // Our own accepted edits must not invalidate the remaining review choices.
+        doc.proposals[current].context = try? CharacterProposalContext.capture(doc, role: batch.role)
+        doc.proposals[current].revision = max(revisionClock, doc.revision) + 1
+        doc.proposals[current].stale = false
       }
+      status = "Applied \(appliedIDs.count) values. \(remaining.count) proposals remain for review."
+      if !rejected.isEmpty { status += " \(rejected.count) selected values need correction." }
     }
   }
+
   func launch(_ operation: @escaping @MainActor () async throws -> Void) {
     guard !running, !store.operationBusy else { error = "Wait for the current local inference job to finish."; return }
     running = true; store.characterDirectorBusy = true; cancelled = false; error = nil
@@ -287,6 +322,7 @@ import StudioCore
   func analyze(role: String, modelPath: String) async throws {
     status = "Analyzing \(role)…"
     let captured = document.revision
+    let context = try CharacterProposalContext.capture(document, role: role)
     var preparationDiagnostics: [CharacterProposalDiagnostic] = []
     var originalSourceHash = ""
     var analysisInputHash = ""
@@ -411,7 +447,7 @@ import StudioCore
     var batch = CharacterProposalBatch(documentID: id, revision: captured, sourcePath: sourcePath ?? "",
       sourceHash: role == "text" ? (result["sourceHash"] as? String ?? "") : originalSourceHash,
       role: role, proposals: proposals,
-      metadata: metadata, diagnostics: diagnostics.isEmpty ? nil : diagnostics)
+      metadata: metadata, diagnostics: diagnostics.isEmpty ? nil : diagnostics, context: context)
     batch.stale = document.revision != captured; document.proposals.append(batch); save()
   }
 }

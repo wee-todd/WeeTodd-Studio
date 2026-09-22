@@ -200,6 +200,10 @@ struct CharacterDirectorWindow: View {
     VStack(alignment: .leading, spacing: 10) {
       ForEach(controller.document.proposals) { batch in
         GroupBox("\(batch.role.capitalized) proposals\(batch.stale ? " · stale" : "")") {
+          if batch.stale {
+            Text("No values were applied. Analyze this source again to refresh these proposals.")
+              .font(.caption).foregroundStyle(.orange)
+          }
           ForEach(Array((batch.diagnostics ?? []).enumerated()), id: \.offset) { _, diagnostic in
             Label(diagnostic.message, systemImage: "exclamationmark.triangle")
               .font(.caption).foregroundStyle(.orange)
@@ -214,8 +218,9 @@ struct CharacterDirectorWindow: View {
             }.toggleStyle(.checkbox).disabled(batch.stale)
           }
           HStack { Spacer(); Button("Accept selected") {
-            controller.applyProposals(batchID: batch.id, selectedIDs: proposalSelections[batch.id] ?? [])
-          }.disabled(batch.stale || (proposalSelections[batch.id] ?? []).isEmpty) }
+            let selected = proposalSelections[batch.id] ?? []
+            Task { await controller.applyProposals(batchID: batch.id, selectedIDs: selected) }
+          }.disabled(batch.stale || !batch.proposals.contains { (proposalSelections[batch.id] ?? []).contains($0.id) }) }
         }
       }
     }

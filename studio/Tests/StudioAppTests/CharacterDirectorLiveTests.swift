@@ -152,7 +152,7 @@ import XCTest
       let ids = try JSONDecoder().decode([String].self, from: Data(contentsOf: URL(fileURLWithPath: file)))
       if !ids.isEmpty {
         let batch = try XCTUnwrap(controller.document.proposals.last)
-        controller.applyProposals(batchID: batch.id, selectedIDs: Set(ids))
+        await controller.applyProposals(batchID: batch.id, selectedIDs: Set(ids))
       }
       if let edits = environment["WEETODD_CHARACTER_REVIEWED_FIELDS"] {
         let fields = try JSONDecoder().decode([String: String].self,

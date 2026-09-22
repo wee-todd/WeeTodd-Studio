@@ -1972,8 +1972,14 @@ skin-tone and skin-texture fields preserve observations without inferring ancest
 authored information. The compiled hair section places coverage before residual hair details.
 Apple Vision separately uses bounded previews for panel detection
 (1600-pixel edge) and reference-head masking (2048-pixel edge), mapping crops back to source pixels.
-Review and select proposals before applying them. Invalid, unsupported and stale proposals remain
-unappliable. Image analysis does not infer authored demographic identity fields. Legacy descriptions
+Review and select proposals before applying them. Accept selected reports the applied count and retains
+unselected or rejected values for further review, including after reopening the document. Character
+analysis remains applicable after unrelated style-reference, rendering, or Required-flag changes.
+Edits to its appearance fields or source image still require a fresh analysis; style and authored-text
+analysis likewise protect their own inputs. Older saved batches without an input snapshot keep the
+conservative document-revision check and must be rerun if marked stale. Importing a reference alone
+does not clear accepted fields. Invalid and unsupported proposals remain unappliable.
+Image analysis does not infer authored demographic identity fields. Legacy descriptions
 remain available for mapping; legacy character-sheet prompts must be mapped before regeneration.
 
 The initial recipe requires **Draw Things Local**, installed **Krea 2 Turbo**, and its compatible

@@ -46,6 +46,34 @@ public struct CharacterProposalDiagnostic: Codable, Equatable {
   }
 }
 
+/// Captures only the inputs this analysis can read or replace. Paths stay in the batch
+/// so portable document import can rewrite them without invalidating field snapshots.
+public struct CharacterProposalContext: Codable, Equatable {
+  public var targetFingerprint: String
+  public var sourceRole: String
+  public var sourceTextHash: String?
+
+  public static func capture(_ document: CharacterSheetDocument, role: String) throws -> Self {
+    struct Target: Encodable {
+      var appearance: CharacterAppearance?
+      var settings: [String: CharacterFieldEntry]
+      var presetID: String?
+      var presetVersion: Int?
+    }
+    let settings = document.definition.settings
+    let relevantSettings = settings.fields.filter { key, _ in
+      guard let field = CharacterFieldCatalog.shared.field(for: key) else { return false }
+      return role == "text" ? (2...8).contains(field.section) : field.extractionRoles.contains(role)
+    }
+    let target = Target(appearance: role == "style" ? nil : document.definition.appearance,
+      settings: relevantSettings, presetID: role == "style" ? settings.stylePresetID : nil,
+      presetVersion: role == "style" ? settings.stylePresetVersion : nil)
+    return try .init(targetFingerprint: CharacterArtifactHash.value(target),
+      sourceRole: role == "style" && document.styleUsesCharacterImage ? "character" : role,
+      sourceTextHash: role == "text" ? CharacterArtifactHash.value(document.originalDescription) : nil)
+  }
+}
+
 public struct CharacterProposalBatch: Codable, Equatable, Identifiable {
   public var id = UUID()
   public var documentID: UUID
@@ -56,14 +84,16 @@ public struct CharacterProposalBatch: Codable, Equatable, Identifiable {
   public var proposals: [CharacterFieldProposal]
   public var metadata: CharacterExtractionMetadata?
   public var diagnostics: [CharacterProposalDiagnostic]?
+  public var context: CharacterProposalContext?
   public var stale = false
   public init(documentID: UUID, revision: Int, sourcePath: String, sourceHash: String,
               role: String, proposals: [CharacterFieldProposal],
               metadata: CharacterExtractionMetadata? = nil,
-              diagnostics: [CharacterProposalDiagnostic]? = nil) {
+              diagnostics: [CharacterProposalDiagnostic]? = nil,
+              context: CharacterProposalContext? = nil) {
     self.documentID = documentID; self.revision = revision; self.sourcePath = sourcePath
     self.sourceHash = sourceHash; self.role = role; self.proposals = proposals
-    self.metadata = metadata; self.diagnostics = diagnostics
+    self.metadata = metadata; self.diagnostics = diagnostics; self.context = context
   }
 }
 

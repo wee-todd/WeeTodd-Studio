@@ -26,7 +26,8 @@ final class CharacterPortabilityTests: XCTestCase {
     document.draft.canvas = ImageWorkspaceInput(path: shared)
     document.draft.moodboard = [ImageWorkspaceInput(path: shared)]
     document.proposals = [.init(documentID: oldID, revision: 2, sourcePath: shared,
-      sourceHash: "source-hash", role: "character", proposals: [])]
+      sourceHash: "source-hash", role: "character", proposals: [],
+      context: try CharacterProposalContext.capture(document, role: "character"))]
     var candidate = MediaAsset(name: "Candidate", kind: .image, path: shared, scope: .global)
     candidate.thumbnail = shared
     candidate.generation = ImageGeneration(provider: "drawThings", requestFingerprint: "request-hash",
@@ -59,6 +60,7 @@ final class CharacterPortabilityTests: XCTestCase {
     XCTAssertEqual(imported.draft.destination, ImageAssetDestination(scope: .global, projectID: imported.id))
     XCTAssertEqual(imported.proposals[0].documentID, imported.id)
     XCTAssertEqual(imported.proposals[0].sourceHash, "source-hash")
+    XCTAssertEqual(imported.proposals[0].context, try CharacterProposalContext.capture(imported, role: "character"))
     XCTAssertEqual(imported.headReference?.sourceSHA256, "original-hash")
     XCTAssertEqual(imported.pipeline.stages[0].inputDigest, "pipeline-input")
     XCTAssertEqual(imported.pipeline.stages[0].outputHash, "pipeline-hash")

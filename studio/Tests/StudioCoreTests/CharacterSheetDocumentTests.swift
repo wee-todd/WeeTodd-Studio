@@ -51,5 +51,6 @@ final class CharacterSheetDocumentTests: XCTestCase {
     let batch = try JSONDecoder().decode(CharacterProposalBatch.self, from: json)
     XCTAssertNil(batch.metadata)
     XCTAssertNil(batch.diagnostics)
+    XCTAssertNil(batch.context)
   }
 }

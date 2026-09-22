@@ -1,5 +1,11 @@
 # WeeTodd Studio implementation status
 
+Character proposal application 2026-09-21: new analysis batches capture role-specific field and input
+fingerprints. Importing a separate style reference no longer blocks character values from being
+applied. Source changes and relevant field edits remain guarded, selected values update the saved
+document, and unselected/rejected proposals survive partial application and reopening. Apply reports
+its count. Older batches retain revision checks and need fresh analysis after being marked stale.
+
 Local assistant sessions and character isolation 2026-09-21 (experimental): related Qwen3.5 4B
 calls now share app-owned decoder/vision weights and a content-hashed image cache within one job.
 Execution remains serial; attention, convolution and recurrent state start fresh for every request.
