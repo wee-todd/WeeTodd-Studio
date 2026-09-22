@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from importlib.resources import files
 from pathlib import Path
 
@@ -53,17 +54,23 @@ def dispatch(
         return {"definition": definition, "report": validate_document(definition)}
     if command not in {"workflow-run", "workflow-review"}:
         raise ValueError("Unknown workflow command")
-    if backend is None:
+    owns_backend = backend is None
+    if owns_backend:
         helper = request.get("runtime", {}).get("drawThingsHelperPath", "")
 
         def model_progress(event):
+            if isinstance(event.get("message"), str):
+                progress({"message": event["message"]})
+                return
             value = event.get("value", {})
             stage = value.get("stage", "loading")
             message = (
                 f"Writing · {value.get('tokens', 0)} tokens"
-                if stage == "writing"
+                if stage in {"writing", "decoding"}
                 else "Reading reference image…"
-                if stage == "vision"
+                if stage in {"vision", "encoding"}
+                else "Reading prompt · Qwen3.5 loaded…"
+                if stage == "prefill"
                 else "Loading Qwen3.5…"
             )
             progress({"message": message})
@@ -71,18 +78,19 @@ def dispatch(
         backend = LocalQwenBackend(
             request.get("models", {}), request.get("assets", {}), helper, progress=model_progress
         )
-    runner = WorkflowRunner(
-        definition,
-        request["runDirectory"],
-        backend,
-        progress=progress,
-        cancelled=cancelled,
-        max_tokens=request.get("maxTokens", 1024),
-    )
-    if command == "workflow-review":
-        return runner.review(request.get("inputs", {}), request.get("review", {}))
-    return runner.run(
-        request.get("inputs", {}),
-        max_steps=request.get("maxSteps"),
-        regenerate=request.get("regenerate"),
-    )
+    with backend if owns_backend else nullcontext():
+        runner = WorkflowRunner(
+            definition,
+            request["runDirectory"],
+            backend,
+            progress=progress,
+            cancelled=cancelled,
+            max_tokens=request.get("maxTokens", 1024),
+        )
+        if command == "workflow-review":
+            return runner.review(request.get("inputs", {}), request.get("review", {}))
+        return runner.run(
+            request.get("inputs", {}),
+            max_steps=request.get("maxSteps"),
+            regenerate=request.get("regenerate"),
+        )

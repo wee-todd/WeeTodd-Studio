@@ -3,6 +3,15 @@ import XCTest
 import StudioCore
 
 @MainActor final class CharacterDirectorSessionTests: XCTestCase {
+  func testStyleAnalysisCapturesTheActualSharedOrSeparateSourceRole() {
+    XCTAssertEqual(CharacterSheetSessionController.analysisSourceRole(
+      role: "style", styleUsesCharacterImage: true), "character")
+    XCTAssertEqual(CharacterSheetSessionController.analysisSourceRole(
+      role: "style", styleUsesCharacterImage: false), "style")
+    XCTAssertEqual(CharacterSheetSessionController.analysisSourceRole(
+      role: "face", styleUsesCharacterImage: true), "face")
+  }
+
   func testExtractionOmissionsRemainVisibleForReview() {
     let diagnostics = CharacterSheetSessionController.extractionDiagnostics([
       "diagnostics": [["code": "proposal.invalid", "field": "body.height",
@@ -63,6 +72,28 @@ import StudioCore
     XCTAssertGreaterThan(undone, edited)
     XCTAssertGreaterThan(redone, undone)
     XCTAssertNotEqual(undone, captured)
+  }
+  func testOriginalSourceMutationDuringBridgeIsRejectedBeforePublishingProposals() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let source = root.appendingPathComponent("character.png")
+    try Data("original character bytes".utf8).write(to: source)
+    let originalHash = try CharacterArtifactHash.file(source.path)
+    let store = StudioStore(dataDirectory: root, restoreSession: false)
+    let controller = CharacterSheetSessionController(document: .init(), store: store,
+      storage: .init(root: root.appendingPathComponent("Characters")))
+
+    // Models a bridge invocation completing after the source was replaced at the same path.
+    try Data("replacement character bytes".utf8).write(to: source, options: .atomic)
+
+    do {
+      try await controller.verifyOriginalSourceUnchanged(path: source.path, expectedSHA256: originalHash)
+      XCTFail("A same-path source replacement must invalidate the analysis result.")
+    } catch {
+      XCTAssertTrue(error.localizedDescription.contains("original character source changed"))
+    }
+    XCTAssertTrue(controller.document.proposals.isEmpty)
   }
   func testMaliciousProposalStateAndInvalidValueRemainUnapplied() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

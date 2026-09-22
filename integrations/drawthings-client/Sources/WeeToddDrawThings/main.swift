@@ -15,6 +15,20 @@ func emit(_ value: [String: Any]) throws {
 }
 
 do {
+  if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "text-session" {
+    let session = LocalTextSession()
+    do {
+      try TextSessionServer.run(input: .standardInput, emit: { record in
+        var data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+        guard data.count <= 1024 * 1024 else { throw TransportError.invalidRequest }
+        data.append(10)
+        try protocolOutput.write(contentsOf: data)
+      }, generate: { request, progress, cancelled in
+        try session.run(request, progress: progress, cancelled: cancelled)
+      }, unload: { session.unload() })
+    } catch { exit(1) } // The session emitted its own versioned failure record.
+    exit(0)
+  }
   var data = Data()
   while data.count <= 1024 * 1024 {
     let chunk = try FileHandle.standardInput.read(upToCount: min(65536, 1024 * 1024 + 1 - data.count)) ?? Data()

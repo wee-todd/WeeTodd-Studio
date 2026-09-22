@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
+from wee_todd_remote.assistant_session import AssistantSession
 from wee_todd_remote.client import invoke_helper
 
 from .context_budget import ContextBudgetError, ModelBindingError, NonRetryableAssistantError
@@ -17,6 +18,21 @@ class LocalQwenBackend:
     def __init__(self, models, assets, helper, *, progress=lambda event: None):
         self.models, self.assets, self.helper = models, assets, Path(helper)
         self.progress = progress
+        self._session = None
+        self._session_model = None
+
+    def __enter__(self):
+        if self._session is not None:
+            raise RuntimeError("Workflow assistant session is already open")
+        self._session = AssistantSession(self.helper, progress=self.progress)
+        self._session.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        if self._session is not None:
+            self._session.__exit__(*args)
+            self._session = None
+            self._session_model = None
 
     def _model(self, requirement):
         if requirement["runtime"] != "drawthings-qwen-local" or requirement["family"] != "qwen3.5":
@@ -91,6 +107,14 @@ class LocalQwenBackend:
             "images": image_inputs,
         }
         try:
+            if self._session is not None:
+                if self._session_model is not None and self._session_model != str(model_path):
+                    self.__exit__(None, None, None)
+                    self.__enter__()
+                self._session_model = str(model_path)
+                return self._session.generate(
+                    payload, progress=self.progress, cancelled=cancelled, timeout=timeout
+                )
             for event in invoke_helper(
                 "text", payload, helper=self.helper, cancelled=cancelled, timeout=timeout
             ):
@@ -98,7 +122,9 @@ class LocalQwenBackend:
                     return event["value"]
                 self.progress(event)
         except RuntimeError as error:
-            match = re.fullmatch(r"Draw Things request failed \(([a-z_]+)\)", str(error))
+            match = re.fullmatch(
+                r"(?:Draw Things|Assistant) request failed \(([a-z_]+)\)", str(error)
+            )
             code = match[1] if match else ""
             if code in {"text_context_too_long", "text_input_bytes_exceeded"}:
                 raise ContextBudgetError(
@@ -108,15 +134,19 @@ class LocalQwenBackend:
                     "review fewer related objects. No source was silently discarded."
                 ) from error
             if code in {
-                "text_model_unavailable", "text_model_invalid_store", "text_model_unsupported"
+                "text_model_unavailable",
+                "text_model_invalid_store",
+                "text_model_unsupported",
             }:
                 raise ModelBindingError(
                     "The assistant model is unavailable or incompatible. Relink or set up the "
                     "supported Qwen3.5 model, then resume this saved job."
                 ) from error
             if code in {
-                "vision_inputs_invalid", "vision_image_unavailable", "vision_model_unsupported",
-                "text_request_invalid"
+                "vision_inputs_invalid",
+                "vision_image_unavailable",
+                "vision_model_unsupported",
+                "text_request_invalid",
             }:
                 raise NonRetryableAssistantError(
                     f"Assistant request needs correction ({code}); check the model, references "

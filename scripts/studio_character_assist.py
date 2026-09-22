@@ -12,19 +12,22 @@ from pathlib import Path
 from studio_prompt_assist import assist
 
 from wee_todd_mlx.character_fields import ROLES, field_id, metadata_for, validate_proposals
+from wee_todd_remote.assistant_session import AssistantSession
 
 MAX_TEXT_BYTES = 24_000
 MAX_ASSIST_INPUT_BYTES = 8_000
 MAX_OUTPUT_TOKENS = 1_024
 OUTPUT_TOKEN_RESERVE = 64
-ESTIMATED_OUTPUT_TOKENS_PER_FIELD = 68
+# Reserve room for descriptive values as well as field IDs, evidence and JSON.
+# Eleven fields still keeps a complete garment record in one observation.
+ESTIMATED_OUTPUT_TOKENS_PER_FIELD = 86
 MAX_FIELDS_PER_BATCH = (
     MAX_OUTPUT_TOKENS - OUTPUT_TOKEN_RESERVE
 ) // ESTIMATED_OUTPUT_TOKENS_PER_FIELD
 MAX_REPAIR_BYTES = 2_000
 CALL_TIMEOUT_SECONDS = 180
 CACHE_LIMIT_BYTES = 100 * 1024 * 1024
-PROMPT_VERSION = 12
+PROMPT_VERSION = 14
 UNKNOWN_VALUES = frozenset(
     {"unknown", "unspecified", "not visible", "none", "n/a", "not applicable"}
 )
@@ -123,6 +126,10 @@ def _eligible_fields(role, fields):
         roles = metadata.get("extractionRoles")
         if role != "text" and isinstance(roles, list) and role not in roles:
             continue
+        if role != "text" and metadata.get("valueKind", metadata.get("kind")) == "measurement":
+            # A photograph has no trustworthy physical scale. Measured values
+            # remain editable and can be mapped from explicitly authored text.
+            continue
         authored = metadata.get("authoredOnly") is True or identifier in {
             "identity.authoredAge",
             "identity.authoredSexGender",
@@ -148,6 +155,15 @@ def _passes(role, fields, requested):
             raise ValueError("requestedFields must be a list of field IDs")
         if any("[]" in path for path in requested):
             raise ValueError("Repeat fields require an exact host-created record path")
+        if role != "text":
+            requested = [
+                path
+                for path in requested
+                if (metadata_for(path, fields) or {}).get(
+                    "valueKind", (metadata_for(path, fields) or {}).get("kind")
+                )
+                != "measurement"
+            ]
         exact = set(eligible)
         for path in requested:
             metadata = metadata_for(path, fields)
@@ -189,8 +205,13 @@ def _instructions(role, allowed):
     return (
         scope + ' Return only compact JSON: {"proposals":[{"field":string,"value":'
         'string,"evidence":string,"uncertainty":string}]}. '
-        "Use only allowedFields and obey fieldRules from the user JSON. Keep evidence and "
-        "uncertainty concise. Omit a field when its value is unknown or its required type "
+        "Use only allowedFields and obey fieldRules. Text values: 1–2 forensic descriptive clauses "
+        "(12–30 words when supported), within maxLength. Include shape, location, proportions, "
+        "distribution, texture or variation only when directly supported and relevant. "
+        "Simple facts may stay short; never pad, invent or beautify. Preserve category/choice "
+        "and measurement formats. Keep evidence and "
+        "uncertainty concise and separate from the description. Omit a field when its value is "
+        "unknown or its required type "
         "is not explicit in the source. Never duplicate one observed item across record slots."
     )
 
@@ -217,13 +238,15 @@ def _field_rules(request, allowed):
         metadata = metadata_for(path, catalog) or {}
         kind = metadata.get("valueKind", metadata.get("kind", "text"))
         rule = {"kind": kind}
+        if kind == "text":
+            rule["maxLength"] = metadata.get("maxLength", 240)
         if path == "camera.projection":
             rule["meaning"] = "perspective or orthographic appearance, never frame shape or format"
         if kind == "measurement":
             rule["format"] = "positive number + mm|cm|m|in|ft"
             rule["omitUnless"] = "source explicitly states both number and unit"
         elif kind == "color":
-            rule["format"] = "color name"
+            rule["format"] = "color name; include visible shade or variation, never hex/RGB"
         elif kind in {"choice", "orderedChoices"}:
             choices = metadata.get("suggestions")
             if isinstance(choices, list) and choices:
@@ -291,6 +314,29 @@ def _field_rules(request, allowed):
             if collection == "garments" and field == "type":
                 rule["meaning"] += "; identify T-shirt versus collared/buttoned shirt when visible"
         forensic_meanings = {
+            "head.shape": "overall visible head outline, relative width/length and contour",
+            "face.shape": "visible facial outline, relative width/length and cheek-to-jaw contour",
+            "face.jaw": "visible jaw width, angle and chin contour; distinguish beard from anatomy",
+            "face.cheekbones": (
+                "visible cheek contour and prominence; do not infer hidden bone structure"
+            ),
+            "face.noseMuzzleBeak": (
+                "visible bridge, width, tip and nostril contour; do not infer a profile "
+                "from a frontal view"
+            ),
+            "face.mouth": "visible mouth width, lip line and resting contour",
+            "face.lips": "visible upper/lower lip fullness, outline and proportions",
+            "eyes.shape": (
+                "visible eye opening, eyelid contour and tilt; omit when obscured; never "
+                "substitute eyewear or an obstruction description for eye shape"
+            ),
+            "brows.shape": "visible brow thickness, density, arch and taper",
+            "ears.shape": "visible ear outline, size relative to head and lobe contour",
+            "hair.facialHair": (
+                "visible facial-hair distribution, length, density, shape and color "
+                "variation; locate each region"
+            ),
+            "hair.texture": "visible strand texture, thickness and variation where hair is present",
             "body.build": (
                 "visible mass distribution and frame only; describe faithfully without flattering, "
                 "slimming, exaggerating, or inferring health"
@@ -324,13 +370,18 @@ def _field_rules(request, allowed):
     return rules
 
 
-def _needs_text_inventory(request):
+def _needed_inventory_collections(request, role):
     counts = {}
     for path in request.get("requestedFields", []):
         match = _REPEAT_PATH.match(path)
         if match:
             counts.setdefault(match.group(1), set()).add(match.group(2))
-    return {collection: len(records) for collection, records in counts.items() if len(records) > 1}
+    minimum_records = 1 if role == "character" else 2
+    return {
+        collection: len(records)
+        for collection, records in counts.items()
+        if len(records) >= minimum_records
+    }
 
 
 def _inventory_payload(request, model, collections):
@@ -576,7 +627,9 @@ def _batch_passes(request, role, model, logical_passes):
                 atoms.append((key, [field]))
         current = []
         for key, atom in atoms:
-            if key == ("forensic-skin", None):
+            if key == ("forensic-skin", None) or (
+                key == ("forensic-hair", None) and len(atom) == len(FORENSIC_HAIR_FIELDS)
+            ):
                 if current:
                     batches.append(current)
                     current = []
@@ -699,10 +752,12 @@ def _assert_source_current(request, role, expected_hash, expected_request):
         raise ValueError("The source changed during extraction; discard these proposals")
 
 
-def _call_assist(payload, *, request, role, source_hash, source_request, progress, cancelled):
+def _call_assist(
+    payload, *, request, role, source_hash, source_request, progress, cancelled, session=None
+):
     _assert_source_current(request, role, source_hash, source_request)
     try:
-        return assist(payload, progress=progress, cancelled=cancelled)
+        return assist(payload, progress=progress, cancelled=cancelled, session=session)
     finally:
         _assert_source_current(request, role, source_hash, source_request)
 
@@ -736,8 +791,13 @@ def _write_cache(root, key, value):
 
 def _model_value(result, *, request, allowed):
     text = result["text"].strip()
+    # Some otherwise complete responses append the training-format end tag.
+    # Remove only this exact terminal wrapper; extra JSON/prose still fails.
+    text = re.sub(r"\s*</output>$", "", text).strip()
     fence = re.fullmatch(r"```(?:json)?\s*\n([\s\S]*?)\n```", text, re.IGNORECASE)
     value = json.loads(fence.group(1) if fence else text)
+    if allowed and isinstance(value, list):
+        value = {"proposals": value}
     aliases = {alias: path for path, alias in _field_aliases(request, allowed).items()}
     if isinstance(value, dict) and isinstance(value.get("proposals"), list):
         for proposal in value["proposals"]:
@@ -913,6 +973,25 @@ def _validate_cached(value, *, role, passes, fields):
 
 
 def extract_fields(request, *, progress=lambda message: None, cancelled=lambda: False):
+    """Own a lazy inference session until the analysis finishes, including repairs."""
+    runtime = request.get("runtime", {})
+    mode = runtime.get("assistantExecutionMode", "session")
+    if mode not in {"session", "oneshot"}:
+        raise ValueError("Assistant execution mode must be session or oneshot")
+    if mode == "oneshot":
+        return _extract_fields(request, progress=progress, cancelled=cancelled)
+    with AssistantSession(
+        runtime.get("drawThingsHelperPath", ""),
+        cancelled=cancelled,
+        progress=lambda event: progress(event.get("message", "Preparing assistant…")),
+    ) as session:
+        result = _extract_fields(request, progress=progress, cancelled=cancelled, session=session)
+    return result
+
+
+def _extract_fields(
+    request, *, progress=lambda message: None, cancelled=lambda: False, session=None
+):
     """Extract bounded review proposals without mutating a Studio document."""
     role, model, fields, source_hash = _preflight(request, cancelled)
     source_request = _source_request_identity(request, role)
@@ -942,7 +1021,9 @@ def extract_fields(request, *, progress=lambda message: None, cancelled=lambda: 
             "role": role,
             "metadata": metadata,
         }
-    collections = _needs_text_inventory(request) if role in {"text", "character"} else {}
+    collections = (
+        _needed_inventory_collections(request, role) if role in {"text", "character"} else {}
+    )
     if collections:
         progress(
             "Identifying distinct visible items"
@@ -962,6 +1043,7 @@ def extract_fields(request, *, progress=lambda message: None, cancelled=lambda: 
             source_request=source_request,
             progress=progress,
             cancelled=inventory_stopped,
+            session=session,
         )
         if cancelled():
             raise InterruptedError("Character extraction cancelled")
@@ -1002,6 +1084,7 @@ def extract_fields(request, *, progress=lambda message: None, cancelled=lambda: 
             source_request=source_request,
             progress=progress,
             cancelled=stopped,
+            session=session,
         )
         if cancelled():
             raise InterruptedError("Character extraction cancelled")
@@ -1045,6 +1128,7 @@ def extract_fields(request, *, progress=lambda message: None, cancelled=lambda: 
                     source_request=source_request,
                     progress=progress,
                     cancelled=stopped,
+                    session=session,
                 )
                 if cancelled():
                     raise InterruptedError("Character extraction cancelled") from error
@@ -1066,6 +1150,18 @@ def extract_fields(request, *, progress=lambda message: None, cancelled=lambda: 
                         allowed=allowed,
                         fields=fields,
                     )
+                if partial is not None:
+                    # A focused schema repair often returns only the offending
+                    # field. Preserve independently validated original fields,
+                    # while repaired values and rejected/conflicting fields win.
+                    rejected = {item.get("field") for item in validated.get("diagnostics", [])}
+                    retained = {
+                        item["field"]: item
+                        for item in partial["proposals"]
+                        if item["field"] not in rejected
+                    }
+                    retained.update({item["field"]: item for item in validated["proposals"]})
+                    validated = {**validated, "proposals": list(retained.values())}
             diagnostics.extend(validated.get("diagnostics", []))
         merged.extend(validated["proposals"])
         if role == "character":

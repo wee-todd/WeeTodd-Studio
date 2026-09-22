@@ -1566,8 +1566,17 @@ gRPC server nor DT+/API credentials are required. The input limit is 4,096 token
 image tokens (also at most 24 KB of prompt/instruction text); output is selectable up to 1,024
 tokens, with a warning when the limit is reached. Progress shows model loading, image processing
 and output-token counts. Completion reports the number of images used and
-elapsed time; completion, failure and cancellation end the request-owned process and unload
-the model. There is no persistent KV cache or automatic model download.
+elapsed time. Single prompt actions, Character Director and workflow jobs use a job-owned
+Qwen3.5 4B session: consecutive calls reuse decoder/vision weights and up to four content-hashed
+image sets (128 MiB combined
+prepared tensors and encoded features). Attention KV, convolution and recurrent state are fresh
+for every request. The session closes and unloads before review, on cancellation/failure, or when
+switching models. Progress reports preparation, reading, writing and final unload. This is serial
+resource reuse; simultaneous GPU batches are not enabled. The cache cap excludes model weights
+and is not a total-memory limit. A single prompt action closes its session after that action.
+9B text remains one-shot. Older helpers can use one-shot compatibility only after an explicit
+startup rejection, before any generation is submitted.
+There is no persistent prompt-prefix cache or automatic model download.
 The current SDK path uses greedy decoding; change the instructions for a different draft rather
 than expecting randomized alternatives from an identical request. Each click snapshots the latest
 instructions; the original prompt remains the source until you apply a proposal and reopen the
@@ -1935,15 +1944,23 @@ clauses, rather than a single appended word. Cinematic Photograph, Realistic 3D,
 Comic, Oil Painting, Concept Art, Clay and Sculpture use the same appearance fields. Character image,
 style image and authored-text analysis use the configured app-owned Qwen3.5 4B model; character and
 style may share one image. Bounded calls propose forensic visible details with evidence and uncertainty.
-Large references are analyzed as orientation-correct overviews capped at 512 pixels per edge;
-the original files are retained. Character analysis also uses Apple Vision to prepare one bounded
-head-and-scalp detail, at most 512 pixels per edge, when exactly one suitable face is detected.
-Only the face/hair calls receive that detail. Wardrobe calls may receive one separate torso/lap
-detail, also capped at 512 pixels, when Vision finds an unambiguous person region containing the
-face. Overlapping or missing people fall back to the overview with a review diagnostic. Detection
-uses a 1600-pixel preview and crop preparation decodes at most 2048 pixels per edge, with streaming
-hashes and source-change checks. A bounded visual inventory assigns distinct items to record slots
-before field extraction, omits unused slots and binds material records to named targets. Clothing
+Descriptive values include supported shape, location, proportions, texture and variation in one or
+two clauses; simple facts can remain short. Evidence and uncertainty stay separate and concise.
+Smaller field batches reserve room for detail without raising the 1,024-token output limit.
+Schema repair preserves independently validated descriptions when repairing a different field.
+Physical height/scale measurements come from manual fields or authored text, not guesses from pixels.
+
+Apple Vision selects the foreground instance containing one unambiguous face, removes the background
+onto white, crops around the subject and prepares an orientation-correct overview capped at 512
+pixels per edge. Character Director shows that prepared image and its isolation status. The original
+file is retained. Head/scalp and torso/lap details use the same isolated subject, each capped at 512
+pixels; only the corresponding face/hair or wardrobe calls receive them. Missing or ambiguous
+subject masks fall back to a bounded original overview with a visible diagnostic, never a claim of
+successful isolation. Character detection and mask/crop preparation use a preview capped at 1600
+pixels, with streaming hashes and source-change checks before publishing proposals. Style analysis
+retains the original scene context and uses the helper's bounded whole-image input.
+A bounded visual inventory assigns distinct items to record slots before field extraction, including
+single optional feature slots, omits unused slots and binds material records to named targets. Clothing
 analysis carries garment identity into material calls,
 omits unobserved footwear and requires literal evidence for condition: fading and creases must not
 be generalized into damage. Structured or negated evidence is checked before a proposal can be applied;

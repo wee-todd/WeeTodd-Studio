@@ -62,8 +62,8 @@ struct LocalTextRequest {
 /// Runs in a request-owned helper process; exiting releases the model and all GPU caches.
 /// Installed DT stores are opened read-only. No download, conversion or persistent KV cache.
 public enum LocalTextGeneration {
-  private static let eos: Set<Int32> = [248_044, 248_046]
-  private static let tokenizer = TiktokenTokenizer(
+  static let eos: Set<Int32> = [248_044, 248_046]
+  static let tokenizer = TiktokenTokenizer(
     vocabulary: BinaryResources.vocab_qwen3_5_json, merges: BinaryResources.merges_qwen3_5_txt,
     specialTokens: ["<|endoftext|>": 248_044, "<|im_start|>": 248_045,
       "<|im_end|>": 248_046, "<think>": 248_068, "</think>": 248_069,

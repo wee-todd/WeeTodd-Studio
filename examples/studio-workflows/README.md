@@ -25,6 +25,12 @@ them on reopening, validates imported jobs before replacing the session, and ret
 outputs after cancellation or failure. **Set up assistant…** can download the pinned Qwen3.5 4B
 checkpoint independently of the Draw Things app; see [setup](../../studio/README.md#local-qwen35-prompt-assistant).
 
+Consecutive local Qwen3.5 4B calls within one active run share a job-owned inference session.
+Weights and a bounded content-hashed vision cache are reused, while every request starts with fresh
+attention/recurrent state. The session unloads before returning for human review and on failure,
+cancellation or model changes. This is serial execution with resource reuse, not concurrent GPU
+batching. The 9B text route remains one-shot; approval, saved-output and checkpoint rules are unchanged.
+
 ## Native image generation boundary
 
 The image workspace can execute Qwen-Image-2.1 through the app-owned MLX renderer. Image exports

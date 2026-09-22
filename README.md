@@ -278,8 +278,11 @@ uses Apple Vision to propose actual panel crops, then refines panels sequentiall
 9B and HighResolution9B, preferring an unambiguous installed KV variant. With optional reference-head
 replacement, new documents run BFS alone at native panel size, enlarge that result 2× with Lanczos,
 then run HighResolution9B alone. Both passes default to eight steps. New recipes use minimal,
-versioned BFS/detail prompts; saved legacy prompts remain available. Wardrobe analysis uses bounded
-image details and evidence-based condition fields. Background
+versioned BFS/detail prompts; saved legacy prompts remain available. Apple Vision isolates and crops
+the primary character before bounded image analysis, with a preview and explicit ambiguity fallback.
+Attribute values include supported descriptive detail; evidence remains separate. Related Qwen 4B
+calls share loaded weights and bounded image features within the job, then unload before review.
+Wardrobe analysis uses bounded image details and evidence-based condition fields. Background
 removal and refinement share the same saved document, progress, previews, completed-stage reuse and reviewed retry. This experimental
 pipeline requires the installed models and LoRAs. Local generation, live previews and completed-panel
 reuse have been exercised; head consistency and composition still require visual review.

@@ -3,6 +3,7 @@
 from pathlib import Path
 from uuid import uuid4
 
+from wee_todd_remote.assistant_session import AssistantSession
 from wee_todd_remote.client import invoke_helper
 
 ERRORS = {
@@ -55,7 +56,7 @@ def validate_result(result):
     return result
 
 
-def assist(request, *, progress=lambda message: None, cancelled=lambda: False):
+def assist(request, *, progress=lambda message: None, cancelled=lambda: False, session=None):
     payload = dict(request["textRequest"])
     payload["requestID"] = str(uuid4())
     helper = request.get("runtime", {}).get("drawThingsHelperPath")
@@ -63,19 +64,45 @@ def assist(request, *, progress=lambda message: None, cancelled=lambda: False):
         raise ValueError(
             "Set up the Draw Things helper in Runtime Settings before using the prompt assistant."
         )
+
+    def report(event):
+        value = event.get("value", {})
+        stage = value.get("stage")
+        if stage in {"vision", "encoding"}:
+            progress(f"Reading {value.get('images', 0)} images with Qwen3.5…")
+        elif stage in {"writing", "decoding"}:
+            progress(f"Writing · {value.get('tokens', 0)} tokens")
+        else:
+            progress(
+                {
+                    "queued": "Waiting for local inference…",
+                    "preparing": "Preparing bounded reference inputs…",
+                    "prefill": "Reading the prompt · Qwen3.5 loaded…",
+                    "resident": "Qwen3.5 loaded for this analysis…",
+                    "unloaded": "Qwen3.5 unloaded",
+                    "compatibility": "Using the helper's single-request compatibility mode…",
+                }.get(stage, "Loading Qwen3.5 and reading the prompt…")
+            )
+
     try:
+        if session is not None:
+            return validate_result(session.generate(payload, progress=report, cancelled=cancelled))
+        mode = request.get("runtime", {}).get("assistantExecutionMode", "session")
+        if mode not in {"session", "oneshot"}:
+            raise ValueError("Assistant execution mode must be session or oneshot")
+        if mode == "session":
+            with AssistantSession(
+                helper,
+                cancelled=cancelled,
+                progress=lambda event: progress(event.get("message", "Preparing assistant…")),
+            ) as owned:
+                return validate_result(
+                    owned.generate(payload, progress=report, cancelled=cancelled)
+                )
         for event in invoke_helper("text", payload, helper=Path(helper), cancelled=cancelled):
             if event["type"] == "result":
                 return validate_result(event["value"])
-            value = event.get("value", {})
-            if value.get("stage") == "vision":
-                progress(f"Reading {value.get('images', 0)} images with Qwen3.5…")
-                continue
-            progress(
-                f"Writing · {value.get('tokens', 0)} tokens"
-                if value.get("stage") == "writing"
-                else "Loading Qwen3.5 and reading the prompt…"
-            )
+            report(event)
     except RuntimeError as error:
         for code, message in ERRORS.items():
             if f"({code})" in str(error):

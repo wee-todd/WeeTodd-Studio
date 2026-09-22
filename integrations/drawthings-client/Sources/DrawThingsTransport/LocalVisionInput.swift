@@ -13,11 +13,12 @@ struct LocalVisionInput {
   let patches: Tensor<Float>
   let grids: [(t: Int, h: Int, w: Int)]
 
-  static func prepare(_ images: [LocalPromptImage]) throws -> Self {
+  static func prepare(_ images: [LocalPromptImage], cancelled: () -> Bool = { false }) throws -> Self {
     guard !images.isEmpty, images.count <= 8 else { throw LocalTextError("vision_inputs_invalid") }
     var pieces = [Tensor<Float>]()
     var grids = [(t: Int, h: Int, w: Int)]()
     for input in images {
+      guard !cancelled() else { throw LocalTextError("text_cancelled") }
       let url = URL(fileURLWithPath: input.path).resolvingSymlinksInPath()
       guard let info = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
         info.isRegularFile == true, let size = info.fileSize, size > 0, size <= 64 * 1024 * 1024,

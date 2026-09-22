@@ -101,6 +101,16 @@ struct CharacterDirectorWindow: View {
         controller.document.styleUsesCharacterImage
       }, set: { value in controller.edit { $0.styleUsesCharacterImage = value } })).toggleStyle(.checkbox)
       ForEach(CharacterSourceRole.allCases) { role in sourceRow(role) }
+      if let path = controller.preparedSubjectPreviewPath {
+        GroupBox("Prepared character analysis input") {
+          HStack(alignment: .top, spacing: 12) {
+            PreviewableImage(path: path, title: "Apple Vision prepared subject")
+              .frame(width: 180, height: 180)
+            Text(controller.preparedSubjectStatus ?? "Bounded character overview ready.")
+              .font(.caption).foregroundStyle(.secondary)
+          }
+        }
+      }
       Divider()
       HStack {
         Picker("Local vision model", selection: $modelPath) {

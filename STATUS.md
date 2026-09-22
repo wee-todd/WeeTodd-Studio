@@ -1,5 +1,30 @@
 # WeeTodd Studio implementation status
 
+Local assistant sessions and character isolation 2026-09-21 (experimental): related Qwen3.5 4B
+calls now share app-owned decoder/vision weights and a content-hashed image cache within one job.
+Execution remains serial; attention, convolution and recurrent state start fresh for every request.
+The cache holds at most four image sets / 128 MiB of prepared tensors and encoded features,
+excluding model weights. Cancellation, failure, model changes and the return to human review unload
+the worker; the shared inference lease survives abrupt parent exit until its worker exits.
+The 9B text route remains one-shot. Apple Vision isolates one unambiguous face-associated foreground
+subject on white before preparing 512-pixel overview/head/torso inputs, with an explicit bounded
+fallback when isolation is unavailable. Originals remain intact and source revisions are rechecked.
+Character values request supported descriptive clauses while retaining separate evidence; partial
+schema repairs preserve valid fields. Physical measurements remain manual or authored-text inputs.
+Optional visual records require an observed inventory item, including a single feature slot.
+These controls improve preparation and validation, but proposals still require visual review.
+
+Installed 8-bit 4B qualification on M3 Ultra / 256 GiB used the same isolated character inputs and
+18-call extraction job: one-shot took 128.8 seconds, session reuse took 84.9 seconds (34% less time).
+Sampled helper RSS maxima were 4195 and 3858 MiB respectively; these are not peak physical-footprint
+measurements or cross-device memory guarantees. The session loaded each model component once,
+encoded three image sets and served 15 image-cache hits, retaining 27.8 MiB of image data. Three
+mixed long-text/image/short-text/repeated-image sequences matched the one-shot answers exactly;
+median wall time was 13.04 versus 6.43 seconds. The full extraction produced 69 versus 72 proposals,
+so these timings do not establish exact full-job output parity. Nine installed-model runtime tests
+passed, including long-prefill initialization, fresh request state, cache invalidation, cancellation
+and small output budgets. No new image-generation or cross-device quality qualification is claimed.
+
 Structured Character Director 2026-09-20 (experimental): a dedicated movie-independent window and
 shared character-reference editor now use typed appearance fields, a deterministic thirteen-section
 prompt, forensic Qwen proposals, versioned style presets and separate portable documents. The local

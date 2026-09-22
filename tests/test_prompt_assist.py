@@ -29,7 +29,7 @@ for t, v in events:
     progress = []
     result = assist(
         {
-            "runtime": {"drawThingsHelperPath": str(helper)},
+            "runtime": {"drawThingsHelperPath": str(helper), "assistantExecutionMode": "oneshot"},
             "textRequest": {
                 "modelPath": "/models/qwen_3.5_4b_i8x.ckpt",
                 "systemPrompt": "Write a prompt.",
@@ -65,16 +65,25 @@ def test_local_text_cancellation_terminates_helper(tmp_path):
     start = time.monotonic()
     with pytest.raises(InterruptedError):
         assist(
-            {"runtime": {"drawThingsHelperPath": str(helper)}, "textRequest": {}},
+            {
+                "runtime": {
+                    "drawThingsHelperPath": str(helper),
+                    "assistantExecutionMode": "oneshot",
+                },
+                "textRequest": {},
+            },
             cancelled=lambda: time.monotonic() - start > 0.2,
         )
     assert time.monotonic() - start < 3
 
 
-@pytest.mark.parametrize("code,message", [
-    ("text_model_unsupported", "H3 Qwen encoders cannot"),
-    ("text_input_bytes_exceeded", "UTF-8"),
-])
+@pytest.mark.parametrize(
+    "code,message",
+    [
+        ("text_model_unsupported", "H3 Qwen encoders cannot"),
+        ("text_input_bytes_exceeded", "UTF-8"),
+    ],
+)
 def test_local_text_errors_explain_model_requirement(tmp_path, code, message):
     from studio_prompt_assist import assist
 
@@ -90,4 +99,12 @@ sys.exit(1)
     )
     helper.chmod(0o755)
     with pytest.raises(ValueError, match=message):
-        assist({"runtime": {"drawThingsHelperPath": str(helper)}, "textRequest": {}})
+        assist(
+            {
+                "runtime": {
+                    "drawThingsHelperPath": str(helper),
+                    "assistantExecutionMode": "oneshot",
+                },
+                "textRequest": {},
+            }
+        )

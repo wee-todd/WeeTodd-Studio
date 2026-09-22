@@ -11,6 +11,8 @@ import StudioCore
   @Published var status = "Ready"
   @Published var error: String?
   @Published var previewPath: String?
+  @Published var preparedSubjectPreviewPath: String?
+  @Published var preparedSubjectStatus: String?
   @Published var catalog: [String: Any] = [:]
   private(set) var catalogFailure: (connectionID: String, message: String)?
   let bridge: Bridge
@@ -246,6 +248,7 @@ import StudioCore
         try FileManager.default.copyItem(at: url, to: destination)
       }.value
       edit { $0.sources[role.rawValue] = destination.path; if role == .face { $0.headReference = nil } }
+      if role == .character { preparedSubjectPreviewPath = nil; preparedSubjectStatus = nil }
       if role == .face { launch { [self] in try await prepareHead() } }
     } catch { self.error = error.localizedDescription }
   }
@@ -268,11 +271,28 @@ import StudioCore
     }
   }
 
+  static func analysisSourceRole(role: String, styleUsesCharacterImage: Bool) -> String {
+    role == "style" && styleUsesCharacterImage ? "character" : role
+  }
+
+  func verifyOriginalSourceUnchanged(path: String, expectedSHA256: String) async throws {
+    let currentHash = try await Task.detached {
+      try CharacterArtifactHash.file(path)
+    }.value
+    guard currentHash == expectedSHA256 else {
+      throw StudioError.invalid("The original character source changed while analysis was running. Analyze it again.")
+    }
+  }
+
   func analyze(role: String, modelPath: String) async throws {
     status = "Analyzing \(role)…"
     let captured = document.revision
     var preparationDiagnostics: [CharacterProposalDiagnostic] = []
-    let sourcePath = role == "style" && document.styleUsesCharacterImage ? document.sources["character"] : document.sources[role]
+    var originalSourceHash = ""
+    var analysisInputHash = ""
+    let sourceRole = Self.analysisSourceRole(role: role,
+      styleUsesCharacterImage: document.styleUsesCharacterImage)
+    let sourcePath = document.sources[sourceRole]
     var payload: [String: Any] = ["role": role, "modelPath": modelPath,
       "capturedTarget": ["documentID": id.uuidString, "revision": captured],
       "fields": try JSONSerialization.jsonObject(with: CharacterFieldCatalog.shared.catalogJSON()) as? [String: Any] ?? [:],
@@ -300,23 +320,46 @@ import StudioCore
     else {
       guard let sourcePath else { throw StudioError.invalid("Choose an image for \(role) analysis.") }
       let hash = try await Task.detached { try CharacterArtifactHash.file(sourcePath) }.value
+      originalSourceHash = hash; analysisInputHash = hash
       payload["sourceImage"] = ["path": sourcePath, "label": role, "sha256": hash]
       if role == "character" {
-        status = "Preparing bounded face and clothing detail…"
+        status = "Isolating the primary character with Apple Vision…"
         let detail = try await CharacterDetailImagePreparation().prepare(
           source: URL(fileURLWithPath: sourcePath),
           outputDirectory: storage.directory(id: id).appendingPathComponent("Analysis Inputs"))
         try checkCancellation()
+        guard document.revision == captured, document.sources["character"] == sourcePath else {
+          throw StudioError.invalid("The character or its source image changed during Apple Vision preparation. Analyze it again.")
+        }
         guard detail.sourceSHA256 == hash else { throw StudioError.invalid("The character image changed during analysis preparation.") }
+        guard let overview = detail.subjectOverviewImage else {
+          throw StudioError.invalid("Studio could not prepare a bounded character overview.")
+        }
+        payload["sourceImage"] = ["path": overview.path, "label": overview.label, "sha256": overview.sha256]
+        analysisInputHash = overview.sha256
         payload["sourceDetailImages"] = detail.sourceDetailImages.map {
           ["path": $0.path, "label": $0.label, "sha256": $0.sha256]
         }
         preparationDiagnostics = detail.diagnostics.map { .init(code: "image.detail", message: $0) }
+        preparedSubjectPreviewPath = overview.path
+        preparedSubjectStatus = detail.diagnostics.isEmpty
+          ? "Primary character isolated on white for analysis."
+          : detail.diagnostics.joined(separator: " ")
         status = "Analyzing character…"
       }
     }
     let result = try await bridge.invoke("character-analyze", runtime: store.runtime, payload: payload)
     try checkCancellation()
+    if role != "text", let sourcePath {
+      try await verifyOriginalSourceUnchanged(path: sourcePath, expectedSHA256: originalSourceHash)
+      try checkCancellation()
+      guard document.revision == captured, document.sources[sourceRole] == sourcePath else {
+        throw StudioError.invalid("The character or its source image changed during analysis. Analyze it again.")
+      }
+    }
+    if role != "text", result["sourceHash"] as? String != analysisInputHash {
+      throw StudioError.invalid("Character analysis returned provenance for a different prepared image.")
+    }
     var proposals: [CharacterFieldProposal] = []
     var diagnostics = preparationDiagnostics + Self.extractionDiagnostics(result)
     let rawProposals = result["proposals"] as? [Any]
@@ -366,7 +409,8 @@ import StudioCore
         promptVersion: prompt, modelFingerprint: fingerprint)
     }
     var batch = CharacterProposalBatch(documentID: id, revision: captured, sourcePath: sourcePath ?? "",
-      sourceHash: result["sourceHash"] as? String ?? "", role: role, proposals: proposals,
+      sourceHash: role == "text" ? (result["sourceHash"] as? String ?? "") : originalSourceHash,
+      role: role, proposals: proposals,
       metadata: metadata, diagnostics: diagnostics.isEmpty ? nil : diagnostics)
     batch.stale = document.revision != captured; document.proposals.append(batch); save()
   }
