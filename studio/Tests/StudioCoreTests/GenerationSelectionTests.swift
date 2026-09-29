@@ -2,6 +2,19 @@ import XCTest
 @testable import StudioCore
 
 final class GenerationSelectionTests: XCTestCase {
+  func testNativeCoreSelectionPreservesOldDocumentsAndRoundTrips() throws {
+    let legacy = Data(#"{"task":"ref2va","preset":"custom"}"#.utf8)
+    var selection = try JSONDecoder().decode(GenerationSelection.self, from: legacy)
+    XCTAssertNil(selection.transformerBackend)
+    XCTAssertFalse(selection.isModified)
+    selection.transformerBackend = "nnc_experimental"
+    XCTAssertTrue(selection.isModified)
+    let restored = try JSONDecoder().decode(GenerationSelection.self, from: JSONEncoder().encode(selection))
+    XCTAssertEqual(restored.transformerBackend, "nnc_experimental")
+    selection.resetOverrides()
+    XCTAssertNil(selection.transformerBackend)
+  }
+
   func testMotionReviewShowsLTXSourceVideoAndEffectiveTaskWithoutChangingSavedTask() {
     for engine in [Engine.ltx23, .ltx25] {
       var clip = Clip(engine: engine)

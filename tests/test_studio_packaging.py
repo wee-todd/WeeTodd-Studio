@@ -20,6 +20,69 @@ dt_packager = importlib.import_module("build_drawthings_client")
 real_subprocess_run = subprocess.run
 
 
+def test_native_ltx_distribution_installs_verified_kernels_and_rejects_tampering(
+        source, monkeypatch):
+    import build_ltx_worker
+    monkeypatch.setattr(packager.subprocess, "run", skip_codesign)
+    folder = source / "ltx-distribution"
+    folder.mkdir()
+    for name in ("WeeToddLTXWorker", "mlx.metallib", "Notices.txt"):
+        (folder / name).write_text(name + " fixture")
+    (folder / "WeeToddLTXWorker").chmod(0o755)
+    manifest = {"format": "weetodd-ltx-native-worker-v1", "protocol": 1,
+                "files": {name: build_ltx_worker.digest(folder / name)
+                          for name in ("WeeToddLTXWorker", "mlx.metallib", "Notices.txt")}}
+    (folder / "manifest.json").write_text(json.dumps(manifest))
+    app = packager.package_app(source, "release", ltx_worker=folder)
+    assert (app / "Contents/MacOS/WeeToddLTXWorker").is_file()
+    assert (app / "Contents/Resources/LTXNative/mlx.metallib").is_file()
+    assert not (app / "Contents/MacOS/mlx.metallib").exists()
+    assert (app / "Contents/Resources/LTXNative/Notices.txt").is_file()
+    (folder / "mlx.metallib").write_text("tampered")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        packager.package_app(source, "release", ltx_worker=folder)
+    assert (app / "Contents/Resources/LTXNative/mlx.metallib").read_text() == "mlx.metallib fixture"
+
+
+def test_h3_mlx_worker_reuses_verified_metal_library_and_rejects_tampering(
+        source, monkeypatch):
+    import build_h3_mlx_worker
+    import build_ltx_worker
+    monkeypatch.setattr(packager.subprocess, "run", skip_codesign)
+    ltx = source / "ltx-distribution"
+    ltx.mkdir()
+    for name in ("WeeToddLTXWorker", "mlx.metallib", "Notices.txt"):
+        (ltx / name).write_text(name + " fixture")
+    (ltx / "WeeToddLTXWorker").chmod(0o755)
+    (ltx / "manifest.json").write_text(json.dumps({
+        "format": "weetodd-ltx-native-worker-v1", "protocol": 1,
+        "files": {name: build_ltx_worker.digest(ltx / name)
+                  for name in ("WeeToddLTXWorker", "mlx.metallib", "Notices.txt")}}))
+    h3 = source / "h3-mlx-distribution"
+    h3.mkdir()
+    for name in ("WeeToddH3MLXWorker", "Notices.txt"):
+        (h3 / name).write_text(name + " fixture")
+    (h3 / "WeeToddH3MLXWorker").chmod(0o755)
+    (h3 / "manifest.json").write_text(json.dumps({
+        "format": "weetodd-h3-mlx-worker-v1", "protocol": 1,
+        "sharedMetalLibrary": "LTXNative/mlx.metallib",
+        "files": {name: build_h3_mlx_worker.digest(h3 / name)
+                  for name in ("WeeToddH3MLXWorker", "Notices.txt")}}))
+    app = packager.package_app(source, "release", ltx_worker=ltx, h3_mlx_worker=h3)
+    assert (app / "Contents/MacOS/WeeToddH3MLXWorker").is_file()
+    assert (app / "Contents/Resources/LTXNative/mlx.metallib").is_file()
+    assert (app / "Contents/Resources/H3MLXNative/Notices.txt").is_file()
+    installed = json.loads((app / "Contents/Resources/H3MLXNative/manifest.json").read_text())
+    assert installed["distributionBinarySHA256"] == build_h3_mlx_worker.digest(
+        h3 / "WeeToddH3MLXWorker")
+    assert installed["files"]["WeeToddH3MLXWorker"] == build_h3_mlx_worker.digest(
+        app / "Contents/MacOS/WeeToddH3MLXWorker")
+    (h3 / "WeeToddH3MLXWorker").write_text("tampered")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        packager.package_app(source, "release", ltx_worker=ltx, h3_mlx_worker=h3)
+    assert (app / "Contents/MacOS/WeeToddH3MLXWorker").read_text() == "WeeToddH3MLXWorker fixture"
+
+
 def skip_codesign(command, **kwargs):
     if command[0] == "codesign":
         return subprocess.CompletedProcess(command, 0)
@@ -246,3 +309,24 @@ def test_signing_choice_survives_rebuilds_without_silent_fallback(source, monkey
         packager.package_app(source, "release", signing_identity="unavailable identity")
     monkeypatch.delenv("WEETODD_STUDIO_SIGNING_IDENTITY")
     assert packager.resolve_signing_identity(source, None) == "fixture identity"
+
+
+def test_native_worker_bundle_includes_notices_and_rejects_tampering(source, monkeypatch):
+    from build_h3_worker import digest
+
+    monkeypatch.setattr(packager.subprocess, "run", skip_codesign)
+    distribution = source / "native-distribution"
+    distribution.mkdir()
+    for name in ("WeeToddH3Worker", "Notices.txt"):
+        (distribution / name).write_text("native fixture")
+    (distribution / "manifest.json").write_text(json.dumps({
+        "format": "weetodd-h3-native-worker-v1", "protocol": 1,
+        "files": {name: digest(distribution / name) for name in ("WeeToddH3Worker", "Notices.txt")},
+    }))
+    app = packager.package_app(source, "release", native_worker=distribution)
+    assert (app / "Contents/MacOS/WeeToddH3Worker").is_file()
+    assert (app / "Contents/Resources/H3Native/Notices.txt").read_text() == "native fixture"
+    (distribution / "Notices.txt").write_text("changed")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        packager.package_app(source, "release", native_worker=distribution)
+    assert (app / "Contents/Resources/H3Native/Notices.txt").read_text() == "native fixture"

@@ -19,7 +19,7 @@ def infer_task(clip):
     return "fflf" if roles & {"first", "last", "keyframe"} else "t2v"
 
 
-def supported_tasks(recipe):
+def supported_tasks(recipe, *, native_h3_still_references=False):
     engine, config = recipe["engine"], recipe.get("config", {})
     components = recipe.get("components", {})
     if engine == "h3":
@@ -40,7 +40,13 @@ def supported_tasks(recipe):
                     raise ValueError("Text encoder provenance exceeds the 4 MiB inspection limit.")
                 document = json.loads(manifest.read_text())
                 if document.get("format") == "weetodd-h3-qwen-paged-v1":
-                    tasks = [task for task in tasks if task == "t2v"]
+                    # The Python paged Qwen encoder omits visual weights. The Swift
+                    # still-reference worker uses its separate vision encoder.
+                    if (native_h3_still_references and components.get("task") == "ref2va"
+                            and components.get("vision_encoder")):
+                        tasks = [task for task in tasks if task == "ref2va"]
+                    else:
+                        tasks = [task for task in tasks if task == "t2v"]
         return tasks
     if engine == "ltx23":
         ic = components.get("ic_loras", [])
@@ -133,7 +139,7 @@ def special_h3_sampling(recipe):
     return False
 
 
-def generation_descriptor(recipe):
+def generation_descriptor(recipe, *, native_h3_still_references=False):
     engine, config = recipe["engine"], recipe.get("config", {})
     h3 = engine == "h3"
     mode = config.get("pipeline_mode", "distilled" if engine == "ltx25" else "two_stage")
@@ -219,7 +225,9 @@ def generation_descriptor(recipe):
         else "This native adapter does not expose a Shift override.",
     }
     return {
-        "supportedTasks": supported_tasks(recipe),
+        "supportedTasks": supported_tasks(
+            recipe, native_h3_still_references=native_h3_still_references
+        ),
         "controls": controls,
         "presets": [
             {"id": "custom", "name": "Custom", "description": "Preserve imported recipe settings."},
@@ -260,6 +268,7 @@ def resolve_generation_selection(selection, clip, profiles, capabilities, *, val
         "shift",
         "memoryPolicy",
         "projectionBackend",
+        "transformerBackend",
     }
     if unknown:
         raise ValueError(f"Unsupported generation controls: {sorted(unknown)}")
@@ -342,7 +351,12 @@ def resolve_generation_selection(selection, clip, profiles, capabilities, *, val
         candidates = [(p, r) for p, r in candidates if p["id"] == selected]
         if not candidates:
             raise ValueError("The selected model recipe is missing. Reimport or select Automatic.")
-    compatible = [(p, r) for p, r in candidates if task in supported_tasks(r)]
+    compatible = [
+        (p, r) for p, r in candidates
+        if task in supported_tasks(
+            r, native_h3_still_references=bool(capabilities.get("nativeH3StillReferences"))
+        )
+    ]
     if not explicit and clip["engine"] == "h3":
         native_task = {
             "t2v": "t2va",
@@ -435,7 +449,10 @@ def resolve_generation_selection(selection, clip, profiles, capabilities, *, val
             inspected.setdefault("loras", {}).setdefault("adapters", []).extend(
                 capabilities["attached_loras"]
             )
-        return generation_descriptor(inspected)
+        return generation_descriptor(
+            inspected,
+            native_h3_still_references=bool(capabilities.get("nativeH3StillReferences")),
+        )
 
     descriptor = describe_resolved()
     controls = descriptor["controls"]
@@ -487,7 +504,14 @@ def resolve_generation_selection(selection, clip, profiles, capabilities, *, val
         if clip["engine"] != "h3" or backend not in {"mlx", "auto"}:
             raise ValueError("projectionBackend supports mlx or auto for native H3 only.")
         config["projection_backend"] = backend
+    transformer_backend = selection.get("transformerBackend")
+    if transformer_backend is not None:
+        if clip["engine"] != "h3" or transformer_backend not in {"mlx", "nnc_experimental"}:
+            raise ValueError("transformerBackend supports mlx or nnc_experimental for H3 only.")
+        config["transformer_backend"] = transformer_backend
     descriptor = describe_resolved()
+    if clip["engine"] == "h3":
+        descriptor["transformerBackend"] = config.get("transformer_backend", "mlx")
     if acceleration:
         from wee_todd_mlx.acceleration import effective_h3_acceleration_report
 

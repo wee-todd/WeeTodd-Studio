@@ -53,6 +53,140 @@ Keep voice and music on separate tracks, adjust volume, pan and fades, and add R
 or Plate reverb. Select Voice, Music or their mix to drive a native video clip. See [Voice and audio mixing](studio/README.md#native-voice-and-audio-mixing)
 for supported checkpoints, reference preparation and the separate model licenses.
 
+The [Swift inference migration](integrations/weetodd-inference/README.md) has started with checked
+checkpoint access, memory admission, worker supervision, progress/preview contracts, a Metal LTX
+Euler sampler, a 48-block audiovisual LTX denoiser, trained Gemma text conditioning, native
+video/audio decoders, two-stage spatial refinement and active ordered standard LoRAs. Component checks use installed weights in place,
+with bounded residency and documented numerical limits. That Metal package remains component
+infrastructure; the separately packaged Swift MLX LTX worker below is selectable in Studio for
+its supported tasks. Retirement of Python LTX 2.3 generation remains in progress, while
+compatible LTX 2.3 LoRAs are retained for LTX 2.5.
+A separate [Swift + MLX audiovisual pipeline](integrations/weetodd-mlx/README.md) now preserves
+packed Q8 weights and streams one block at a time, with complete fixed/block LoRA evaluation,
+one-time timestep preparation, GPU-resident sampling states and cancellation cleanup.
+Trained Gemma text encoding now uses row-sliced projections and hands evaluated audio/video
+contexts directly to the sampler after releasing text weights.
+It now connects the distilled 8+3 sampling schedule, spatial upscaling and native audio/video decoding
+to a developer media CLI. Image encoding and first/last-frame conditioning now execute at both
+resolutions, with bounded native reference preparation before model loading. A matched Beowulf FFLF
+recipe (1344 × 768, 89 frames, seed 43) completes with synchronized audio using explicit developer
+workspace allowances and versioned MLX noise compatibility. The final three fixed-binary
+confirmations took 170.22, 170.64 and 171.59 seconds internally (median 170.64 seconds),
+each below the original Python job's 180.50-second target. With the common process-launch
+through verified-output stopwatch, Swift's median was 171.85 seconds versus 182.15 seconds
+for one fresh Python control. That control is a single observation, not a repeated median.
+Peak Swift-process physical footprint was 8.854 GB (FFmpeg excluded), with no swap.
+The fixed-recipe performance gate now passes; this is not general production qualification.
+This uses MLX core 0.32.2, compiled blocks, native sampling/text/fixed-parameter reads,
+compressed per-token conditioning, an MLX upscaler, BF16 video decoding and bounded RGB
+streaming. Independent component oracles pass. All final audiovisual files are byte-identical
+to the earlier Swift clip; this does not claim pixel-identical Swift/Python videos.
+Earlier slower attempts remain recorded; the full timing gain is not attributed solely to
+fixed loading because the contemporary Python control also improved.
+Studio now packages this renderer as `WeeToddLTXWorker` and can launch supported distilled
+T2V, first-image, first/last-frame and single-audio-driver A2V jobs directly in Swift. Runtime
+Settings exposes the Swift/Python choice; unsupported native controls fail preflight without
+silent fallback.
+Sampling progress, bounded decoded-frame previews, cancellation and immutable take publication
+use the existing Studio job lifecycle. Previews start during video decoding, not denoising.
+Supported LTX profile discovery, recipe composition, preflight, rendering and take inspection
+now run in Swift with Python unavailable. Preparation preserves editorial duration coverage,
+endpoint roles, seeds and ordered compatible LTX 2.3/2.5 LoRAs. Decoder geometry
+is derived from the prepared job in both preflight and execution, fixing the Swift duration
+bug that rejected 10-second clips. The worker sizes activation allowances from each job and the
+Mac’s memory, retaining host reserves and the engine’s per-stage limits. Other engines, advanced LTX
+workflows, library/setup tools and complete Python-free distribution remain separate work.
+The first packaged-worker qualification produced the identical accepted Beowulf video at an
+8.810 GB Swift physical peak (FFmpeg excluded). It took 186.60 seconds externally versus
+180.06 seconds for one fresh developer-path control. This single pair leaves packaged speed
+parity open; the earlier 171.85-second developer median is not a packaged-app timing claim.
+In the final isolated-app regression, supported T2V, first-image I2V and first/last-frame FFLF
+recipes each prepared, rendered, delivered decoded previews, accepted a take, saved a project and
+reopened it with Python unavailable. Each raw take was byte-identical across that app, the
+headless Swift route and a saved recipe-backed ComfyUI Swift prompt. I2V's first decoded frame
+closely matched its input; FFLF landed at both supplied endpoints. This is exact-recipe route
+qualification, not a claim that every LTX control or geometry is implemented in Swift.
+A separate installed-checkpoint Swift A2V test used one selected audio driver for a 49-frame,
+512 × 320 take at 24 fps. It completed in 31.82 worker seconds; its 98,000-sample stereo 48 kHz
+WAV matched the expected trimmed/padded source by SHA-256. Sampled frames showed one coherent
+speaking person. Studio admits this single-driver distilled route; phoneme-level sync, longer
+clips and broader A2V quality remain unqualified. The installed Studio route also completed
+this recipe with Python unavailable, delivered two decoded previews, accepted and reopened the
+take, and produced an MP4 byte-identical to the direct worker with the expected audio SHA-256.
+An ordinary LTX 2.3 standard LoRA also
+completed a distinct, coherent five-second 768 × 448 Swift take at strength 0.3 in both stages;
+this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.
+
+An experimental Swift MLX H3 worker now runs text-to-audiovisual and ordered still-image Ref2VA
+through the installed Qwen, H3 transformer and separate video/audio VAE components. Studio has
+a guarded, off-by-default Swift preparation and worker handoff for these tasks; it admits one
+complete ComfyUI-format H3 Turbo LoRA, up to nine still references for Ref2VA, and rejects
+unsupported media, adapter stacks, controls and profiles before model loading. Enable **Use Swift
+MLX for H3 (experimental)** in Studio Runtime Settings to try it; the normal H3 route remains
+unchanged by default. A 768 × 768, five-second,
+one-evaluation text-only wiring run completed in 407.7 seconds,
+with 124 decoded video frames, stereo audio within 8.3 ms of video duration, 6.98 GB peak MLX
+allocation and 7.99 GB peak worker footprint (FFmpeg excluded). Its dark output is not a
+multi-step quality sample or speed-parity result. The current 40,000 packed-row limit is rejected
+before opening model files. Turbo LoRA tensors are applied to each active Swift projection
+without making a merged checkpoint copy. A 768 × 768, five-second, four-evaluation Turbo run
+completed in 878.77 seconds with 7.84 GB peak MLX allocation and 9.18 GB peak worker footprint
+(FFmpeg excluded). The five reviewed frames show a coherent boxer and punch, but no reference
+image was supplied, so character identity and full perceptual quality remain unqualified. This
+is an integration test path, not a qualified user-facing engine. A separate two-image Ref2VA
+boxing take at 768 × 448 and four evaluations completed in 881.38 seconds. It produced 124
+video frames and stereo audio with an 8.3 ms endpoint difference. Peak worker footprint was
+5.72 GB and peak MLX allocation 4.96 GB, excluding FFmpeg; the Mac used no swap. The inspected
+frames show coherent motion. A separate one-image Beowulf take through the packaged Swift worker completed in
+842.99 seconds at 768 × 448 with four evaluations, 124 video frames and 32 kHz stereo audio.
+Its peak worker footprint was 5.61 GB and peak MLX allocation 4.90 GB, with no system swap;
+the inspected frames show coherent boxing. Both historical takes used vertically inverted
+still-reference pixels and do not qualify identity or likeness. H3 video
+and audio references, general LoRA stacks and the remaining LTX 2.5 tasks still need native route coverage
+before the H3/LTX Python inference paths can be retired.
+A five-second 768 × 448 H3 T2VA Turbo recipe later completed in both headless and saved
+recipe-backed ComfyUI Swift routes with byte-identical video and audio, synchronized endpoints,
+decoded previews, and the same 4.82 GB peak MLX allocation. The ordered still-reference route
+passed worker preflight at every count from one through nine. A real nine-image exported Studio
+job completed and a separate two-image installed-app
+take delivered seven previews and passed acceptance, project save and reopen with Python
+unavailable. Those visual observations also predate the still-reference orientation fix; they
+verify route execution and lifecycle, not identity quality. H3's worker still reports
+experimental production status; other reference media and general adapter support remain open.
+A full Studio-initiated run of the same two-reference recipe also completed with Python unavailable:
+Studio received seven decoded previews, saved the take as a version and adopted it on the clip.
+That run took 794.61 seconds, peaked at 5.78 GB worker footprint and 4.96 GB MLX allocation, and
+used no system swap. These two individual runs do not establish a reliable speed improvement.
+After correcting the still-image row order, the same-seed one-image Beowulf Ref2VA recipe
+completed again: five seconds at 768 × 448, 124 frames and four evaluations. It fully decoded
+and showed coherent boxing, darker hair and beard closer to the portrait, a clearer face during
+the jab, and visible glove contact with the red bag; white shirt stripes were invented. The
+worker took 750.707 seconds under a concurrent app build, peaked at 4,889,500,852 bytes MLX
+allocation and 5,731,812,312 bytes process footprint, with zero swap. Its non-silent stereo
+track measured -29.3 dBFS mean and -2.6 dBFS peak. This is one corrected recipe, not broad
+likeness or speed qualification.
+The H3 FL2VA first/last-frame route passed structural preparation, worker preflight and one
+corrected real reference-conditioned recipe: five seconds at 768 × 448, 124 frames, four
+evaluations and seed 20260927. Sampled frames showed a coherent front-to-profile turn;
+first/last endpoint Pearson correlations were 0.9903/0.9957. The worker took 511.623 seconds
+under a concurrent app build, peaked at 4,720,223,400 bytes MLX allocation and 5,742,871,896
+bytes process footprint, and used no swap. Stereo audio was nearly silent under a quiet-room
+prompt, so audible AV quality is unqualified. This is one experimental visual recipe, not broad
+FL2VA quality or performance parity.
+
+Ripple also has an opt-in **Use Swift MLX for Ripple (experimental)** route in its Runtime
+Settings. It freezes edited images, streams the source guide, runs the pinned author LoRA
+through the single-stage Swift sampler, shows decoding previews, and verifies the published
+take before it can be saved. One 64 × 64, 10-frame silent worker test completed in 39.04 seconds
+with a 1.575 GiB peak MLX allocation; this is a wiring test. Real source-guided tests also
+completed at 768 × 448 for three seconds (72 editorial frames, 163.34 worker seconds,
+3.09 GB peak MLX, 5.07 GB peak worker footprint) and 1152 × 768 for five seconds
+(120 editorial frames, 865.417 worker seconds, 9.44 GB peak MLX, 11.11 GB peak worker
+footprint). Both movies fully decoded and sampled frames showed a coherent kitten. These
+measurements exclude FFmpeg and do not establish broader subject, motion, timed-anchor,
+hardware-memory or visual-quality parity. Source-audio mux has a separate small test;
+installed-app qualification remains open.
+
 ## Choose how to generate
 
 Studio is the interface in each case. The engine choice determines where inference runs.
@@ -73,6 +207,12 @@ on the stereo Music track or use a sample-accurate excerpt to drive a supported 
 Advanced controls include score composition, separate token samplers, acoustic steps, guidance,
 seeds and saved-stage reuse. No external YuE runtime or ComfyUI installation is required.
 See [music generation](studio/README.md#native-yue2-music) for checkpoint and license limits.
+
+**Experimental native H3 core:** H3 clips can explicitly select **Native NNC** under
+**Memory and execution → Transformer**. This Swift/Metal worker runs the 50 core blocks with
+one GPU block and one CPU prefetch; MLX keeps conditioning, sampling and VAE decoding. The
+initial supported combination is a Comfy INT8 Ref2VA checkpoint plus the BF16 four-step Turbo
+LoRA at strength 1. Existing recipes remain on MLX. See [requirements and limits](studio/README.md#native-h3-nnc-core).
 
 **Native Qwen-Image-2.1** adds local image generation and editing to the existing image workspace.
 Choose **Local MLX**, prepare the 8-bit model, and use up to ten ordered image inputs (including
@@ -97,7 +237,9 @@ native features in this integration. See the [reference support guide](studio/RE
 ## Get started
 
 The current release is a **source-build preview**. The app supports macOS 14 or later on Apple
-Silicon; building uses Xcode 26 or newer. Some models and MetalFX features require newer macOS or
+Silicon; building uses full Xcode 26 or newer. The build checks SwiftUI macro support before
+compiling and accepts `--xcode /Applications/Xcode.app` to select an installation explicitly.
+Standalone Command Line Tools are insufficient. Some models and MetalFX features require newer macOS or
 specific hardware. Consumer packaging and clean-Mac qualification are still in progress.
 
 ### Build the standalone app
@@ -335,7 +477,7 @@ media utilities. Existing node IDs, sockets, `WeeTodd/H3` categories and workflo
 supported. App-first development does not remove graph execution or its lightweight imports.
 
 - 56 composable nodes under `WeeTodd/H3`
-- 128 registered nodes across all engines and media utilities; 46 shipped UI workflows
+- 129 registered nodes across all engines and media utilities; 46 shipped UI workflows
 
 Use [node installation](#install), [workflow selection](#choose-a-workflow), and the
 [generated node catalog](#node-catalog). The detailed reference below retains model layouts,
@@ -1717,6 +1859,26 @@ quality qualification. H3 recipes accept a separate generic LoRA stack; LTX 2.5 
 existing generic/task-specific stacks. LTX 2.3 exposes resident and low-RAM streamed
 standard-LoRA stacks across T2V, FFLF, A2V, and extension; accepting a local path does not imply
 every trainer format or checkpoint is visually qualified.
+An opt-in `--swift-worker` flag hands an H3 or LTX 2.5 recipe to its versioned
+native Swift worker without Python model inference. Exported movie jobs have
+per-engine `--h3-swift-worker` and `--ltx25-swift-worker` overrides. A job exported
+with Studio's Swift setting uses its saved worker path by default and fails if
+that worker is unavailable. A five-second LTX 2.5 T2V clip from an exported
+Studio job completed in Swift and assembled into a 1920×1080 movie; a verified
+resume reused the take. One LTX 2.5 FFLF headless recipe also completed with
+synchronized audio. The H3 and LTX workers acquire the same
+cross-process inference lock used by the Python host before loading weights.
+The experimental **Generate H3 / LTX 2.5 (Swift MLX Recipe)** ComfyUI node accepts the
+same resolved `weetodd-headless-v2` recipe and an explicit worker executable path. It
+preflights the frozen recipe, streams progress, checks ComfyUI cancellation even between
+worker events, and publishes the movie in ComfyUI's output directory. A missing or
+incompatible worker fails rather than falling back to Python inference. Existing
+composable H3 and LTX 2.5 nodes still use their Python samplers. The new node has
+passed contract tests and installed-worker preflight. One saved LTX 2.5 FFLF API
+prompt also completed through an isolated ComfyUI server; its MP4 was byte-identical
+to the same recipe's earlier Swift headless render. One-image H3 Ref2VA also
+completed through the recipe-backed ComfyUI node and direct headless Swift route.
+Existing composable nodes and unsupported task families remain to be migrated.
 
 `scripts/inspect_model_library.py --root <existing-folder> --output <new-report.json>`
 provides read-only model-library discovery without MLX or ComfyUI imports. It recognizes
@@ -2038,6 +2200,7 @@ This table is generated from the registered node contracts. Run
 | LTX 2.5 Generate Chained Timeline | Generate two to four overlapping LTX 2.5 windows with interior video history, regenerated terminal video context, and one synchronized audio/video decode. Supports distilled two-stage and full-resolution single-stage Sol configurations. Guided, CFG++, generated-keyframe, DFR, and automatic-duration modes are unsupported. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Video Upscale / Refine | Upscale decoded ComfyUI IMAGE+AUDIO from any movie through LTX 2.5 latent space, optionally adding generative video-only refinement while preserving the source audio. Refinement can invent identity details, logos, and text. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Unload MLX Runtime | Release process-local LTX 2.5 state. | LTX 2.5 — Core | Supported |
+| Generate H3 / LTX 2.5 (Swift MLX Recipe) | Run a saved weetodd-headless-v2 H3 or LTX 2.5 recipe through the selected Swift MLX worker. The worker preflights before inference; this node never loads a Python model. Existing composable nodes remain separate. | Native Swift — Recipe execution | Experimental |
 | Canny Preprocessor (MLX) | Create temporally aligned Canny control frames with MLX. The defaults match ComfyUI's current normalized-threshold Canny contract. | MLX preprocessors — Edges | Experimental |
 | Video Depth Model Loader (MLX) | Select a converted Apache-2.0 Video Depth Anything Small checkpoint. This node does not load weights. | MLX preprocessors — Depth | Experimental |
 | Video Depth Preprocessor (MLX) | Estimate temporally consistent relative depth with Video Depth Anything Small on MLX. The default unloads the model after preprocessing. | MLX preprocessors — Depth | Experimental |

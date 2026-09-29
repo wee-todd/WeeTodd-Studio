@@ -39,11 +39,14 @@ class H3GenerationConfig:
     attention_head_chunk_size: str = "automatic"
     ffn_row_chunk_size: str = "automatic"
     projection_backend: str = "auto"
+    transformer_backend: str = "mlx"
     sampling_method: str = "euler"
     inference_optimization: str = "off"
     paging_cache_gb: float = 0.0
 
     def validate(self) -> None:
+        if self.transformer_backend not in {"mlx", "nnc_experimental"}:
+            raise ValueError("transformer_backend must be mlx or nnc_experimental")
         if (
             isinstance(self.paging_cache_gb, bool)
             or not isinstance(self.paging_cache_gb, (int, float))

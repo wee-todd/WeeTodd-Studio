@@ -80,6 +80,7 @@ def build_checks(project: Path, profiles: list[str], python: str) -> list[list[s
                            "scripts/studio_dialogue.py", "scripts/studio_ripple.py",
                            "scripts/studio_production.py",
                            "scripts/build_studio_app.py",
+                           "scripts/build_ltx_worker.py",
                            "scripts/install_studio_runtime.py", "scripts/setup_assistant_model.py",
                            "scripts/studio_assistant_models.py",
                            "src/wee_todd_mlx/assistant_models.py",
@@ -96,6 +97,10 @@ def build_checks(project: Path, profiles: list[str], python: str) -> list[list[s
     if "src" in lint_paths:
         lint_paths = {p for p in lint_paths if not p.startswith("src/")}
     checks.append([python, "-m", "ruff", "check", *sorted(lint_paths)])
+    if "core" in selected:
+        checks.append(["swift", "test", "--package-path", "integrations/weetodd-inference",
+                       "--jobs", "2"])
+        checks.append(["bash", "integrations/weetodd-mlx/scripts/test.sh"])
     if "studio" in selected:
         checks.append(["swift", "test", "--package-path", "studio", "--jobs", "2"])
     if "remote" in selected:

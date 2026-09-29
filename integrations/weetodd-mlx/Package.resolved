@@ -1,0 +1,63 @@
+{
+  "originHash" : "0e66657959aeae084728c5f3be0c4bce5b894d2ffe8ff43c8b97a38d65cfcea9",
+  "pins" : [
+    {
+      "identity" : "ccv",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/liuliu/ccv.git",
+      "state" : {
+        "revision" : "bf5459732be3b552bb470e4004dac53abc01ea11"
+      }
+    },
+    {
+      "identity" : "mlx-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ml-explore/mlx-swift.git",
+      "state" : {
+        "revision" : "901941965d82e4a216d4d117231d847d194c563d"
+      }
+    },
+    {
+      "identity" : "s4nnc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/liuliu/s4nnc.git",
+      "state" : {
+        "revision" : "c99e45ad0d16c902c6c477e4dc9f1a7e49386dcd"
+      }
+    },
+    {
+      "identity" : "swift-fpzip-support",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/weiyanlin117/swift-fpzip-support.git",
+      "state" : {
+        "revision" : "0ec6d4668c9c83bc3da0f8b2d6dfc46da0b98609"
+      }
+    },
+    {
+      "identity" : "swift-numerics",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-numerics",
+      "state" : {
+        "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
+        "version" : "1.1.1"
+      }
+    },
+    {
+      "identity" : "swift-protobuf",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-protobuf.git",
+      "state" : {
+        "revision" : "d57a5aecf24a25b32ec4a74be2f5d0a995a47c4b"
+      }
+    },
+    {
+      "identity" : "swift-system",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-system.git",
+      "state" : {
+        "revision" : "fbd61a676d79cbde05cd4fda3cc46e94d6b8f0eb"
+      }
+    }
+  ],
+  "version" : 3
+}

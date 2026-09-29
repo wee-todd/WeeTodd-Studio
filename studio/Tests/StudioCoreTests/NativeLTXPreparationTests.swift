@@ -1,0 +1,302 @@
+import XCTest
+import AVFoundation
+import AppKit
+@testable import StudioCore
+
+final class NativeLTXPreparationTests: XCTestCase {
+  func testA2VCompositionRetainsNonzeroSourceIntervalAndRejectsMissingControls() throws {
+    let (root,original,runtime)=try fixture()
+    var project=original
+    let file=root.appendingPathComponent("voice.wav");try Data([1]).write(to:file)
+    var asset=MediaAsset(name:"Voice",kind:.audio,path:file.path);asset.duration=4
+    project.assets=[asset]
+    project.clips[0].duration=2
+    project.clips[0].generationSelection?.task="a2v"
+    var driver=Attachment(assetID:asset.id,role:.audioDriver)
+    driver.audioSourceStart=1.25;driver.audioSourceDuration=49.0/24.0
+    project.clips[0].attachments=[driver]
+    let composed=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let recipe=composed["recipe"] as! [String:Any]
+    let conditioning=recipe["conditioning"] as! [String:Any]
+    let inputs=conditioning["inputs"] as! [[String:Any]]
+    XCTAssertEqual(conditioning["task"] as? String,"a2v")
+    XCTAssertEqual(inputs.count,1)
+    XCTAssertEqual(inputs[0]["role"] as? String,"audio_driver")
+    XCTAssertEqual(inputs[0]["source_start_seconds"] as? Double,1.25)
+    XCTAssertEqual(inputs[0]["source_duration_seconds"] as? Double,49.0/24.0)
+    XCTAssertTrue((try NativeLTXPreparation.catalog(directory:root.path)[0]["generation"] as! [String:Any])["supportedTasks"] as! [String] == ["t2v","i2v","fflf","a2v"])
+    project.clips[0].attachments[0].audioSourceStart=nil
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project.clips[0].attachments[0]=driver
+    project.clips[0].attachments[0].strength=0.5
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+  }
+  func fixture() throws -> (URL, StudioProject, [String: Any]) {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+    let recipe: [String: Any] = ["format": "weetodd-headless-v2", "engine": "ltx25",
+      "prompt": "old prompt", "components": ["transformer_path": "/models/transformer", "loras": [["/models/base.safetensors", 0.5]]],
+      "config": ["pipeline_mode": "distilled", "stage1_steps": 8, "stage2_steps": 3, "frame_rate": 24,
+        "width": 768, "height": 448, "seed": 1, "duration_seconds": 5],
+      "conditioning": ["version": 1, "task": "fflf", "inputs": [["path": "/old.png"]]]]
+    try JSONSerialization.data(withJSONObject: recipe).write(to: root.appendingPathComponent("model.json"))
+    var project = StudioProject()
+    var clip = Clip(); clip.prompt = "  Beowulf raises his cup.  "; clip.duration = 3.7; clip.seed = 43
+    clip.generationWidth = 1344; clip.generationHeight = 768
+    clip.generationSelection = GenerationSelection(task: "t2v")
+    project.clips = [clip]
+    return (root, project, ["profilesDirectory": root.path, "ffmpegPath": "/usr/bin/true"])
+  }
+  func request(_ project: StudioProject, _ runtime: [String: Any]) throws -> [String: Any] {
+    ["project": try JSONSerialization.jsonObject(with: JSONEncoder().encode(project)),
+      "clipID": project.clips[0].id.uuidString, "runtime": runtime]
+  }
+  func testNativeCompositionUsesEditorialCoverageAndReplacesHiddenMedia() throws {
+    let (_, project, runtime) = try fixture()
+    let result = try NativeLTXPreparation.compose(request: request(project, runtime))
+    let recipe = try XCTUnwrap(result["recipe"] as? [String: Any])
+    let config = try XCTUnwrap(recipe["config"] as? [String: Any])
+    XCTAssertEqual(config["duration_seconds"] as? Double, 4)
+    XCTAssertEqual(config["seed"] as? Int, 43)
+    XCTAssertEqual(config["width"] as? Int, 1344)
+    XCTAssertEqual(recipe["prompt"] as? String, "Beowulf raises his cup.")
+    XCTAssertEqual(((recipe["conditioning"] as? [String: Any])?["inputs"] as? [Any])?.count, 0)
+    XCTAssertEqual((result["report"] as? [String: Any])?["preserveEditorialDuration"] as? Bool, true)
+  }
+  func testCatalogSkipsInvalidFilesAndDescriptionRetainsControlsForMissingInput() throws {
+    let (root, original, runtime) = try fixture()
+    try Data("broken".utf8).write(to: root.appendingPathComponent("broken.json"))
+    XCTAssertEqual(try NativeLTXPreparation.catalog(directory: root.path).count, 1)
+    var project = original; project.clips[0].generationSelection?.task = "fflf"
+    let description = try NativeLTXPreparation.describe(request: request(project, runtime))
+    XCTAssertFalse((description["readinessErrors"] as? [String] ?? []).isEmpty)
+    let generation = try XCTUnwrap(description["generation"] as? [String: Any])
+    XCTAssertEqual((generation["controls"] as? [String: Any])?["evaluations"] as? Int, 8)
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+  }
+  func testCatalogDoesNotAdvertiseProfileRejectedBySwiftWorker() throws {
+    let (root, _, _) = try fixture()
+    let url = root.appendingPathComponent("model.json")
+    let original = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    let unsupported: [(String, String, Any)] = [
+      ("components", "msr_lora_path", "/models/msr.safetensors"),
+      ("components", "distilled_lora_path", "/models/distilled.safetensors"),
+      ("components", "duration_head_path", "/models/duration.safetensors"),
+      ("config", "stage1_steps", 7),
+      ("config", "duration_mode", "automatic"),
+      ("config", "stage1_sampler", "euler"),
+      ("config", "dfr_enabled", true),
+    ]
+    for (section, key, value) in unsupported {
+      var recipe = original
+      var fields = recipe[section] as! [String: Any]
+      fields[key] = value
+      recipe[section] = fields
+      try JSONSerialization.data(withJSONObject: recipe).write(to: url)
+      XCTAssertTrue(try NativeLTXPreparation.catalog(directory: root.path).isEmpty,
+        "The Swift worker rejects \(section).\(key); Studio must not offer this profile.")
+    }
+  }
+  func testLegacyProfileNegativePromptIsReportedAndOmittedFromSwiftRecipe() throws {
+    let (root, project, runtime) = try fixture()
+    let url = root.appendingPathComponent("model.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    var config = recipe["config"] as! [String: Any]
+    config["negative_prompt"] = "blurry"
+    recipe["config"] = config
+    try JSONSerialization.data(withJSONObject: recipe).write(to: url)
+
+    XCTAssertEqual(try NativeLTXPreparation.catalog(directory: root.path).count, 1)
+    let result = try NativeLTXPreparation.compose(request: request(project, runtime))
+    let effective = (result["recipe"] as! [String: Any])["config"] as! [String: Any]
+    XCTAssertEqual(effective["negative_prompt"] as? String, "")
+    let warnings = (result["report"] as! [String: Any])["warnings"] as! [String]
+    XCTAssertTrue(warnings.contains { $0.contains("negative prompt") })
+  }
+  func testRejectsOverridesAndContinuousSceneLeader() throws {
+    let (_, original, runtime) = try fixture()
+    var project = original; project.clips[0].generationSelection?.steps = 7
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    project = original
+    var follower = Clip(); follower.continuity = ClipContinuity(mode: "scene")
+    project.clips.append(follower)
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+  }
+  func testRejectsNegativePromptThatDistilledSwiftCannotEvaluate() throws {
+    let (_, original, runtime) = try fixture()
+    var project = original
+    project.clips[0].negativePrompt = "no ghosting"
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+  }
+  func testPreparationPublishesSnapshotAndNeverOverwritesExistingJob() throws {
+    let (root, project, runtime) = try fixture()
+    let output = root.appendingPathComponent("job")
+    let result = try NativeLTXPreparation.prepare(request: request(project, runtime), destination: output)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(result["recipePath"] as? String)))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("editor-request.json").path))
+    XCTAssertThrowsError(try NativeLTXPreparation.prepare(request: request(project, runtime), destination: output))
+  }
+  func testLoRA23CompatibilityOrderAndConflictingHeaderRejection() throws {
+    let (root, original, runtime) = try fixture()
+    var project = original
+    let file = root.appendingPathComponent("style.safetensors")
+    func writeHeader(_ model: String) throws {
+      let header = try JSONSerialization.data(withJSONObject: ["__metadata__": ["model_version": model]])
+      var length = UInt64(header.count).littleEndian
+      var bytes = withUnsafeBytes(of: &length) { Data($0) }; bytes.append(header)
+      try bytes.write(to: file)
+    }
+    try writeHeader("ltx-2.3")
+    var asset = MediaAsset(name: "Style", kind: .lora, path: file.path)
+    asset.loraModel = .ltx23; project.assets = [asset]
+    var adapter = Attachment(assetID: asset.id, role: .lora); adapter.strength = 0.8
+    project.clips[0].attachments = [adapter]
+    let result = try NativeLTXPreparation.compose(request: request(project, runtime))
+    let recipe = result["recipe"] as! [String: Any]
+    let pairs = (recipe["components"] as! [String: Any])["loras"] as! [[Any]]
+    XCTAssertEqual(pairs.count, 2); XCTAssertEqual(pairs[1][0] as? String, file.path)
+    XCTAssertEqual(pairs[1][1] as? Double, 0.8)
+    try writeHeader("minimax-h3")
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    project.clips[0].attachments[0].enabled = false
+    XCTAssertNoThrow(try NativeLTXPreparation.compose(request: request(project, runtime)))
+  }
+
+  func testEndpointRolesAndSingleImageDoNotBecomeGenericReferences() throws {
+    let (root, original, runtime) = try fixture()
+    var project = original
+    let file = root.appendingPathComponent("image.png"); try Data([1]).write(to: file)
+    let first = MediaAsset(name: "First", kind: .image, path: file.path)
+    let last = MediaAsset(name: "Last", kind: .image, path: file.path)
+    project.assets = [first, last]
+    project.clips[0].generationSelection?.task = "fflf"
+    project.clips[0].attachments = [Attachment(assetID: last.id, role: .last), Attachment(assetID: first.id, role: .first)]
+    let result = try NativeLTXPreparation.compose(request: request(project, runtime))
+    let contract = (result["recipe"] as! [String: Any])["conditioning"] as! [String: Any]
+    let inputs = contract["inputs"] as! [[String: Any]]
+    XCTAssertEqual(inputs[0]["frame_index"] as? String, "last")
+    XCTAssertEqual(inputs[1]["frame_index"] as? Int, 0)
+    XCTAssertEqual(inputs[0]["role"] as? String, "keyframe")
+    project.clips[0].attachments.removeFirst(); project.clips[0].generationSelection?.task = "i2v"
+    XCTAssertNoThrow(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    project.clips[0].attachments.append(Attachment(assetID: last.id, role: .keyframe, time: 1))
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+  }
+
+  func testMalformedProfileLoRAsAndH3OnlyAssetControlsFailClosed() throws {
+    let (root, original, runtime) = try fixture()
+    var project = original
+    let file = root.appendingPathComponent("style.safetensors")
+    let header = Data("{}".utf8); var size = UInt64(header.count).littleEndian
+    var bytes = withUnsafeBytes(of: &size) { Data($0) }; bytes.append(header); try bytes.write(to: file)
+    var asset = MediaAsset(name: "Style", kind: .lora, path: file.path); asset.loraModel = .ltx25
+    project.assets = [asset]; project.clips[0].attachments = [Attachment(assetID: asset.id, role: .lora)]
+    for field in ["profile", "layout", "grid"] {
+      project.assets = [asset]
+      if field == "profile" { project.assets[0].loraProfile = "standard" }
+      if field == "layout" { project.assets[0].loraLayout = "auto" }
+      if field == "grid" { project.assets[0].loraAdalnInputGrid = "/unused" }
+      XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)), field)
+    }
+    project.assets = [asset]
+    let url = root.appendingPathComponent("model.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    var components = recipe["components"] as! [String: Any]; components["loras"] = ["invalid", [file.path, 1]] as [Any]
+    recipe["components"] = components; try JSONSerialization.data(withJSONObject: recipe).write(to: url)
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+  }
+  func testDescriptionIncludesModelProvenanceFiles() throws {
+    let (root, project, runtime) = try fixture()
+    let model = root.appendingPathComponent("model")
+    try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
+    let names = ["paged_manifest.json", "model_identity.json", "conversion_provenance.json"]
+    for name in names { try Data("{}".utf8).write(to: model.appendingPathComponent(name)) }
+    let url = root.appendingPathComponent("model.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    var components = recipe["components"] as! [String: Any]; components["transformer_path"] = model.path
+    recipe["components"] = components; try JSONSerialization.data(withJSONObject: recipe).write(to: url)
+    let description = try NativeLTXPreparation.describe(request: request(project, runtime))
+    let paths = description["sourcePaths"] as? [String] ?? []
+    for name in names { XCTAssertTrue(paths.contains(model.appendingPathComponent(name).path)) }
+  }
+
+  func continuityMovie(_ root: URL) async throws -> URL {
+    let url = root.appendingPathComponent("variable.mov")
+    let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264,
+      AVVideoWidthKey: 64, AVVideoHeightKey: 64])
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB])
+    writer.add(input); XCTAssertTrue(writer.startWriting()); writer.startSession(atSourceTime: .zero)
+    for (frame, time) in [0.0, 0.2, 0.8, 1.1].enumerated() {
+      while !input.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 1_000_000) }
+      var buffer: CVPixelBuffer?
+      XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32ARGB, nil, &buffer), kCVReturnSuccess)
+      let pixel = try XCTUnwrap(buffer); CVPixelBufferLockBaseAddress(pixel, [])
+      let bytes = CVPixelBufferGetBaseAddress(pixel)!.assumingMemoryBound(to: UInt8.self)
+      for y in 0..<64 { for x in 0..<64 {
+        let offset = y * CVPixelBufferGetBytesPerRow(pixel) + x * 4
+        bytes[offset] = 255
+        for c in 0..<3 { bytes[offset + c + 1] = c == frame % 3 ? 255 : 0 }
+      } }
+      CVPixelBufferUnlockBaseAddress(pixel, [])
+      XCTAssertTrue(adaptor.append(pixel, withPresentationTime: CMTime(seconds: time, preferredTimescale: 600)))
+    }
+    input.markAsFinished(); writer.endSession(atSourceTime: CMTime(seconds: 1.5, preferredTimescale: 600))
+    await writer.finishWriting(); XCTAssertEqual(writer.status, .completed); return url
+  }
+
+  func testMatchPreviousFrameUsesLastVisibleVFRTimestampAndPreservesOriginalRequest() async throws {
+    let (root, original, runtime) = try fixture()
+    let movie = try await continuityMovie(root)
+    for (end, expectedChannel) in [(0.8, 1), (0.95, 2)] {
+      var project = original
+      var source = Clip(engine: .movie); source.sourcePath = movie.path; source.sourceIn = 0.15; source.duration = end - 0.15
+      var target = project.clips[0]; target.continuity = ClipContinuity(mode: "frame")
+      let stored = MediaAsset(name: "Original first", kind: .image, path: root.appendingPathComponent("missing-original.png").path)
+      project.assets.append(stored); target.attachments = [Attachment(assetID: stored.id, role: .first)]
+      project.clips = [source, target]
+      var body = try request(project, runtime); body["clipID"] = target.id.uuidString
+      let described = try NativeLTXPreparation.describe(request: body)
+      XCTAssertEqual(described["readinessErrors"] as? [String], [])
+      XCTAssertTrue((described["sourcePaths"] as? [String] ?? []).contains(movie.path))
+      let output = root.appendingPathComponent("prepared-\(end)")
+      let result = try await NativeLTXPreparation.prepareWithMedia(request: body, destination: output)
+      let recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: result["recipePath"] as! String))) as! [String: Any]
+      let inputs = (recipe["conditioning"] as! [String: Any])["inputs"] as! [[String: Any]]
+      XCTAssertEqual(inputs.count, 1); XCTAssertEqual(inputs[0]["frame_index"] as? Int, 0)
+      let imagePath = inputs[0]["path"] as! String
+      XCTAssertTrue(imagePath.hasPrefix(output.path + "/"))
+      let image = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: URL(fileURLWithPath: imagePath))))
+      let color = try XCTUnwrap(image.colorAt(x: 32, y: 32)?.usingColorSpace(.deviceRGB))
+      XCTAssertGreaterThan([color.redComponent, color.greenComponent, color.blueComponent][expectedChannel], 0.8)
+      let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: output.appendingPathComponent("editor-request.json"))) as! NSDictionary
+      XCTAssertEqual(saved, body as NSDictionary)
+      XCTAssertEqual(project.clips[1].attachments, target.attachments)
+      let continuity = (result["report"] as! [String: Any])["continuity"] as! [String: Any]
+      XCTAssertEqual(continuity["mode"] as? String, "frame")
+      XCTAssertEqual(continuity["sourceFrameTime"] as! Double, expectedChannel == 1 ? 0.2 : 0.8, accuracy: 0.001)
+    }
+  }
+
+  func testMatchPreviousFrameRejectsInvalidSourceAndInvalidatesChangedTrim() async throws {
+    let (root, original, runtime) = try fixture(); let movie = try await continuityMovie(root)
+    var project = original
+    var source = Clip(engine: .movie); source.sourcePath = movie.path; source.duration = 0.8
+    project.clips[0].continuity = ClipContinuity(mode: "frame")
+    let targetID = project.clips[0].id
+    project.clips.insert(source, at: 0)
+    func body() throws -> [String: Any] { var result = try request(project, runtime); result["clipID"] = targetID.uuidString; return result }
+    let before = try NativeLTXPreparation.describe(request: body())["fingerprint"] as? String
+    project.clips[0].duration = 0.95
+    XCTAssertNotEqual(try NativeLTXPreparation.describe(request: body())["fingerprint"] as? String, before)
+    project.clips[1].continuity?.sourceClipID = targetID
+    XCTAssertThrowsError(try NativeLTXPreparation.describe(request: body()))
+    project.clips[1].continuity?.sourceClipID = nil; project.clips[0].duration = 10
+    let output = root.appendingPathComponent("bad-job")
+    do { _ = try await NativeLTXPreparation.prepareWithMedia(request: body(), destination: output); XCTFail("Out-of-range trim accepted") }
+    catch { XCTAssertFalse(FileManager.default.fileExists(atPath: output.path)) }
+  }
+
+}

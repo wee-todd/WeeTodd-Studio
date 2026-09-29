@@ -15,11 +15,18 @@ struct RuntimeSettings: Codable {
   var rifeWeights = ""
   var metalPath = ""
   var drawThingsHelperPath: String?
+  var ltx25WorkerPath: String?
+  var nativeLTX25Enabled: Bool?
+  var usesNativeLTX25: Bool { nativeLTX25Enabled ?? (ltx25WorkerPath != nil) }
+  var h3WorkerPath: String?
+  var nativeH3Enabled: Bool?
+  var usesNativeH3: Bool { nativeH3Enabled == true }
   var acceleration: AccelerationSettings?
   var loraFolders: [LoRAFolder]?
   var voiceModels: VoiceModelSettings?
   var rippleAdapterPath: String?
   var rippleProfileID: String?
+  var nativeRippleEnabled: Bool?
   var generationSettings: Self {
     var value = self
     value.loraFolders = nil
@@ -31,6 +38,8 @@ struct RuntimeSettings: Codable {
 
   static func restoring(_ data: Data?, defaults: Self) -> Self {
     var value = data.flatMap { try? JSONDecoder().decode(Self.self, from: $0) } ?? defaults
+    if let bundled = defaults.ltx25WorkerPath { value.ltx25WorkerPath = bundled }
+    if let bundled = defaults.h3WorkerPath { value.h3WorkerPath = bundled }
     let savedHelper = value.drawThingsHelperPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if !FileManager.default.isExecutableFile(atPath: savedHelper) {
       let bundledHelper = defaults.drawThingsHelperPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -51,6 +60,10 @@ struct RuntimeSettings: Codable {
       Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/StudioMetal").path
     let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddDrawThings").path
     if FileManager.default.isExecutableFile(atPath: helper) { value.drawThingsHelperPath = helper }
+    let ltx = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddLTXWorker").path
+    if FileManager.default.isExecutableFile(atPath: ltx) { value.ltx25WorkerPath = ltx }
+    let h3 = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddH3MLXWorker").path
+    if FileManager.default.isExecutableFile(atPath: h3) { value.h3WorkerPath = h3 }
     return value
   }
 }
@@ -101,10 +114,12 @@ struct BridgeResponseBuffer {
   init(invocation: Invocation? = nil) { self.invocation = invocation }
   func independent() -> Bridge { Bridge(invocation: invocation) }
   private var process: Process?
+  private var preparationTask: Task<Data, Error>?
   private var cancellationRequested = false
   func cancel() {
     cancellationRequested = true
     message = "Cancelling and releasing render resources…"
+    preparationTask?.cancel()
     process?.interrupt()
     let cancelledProcess = process
     DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
@@ -129,11 +144,94 @@ struct BridgeResponseBuffer {
       defer { busy = false }
       return try await invocation(command, runtime, payload, output)
     }
-    guard FileManager.default.isExecutableFile(atPath: runtime.pythonPath),
-      FileManager.default.fileExists(atPath: runtime.root + "/scripts/studio_bridge.py")
-    else {
-      throw StudioError.invalid(
-        "Select the WeeTodd repository and its Python environment in Runtime Settings.")
+    if (runtime.nativeRippleEnabled == true || runtime.usesNativeLTX25),
+      ["ripple-inspect", "ripple-frame"].contains(command) {
+      busy = true; cancellationRequested = false; startedAt = Date(); fraction = 0
+      message = "Inspecting Ripple source in Swift…"; log = ""; livePreview = nil
+      defer { busy = false; preparationTask = nil }
+      guard let ripple = payload["ripple"] as? [String: Any] else {
+        throw StudioError.invalid("A Ripple source request is required.")
+      }
+      let job = Task.detached(priority: .userInitiated) {
+        try Task.checkCancellation()
+        let result: [String: Any]
+        if command == "ripple-inspect" { result = try await NativeRippleMedia.inspect(ripple) }
+        else {
+          guard let output else { throw StudioError.invalid("Ripple extraction requires a destination.") }
+          result = try await NativeRippleMedia.extractFrame(ripple, into: output)
+        }
+        return try JSONSerialization.data(withJSONObject: result)
+      }
+      preparationTask = job
+      let bytes = try await withTaskCancellationHandler(operation: { try await job.value }, onCancel: { job.cancel() })
+      guard !cancellationRequested else { throw CancellationError() }
+      fraction = 1; message = "Ripple source ready"
+      return try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
+    }
+    let nativeH3Preparation = ["h3-native-catalog", "h3-native-describe", "h3-native-prepare"].contains(command)
+    if nativeH3Preparation || ["ltx-native-catalog", "ltx-native-describe", "ltx-native-prepare",
+      "ripple-native-prepare"].contains(command) {
+      busy = true; cancellationRequested = false; startedAt = Date(); fraction = 0
+      message = nativeH3Preparation ? "Preparing H3 in Swift…" : "Preparing LTX in Swift…"
+      log = ""; livePreview = nil
+      defer { busy = false; preparationTask = nil }
+      var body = payload; body["runtime"] = try runtime.object()
+      let input = try JSONSerialization.data(withJSONObject: body)
+      guard input.count <= 16 * 1024 * 1024 else { throw StudioError.invalid("Studio preparation request exceeds 16 MiB.") }
+      let job = Task.detached(priority: .userInitiated) {
+        try Task.checkCancellation()
+        let request = try JSONSerialization.jsonObject(with: input) as! [String: Any]
+        let result: [String: Any]
+        switch command {
+        case "h3-native-catalog":
+          let settings = request["runtime"] as! [String: Any]
+          result = ["profiles": try NativeH3Preparation.catalog(directory: settings["profilesDirectory"] as? String ?? "")]
+        case "h3-native-describe": result = try NativeH3Preparation.describe(request: request)
+        case "h3-native-prepare":
+          guard let output else { throw StudioError.invalid("Preparation requires a job directory.") }
+          result = try NativeH3Preparation.prepare(request: request, destination: output)
+        case "ltx-native-catalog":
+          let settings = request["runtime"] as! [String: Any]
+          result = ["profiles": try NativeLTXPreparation.catalog(directory: settings["profilesDirectory"] as? String ?? "")]
+        case "ltx-native-describe": result = try NativeLTXPreparation.describe(request: request)
+        case "ripple-native-prepare":
+          guard let output, let rawDraft = request["draft"],
+            let takePath = request["takeOutput"] as? String else {
+            throw StudioError.invalid("Ripple preparation needs a draft and take destination.")
+          }
+          let draft = try JSONDecoder().decode(RippleDraft.self,
+            from: JSONSerialization.data(withJSONObject: rawDraft))
+          result = try await NativeRipplePreparation.prepare(draft: draft,
+            runtime: request["runtime"] as! [String: Any], into: output,
+            output: URL(fileURLWithPath: takePath))
+        default:
+          guard let output else { throw StudioError.invalid("Preparation requires a job directory.") }
+          result = try await NativeLTXPreparation.prepareWithMedia(request: request, destination: output)
+        }
+        try Task.checkCancellation()
+        return try JSONSerialization.data(withJSONObject: result)
+      }
+      preparationTask = job
+      let bytes = try await withTaskCancellationHandler(operation: { try await job.value }, onCancel: { job.cancel() })
+      guard !cancellationRequested else { throw CancellationError() }
+      fraction = 1; message = "Swift preparation complete"
+      return try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
+    }
+    let nativeLTX = ["ltx-native-render", "ltx-native-preflight"].contains(command)
+    let nativeH3 = ["h3-native-render", "h3-native-preflight"].contains(command)
+    if nativeLTX || nativeH3 {
+      let workerPath = nativeH3 ? runtime.h3WorkerPath : runtime.ltx25WorkerPath
+      let label = nativeH3 ? "H3" : "LTX"
+      guard let worker = workerPath, FileManager.default.isExecutableFile(atPath: worker), output != nil else {
+        throw StudioError.invalid("The native \(label) worker is missing. Use a complete Studio build.")
+      }
+    } else {
+      guard FileManager.default.isExecutableFile(atPath: runtime.pythonPath),
+        FileManager.default.fileExists(atPath: runtime.root + "/scripts/studio_bridge.py")
+      else {
+        throw StudioError.invalid(
+          "Select the WeeTodd repository and its Python environment in Runtime Settings.")
+      }
     }
     busy = true
     cancellationRequested = false
@@ -142,8 +240,8 @@ struct BridgeResponseBuffer {
     fraction = 0
     log = ""
     livePreview = nil
-    let previewFile = ["dt-generate-image", "image-generate"].contains(command)
-      ? output?.appendingPathComponent("live-preview.png") : nil
+    let previewFile = ["ltx-native-render", "h3-native-render"].contains(command) ? output?.appendingPathExtension("preview.png")
+      : (["dt-generate-image", "image-generate"].contains(command) ? output?.appendingPathComponent("live-preview.png") : nil)
     defer {
       busy = false; process = nil; livePreview = nil
       if let previewFile { try? FileManager.default.removeItem(at: previewFile) }
@@ -168,7 +266,13 @@ struct BridgeResponseBuffer {
     try FileManager.default.createDirectory(
       at: input.deletingLastPathComponent(), withIntermediateDirectories: true)
     var body = payload
-    body["runtime"] = try runtime.object()
+    if nativeLTX || nativeH3 {
+      body = try nativeH3
+        ? NativeVideoJobRequest.h3(payload: payload, runtime: runtime, output: output!)
+        : NativeVideoJobRequest.ltx(payload: payload, runtime: runtime, output: output!)
+    } else {
+      body["runtime"] = try runtime.object()
+    }
     try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys]).write(
       to: input, options: .atomic)
     busy = true
@@ -178,10 +282,11 @@ struct BridgeResponseBuffer {
     message = command.capitalized + "…"
     log = ""
     let task = Process()
-    task.executableURL = URL(fileURLWithPath: runtime.pythonPath)
-    task.arguments = [runtime.root + "/scripts/studio_bridge.py", command, "--request", input.path]
+    task.executableURL = URL(fileURLWithPath: nativeH3 ? runtime.h3WorkerPath! : nativeLTX ? runtime.ltx25WorkerPath! : runtime.pythonPath)
+    task.arguments = nativeLTX || nativeH3 ? [command.hasSuffix("render") ? "render" : "preflight", "--request", input.path]
+      : [runtime.root + "/scripts/studio_bridge.py", command, "--request", input.path]
     if let output { task.arguments! += ["--output", output.path] }
-    task.currentDirectoryURL = URL(fileURLWithPath: runtime.root)
+    task.currentDirectoryURL = nativeLTX || nativeH3 ? input.deletingLastPathComponent() : URL(fileURLWithPath: runtime.root)
     task.environment = env
     let pipe = Pipe()
     task.standardOutput = pipe
@@ -370,6 +475,13 @@ extension Encodable {
   let dataDirectory: URL
   @Published var preparingImageRequest = false
   @Published private(set) var activeNativeRequest: UUID?
+  @Published private(set) var nativePreviewOwner: (request: UUID, session: UUID, project: UUID, clip: UUID)?
+  var nativeRenderPreview: BridgeProgressEvent? {
+    guard let owner = nativePreviewOwner, owner.request == activeNativeRequest,
+      owner.session == documentSessionID, owner.project == project.id,
+      owner.clip == selectedClipID, bridge.busy else { return nil }
+    return bridge.livePreview
+  }
   private(set) var documentSessionID = UUID()
   @Published var preparingDrawThings = false
   @Published var characterDirectorBusy = false
@@ -691,7 +803,12 @@ extension Encodable {
           if let loraLayout { inspection["loraLayout"] = loraLayout }
           if let loraAdalnInputGrid { inspection["loraAdalnInputGrid"] = loraAdalnInputGrid }
         }
-        let info = try await bridge.invoke("inspect", runtime: runtime, payload: inspection)
+        let info: [String: Any]
+        if let still = try NativeAssetInspection.inspectStill(url) {
+          info = still
+        } else {
+          info = try await bridge.invoke("inspect", runtime: runtime, payload: inspection)
+        }
         let kind = AssetKind(rawValue: info["kind"] as? String ?? "video") ?? .video
         var asset = MediaAsset(
           name: url.deletingPathExtension().lastPathComponent, kind: kind, path: url.path,
@@ -926,10 +1043,30 @@ extension Encodable {
     } catch { self.error = error.localizedDescription }
   }
   func reloadProfiles() async {
-    guard !runtime.root.isEmpty, !bridge.busy else { return }
+    guard !bridge.busy else { return }
     do {
-      let r = try await bridge.invoke("catalog", runtime: runtime, payload: [:])
-      profiles = (r["profiles"] as? [[String: Any]] ?? []).compactMap { d in
+      var available: [[String: Any]] = []
+      if runtime.usesNativeLTX25 {
+        let result = try await bridge.invoke("ltx-native-catalog", runtime: runtime, payload: [:])
+        available += result["profiles"] as? [[String: Any]] ?? []
+      }
+      if runtime.usesNativeH3 {
+        let result = try await bridge.invoke("h3-native-catalog", runtime: runtime, payload: [:])
+        available += result["profiles"] as? [[String: Any]] ?? []
+      }
+      if !runtime.usesNativeLTX25 && !runtime.usesNativeH3 {
+        let result = try await bridge.invoke("catalog", runtime: runtime, payload: [:])
+        available = result["profiles"] as? [[String: Any]] ?? []
+      } else if FileManager.default.isExecutableFile(atPath: runtime.pythonPath),
+        FileManager.default.fileExists(atPath: runtime.root + "/scripts/studio_bridge.py"),
+        let legacy = try? await bridge.invoke("catalog", runtime: runtime, payload: [:]) {
+        available += (legacy["profiles"] as? [[String: Any]] ?? []).filter {
+          let engine = $0["engine"] as? String
+          return !(runtime.usesNativeLTX25 && engine == "ltx25")
+            && !(runtime.usesNativeH3 && engine == "h3")
+        }
+      }
+      profiles = available.compactMap { d in
         guard let id = d["id"] as? String, let name = d["name"] as? String,
           let engine = d["engine"] as? String, let task = d["task"] as? String
         else { return nil }
@@ -1002,7 +1139,9 @@ extension Encodable {
     let key = generationRequestKey(for: clip)
     let session = documentSessionID
     do {
-      var result = try await descriptionBridge.independent().invoke("describe-generation", runtime: runtime, payload: try payload())
+      let command = clip.engine == .ltx25 && runtime.usesNativeLTX25 ? "ltx-native-describe"
+        : clip.engine == .h3 && runtime.usesNativeH3 ? "h3-native-describe" : "describe-generation"
+      var result = try await descriptionBridge.independent().invoke(command, runtime: runtime, payload: try payload())
       guard documentSessionID == session, selectedClipID == clip.id,
         selectedClip.map({ generationRequestKey(for: $0) }) == key else { return }
       result["studioInput"] = key
@@ -1028,7 +1167,9 @@ extension Encodable {
   func prepareSelected() async {
     guard !operationBusy else { return }
     let target = selectedClipID, originalSession = documentSessionID
-    if selectedClip?.audioDriverSelection != nil {
+    if selectedClip?.audioDriverSelection != nil,
+      !(selectedClip?.engine == .ltx25 && runtime.usesNativeLTX25),
+      !(selectedClip?.engine == .h3 && runtime.usesNativeH3) {
       guard await prepareAudioDriver(), selectedClipID == target,
         documentSessionID == originalSession else { return }
     }
@@ -1048,7 +1189,10 @@ extension Encodable {
     preparedRecipe = nil; preparedFingerprint = nil
     do {
       let body = try payload()
-      var description = try await descriptionBridge.invoke("describe-generation", runtime: settings, payload: body)
+      let nativeLTX = clip.engine == .ltx25 && settings.usesNativeLTX25
+      let nativeH3 = clip.engine == .h3 && settings.usesNativeH3
+      let describeCommand = nativeLTX ? "ltx-native-describe" : nativeH3 ? "h3-native-describe" : "describe-generation"
+      var description = try await descriptionBridge.invoke(describeCommand, runtime: settings, payload: body)
       guard isCurrent() else {
         notice = "Preflight stopped because its project or clip changed. Prepare the current clip again."
         return
@@ -1060,7 +1204,16 @@ extension Encodable {
       generationDescriptions[clip.id] = description
       let snapshot = signature(for: clip)
       let destination = dataDirectory.appendingPathComponent("Jobs/\(requestID.uuidString)/prepared")
-      let r = try await bridge.invoke("prepare", runtime: settings, payload: body, output: destination)
+      let prepareCommand = nativeLTX ? "ltx-native-prepare" : nativeH3 ? "h3-native-prepare" : "prepare"
+      var r = try await bridge.invoke(prepareCommand, runtime: settings, payload: body, output: destination)
+      if nativeLTX || nativeH3, let recipePath = r["recipePath"] as? String {
+        _ = try await bridge.invoke(nativeH3 ? "h3-native-preflight" : "ltx-native-preflight",
+          runtime: settings, payload: ["recipePath": recipePath],
+          output: destination.deletingLastPathComponent().appendingPathComponent("render"))
+        var report = r["report"] as? [String: Any] ?? [:]
+        report["nativeRuntime"] = "swift-mlx"
+        r["report"] = report
+      }
       guard isCurrent(), signature(for: clip) == snapshot else {
         notice = "Clip changed during preflight. Prepare it again."
         return
@@ -1111,15 +1264,26 @@ extension Encodable {
       if !sceneClips.isEmpty && sceneReport == nil {
         throw StudioError.invalid("Prepare the complete continuous scene before rendering.")
       }
-      // Retried scenes share immutable sampling checkpoints, never candidate movies.
-      let renderDestination = sceneClips.isEmpty ? destination
+      // Native publication is immutable; each take gets its own destination.
+      let nativeLTX = c.engine == .ltx25 && settings.usesNativeLTX25
+      let nativeH3 = c.engine == .h3 && settings.usesNativeH3
+      if nativeLTX || nativeH3 { nativePreviewOwner = (requestID, session, projectID, c.id) }
+      defer { if nativePreviewOwner?.request == requestID { nativePreviewOwner = nil } }
+      let renderDestination = sceneClips.isEmpty && !nativeLTX && !nativeH3 ? destination
         : destination.appendingPathComponent(requestID.uuidString)
+      if nativeH3 {
+        try FileManager.default.createDirectory(at: renderDestination.deletingLastPathComponent(),
+          withIntermediateDirectories: true)
+      }
       let r = try await bridge.invoke(
-        "render", runtime: settings, payload: ["recipePath": path], output: renderDestination)
+        nativeLTX ? "ltx-native-render" : nativeH3 ? "h3-native-render" : "render",
+        runtime: settings, payload: ["recipePath": path], output: renderDestination)
       guard let video = r["video"] as? String else {
         throw StudioError.invalid("Renderer did not return a movie.")
       }
-      let info = try await bridge.invoke("inspect", runtime: settings, payload: ["path": video])
+      let info: [String: Any]
+      if nativeLTX || nativeH3 { info = try await Self.inspectNativeMovie(video) }
+      else { info = try await bridge.invoke("inspect", runtime: settings, payload: ["path": video]) }
       if !sceneClips.isEmpty {
         try receiveContinuousScene(result: r, media: info, prepared: sceneReport!,
           clips: sceneClips, requestKey: sceneKey, projectID: projectID, session: session,

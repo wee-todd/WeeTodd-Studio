@@ -11,6 +11,78 @@ direction and backend choices. This is a source-build preview, not a notarized c
 
 ## Start here
 
+Source builds include a Swift MLX LTX 2.5 worker. In Runtime Settings, **Use Swift MLX for
+LTX 2.5** selects native distilled 8 + 3 step T2V, first-image, first/last-frame and
+single-audio-driver A2V rendering
+with compatible standard LoRAs, including LTX 2.3 adapters. The worker reuses installed paged
+weights and the shared renderer. Unsupported controls fail native preflight; turn the option
+off explicitly for advanced workflows still provided by Python.
+
+The render job reports sampling steps and decode progress, then shows actual decoded frames
+at a maximum 640-pixel preview size. These previews do not load a VAE during denoising.
+Cancel releases weighted stages and removes unpublished output. Each completed native take
+gets a distinct output directory; late results retain the existing project/clip revision checks.
+Decoder geometry follows the prepared job in both preflight and execution; the earlier fixed
+temporal cap that rejected 10-second clips was a Swift bug. Duration and resolution still
+have to fit activation/workspace limits. The worker calculates each stage’s allowance from the
+job geometry and the Mac’s memory, reserving space for other applications, weights and caches.
+It no longer rejects larger jobs solely because they exceed a fixed 12 GiB allowance; requests
+that exceed the hardware allowance or engine limit fail preflight with required/allowed bytes.
+Native movie inspection uses AVFoundation. Supported LTX profile discovery and preparation
+also run in Swift without a Python installation. Imported distilled recipes and already linked
+assets can be prepared, rendered and accepted directly. Standard LoRA headers are inspected
+without loading weights; compatible LTX 2.3 adapters retain their order and strength.
+Final isolated-app checks completed T2V, first-image I2V and first/last-frame FFLF through
+prepare, decoded previews, render, acceptance, project save and reopen with Python unavailable.
+For each checked recipe, the raw movie matched its headless and recipe-backed ComfyUI Swift run
+byte for byte. These checks qualify the tested recipes, not every duration or resolution.
+One additional 49-frame, 512 × 320 Swift A2V test at 24 fps completed in 31.82 worker seconds.
+Its 98,000-sample stereo 48 kHz output WAV matched the expected trimmed/padded driver by
+SHA-256, and sampled frames showed one coherent speaking person. This is a single short speech
+take, not phoneme-level sync or longer-clip quality qualification. An installed Studio run of
+this recipe worked with Python unavailable, delivered two decoded previews, accepted and
+reopened the take, and produced an MP4 byte-identical to the direct worker with the expected
+audio SHA-256. A separate five-second
+768 × 448 Swift take with an ordinary LTX 2.3 LoRA at strength 0.3 in both stages completed
+with distinct coherent output; that one adapter result does not qualify every LTX 2.3 LoRA.
+Continuous scenes, continuity/extension, other A2V forms and specialized controls still require
+the explicitly selected Python route. Model setup, asset/library tools and other engines remain
+separate migration work; this is not yet a fully Python-free Studio release.
+The experimental Swift H3 worker has completed text-to-audiovisual and one- and two-still Ref2VA takes.
+The off-by-default Swift preparation path validates clip inputs, ordered references and profile
+settings, then requires worker preflight before a take can render. Enable **Use Swift MLX for H3
+(experimental)** in Runtime Settings to try text-to-AV or 1–9 still-image Ref2VA. Other reference
+media, adapter stacks and production quality remain unqualified.
+H3 FL2VA first/last-frame preparation and worker preflight have structural coverage. One
+corrected real 768 × 448, five-second first/last recipe (124 frames, four evaluations, seed
+20260927) showed a coherent front-to-profile turn; first/last endpoint Pearson correlations
+were 0.9903/0.9957. The worker took 511.623 seconds under a concurrent app build, peaked at
+4,720,223,400 bytes MLX allocation and 5,742,871,896 bytes process footprint, and used no
+swap. Its stereo audio was nearly silent under a quiet-room prompt. This qualifies one
+experimental visual recipe, not audible AV quality, broad FL2VA quality or speed parity.
+An installed two-reference Studio take passed preparation, worker render, seven decoded previews,
+clip-source adoption, project save and reopen with Python unavailable. Ordered reference preflights
+passed for every count from one through nine, and a real nine-reference exported Studio job
+completed. Those one-, two- and nine-image visual observations are historical: the old
+still-reference conversion inverted image rows. They verify execution and Studio lifecycle,
+not likeness. The H3 route remains experimental; broader performance qualification and
+media-reference tasks remain open.
+A separate one-reference packaged-worker take completed with synchronized video/audio, decoded
+previews, and no swap; its Studio UI lifecycle has not yet been exercised end to end. After
+the orientation fix, the same-seed one-image Beowulf recipe completed again at five seconds,
+768 × 448, 124 frames and four evaluations. Its fully decoded frames showed coherent boxing,
+darker hair and beard closer to the portrait, a clearer face during the jab and glove contact
+with the red bag; white shirt stripes were invented. The worker took 750.707 seconds under a
+concurrent app build, peaked at 4,889,500,852 bytes MLX and 5,731,812,312 bytes process
+footprint, with zero swap. Its non-silent stereo audio measured -29.3 dBFS mean and -2.6 dBFS
+peak. This is one corrected recipe, not broad likeness or speed qualification.
+Still-image asset import uses ImageIO metadata inspection without decoding full-resolution pixels
+or invoking Python; other asset kinds may still use the legacy bridge.
+To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import one to nine
+images into the clip asset store, then choose **Use in clip → Appearance · image reference** for
+each. Write a complete H3 prompt, select the installed compatible Ref2VA profile, and use
+**Prepare clip** to inspect the exact settings and run preflight before generating.
+
 | Your goal | Go to |
 | --- | --- |
 | Build and launch the standalone app | [Build and open](#build-and-open) |
@@ -237,13 +309,37 @@ a running copy: replacing an ad-hoc-signed bundle while it is open can make macO
 picker, causing a beachball followed by no dialog. If this happens after an older build script
 replaced the app, quit normally and reopen the updated app before retrying the picker.
 
-Run these commands from the repository root on Apple Silicon with Xcode 26 or newer.
-The MetalFX frame interpolator uses the macOS 26 SDK:
+Run these commands from the repository root on Apple Silicon with **full Xcode 26 or newer**.
+Standalone Command Line Tools are insufficient. The MetalFX frame interpolator requires a
+macOS 26 or newer SDK:
 
 ```bash
 python3 scripts/build_studio_app.py --configuration release
 open "studio/.build/WeeTodd Studio.app"
 ```
+
+The build resolves the Swift compiler, macOS SDK and platform macro plugins from one Xcode
+installation. It compiles a small `@State`, `@Binding` and `@Observable` probe before building
+Studio, so missing SwiftUI macros produce an early toolchain error. Shell overrides for a
+separately installed Swift compiler or SDK do not override the selected Xcode.
+
+Selection order is `--xcode`, then `DEVELOPER_DIR`, then `xcode-select -p`. For example:
+
+```bash
+python3 scripts/build_studio_app.py --configuration release --xcode /Applications/Xcode.app
+```
+
+This does not change the system-wide developer directory. A single Xcode installation is enough;
+keeping multiple versions is optional. The argument also accepts an Xcode `Contents/Developer`
+directory. Open a newly installed Xcode and complete its component setup before building.
+
+**Xcode 27:** Apple changed SwiftUI's `@State` to a macro, which requires the matching platform
+plugin. The build supplies that plugin search path explicitly. Updating Xcode does not change
+Studio's macOS 14 deployment target or require a Swift 6 language-mode migration. The last
+completed release qualification used Xcode 26.4; full Xcode 27 build and test qualification is
+pending an installed Xcode 27 toolchain. See [Apple's State documentation](https://developer.apple.com/documentation/SwiftUI/State)
+and [Xcode system requirements](https://developer.apple.com/xcode/system-requirements/) for the
+build host requirements of the Xcode version you install.
 
 The GUI supports macOS 14 and newer. Actual model/runtime requirements can require newer macOS.
 MetalFX frame interpolation additionally requires macOS 26 and a supporting GPU. The helper checks
@@ -407,6 +503,33 @@ preflight includes temporary decoding space. Explicit paging-cache budgets can r
 blocks to reduce repeated reads, at increased RAM use. Staged unloading remains the default.
 Native execution uses BF16/FP32 and does not reproduce Comfy's CUDA W8A8 activation quantization
 or imply the same speed, memory use or output. This route remains experimental.
+
+## Native H3 NNC core
+
+In an H3 clip, open **Memory and execution → Transformer → Native NNC (experimental)**.
+This is an explicit backend choice for an existing H3 model, not a separate model family.
+The first qualified configuration uses a supported Comfy INT8 Ref2VA transformer, one complete
+ComfyUI BF16 Ref2VA Turbo LoRA at strength 1 with contiguous QKV layout, **4 steps** in Studio
+(`steps: 5` schedule points in a recipe), Euler sampling and Drop AdaLN. Use checkpoint-default
+paged residency, no retained page cache, automatic chunk controls and auto/MLX projections.
+The native core has fixed buffer policies; MLX chunk controls only affect MLX stages.
+Unsupported settings fail rather than falling back silently. Cache accelerators, sparse/approximate
+attention, control, continuation and refinement are not qualified for this backend. Packed input
+is limited to 40,000 rows, including text and reference media.
+
+The independently implemented Swift/NNC worker reads installed weights in place and keeps one
+GPU block plus one CPU prefetch. It uses FP16 projections with FP32 residuals and attention.
+MLX retains the shared conditioning, sampling schedule, input/output projections, previews and
+VAEs. Progress includes each native block. Staged unloading stops and reaps the worker before
+VAE decoding, including on failure or cancellation; a watchdog exits it if its parent dies.
+Keeping the transformer warm is still an explicit shared-runtime control. Worker Metal allocation
+and parent MLX memory are separate measurements and must not be confused with total process memory.
+
+Release packaging builds this helper and includes pinned dependency notices. Development checkouts
+can run `python scripts/build_h3_worker.py`. A saved full-size 39,967-row evaluation through the
+integrated shared DIT path matched the qualified prototype across all 214,862,592 Float32 values,
+with the worker reaped after completion. This validates integration numerics, not Draw Things
+parity, complete video quality or performance across hardware. MLX remains the default.
 
 ## Guided model setup
 
@@ -672,6 +795,21 @@ The IC-LoRA strength starts at **1.35** and is editable. The prompt starts with 
 for preserving source motion, timing, camera movement, composition and unchanged content
 while propagating the first-frame edit. Add a brief description of your visual change
 when needed. The compact clip inspector and Director edit the same saved settings.
+With native LTX selected, Studio inspects the source interval and extracts edited-frame
+canvases in Swift. **Use Swift MLX for Ripple (experimental)** in Ripple Runtime Settings
+also enables native preparation and generation. This route freezes edited images, streams
+the causal RGB24 guide, encodes it in bounded VAE tiles, uses the pinned author LoRA in
+an eight-step single-stage sampler, decodes live frame previews, preserves source audio
+when selected, and verifies the published editorial frame count before saving a take.
+The default remains the Python-backed LTX 2.5 route. A 64 × 64, 10-frame silent native
+worker test produced a decodable take in 39.04 seconds with a 1.575 GiB peak MLX allocation.
+Real source-guided tests also completed at 768 × 448 for three seconds (72 editorial frames,
+163.34 worker seconds, 3.09 GB peak MLX, 5.07 GB worker footprint) and 1152 × 768 for five
+seconds (120 editorial frames, 865.417 worker seconds, 9.44 GB peak MLX, 11.11 GB worker
+footprint). Both fully decoded and sampled frames showed a coherent kitten. These are two
+specific sources and recipes, not general subject/motion or timed-anchor quality qualification;
+footprints exclude external FFmpeg. Source-audio mux passed a separate short test.
+Installed-app execution remains unqualified.
 
 Frame numbers are relative to the clip's captured trim interval. Studio adopts the source
 frame rate and extracts matching frames without resampling. Use a constant-frame-rate source;
@@ -1148,6 +1286,19 @@ Developers can also use the existing Python client directly:
 .venv/bin/python scripts/render_headless.py \
   --job Movie.weetodd-job.json --output-directory Render --resume
 ```
+
+An exported job retains Studio's Swift H3/LTX 2.5 selection and worker paths.
+If the app moved, add `--h3-swift-worker /path/to/WeeToddH3MLXWorker` and/or
+`--ltx25-swift-worker /path/to/WeeToddLTXWorker` to override those paths. The
+selected H3/LTX 2.5 clips preflight and render in the Swift worker; the Python
+process only orchestrates the job and movie assembly. Once a Swift worker is
+selected, every H3/LTX 2.5 clip in the job needs its corresponding worker or
+preflight fails. Resume pins each selected executable's path and SHA-256. This
+route has passed worker preflight and transport tests. A five-second LTX 2.5
+T2V clip from a Studio export completed in Swift and assembled into a 1920×1080
+movie with stereo audio; verified resume reused its take. Swift H3/LTX workers share the
+cross-process inference lock with Python/MLX jobs. Existing composable ComfyUI nodes
+still use Python samplers; the recipe-backed Swift MLX node uses these workers.
 
 The editor can be closed. Jobs preflight all clips and finishing dependencies before generation,
 run one generation process at a time, finish clips serially, and assemble the result with titles,

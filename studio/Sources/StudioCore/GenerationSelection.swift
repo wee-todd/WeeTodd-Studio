@@ -113,17 +113,18 @@ public struct GenerationSelection: Codable, Equatable {
   public var shift: Double?
   public var memoryPolicy: String?
   public var projectionBackend: String?
+  public var transformerBackend: String?
   public init(task: String = "t2v", preset: GenerationPreset = .balanced) {
     self.task = task
     self.preset = preset
   }
   public var isModified: Bool {
     steps != nil || refinementSteps != nil || cfg != nil || shift != nil
-      || memoryPolicy != nil || projectionBackend != nil
+      || memoryPolicy != nil || projectionBackend != nil || transformerBackend != nil
   }
   public mutating func resetOverrides() {
     steps = nil; refinementSteps = nil; cfg = nil; shift = nil
-    memoryPolicy = nil; projectionBackend = nil
+    memoryPolicy = nil; projectionBackend = nil; transformerBackend = nil
   }
   public static func taskLabel(_ task: String) -> String {
     switch task {

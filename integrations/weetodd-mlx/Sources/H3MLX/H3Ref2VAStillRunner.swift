@@ -1,0 +1,197 @@
+import Foundation
+import MLX
+
+/// An in-memory, ordered still-reference request. The worker is responsible for
+/// bounded decode and source-file identity before constructing these RGB bytes.
+public struct H3Ref2VAStillRequest: Sendable {
+  public let prompt: String
+  public let references: [H3StillReference]
+  public let geometry: H3Geometry
+  public let seed: UInt64
+  public let requestedSteps: Int
+  public let transformer: URL
+  public let qwenPages: URL
+  public let qwenVision: URL
+  public let tokenizer: URL
+  public let videoVAE: URL
+  public let audioVAE: URL
+  public let turboLoRA: URL?
+  public let turboLoRAStrength: Float
+
+  public init(prompt: String, references: [H3StillReference], width: Int,
+    height: Int, durationSeconds: Double, seed: UInt64, requestedSteps: Int,
+    transformer: URL, qwenPages: URL, qwenVision: URL, tokenizer: URL,
+    videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
+    turboLoRAStrength: Float = 1) throws {
+    guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
+      (1...9).contains(references.count),
+      references.allSatisfy({ reference in
+        (64...256).contains(reference.width) &&
+          (64...256).contains(reference.height) &&
+          reference.width.isMultiple(of: 32) &&
+          reference.height.isMultiple(of: 32) &&
+          reference.rgb8.count == reference.width * reference.height * 3
+      }),
+      [transformer, qwenPages, qwenVision, tokenizer, videoVAE, audioVAE]
+        .allSatisfy({ $0.isFileURL && $0.path.hasPrefix("/") }),
+      turboLoRA == nil || (turboLoRA!.isFileURL &&
+        turboLoRA!.path.hasPrefix("/") && turboLoRAStrength.isFinite &&
+        (0...2).contains(turboLoRAStrength)) else {
+      throw H3CheckpointError.invalid("Invalid H3 still-reference request.")
+    }
+    let geometry = try H3Geometry(width: width, height: height,
+      durationSeconds: durationSeconds)
+    guard width * height <= 768 * 1344,
+      try geometry.packedRows(textRows: 1,
+        conditionVideoRows: references.reduce(0) {
+          $0 + $1.width * $1.height / 1024
+        }, conditionAudioRows: 0) <= 40_000 else {
+      throw H3CheckpointError.invalid("H3 reference canvas exceeds packed-row admission.")
+    }
+    self.prompt = prompt
+    self.references = references
+    self.geometry = geometry
+    self.seed = seed
+    self.requestedSteps = requestedSteps
+    self.transformer = transformer
+    self.qwenPages = qwenPages
+    self.qwenVision = qwenVision
+    self.tokenizer = tokenizer
+    self.videoVAE = videoVAE
+    self.audioVAE = audioVAE
+    self.turboLoRA = turboLoRA
+    self.turboLoRAStrength = turboLoRAStrength
+  }
+}
+
+public enum H3Ref2VAStillRunner {
+  public struct Admission {
+    public let geometry: H3Geometry
+    public let textRows: Int
+    public let packedRows: Int
+    public let evaluations: Int
+    let layout: H3ReferenceLayout
+    let videoSchedule: H3Schedule
+    let audioSchedule: H3Schedule
+    let rowSchedule: H3ReferenceRowSchedule
+  }
+
+  public typealias Result = H3AVOutputDecoder.Result
+
+  public static func preflight(_ request: H3Ref2VAStillRequest) throws -> Admission {
+    try Task.checkCancellation()
+    let prepared = try H3StillReferencePreparation.prepare(prompt: request.prompt,
+      geometry: request.geometry, references: request.references,
+      tokenizerURL: request.tokenizer)
+    let video = try H3Schedule(requestedSteps: request.requestedSteps, shift: 12)
+    let audio = try H3Schedule(requestedSteps: request.requestedSteps, shift: 3)
+    let rows = try H3ReferenceRowSchedule(layout: prepared.layout,
+      video: video, audio: audio)
+    guard prepared.layout.tags.count <= 40_000 else {
+      throw H3CheckpointError.invalid("H3 reference packed rows exceed engine admission.")
+    }
+    _ = try H3QwenCheckpointLayout.inspect(root: request.qwenPages)
+    let vision = try H3QwenCheckpointLayout.inspect(root: request.qwenVision)
+    guard vision.visionFile != nil else {
+      throw H3CheckpointError.invalid("The H3 reference conditioner needs a vision tower.")
+    }
+    _ = try H3CheckpointLayout(url: request.transformer)
+    _ = try H3VideoVAELayout(url: request.videoVAE)
+    _ = try H3AudioVAELayout(url: request.audioVAE)
+    if let turboLoRA = request.turboLoRA {
+      _ = try H3LoRAFile(url: turboLoRA,
+        strength: request.turboLoRAStrength)
+    }
+    return Admission(geometry: request.geometry,
+      textRows: prepared.qwenRequest.tags.count,
+      packedRows: prepared.layout.tags.count,
+      evaluations: video.timesteps.count, layout: prepared.layout,
+      videoSchedule: video, audioSchedule: audio, rowSchedule: rows)
+  }
+
+  public static func run(_ request: H3Ref2VAStillRequest,
+    onFrame: (Int, Data) throws -> Void,
+    onAudio: ([Float], Int) throws -> Void,
+    progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
+    let admission = try preflight(request)
+    let geometry = admission.geometry
+    let textRows = try autoreleasepool { () throws -> [Float] in
+      let prepared = try H3StillReferencePreparation.prepare(prompt: request.prompt,
+        geometry: geometry, references: request.references,
+        tokenizerURL: request.tokenizer)
+      let encoded = try H3QwenTextEncoder.encodeReferences(
+        prompt: request.prompt, pixels: prepared.qwenPixels,
+        references: prepared.qwenGrids.map { .image(grid: $0) },
+        checkpointRoot: request.qwenPages,
+        visionCheckpointURL: request.qwenVision,
+        tokenizerURL: request.tokenizer) { completed, total in
+          progress("text", completed, total)
+        }
+      guard encoded.tags == Array(admission.layout.tags.prefix(admission.textRows)) else {
+        throw H3CheckpointError.invalid("H3 reference conditioner changed admitted text rows.")
+      }
+      return encoded.hidden.asType(.float32).asArray(Float.self)
+    }
+    Stream.gpu.synchronize()
+    Memory.clearCache()
+    progress("text_weights_released", 1, 1)
+    try Task.checkCancellation()
+
+    let conditionVideoRows = try autoreleasepool { () throws -> [Float] in
+      let rows = try H3StillReferencePreparation.encodeVideoRows(
+        references: request.references, layout: admission.layout,
+        videoVAEURL: request.videoVAE)
+      return rows.asType(.float32).asArray(Float.self)
+    }
+    Stream.gpu.synchronize()
+    Memory.clearCache()
+    progress("reference_video_weights_released", 1, 1)
+    try Task.checkCancellation()
+
+    let rawRows = try autoreleasepool { () throws -> ([Float], [Float]) in
+      let state = try H3ReferenceDiTState(checkpointURL: request.transformer,
+        layout: admission.layout,
+        textEmbeddings: MLXArray(textRows,
+          [1, admission.textRows, 5120]).asType(.bfloat16),
+        timestepTable: admission.rowSchedule.table,
+        turboLoRAURL: request.turboLoRA,
+        turboLoRAStrength: request.turboLoRAStrength) { completed, total in
+          progress("transformer_prepare", completed, total)
+        }
+      defer { state.unload() }
+      let noise = try H3Noise.make(seed: request.seed,
+        videoLatentFrames: geometry.videoLatentFrames,
+        latentHeight: geometry.height / 16,
+        latentWidth: geometry.width / 16,
+        audioLatentFrames: geometry.audioLatentFrames)
+      let conditionCount = admission.layout.conditionVideoIndices.count
+      let video = concatenated([
+        MLXArray(conditionVideoRows, [1, conditionCount, 96]), noise.video
+      ], axis: 1)
+      let sampled = try H3ReferenceSampler.run(predictor: state,
+        videoSchedule: admission.videoSchedule,
+        audioSchedule: admission.audioSchedule,
+        rowSchedule: admission.rowSchedule,
+        videoLatents: video, audioLatents: noise.audio,
+        progress: { completed, total in progress("sampling", completed, total) },
+        blockProgress: { step, completed, total in
+          progress("sampling_block_\(step)", completed, total)
+        })
+      let targetVideo = sampled.video[0..<1,
+        conditionCount..<admission.layout.videoIndices.count, 0..<96]
+      let targetAudio = sampled.audio[0..<1,
+        admission.layout.conditionAudioIndices.count..<admission.layout.audioIndices.count,
+        0..<32]
+      return (targetVideo.asType(.float32).asArray(Float.self),
+        targetAudio.asType(.float32).asArray(Float.self))
+    }
+    Stream.gpu.synchronize()
+    Memory.clearCache()
+    progress("transformer_weights_released", 1, 1)
+    return try H3AVOutputDecoder.decode(videoRows: rawRows.0,
+      audioRows: rawRows.1, geometry: geometry, videoVAE: request.videoVAE,
+      audioVAE: request.audioVAE, onFrame: onFrame, onAudio: onAudio,
+      progress: progress)
+  }
+}

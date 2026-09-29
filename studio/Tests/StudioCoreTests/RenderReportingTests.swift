@@ -1,4 +1,15 @@
 import XCTest
+
+final class NativeLTXReportingTests: XCTestCase {
+  func testNativeFootprintIsNotReportedAsRSS() throws {
+    let stats=try XCTUnwrap(RenderStats(result:["seconds":171.0,"sampling_seconds":147.0,
+      "metadata":["peak_process_footprint_bytes":8_850_000_000,"peak_mlx_bytes":5_900_000_000]]))
+    XCTAssertEqual(stats.processPeakBytes,8_850_000_000)
+    XCTAssertEqual(stats.processPeakScope,"Physical footprint · Swift process, excluding FFmpeg")
+    XCTAssertEqual(stats.mlxPeakBytes,5_900_000_000)
+    XCTAssertEqual(stats.samplingScope,"Transformer sampling")
+  }
+}
 @testable import StudioCore
 
 final class RenderReportingTests: XCTestCase {

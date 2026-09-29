@@ -78,8 +78,26 @@ struct GenerationInspector: View {
         Text(error).font(.caption2).foregroundStyle(.red).textSelection(.enabled)
       }
       Button("Set up or repair models…") { store.showRuntime = true }
+      if clip.engine == .ltx25 {
+        Text(store.runtime.usesNativeLTX25
+          ? "Renderer: Swift MLX · distilled 8 + 3 steps · decoded previews"
+          : "Renderer: Python MLX")
+          .font(.caption2).foregroundStyle(.secondary)
+      }
       if clip.engine == .h3 {
         DisclosureGroup("Memory and execution") {
+          Picker("Transformer", selection: Binding(get: {
+            clip.generationSelection?.transformerBackend ?? "recipe"
+          }, set: { value in edit { $0.transformerBackend = value == "recipe" ? nil : value } })) {
+            Text("Recipe default").tag("recipe")
+            Text("MLX").tag("mlx")
+            Text("Native NNC (experimental)").tag("nnc_experimental")
+          }
+          if let generation = store.generationDescriptions[clip.id]?["generation"] as? [String: Any],
+            generation["transformerBackend"] as? String == "nnc_experimental" {
+            Text("Native NNC: Ref2VA with the ComfyUI BF16 Turbo LoRA at strength 1, four Euler evaluations and Drop AdaLN. Uses one GPU block plus one CPU prefetch, FP16 projections and FP32 attention. MLX handles conditioning and decoding. Native core buffers use a fixed policy; MLX chunk controls apply only outside the native core. Advanced cache/control/refinement settings are not supported.")
+              .font(.caption2).foregroundStyle(.secondary)
+          }
           Picker("Sampling weights", selection: Binding(get: {
             clip.generationSelection?.memoryPolicy ?? "recipe"
           }, set: { value in edit { $0.memoryPolicy = value == "recipe" ? nil : value } })) {

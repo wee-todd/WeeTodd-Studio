@@ -303,6 +303,16 @@ struct RuntimeView: View {
           }
           PathPicker(label: "WeeTodd Studio repository", value: $store.runtime.root, directory: true)
           PathPicker(label: "Python executable", value: $store.runtime.pythonPath)
+          Toggle("Use Swift MLX for LTX 2.5", isOn: Binding(
+            get: { store.runtime.usesNativeLTX25 },
+            set: { store.runtime.nativeLTX25Enabled = $0; store.saveRuntime() }))
+          Text("Swift supports distilled 8 + 3 step text, first-image and first/last-frame generation with standard LoRAs. It shows sampling progress and decoded frame previews. Advanced LTX workflows require explicitly turning this off. Profile discovery, job preparation, generation and result inspection use Swift for these supported LTX jobs. Other engines and advanced workflows may still require Python.")
+            .font(.caption).foregroundStyle(.secondary)
+          Toggle("Use Swift MLX for H3 (experimental)", isOn: Binding(
+            get: { store.runtime.usesNativeH3 },
+            set: { store.runtime.nativeH3Enabled = $0; store.saveRuntime() }))
+          Text("Swift H3 currently supports text-to-audiovisual clips and one to nine ordered still-image Ref2VA references, with at most one compatible Turbo LoRA. Unsupported H3 tasks and controls fail preparation. This path is experimental; check its output before using it in a project.")
+            .font(.caption).foregroundStyle(.secondary)
           PathPicker(
             label: "Model recipes folder", value: $store.runtime.profilesDirectory, directory: true)
           HStack {

@@ -123,6 +123,8 @@ def render_h3(recipe, target):
     )
     config = H3GenerationConfig(**recipe["config"])
     config.validate()
+    from minimax_h3_mlx.native_backend import preflight_native_recipe
+    preflight_native_recipe(recipe)
     continuation_plan = None
     continuation_report = None
     if "continuation" in recipe:
@@ -486,6 +488,7 @@ def render_h3(recipe, target):
             "sampling_seconds": latents.total_seconds,
             "paging": latents.paging_report,
             "block_residency": latents.block_residency_report,
+            "transformer_backend": latents.transformer_backend_report,
             "projection_backend": latents.projection_backend_report,
             "projection_backend_runtime": latents.projection_backend_runtime,
             "attention": latents.sol_attention_report,
@@ -741,7 +744,33 @@ def render_ltx(recipe, target, *, checkpoint_directory=None):
 
 
 
-def execute_native_render(recipe, output, *, checkpoint_directory=None):
+def execute_native_render(recipe, output, *, checkpoint_directory=None, swift_worker=None):
+    if swift_worker is not None:
+        if checkpoint_directory is not None:
+            raise ValueError("Swift video worker does not yet support checkpoint-directory resume")
+        from wee_todd_mlx.swift_video_worker import run_swift_video_worker
+
+        output = Path(output).resolve()
+        take = output.parent / "native-take"
+        with tempfile.TemporaryDirectory(
+            prefix="weetodd-swift-recipe-", dir=output.parent
+        ) as scratch:
+            prepared = Path(scratch) / "recipe.json"
+            prepared.write_text(json.dumps(recipe, separators=(",", ":")))
+            preflight = run_swift_video_worker(
+                worker=swift_worker, engine=recipe["engine"], recipe=prepared,
+                output=take, mode="preflight",
+            )
+            rendered = run_swift_video_worker(
+                worker=swift_worker, engine=recipe["engine"], recipe=prepared,
+                output=take, mode="render",
+                on_progress=lambda event: print(json.dumps(event), flush=True),
+            )
+        video = Path(rendered["video"])
+        output.symlink_to(video.relative_to(output.parent))
+        return {"video": str(output), "metadata": rendered, "preflight": preflight,
+                "runtime_loaded": [False],
+                "native_runtime": "swift-mlx"}
     from wee_todd_mlx.inference_lease import InferenceLease
     from wee_todd_mlx.progress import render_progress
     with InferenceLease(progress=lambda event: render_progress("waiting", event["message"])):
@@ -761,6 +790,8 @@ def main():
     parser.add_argument("--preflight-only", action="store_true", help="Validate without rendering")
     parser.add_argument("--checkpoint-directory", type=Path,
                         help="Persistent native scene windows for an exported job resume")
+    parser.add_argument("--swift-worker", type=Path,
+                        help="Run H3/LTX 2.5 through this executable Swift worker")
     args = parser.parse_args()
     recipe = json.loads(args.recipe.read_text())
     if recipe.get("format") != "weetodd-headless-v2" or recipe.get("engine") not in {
@@ -791,14 +822,25 @@ def main():
         )
         record["asset_resolution"] = resolution
         (output / "resolved-recipe.json").write_text(json.dumps(recipe, indent=2) + "\n")
-        from wee_todd_mlx.headless_preflight import preflight_recipe
+        if args.swift_worker is None:
+            from wee_todd_mlx.headless_preflight import preflight_recipe
 
-        record["preflight"] = preflight_recipe(recipe)
-        (output / "effective-conditioning.json").write_text(
-            json.dumps(record["preflight"]["conditioning"]["contract"], indent=2) + "\n"
-        )
+            record["preflight"] = preflight_recipe(recipe)
+            (output / "effective-conditioning.json").write_text(
+                json.dumps(record["preflight"]["conditioning"]["contract"], indent=2) + "\n"
+            )
+        elif args.preflight_only:
+            from wee_todd_mlx.swift_video_worker import run_swift_video_worker
+
+            with tempfile.TemporaryDirectory(prefix="weetodd-swift-recipe-", dir=output) as scratch:
+                prepared = Path(scratch) / "recipe.json"
+                prepared.write_text(json.dumps(recipe, separators=(",", ":")))
+                record["preflight"] = run_swift_video_worker(
+                    worker=args.swift_worker, engine=recipe["engine"], recipe=prepared,
+                    output=output / "native-take", mode="preflight",
+                )
         if args.preflight_only:
-            if "continuation" in recipe:
+            if args.swift_worker is None and "continuation" in recipe:
                 from wee_todd_mlx.h3_continuation_artifact import prepare_continuation
 
                 prepared = prepare_continuation(recipe, load_arrays=False)
@@ -816,7 +858,8 @@ def main():
             print(json.dumps({"status": record["status"], "output": str(output)}), flush=True)
             return
         record.update(execute_native_render(recipe, output / "render.mp4",
-                                            checkpoint_directory=args.checkpoint_directory))
+                                            checkpoint_directory=args.checkpoint_directory,
+                                            swift_worker=args.swift_worker))
         record["seconds"] = time.perf_counter() - started
         if any(record["runtime_loaded"]):
             raise RuntimeError("A weighted runtime was not released")
@@ -824,6 +867,11 @@ def main():
         render_progress("publishing", "Verifying finished movie")
         record["mp4_sha256"] = hashlib.sha256(Path(record["video"]).read_bytes()).hexdigest()
         record["status"] = "success"
+    except KeyboardInterrupt:
+        record["status"] = "cancelled"
+        record["error"] = "Interrupted by user"
+        print(json.dumps({"candidate": record["candidate"], "status": "cancelled"}), flush=True)
+        raise SystemExit(130) from None
     except BaseException as exc:
         record["error"] = f"{type(exc).__name__}: {exc}"
         raise

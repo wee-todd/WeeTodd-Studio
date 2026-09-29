@@ -110,20 +110,37 @@ struct RippleReferenceGenerator: View {
     draft.name = "Ripple · frame \(context.frame)"
     draft.prompt = ""; draft.moodboard = []; draft.canvas = ImageWorkspaceInput(path: context.originalPath)
     draft.width = width; draft.height = height
-    if let saved = imageWorkspaceLibrary.sessions[draft.storageKey], saved.draft.rippleReference == context {
-      return saved.draft
+    if let saved = imageWorkspaceLibrary.sessions[draft.storageKey],
+      let prior = saved.draft.rippleReference,
+      prior.clipID == context.clipID, prior.referenceID == context.referenceID,
+      prior.sourcePath == context.sourcePath, prior.sourceIn == context.sourceIn,
+      prior.frame == context.frame {
+      draft = saved.draft
+      // A changed trim invalidates the old capture and preview, but not the
+      // user's description or image-model choices for this same source frame.
+      draft.rippleReference = context
+      if prior != context { draft.canvas = ImageWorkspaceInput(path: context.originalPath) }
+      return alignedRippleImageDraft(draft)
     }
     if imageWorkspaceLibrary.referenceProvider == .nativeMLX {
       draft.selectProvider(.nativeMLX); draft.nativeImage = imageWorkspaceLibrary.referenceNativeImage ?? NativeImageSettings()
       draft.width = width; draft.height = height
-      return draft
+      return alignedRippleImageDraft(draft)
     }
     if let preferred = imageWorkspaceLibrary.referenceConnectionID {
       draft.profileID = drawThingsConnections.contains { $0.id == preferred } ? preferred : ""
     } else if !drawThingsConnections.contains(where: { $0.id == draft.profileID }) {
       draft.profileID = ""
     }
-    return draft
+    return alignedRippleImageDraft(draft)
+  }
+
+  private func alignedRippleImageDraft(_ draft: DrawThingsImageDraft) -> DrawThingsImageDraft {
+    var aligned = draft
+    let multiple = aligned.executionProvider == .drawThings ? 64 : 32
+    aligned.width = max(multiple, aligned.width / multiple * multiple)
+    aligned.height = max(multiple, aligned.height / multiple * multiple)
+    return aligned
   }
 
   func adoptRippleImage(_ path: String, context: RippleImageContext) throws {

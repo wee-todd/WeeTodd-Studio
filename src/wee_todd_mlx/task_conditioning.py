@@ -226,6 +226,7 @@ def normalize_conditioning(recipe, *, check_files=True):
                 "kind",
                 "role",
                 "path",
+                "sha256",
                 "frame_index",
                 "strength",
                 "control_type",
@@ -254,6 +255,15 @@ def normalize_conditioning(recipe, *, check_files=True):
             raise ValueError(f"{identity}: path must name a local file")
         if check_files and not Path(path).is_file():
             raise FileNotFoundError(f"{identity}: media file not found: {path}")
+        if "sha256" in item:
+            digest = item["sha256"]
+            if (engine != "h3" or result["task"] != "ref2va"
+                    or item["kind"] != "image" or item["role"] != "reference"
+                    or not isinstance(digest, str) or len(digest) != 64
+                    or any(character not in "0123456789abcdef" for character in digest)):
+                raise ValueError(
+                    f"{identity}: sha256 is only valid for a pinned H3 still reference"
+                )
         if "soundtrack_path" in item:
             soundtrack = item["soundtrack_path"]
             if engine != "h3" or item["kind"] != "video" or item["role"] != "reference":

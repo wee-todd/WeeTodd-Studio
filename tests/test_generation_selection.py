@@ -400,6 +400,31 @@ def test_h3_text_only_paged_encoder_does_not_advertise_image_tasks(tmp_path):
     assert supported_tasks(recipe) == ["t2v"]
 
 
+def test_swift_h3_still_reference_selection_uses_separate_vision_encoder(tmp_path):
+    import json
+
+    encoder = tmp_path / "encoder"
+    encoder.mkdir()
+    (encoder / "paged_text_encoder_manifest.json").write_text(json.dumps({
+        "format": "weetodd-h3-qwen-paged-v1", "skipped_visual_bytes": 762559840,
+    }))
+    item = profile(task="ref2va")
+    item["recipe"]["components"].update(
+        text_encoder=str(encoder), vision_encoder="/installed/vision.safetensors"
+    )
+    clip = {"engine": "h3", "profileID": item["id"],
+            "attachments": [{"role": "reference"}]}
+    with pytest.raises(ValueError, match="conflicts with the selected recipe"):
+        selection.resolve_generation_selection(
+            {"task": "ref2va", "preset": "custom"}, clip, [item], {}
+        )
+    result = selection.resolve_generation_selection(
+        {"task": "ref2va", "preset": "custom"}, clip, [item],
+        {"nativeH3StillReferences": True},
+    )
+    assert result["profileID"] == item["id"]
+
+
 def test_h3_approximate_attention_and_ltx_guided_do_not_advertise_unsupported_continuity():
     from wee_todd_mlx.generation_selection import supported_tasks
 
@@ -432,3 +457,15 @@ def test_automatic_balanced_ltx_prefers_matching_distilled_profile_without_overr
     assert resolve_generation_selection(selection, clip, profiles, {})["profileID"] == "distilled"
     clip["profileID"] = "guided"
     assert resolve_generation_selection(selection, clip, profiles, {})["profileID"] == "guided"
+
+
+def test_native_core_selection_is_explicit_and_preserves_legacy():
+    item = profile()
+    assert "transformer_backend" not in resolve(item=item)["recipe"]["config"]
+    selected = resolve(
+        {"task": "t2v", "preset": "custom", "transformerBackend": "nnc_experimental"}, item
+    )
+    assert selected["recipe"]["config"]["transformer_backend"] == "nnc_experimental"
+    assert selected["generation"]["transformerBackend"] == "nnc_experimental"
+    with pytest.raises(ValueError, match="transformerBackend"):
+        resolve({"task": "t2v", "transformerBackend": "typo"}, item)

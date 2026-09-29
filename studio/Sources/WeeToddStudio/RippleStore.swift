@@ -12,7 +12,27 @@ extension StudioStore {
     }
     rippleClipID = clip.id; rippleSelectedTakeID = nil
     rippleInspection = nil; rippleInspectionKey = nil
-    if clip.rippleDraft == nil {
+    if let draft = clip.rippleDraft, !draft.sourceMatches(clip),
+      draft.references.count == 1, draft.references[0].frame == 0,
+      draft.references[0].path.isEmpty {
+      // An extracted but unedited frame does not pin the old source interval.
+      // Keep the user's render choices while replacing the stale trim and frame.
+      var refreshed = RippleDraft(clip: clip, frameRate: clip.settings(in: project).fps)
+      refreshed.prompt = draft.prompt
+      refreshed.seed = draft.seed
+      refreshed.loraStrength = draft.loraStrength
+      refreshed.audioPolicy = draft.audioPolicy
+      if draft.sourcePath == clip.sourcePath {
+        refreshed.width = draft.width
+        refreshed.height = draft.height
+        if draft.sourceIn == clip.sourceIn {
+          // The first source frame is unchanged when only the outgoing trim moves.
+          // Keep its workspace identity so a saved edit prompt survives reopening.
+          refreshed.references[0].id = draft.references[0].id
+        }
+      }
+      updateRipple { $0 = refreshed }
+    } else if clip.rippleDraft == nil {
       updateRipple { $0 = RippleDraft(clip: clip, frameRate: clip.settings(in: project).fps) }
     }
   }
@@ -146,10 +166,24 @@ extension StudioStore {
     guard !operationBusy, let clip = target, let draft = clip.rippleDraft else { return }
     let session = documentSessionID
     let job = dataDirectory.appendingPathComponent("Ripple/Takes/\(UUID().uuidString)")
+    let native = runtime.nativeRippleEnabled == true
+    let inputs = job.appendingPathExtension("inputs")
+    defer { if native { try? FileManager.default.removeItem(at: inputs) } }
     do {
-      let body = try draft.bridgeObject()
-      let result = try await bridge.invoke("ripple-generate", runtime: runtime,
-        payload: ["ripple": body], output: job)
+      let result: [String: Any]
+      if native {
+        let prepared = try await bridge.invoke("ripple-native-prepare", runtime: runtime,
+          payload: ["draft": try draft.object(), "takeOutput": job.path], output: inputs)
+        guard let recipePath = prepared["recipePath"] as? String else {
+          throw StudioError.invalid("Swift Ripple did not prepare a worker request.")
+        }
+        result = try await bridge.invoke("ltx-native-render", runtime: runtime,
+          payload: ["recipePath": recipePath], output: job)
+      } else {
+        let body = try draft.bridgeObject()
+        result = try await bridge.invoke("ripple-generate", runtime: runtime,
+          payload: ["ripple": body], output: job)
+      }
       guard let path = result["video_path"] as? String ?? result["path"] as? String,
         !path.isEmpty, path != draft.sourcePath,
         let duration = result["duration"] as? Double, duration.isFinite,
@@ -181,6 +215,9 @@ extension StudioStore {
           throw StudioError.invalid("Ripple returned inconsistent frozen reference identities. Artifacts: \(job.path)")
         }
         replayDraft.references[index].path = imagePath
+      }
+      if native {
+        try await NativeRippleMedia.verifyPublishedTake(path, draft: draft, hasAudio: hasAudio)
       }
       let take = RippleTake(draft: replayDraft, path: path, receiptPath: receipt,
         artifactsDirectory: artifacts, hasAudio: hasAudio, submittedDraftFingerprint: draft.inputFingerprint)

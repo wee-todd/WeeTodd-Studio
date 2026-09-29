@@ -6,6 +6,7 @@ public struct RenderStats: Codable, Equatable {
   public var samplingSeconds: Double?
   public var samplingScope: String?
   public var processPeakBytes: Double?
+  public var processPeakScope: String?
   public var mlxPeakBytes: Double?
   public var mlxPeakScope: String?
 
@@ -23,9 +24,16 @@ public struct RenderStats: Codable, Equatable {
     if measured(result["sampling_seconds"]) != nil { samplingScope = "Transformer sampling" }
     else if samplingSeconds != nil { samplingScope = "Pre-decode pipeline" }
     processPeakBytes = measured(result["process_peak_rss_bytes"])
+    if processPeakBytes != nil { processPeakScope = "Resident memory · renderer process" }
+    else if let footprint = measured(metadata["peak_process_footprint_bytes"]) {
+      processPeakBytes = footprint
+      processPeakScope = "Physical footprint · Swift process, excluding FFmpeg"
+    }
     if let peak = measured(phases["run_peak_bytes"]) {
       mlxPeakBytes = peak; mlxPeakScope = "Instrumented stages"
     } else if let peak = measured(metadata["mlx_peak_bytes"]) {
+      mlxPeakBytes = peak; mlxPeakScope = "MLX generation"
+    } else if let peak = measured(metadata["peak_mlx_bytes"]) {
       mlxPeakBytes = peak; mlxPeakScope = "MLX generation"
     }
     if elapsedSeconds == nil && samplingSeconds == nil && processPeakBytes == nil && mlxPeakBytes == nil {

@@ -1224,3 +1224,76 @@ def test_sampler_constructor_failure_closes_direct_store(tmp_path, monkeypatch):
         _default_sampler_factory(replace(spec,transformer=str(model)))
     with pytest.raises(RuntimeError,match='closed'):
         store.read('w')
+
+
+@pytest.mark.parametrize("failure", [None, RuntimeError, KeyboardInterrupt])
+def test_native_owner_released_before_pager_on_every_sampling_exit(tmp_path, failure):
+    events = []
+    owner = SimpleNamespace(report={"worker_released": False}, begin_run=lambda: None)
+
+    def close_native():
+        events.append("native-reaped")
+        owner.report["worker_released"] = True
+
+    owner.close = close_native
+
+    def factory(spec):
+        from minimax_h3_mlx.paged_checkpoint import PagedCheckpointManifest, PagedTensorStore
+
+        result = FakeSampler(spec)
+        cache._native_blocks = owner
+        result.dit.paged_blocks = SimpleNamespace(
+            close=lambda: events.append("pager-closed"), report=lambda: {},
+            store=PagedTensorStore(PagedCheckpointManifest(tmp_path, 0, 0, None, ())),
+        )
+        if failure:
+            def fail(*args, **kwargs):
+                raise failure("interrupted")
+            result.sample_latents = fail
+        return result
+
+    cache = H3TransformerCache(factory)
+    spec = _spec(tmp_path)
+    if failure:
+        with pytest.raises(failure):
+            cache.sample(spec, _conditioning(spec), H3GenerationConfig(steps=3), unload_after=True)
+    else:
+        result = cache.sample(spec, _conditioning(spec), H3GenerationConfig(steps=3),
+                              unload_after=True)
+        assert result.transformer_backend_report["worker_released"]
+    assert events == ["native-reaped", "pager-closed"]
+    assert not cache.loaded
+    assert cache._native_blocks is None
+
+
+def test_explicit_native_backend_attaches_to_shared_dit_and_unloads(tmp_path, monkeypatch):
+    from minimax_h3_mlx.native_blocks import NativeH3Blocks
+
+    monkeypatch.setattr("minimax_h3_mlx.native_backend.preflight_native_backend",
+                        lambda *args, **kwargs: {"worker": "/unused/test-worker"})
+    monkeypatch.setattr("minimax_h3_mlx.lora.apply_lora_stack", lambda *args: ())
+    created = []
+
+    def factory(spec):
+        sampler = FakeSampler(spec)
+        original = sampler.sample_latents
+
+        def sample(*args, **kwargs):
+            assert isinstance(sampler.dit.native_block_executor, NativeH3Blocks)
+            assert sampler.dit.native_block_executor is cache._native_blocks
+            return original(*args, **kwargs)
+
+        sampler.sample_latents = sample
+        created.append(sampler)
+        return sampler
+
+    cache = H3TransformerCache(factory)
+    spec = _spec(tmp_path, task="ref2va")
+    result = cache.sample(spec, _conditioning(spec, task="ref2va", load_vision=True,
+                                               condition_video_rows=mx.zeros((1, 128)),
+                                               references=("test-reference",)),
+                          H3GenerationConfig(steps=5, transformer_backend="nnc_experimental"),
+                          loras=_turbo_lora_stack(tmp_path), unload_after=True)
+    assert result.transformer_backend_report["backend"] == "nnc_experimental"
+    assert result.transformer_backend_report["worker_released"]
+    assert not cache.loaded

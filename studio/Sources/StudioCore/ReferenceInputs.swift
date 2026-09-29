@@ -34,14 +34,14 @@ extension Clip {
         label: engine == .ltx25 ? "Appearance · MSR image" : "Appearance · image reference",
         detail: engine == .ltx25
           ? "Requires the dedicated MSR adapter. Use 1–5 images and describe each subject, object, clothing or background."
-          : "H3 Ref2VA uses this image as a visual reference; it is not a fixed first frame.", role: .reference)
+          : "Swift H3 Ref2VA uses up to nine still images as visual references; they are not fixed first frames.", role: .reference)
       return engine == .ltx25 ? [appearance, ingredients] : [appearance]
     case .video, .sequence:
       // Imported sequences are movie files in the current Studio media contract.
       return [
         ReferenceAction(id: "movieAppearance", label: engine == .h3
           ? "Appearance / story · movie reference" : "Appearance / story · make reference sheet",
-          detail: engine == .h3 ? "H3 Ref2VA receives the movie as reference context. Describe what to retain in the prompt."
+          detail: engine == .h3 ? "Movie references remain available through the existing H3 renderer; the Swift H3 route currently accepts still images only."
             : "Samples six frames into a visible Ingredients sheet. This preserves visual context, not the movie's timing or soundtrack. Describe the story in the prompt.",
           role: engine == .ltx25 ? .control : .reference,
           controlType: "ingredients_reference_sheet", preparation: engine == .h3 ? nil : "sheet"),
@@ -56,7 +56,7 @@ extension Clip {
       let driver = ReferenceAction(id: "audioDriver", label: "Audio · drive video",
         detail: "Uses this audio as the timed driver. LTX preserves the supplied audio; this is not a voice/style reference.", role: .audioDriver)
       return engine == .h3 ? [driver, ReferenceAction(id: "audioReference", label: "Audio · reference sound / voice",
-        detail: "H3 Ref2VA also needs an image or movie reference. Describe which sound or voice to retain.", role: .reference)] : [driver]
+        detail: "H3 Ref2VA also needs a visual reference. Audio references are not yet available through the Swift H3 route.", role: .reference)] : [driver]
     default: return []
     }
   }

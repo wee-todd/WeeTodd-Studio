@@ -45,6 +45,7 @@ CATEGORY_NAMES = {
     "WeeTodd/MLX preprocessors": "MLX preprocessors — Lifecycle",
     "WeeTodd/CorridorKey": "CorridorKey — Keying",
     "WeeTodd/Draw Things": "Draw Things — Remote generation",
+    "WeeTodd/Native Swift": "Native Swift — Recipe execution",
 }
 
 RECOMMENDED = {
@@ -59,6 +60,7 @@ RECOMMENDED = {
     "WeeToddLTX23Preflight",
 }
 EXPERIMENTAL = {
+    "WeeToddSwiftVideoGenerate",
     "WeeToddH3PagingSettings",
     "WeeToddDrawThingsConnection",
     "WeeToddDrawThingsDiscover",

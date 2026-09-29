@@ -142,6 +142,7 @@ class H3Latents:
     trajectory_excluded_video_rows: int = 0
     trajectory_excluded_audio_rows: int = 0
     lora_report: tuple[dict[str, Any], ...] = ()
+    transformer_backend_report: dict[str, Any] | None = None
     projection_backend_report: dict[str, Any] | None = None
     projection_backend_runtime: dict[str, Any] | None = None
     paging_report: dict[str, Any] | None = None
@@ -205,6 +206,7 @@ class H3TransformerCache:
         self._lock = RLock()
         self._factory = factory or _default_sampler_factory
         self._spec: H3TransformerSpec | None = None
+        self._native_blocks = None
         self._schedule_key: tuple | None = None
         self._lora_key = None
         self._vdn_key = None
@@ -253,6 +255,26 @@ class H3TransformerCache:
         spec.validate()
         config.validate()
         config.validate_paging(spec.transformer, block_residency)
+        from minimax_h3_mlx.native_backend import preflight_native_backend
+
+        native_report = preflight_native_backend(
+            config, spec.task, spec.transformer, (loras or H3LoRAStack()).adapters,
+            block_residency=block_residency,
+            features=dict(easycache=easycache, blockcache=blockcache,
+                          trajectory_forecast=trajectory_forecast, sol_attention=sol_attention,
+                          fastvideo=fastvideo, vdn=vdn, continuation=continuation,
+                          refinement_source=refinement_source, fun_control_spec=fun_control_spec),
+        )
+        if native_report is not None:
+            from minimax_h3_mlx.native_backend import validate_native_rows
+
+            validate_native_rows(
+                config, prompt_rows=conditioning.token_count,
+                video_rows=(0 if conditioning.condition_video_rows is None
+                            else int(conditioning.condition_video_rows.shape[0])),
+                audio_rows=(0 if conditioning.condition_audio_rows is None
+                            else int(conditioning.condition_audio_rows.shape[0])),
+            )
         if refinement_mode not in {"spatial", "motion"}:
             raise ValueError("Unknown H3 refinement mode.")
         if refinement_evaluations is not None:
@@ -411,6 +433,7 @@ class H3TransformerCache:
             config.drop_adaln,
             config.memory_mode,
             config.projection_backend,
+            config.transformer_backend,
             config.sampling_method,
             config.inference_optimization,
             block_residency,
@@ -612,6 +635,13 @@ class H3TransformerCache:
                             item["path"] = Path(item["path"]).name
                             sanitized.append(item)
                         self._lora_report = tuple(sanitized)
+                    if native_report is not None:
+                        from minimax_h3_mlx.native_blocks import NativeH3Blocks
+
+                        self._native_blocks = NativeH3Blocks(
+                            spec.transformer, loras.adapters[0].path, native_report["worker"]
+                        )
+                        self._sampler.dit.native_block_executor = self._native_blocks
                     if config.inference_optimization != "off":
                         from minimax_h3_mlx.inference_optimizations import (
                             configure_inference_optimizations,
@@ -626,6 +656,8 @@ class H3TransformerCache:
                     self._release_locked()
                     raise
             try:
+                if self._native_blocks is not None:
+                    self._native_blocks.begin_run()
                 self._sampler.dit.set_attention_query_chunk_size(config.attention_query_chunk_size)
                 sol_setter = getattr(self._sampler.dit, "set_sol_attention_config", None)
                 if sol_attention is not None and sol_setter is None:
@@ -713,6 +745,7 @@ class H3TransformerCache:
                             configure_lookahead(
                                 config.memory_mode == "normal"
                                 and config.projection_backend != "mlx"
+                                and config.transformer_backend == "mlx"
                             )
                     vdn_runtime = getattr(self._sampler.dit, "vdn_runtime", None)
                     if vdn_runtime is not None:
@@ -844,6 +877,9 @@ class H3TransformerCache:
                         result, "trajectory_excluded_audio_rows", 0
                     ),
                     lora_report=self._lora_report,
+                    transformer_backend_report=(
+                        self._native_blocks.report if self._native_blocks is not None else None
+                    ),
                     projection_backend_report=self._projection_backend_report,
                     projection_backend_runtime=mpp_runtime_status(),
                     paging_report=paged.report() if paged is not None else None,
@@ -911,6 +947,9 @@ class H3TransformerCache:
             self._release_locked()
 
     def _release_locked(self) -> None:
+        if self._native_blocks is not None:
+            self._native_blocks.close()
+            self._native_blocks = None
         dit = getattr(self._sampler, "dit", None)
         pager = getattr(dit, "paged_blocks", None)
         if pager is not None and hasattr(pager, "close"):

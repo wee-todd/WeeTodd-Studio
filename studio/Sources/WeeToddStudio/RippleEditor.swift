@@ -373,6 +373,11 @@ struct RippleRuntimeSettings: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       Text("LTX Ripple video restyling").font(.headline)
+      Toggle("Use Swift MLX for Ripple (experimental)", isOn: Binding(
+        get: { store.runtime.nativeRippleEnabled == true },
+        set: { store.runtime.nativeRippleEnabled = $0; store.saveRuntime() }))
+      Text("Swift Ripple uses a staged source guide and the installed author LoRA. Review the take before applying it; full-size visual and memory qualification is still in progress.")
+        .font(.caption).foregroundStyle(.secondary)
       PathPicker(label: "Installed Ripple adapter (.safetensors)", value: Binding(
         get: { store.runtime.rippleAdapterPath ?? "" }, set: { store.runtime.rippleAdapterPath = $0 }))
       Picker("LTX 2.5 components", selection: Binding(

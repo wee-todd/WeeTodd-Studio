@@ -8,11 +8,109 @@ import hashlib
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass
+class SwiftToolchain:
+    swift: Path
+    env: dict[str, str]
+    build_arguments: list[str]
+
+
+def prepare_swift_toolchain(xcode: Path | None = None) -> SwiftToolchain:
+    """Resolve one complete Apple toolchain and exercise macros before the expensive build."""
+    env = os.environ.copy()
+
+    def read(command: list[str]) -> str:
+        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+        if result.returncode:
+            raise RuntimeError(
+                f"Xcode toolchain check failed: {' '.join(command)}\n"
+                f"{result.stderr.strip()}\nOpen full Xcode and finish its component setup. "
+                "Select it with --xcode /Applications/Xcode.app."
+            )
+        return result.stdout.strip()
+
+    selected = xcode or env.get("DEVELOPER_DIR") or read(["/usr/bin/xcode-select", "-p"])
+    developer = Path(selected).expanduser().resolve()
+    if developer.suffix == ".app":
+        developer = developer / "Contents/Developer"
+    if not (developer / "usr/bin/xcodebuild").is_file():
+        raise RuntimeError(
+            f"Studio requires full Xcode 26 or newer; selected {developer}. "
+            "Standalone Command Line Tools are insufficient. Install/open Xcode, then use "
+            "--xcode /Applications/Xcode.app."
+        )
+    env["DEVELOPER_DIR"] = str(developer)
+    env["TOOLCHAINS"] = "XcodeDefault"
+    # A custom compiler or SDK inherited from the shell must not override this selection.
+    for key in ("SDKROOT", "SWIFT_EXEC", "SWIFT_EXEC_MANIFEST"):
+        env.pop(key, None)
+    version = read([str(developer / "usr/bin/xcodebuild"), "-version"])
+    match = re.search(r"^Xcode (\d+)", version)
+    if not match or int(match[1]) < 26:
+        raise RuntimeError(f"Studio requires Xcode 26 or newer; selected {version}.")
+    # Keep the driver's invocation name: swift may symlink to swift-frontend,
+    # whose behavior changes with argv[0]. Resolving it breaks SwiftPM commands.
+    swift = Path(read(["/usr/bin/xcrun", "--find", "swift"]))
+    sdk = Path(read(["/usr/bin/xcrun", "--sdk", "macosx", "--show-sdk-path"])).resolve()
+    sdk_version = read(["/usr/bin/xcrun", "--sdk", "macosx", "--show-sdk-version"])
+    platform = Path(read([
+        "/usr/bin/xcrun", "--sdk", "macosx", "--show-sdk-platform-path"
+    ])).resolve()
+    if not swift.resolve().is_relative_to(developer) or not sdk.is_relative_to(developer):
+        raise RuntimeError("Selected Swift compiler and macOS SDK must belong to the same Xcode.")
+    if not sdk.is_dir() or not swift.is_file() or not swift.with_name("swiftc").is_file():
+        raise RuntimeError("Xcode is incomplete. Open Xcode and finish its component setup.")
+    if not re.match(r"^\d+", sdk_version) or int(sdk_version.split(".")[0]) < 26:
+        raise RuntimeError(f"Studio requires a macOS 26 or newer SDK; selected {sdk_version}.")
+    env["SDKROOT"] = str(sdk)
+    env["SWIFT_EXEC"] = str(swift.with_name("swiftc"))
+    env["SWIFT_EXEC_MANIFEST"] = env["SWIFT_EXEC"]
+    plugins = platform / "Developer/usr/lib/swift/host/plugins"
+    server = platform / "Developer/usr/bin/swift-plugin-server"
+    if not (plugins / "libSwiftUIMacros.dylib").is_file() or not server.is_file():
+        raise RuntimeError(
+            f"SwiftUIMacros or its plugin server is missing from {platform}. "
+            "Open full Xcode and finish its component setup, or select a complete installation "
+            "with --xcode /Applications/Xcode.app."
+        )
+    # SDK macros live in the platform, not a separately installed Swift toolchain.
+    # Pass this to both the probe and SwiftPM so their plugin discovery agrees.
+    plugin_arguments = ["-external-plugin-path", f"{plugins}#{server}"]
+    print(f"Building with {version.replace(chr(10), ' · ')} · macOS SDK {sdk_version}\n"
+          f"Swift: {swift}\n{read([str(swift), '--version'])}", flush=True)
+    with tempfile.TemporaryDirectory(prefix="weetodd-swiftui-preflight-") as temporary:
+        probe = Path(temporary) / "MacroProbe.swift"
+        probe.write_text(
+            "import SwiftUI\nimport Observation\n"
+            "@Observable final class ProbeModel { var value = 0 }\n"
+            "struct MacroProbe: View {\n"
+            "  @State private var count = 0\n"
+            "  @State private var model = ProbeModel()\n"
+            "  @Binding var enabled: Bool\n"
+            "  var body: some View { Toggle(\"Probe\", isOn: $enabled) }\n}\n"
+        )
+        result = subprocess.run([
+            str(swift.with_name("swiftc")), "-typecheck", "-swift-version", "5",
+            "-target", "arm64-apple-macosx14.0", "-sdk", str(sdk),
+            *plugin_arguments, str(probe),
+        ], env=env, capture_output=True, text=True, timeout=120)
+        if result.returncode:
+            raise RuntimeError(
+                "SwiftUI macro preflight failed before building Studio. "
+                "Use --xcode to select a complete Xcode installation and finish its component "
+                f"setup.\n{result.stderr[:6000]}"
+            )
+    return SwiftToolchain(swift, env, ["--sdk", str(sdk),
+        *[item for argument in plugin_arguments for item in ("-Xswiftc", argument)]])
 
 
 def resolve_signing_identity(root: Path, explicit: str | None) -> str:
@@ -30,7 +128,9 @@ def resolve_signing_identity(root: Path, explicit: str | None) -> str:
 
 
 def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | None = None,
-                 signing_identity: str = "-") -> None:
+                 signing_identity: str = "-", native_worker: Path | None = None,
+                 ltx_worker: Path | None = None,
+                 h3_mlx_worker: Path | None = None) -> None:
     """Assemble a fresh bundle without requiring ignored agent configuration."""
     binaries = root / "studio" / ".build" / configuration
     macos = app / "Contents" / "MacOS"
@@ -57,6 +157,18 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
             "DrawThings-Corresponding-Source.tar.gz", "DrawThings-Notices.txt", "manifest.json"
         ):
             shutil.copy2(drawthings / name, notices / name)
+    if native_worker is not None:
+        from build_h3_worker import install_worker
+
+        install_worker(native_worker, macos, resources)
+    if ltx_worker is not None:
+        from build_ltx_worker import install_worker as install_ltx_worker
+
+        install_ltx_worker(ltx_worker, macos, resources)
+    if h3_mlx_worker is not None:
+        from build_h3_mlx_worker import install_worker as install_h3_mlx_worker
+
+        install_h3_mlx_worker(h3_mlx_worker, macos, resources)
     source = resources / "RendererSource"
     source.mkdir(parents=True, exist_ok=True)
     shutil.copy2(root / "studio/Resources/AppIcon.icns", resources / "AppIcon.icns")
@@ -105,6 +217,10 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
             "codesign", "--force", "--sign", signing_identity,
             "--identifier", f"studio.weetodd.mac.{executable.name}", str(executable),
         ], check=True)
+    if h3_mlx_worker is not None:
+        from build_h3_mlx_worker import record_installed_signature
+
+        record_installed_signature(macos, resources)
     subprocess.run(["codesign", "--force", "--sign", signing_identity, str(app)], check=True)
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
 
@@ -127,7 +243,9 @@ def assert_app_not_running(app: Path) -> None:
 
 
 def package_app(root: Path, configuration: str, drawthings: Path | None = None,
-                signing_identity: str | None = None, output: Path | None = None) -> Path:
+                signing_identity: str | None = None, output: Path | None = None,
+                native_worker: Path | None = None, ltx_worker: Path | None = None,
+                h3_mlx_worker: Path | None = None) -> Path:
     signing_identity = resolve_signing_identity(root, signing_identity)
     build = root / "studio" / ".build"
     app = output.resolve() if output is not None else build / "WeeTodd Studio.app"
@@ -138,7 +256,8 @@ def package_app(root: Path, configuration: str, drawthings: Path | None = None,
     # Finish and verify packaging before replacing a previously working build.
     with tempfile.TemporaryDirectory(prefix=".studio-package-", dir=app.parent) as temporary:
         staging = Path(temporary) / app.name
-        build_bundle(root, configuration, staging, drawthings, signing_identity)
+        build_bundle(root, configuration, staging, drawthings, signing_identity,
+                     native_worker, ltx_worker, h3_mlx_worker)
         # The user may have launched the app while the bundle was being assembled.
         assert_app_not_running(app)
         previous = Path(temporary) / "Previous.app"
@@ -161,6 +280,9 @@ def package_app(root: Path, configuration: str, drawthings: Path | None = None,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--configuration", choices=("debug", "release"), default="debug")
+    parser.add_argument("--xcode", type=Path,
+                        help="Full Xcode .app or Contents/Developer directory. Otherwise use "
+                             "DEVELOPER_DIR or xcode-select; never changes system defaults.")
     parser.add_argument("--output", type=Path,
                         help="Build a separate .app bundle without replacing the default app "
                              "or saving a new signing identity")
@@ -180,12 +302,29 @@ def main():
     if app.suffix != ".app":
         parser.error("--output must end in .app")
     assert_app_not_running(app)
+    try:
+        toolchain = prepare_swift_toolchain(args.xcode)
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+        parser.exit(1, f"Build preflight failed: {error}\n")
     subprocess.run(
-        ["swift", "build", "--package-path", str(root / "studio"), "-c", args.configuration],
-        check=True,
+        [str(toolchain.swift), "build", "--package-path", str(root / "studio"),
+         "-c", args.configuration, *toolchain.build_arguments],
+        check=True, env=toolchain.env,
     )
+    from build_h3_worker import build_worker
+
+    native_worker = build_worker(root, swift=toolchain.swift, env=toolchain.env,
+                                 build_arguments=toolchain.build_arguments)
+    from build_ltx_worker import build_worker as build_ltx_worker
+
+    ltx_worker = build_ltx_worker(root, swift=toolchain.swift, env=toolchain.env,
+                                build_arguments=toolchain.build_arguments)
+    from build_h3_mlx_worker import build_worker as build_h3_mlx_worker
+
+    h3_mlx_worker = build_h3_mlx_worker(root, swift=toolchain.swift, env=toolchain.env,
+                                       build_arguments=toolchain.build_arguments)
     print(package_app(root, args.configuration, args.drawthings_distribution,
-                      identity, args.output))
+                      identity, args.output, native_worker, ltx_worker, h3_mlx_worker))
 
 
 if __name__ == "__main__":

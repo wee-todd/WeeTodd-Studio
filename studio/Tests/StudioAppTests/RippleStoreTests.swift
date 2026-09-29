@@ -1,9 +1,324 @@
+import AVFoundation
+import AppKit
 import Foundation
 import StudioCore
 import XCTest
 @testable import WeeToddStudio
 
 final class RippleStoreTests: XCTestCase {
+  @MainActor func testRippleFrameImageUsesDrawThingsDimensionsAndKeepsEditAfterTrim() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = StudioStore(dataDirectory: directory, restoreSession: false)
+    addTeardownBlock { await MainActor.run { store.invalidateTimelinePlayback() } }
+    var clip = Clip(name: "Source", engine: .movie)
+    clip.sourcePath = "/source.mp4"; clip.duration = 5.18
+    store.project.clips = [clip]; store.selectedClipID = clip.id
+    store.openRipple()
+    store.updateRipple {
+      $0.width = 1376; $0.height = 768
+      $0.references[0].originalPath = "/old-frame.png"
+    }
+    let original = try XCTUnwrap(store.rippleClip?.rippleDraft)
+    let originalContext = RippleImageContext(clipID: clip.id, draft: original, reference: original.references[0])
+    var image = store.makeRippleImageDraft(originalContext, width: original.width, height: original.height,
+                                           previousDraft: nil)
+    XCTAssertEqual(image.width, 1344)
+    XCTAssertEqual(image.height, 768)
+    image.prompt = "A red winter coat"
+    store.imageWorkspaceLibrary.record(image, preview: "/old-result.png")
+
+    store.rippleClipID = nil
+    store.project.clips[0].duration = 5.16
+    store.openRipple()
+    let refreshed = try XCTUnwrap(store.rippleClip?.rippleDraft)
+    XCTAssertEqual(refreshed.references[0].id, original.references[0].id)
+    store.updateRipple { $0.references[0].originalPath = "/new-frame.png" }
+    let current = try XCTUnwrap(store.rippleClip?.rippleDraft)
+    let context = RippleImageContext(clipID: clip.id, draft: current, reference: current.references[0])
+    let restored = store.makeRippleImageDraft(context, width: current.width, height: current.height,
+                                               previousDraft: nil)
+    XCTAssertEqual(restored.prompt, "A red winter coat")
+    XCTAssertEqual(restored.canvas?.path, "/new-frame.png")
+    XCTAssertEqual(restored.width, 1344)
+    XCTAssertEqual(restored.height, 768)
+    XCTAssertEqual(restored.rippleReference, context)
+    XCTAssertNotEqual(restored, image, "The old generated preview must not be reused for a changed trim")
+  }
+
+  @MainActor func testReopeningUneditedRippleDraftUsesChangedTimelineTrim() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = StudioStore(dataDirectory: directory, restoreSession: false)
+    addTeardownBlock { await MainActor.run { store.invalidateTimelinePlayback() } }
+    var clip = Clip(name: "Source", engine: .movie)
+    clip.sourcePath = "/source.mp4"; clip.duration = 5.18
+    store.project.clips = [clip]; store.selectedClipID = clip.id
+    store.openRipple()
+    store.updateRipple {
+      $0.prompt = "Keep the coat blue"
+      $0.references[0].originalPath = "/old-frame.png"
+    }
+    store.rippleClipID = nil
+    store.project.clips[0].duration = 5.16
+    store.openRipple()
+    let draft = try XCTUnwrap(store.rippleClip?.rippleDraft)
+    XCTAssertEqual(draft.duration, 5.16)
+    XCTAssertEqual(draft.frameCount, 124)
+    XCTAssertEqual(draft.prompt, "Keep the coat blue")
+    XCTAssertEqual(draft.references[0].originalPath, "")
+  }
+
+  private func nativeSource(_ directory: URL, times: [Double] = [0, 0.5, 1, 1.5]) async throws -> URL {
+    let url = directory.appendingPathComponent("source.mov")
+    let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+      AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64])
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+    writer.add(input)
+    XCTAssertTrue(writer.startWriting()); writer.startSession(atSourceTime: .zero)
+    for frame in 0..<4 {
+      while !input.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 1_000_000) }
+      var buffer: CVPixelBuffer?
+      XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA, nil, &buffer), kCVReturnSuccess)
+      let pixels = try XCTUnwrap(buffer)
+      CVPixelBufferLockBaseAddress(pixels, [])
+      let bytes = CVPixelBufferGetBaseAddress(pixels)!.assumingMemoryBound(to: UInt8.self)
+      for y in 0..<64 { for x in 0..<64 {
+        let offset = y * CVPixelBufferGetBytesPerRow(pixels) + x * 4
+        bytes[offset] = frame == 2 ? 255 : 0
+        bytes[offset + 1] = frame == 1 ? 255 : 0
+        bytes[offset + 2] = frame == 0 ? 255 : 0
+        bytes[offset + 3] = 255
+      } }
+      CVPixelBufferUnlockBaseAddress(pixels, [])
+      XCTAssertTrue(adaptor.append(pixels, withPresentationTime: CMTime(seconds: times[frame], preferredTimescale: 600)))
+    }
+    input.markAsFinished(); writer.endSession(atSourceTime: CMTime(value: 4, timescale: 2))
+    await writer.finishWriting(); XCTAssertEqual(writer.status, .completed)
+    return url
+  }
+
+  func testNativeRipplePreparationFreezesReferencesAndWritesWorkerContract() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let movie = try await nativeSource(root)
+    let reference = try await NativeRippleMedia.extractFrame([
+      "source_path": movie.path, "source_start": 0.0, "duration": 2.0,
+      "frame_rate": 2.0, "width": 64, "height": 64, "frame": 0],
+      into: root.appendingPathComponent("reference"))
+    var clip = Clip(name: "Source", engine: .movie)
+    clip.sourcePath = movie.path; clip.duration = 2.0
+    var draft = RippleDraft(clip: clip, frameRate: 2)
+    draft.width = 64; draft.height = 64
+    draft.references[0].path = try XCTUnwrap(reference["image_path"] as? String)
+    let transformer = root.appendingPathComponent("transformer")
+    let text = root.appendingPathComponent("text")
+    try FileManager.default.createDirectory(at: transformer, withIntermediateDirectories: false)
+    try FileManager.default.createDirectory(at: text, withIntermediateDirectories: false)
+    let video = root.appendingPathComponent("video.safetensors")
+    let audio = root.appendingPathComponent("audio.safetensors")
+    let adapter = root.appendingPathComponent("adapter.safetensors")
+    for path in [video, audio, adapter] { try Data([1]).write(to: path) }
+    let profile = root.appendingPathComponent("profile.json")
+    try JSONSerialization.data(withJSONObject: [
+      "format": "weetodd-headless-v2", "engine": "ltx25",
+      "config": ["pipeline_mode": "distilled"],
+      "components": ["transformer_path": transformer.path,
+        "text_encoder_path": text.path, "video_vae_path": video.path,
+        "audio_vae_path": audio.path, "loras": [], "ic_loras": []]
+    ]).write(to: profile)
+    let inputs = root.appendingPathComponent("inputs")
+    let take = root.appendingPathComponent("take")
+    let result = try await NativeRipplePreparation.prepare(draft: draft,
+      runtime: ["rippleAdapterPath": adapter.path, "rippleProfileID": profile.path,
+        "profilesDirectory": root.path, "ffmpegPath": "/usr/bin/true"],
+      into: inputs, output: take)
+    let recipe = try XCTUnwrap(result["recipePath"] as? String)
+    let values = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf:
+      URL(fileURLWithPath: recipe))) as? [String: Any])
+    XCTAssertEqual(values["task"] as? String, "ripple")
+    XCTAssertEqual(values["frames"] as? Int, 9)
+    XCTAssertEqual(values["editorial_frames"] as? Int, 4)
+    XCTAssertEqual(values["output_directory"] as? String, take.path)
+    XCTAssertEqual((values["anchors"] as? [Any])?.count, 0)
+    XCTAssertEqual((values["source_sha256"] as? String)?.count, 64)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: values["first_reference_path"] as! String))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: take.path))
+  }
+
+  func testNativeRipplePreparationRejectsOversizedProfileBeforeReadingMedia() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = root.appendingPathComponent("source.mp4")
+    let adapter = root.appendingPathComponent("adapter.safetensors")
+    let profile = root.appendingPathComponent("profile.json")
+    try Data([1]).write(to: source)
+    try Data([1]).write(to: adapter)
+    try Data(repeating: 32, count: 1024 * 1024 + 1).write(to: profile)
+    var clip = Clip(name: "Source", engine: .movie)
+    clip.sourcePath = source.path; clip.duration = 1
+    var draft = RippleDraft(clip: clip, frameRate: 24)
+    draft.references[0].path = "/edited.png"
+    do {
+      _ = try await NativeRipplePreparation.prepare(draft: draft,
+        runtime: ["rippleAdapterPath": adapter.path, "rippleProfileID": profile.path,
+          "profilesDirectory": root.path, "ffmpegPath": "/usr/bin/true"],
+        into: root.appendingPathComponent("inputs"), output: root.appendingPathComponent("take"))
+      XCTFail("Oversized profile must fail before source inspection")
+    } catch {
+      XCTAssertTrue(error.localizedDescription.contains("plain installed LTX 2.5 distilled profile"))
+    }
+  }
+
+  func testNativeRipplePublishedTakeChecksActualFramesAndAudio() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let movie = try await nativeSource(root)
+    var clip = Clip(name: "Source", engine: .movie)
+    clip.sourcePath = movie.path; clip.duration = 2
+    var draft = RippleDraft(clip: clip, frameRate: 2)
+    draft.width = 64; draft.height = 64
+    try await NativeRippleMedia.verifyPublishedTake(movie.path,
+      draft: draft, hasAudio: false)
+    do {
+      try await NativeRippleMedia.verifyPublishedTake(movie.path,
+        draft: draft, hasAudio: true)
+      XCTFail("An absent audio stream must fail verification")
+    } catch { XCTAssertTrue(error.localizedDescription.contains("audio")) }
+    draft.duration = 1
+    do {
+      try await NativeRippleMedia.verifyPublishedTake(movie.path,
+        draft: draft, hasAudio: false)
+      XCTFail("A two-second take must not satisfy a one-second draft")
+    } catch { XCTAssertTrue(error.localizedDescription.contains("timing")) }
+  }
+
+  @MainActor func testOptedInRippleUsesNativePreparationAndWorker() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let movie = try await nativeSource(root)
+    let take = root.appendingPathComponent("take.mov")
+    try FileManager.default.copyItem(at: movie, to: take)
+    var calls: [String] = []
+    let store = StudioStore(dataDirectory: root, restoreSession: false,
+      invocation: { command, _, payload, _ in
+        if command == "audio-mix" { throw CancellationError() }
+        calls.append(command)
+        switch command {
+        case "ripple-native-prepare":
+          XCTAssertNotNil(payload["draft"] as? [String: Any])
+          return ["recipePath": root.appendingPathComponent("request.json").path]
+        case "ltx-native-render":
+          XCTAssertNotNil(payload["recipePath"] as? String)
+          return ["video_path": take.path, "duration": 2.0, "frames": 4,
+            "frame_rate": 2.0, "width": 64, "height": 64, "has_audio": false,
+            "receipt_path": root.appendingPathComponent("receipt.json").path,
+            "artifacts_directory": root.path,
+            "frozen_references": [["frame": 0,
+              "path": root.appendingPathComponent("frozen.png").path, "strength": 1.0]],
+            "source_sha256": String(repeating: "a", count: 64)]
+        default:
+          XCTFail("Unexpected Ripple command: \(command)")
+          throw StudioError.invalid("Unexpected Ripple command")
+        }
+      })
+    addTeardownBlock { await MainActor.run { store.invalidateTimelinePlayback() } }
+    store.runtime.nativeRippleEnabled = true
+    store.runtime.pythonPath = "/no-python-for-ripple-route-test"
+    var clip = Clip(name: "Source", engine: .movie)
+    clip.sourcePath = movie.path; clip.duration = 2
+    store.project.clips = [clip]; store.selectedClipID = clip.id
+    store.openRipple()
+    store.updateRipple { draft in
+      draft.width = 64; draft.height = 64; draft.frameRate = 2
+      draft.references[0].path = "/edited.png"
+    }
+    await store.generateRipple()
+    XCTAssertNil(store.error)
+    XCTAssertEqual(calls, ["ripple-native-prepare", "ltx-native-render"])
+    XCTAssertEqual(store.selectedClip?.rippleTakes?.first?.path, take.path)
+  }
+
+  @MainActor func testNativeRippleInspectionAndFrameExtractionWorkWithoutPython() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let movie = try await nativeSource(directory)
+    let store = StudioStore(dataDirectory: directory, restoreSession: false)
+    addTeardownBlock { await MainActor.run { store.invalidateTimelinePlayback() } }
+    store.runtime.nativeLTX25Enabled = false
+    store.runtime.nativeRippleEnabled = true
+    store.runtime.pythonPath = "/missing-python-for-native-ripple-test"
+    var clip = Clip(name: "Source", engine: .movie)
+    clip.sourcePath = movie.path; clip.sourceIn = 0.5; clip.duration = 1
+    store.project.clips = [clip]; store.selectedClipID = clip.id
+    store.openRipple()
+    await store.inspectRipple()
+    XCTAssertNil(store.error)
+    let draft = try XCTUnwrap(store.rippleClip?.rippleDraft)
+    XCTAssertEqual(draft.frameRate, 2)
+    XCTAssertEqual(draft.sourcePreviewStart ?? -1, 0.5, accuracy: 0.001)
+    XCTAssertEqual(draft.frameCount, 2)
+    let reference = try XCTUnwrap(draft.references.first)
+    await store.extractRippleFrame(referenceID: reference.id)
+    XCTAssertNil(store.error)
+    let extracted = try XCTUnwrap(store.rippleClip?.rippleDraft?.references.first?.originalPath)
+    let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: URL(fileURLWithPath: extracted))))
+    let color = try XCTUnwrap(bitmap.colorAt(x: 32, y: 32)?.usingColorSpace(.deviceRGB))
+    XCTAssertGreaterThan(color.greenComponent, 0.75)
+    XCTAssertLessThan(color.redComponent, 0.4)
+  }
+
+  @MainActor func testNativeRippleRejectsVariableCadenceBeforeExtractingAnEditFrame() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let movie = try await nativeSource(directory, times: [0, 0.5, 1.15, 1.65])
+    let store = StudioStore(dataDirectory: directory, restoreSession: false)
+    addTeardownBlock { await MainActor.run { store.invalidateTimelinePlayback() } }
+    store.runtime.nativeLTX25Enabled = true
+    store.runtime.pythonPath = "/missing-python-for-native-ripple-test"
+    var clip = Clip(name: "Variable", engine: .movie)
+    clip.sourcePath = movie.path; clip.sourceIn = 0; clip.duration = 1.5
+    store.project.clips = [clip]; store.selectedClipID = clip.id
+    store.openRipple()
+    await store.inspectRipple()
+    XCTAssertTrue(store.error?.contains("constant frame rate") == true)
+    XCTAssertNil(store.rippleClip?.rippleDraft?.sourcePreviewStart)
+  }
+  func testNativeRippleStreamsEditedFirstFrameAndSourceFramesInOrder() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let movie = try await nativeSource(directory)
+    let request: [String: Any] = ["source_path": movie.path, "source_start": 0.0,
+      "duration": 2.0, "frame_rate": 2.0, "width": 64, "height": 64, "frame": 1]
+    let edited = try await NativeRippleMedia.extractFrame(request,
+      into: directory.appendingPathComponent("edit"))
+    let guide = try await NativeRippleMedia.prepareGuide(request,
+      editedFirstFrame: URL(fileURLWithPath: edited["image_path"] as! String),
+      into: directory.appendingPathComponent("guide"))
+    XCTAssertEqual(guide["frames"] as? Int, 9)
+    let raw = try Data(contentsOf: URL(fileURLWithPath: guide["rgb_path"] as! String))
+    XCTAssertEqual(raw.count, 9 * 64 * 64 * 3)
+    func color(_ frame: Int) -> [UInt8] {
+      let offset = (frame * 64 * 64 + 32 * 64 + 32) * 3
+      return Array(raw[offset..<offset + 3])
+    }
+    XCTAssertGreaterThan(color(0)[1], 180) // edited green first
+    XCTAssertGreaterThan(color(1)[0], 180) // source red follows, not replaced
+    XCTAssertGreaterThan(color(2)[1], 180)
+    XCTAssertGreaterThan(color(3)[2], 180)
+    XCTAssertEqual(color(4), color(8)) // terminal frame is cloned for VAE padding
+  }
   @MainActor private func store(invocation: Bridge.Invocation? = nil) throws -> StudioStore {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

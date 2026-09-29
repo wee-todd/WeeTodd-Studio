@@ -378,6 +378,7 @@ def test_scene_compares_effective_defaults_across_distinct_profiles(tmp_path):
     request["project"]["clips"][1]["profileID"] = str(alternate)
     recipe, _ = bridge.compose_recipe(request)
     assert len(recipe["scene"]["segments"]) == 2
+    assert recipe["config"]["negative_prompt"] == "same"
 
 
 def test_scene_preflight_exposes_ranges_and_rejects_baked_controls(tmp_path, monkeypatch):

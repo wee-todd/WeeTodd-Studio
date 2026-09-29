@@ -1,0 +1,46 @@
+{
+  "originHash" : "667f99ec423bc7737e8b7ff7117c80acc624fa2c643f710ddd10fc0acd89f08d",
+  "pins" : [
+    {
+      "identity" : "ccv",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/liuliu/ccv.git",
+      "state" : {
+        "revision" : "bf5459732be3b552bb470e4004dac53abc01ea11"
+      }
+    },
+    {
+      "identity" : "s4nnc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/liuliu/s4nnc.git",
+      "state" : {
+        "revision" : "c99e45ad0d16c902c6c477e4dc9f1a7e49386dcd"
+      }
+    },
+    {
+      "identity" : "swift-fpzip-support",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/weiyanlin117/swift-fpzip-support.git",
+      "state" : {
+        "revision" : "0ec6d4668c9c83bc3da0f8b2d6dfc46da0b98609"
+      }
+    },
+    {
+      "identity" : "swift-protobuf",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-protobuf.git",
+      "state" : {
+        "revision" : "d57a5aecf24a25b32ec4a74be2f5d0a995a47c4b"
+      }
+    },
+    {
+      "identity" : "swift-system",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-system.git",
+      "state" : {
+        "revision" : "fbd61a676d79cbde05cd4fda3cc46e94d6b8f0eb"
+      }
+    }
+  ],
+  "version" : 3
+}

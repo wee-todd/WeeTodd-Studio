@@ -1683,6 +1683,14 @@ class MiniMaxH3DiT(nn.Module):
         control_strength=0.0,
     ):
         """Run bounded weight windows and complete activations before retiring each window."""
+        native = getattr(self, "native_block_executor", None)
+        if native is not None:
+            return native.run(
+                x, temb, adaln_indices, rotary, video_indices, audio_indices,
+                modulation_cache, mask, blockcache, step_index, total_steps,
+                diagnostics, active_layers, approximation_config, pairing_geometry,
+                control_model, control_state, control_strength,
+            )
         paged = self.paged_blocks
         before_block_zero = x
         after_block_zero = None

@@ -252,7 +252,8 @@ def test_headless_forwards_policy_and_releases_before_decode(tmp_path, monkeypat
             raise failure("test interruption")
         return SimpleNamespace(transformer_evaluations=2, total_seconds=1,
                                paging_report={}, sol_attention_report={}, vdn_report={},
-                               preview_report={}, projection_backend_report={"requested": "auto"},
+                               preview_report={}, transformer_backend_report=None,
+                               projection_backend_report={"requested": "auto"},
                                projection_backend_runtime={"fallback_calls": 1},
                                block_residency_report={"requested": mode})
 

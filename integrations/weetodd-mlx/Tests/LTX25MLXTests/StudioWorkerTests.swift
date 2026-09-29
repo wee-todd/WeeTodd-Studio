@@ -1,0 +1,73 @@
+import XCTest
+import ImageIO
+@testable import LTX25MLX
+
+final class StudioWorkerTests: XCTestCase {
+  func testA2VEncodingStartsBeforePromptAndSamplingProgress() throws {
+    var progress=MLXStudioProgress()
+    let stages:[(String,Int,Int)]=[("audio_encode",1,9),("audio_encode",9,9),
+      ("audio_encoder_weights_released",0,1),("text:layer",48,48),
+      ("sampling",1,11),("stage1:block",48,48),("sampling",8,11),
+      ("upscale:begin",0,1),("sampling",11,11),("video_decode",49,49),
+      ("source_audio_published",0,1),("ready_to_publish",1,1)]
+    let fractions=stages.map { progress.event(stage:$0.0,completed:$0.1,total:$0.2)["fraction"] as! Double }
+    XCTAssertEqual(fractions,fractions.sorted())
+    XCTAssertLessThan(fractions[1],fractions[3],"Source encoding must not consume the audio-decode end phase.")
+    XCTAssertLessThan(fractions[1],fractions[4],"Sampling must advance after source encoding.")
+    XCTAssertLessThan(fractions[8],fractions[9])
+    XCTAssertLessThan(fractions.last!,1)
+  }
+  func testPublicationIncludesSidecarsAndDoesNotPublishAfterFailure() throws {
+    let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let staging=root.appendingPathComponent("partial"),output=root.appendingPathComponent("output")
+    try FileManager.default.createDirectory(at:staging,withIntermediateDirectories:true)
+    defer { try? FileManager.default.removeItem(at:root) }
+    XCTAssertThrowsError(try MLXMediaPipeline.publish(staging:staging,output:output) { throw CancellationError() })
+    XCTAssertFalse(FileManager.default.fileExists(atPath:output.path))
+    try MLXMediaPipeline.publish(staging:staging,output:output) {
+      XCTAssertFalse(FileManager.default.fileExists(atPath:output.path))
+      try Data("result".utf8).write(to:staging.appendingPathComponent("result.json"))
+    }
+    XCTAssertEqual(try Data(contentsOf:output.appendingPathComponent("result.json")),Data("result".utf8))
+    XCTAssertFalse(FileManager.default.fileExists(atPath:staging.path))
+  }
+
+  func testProgressIsMonotonicAndCompletionReservedForPublication() throws {
+    var progress=MLXStudioProgress()
+    var previous=0.0
+    for (stage,completed,total) in [("text:layer",1,48),("sampling",1,11),("stage1:block",48,48),
+      ("sampling",8,11),("upscale:begin",0,1),("sampling",11,11),("video_decode",1,89),
+      ("video_decode",89,89),("audio:decode",0,1),("ready_to_publish",1,1)] {
+      let event=progress.event(stage:stage,completed:completed,total:total)
+      XCTAssertEqual(event["event"] as? String,"progress")
+      let fraction=try XCTUnwrap(event["fraction"] as? Double)
+      XCTAssertGreaterThanOrEqual(fraction,previous);XCTAssertLessThan(fraction,1)
+      previous=fraction
+    }
+  }
+  func testRippleProgressUsesEightStepsAndReferenceEncoding() throws {
+    var progress=MLXStudioProgress()
+    var previous=0.0
+    for (stage,done,total) in [("text:gemma",48,48),("guide_encode",1,4),
+      ("guide_encode",4,4),("anchor_encode",42,42),("ripple:block",48,48),
+      ("sampling",1,8),("sampling",8,8),("video_decode",1,10),
+      ("video_decode",10,10),("ready_to_publish",1,1)] {
+      let event=progress.event(stage:stage,completed:done,total:total)
+      let fraction=try XCTUnwrap(event["fraction"] as? Double)
+      XCTAssertGreaterThanOrEqual(fraction,previous)
+      XCTAssertLessThan(fraction,1)
+      previous=fraction
+    }
+  }
+  func testDecodedPreviewIsBoundedAndAtomicallyReplaced() throws {
+    let file=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".png")
+    defer { try? FileManager.default.removeItem(at:file) }
+    for color:UInt8 in [40,200] {
+      try MLXStudioPreview.write(rgb:Data(repeating:color,count:1920*1088*3),width:1920,height:1088,to:file)
+      let source=try XCTUnwrap(CGImageSourceCreateWithURL(file as CFURL,nil))
+      let image=try XCTUnwrap(CGImageSourceCreateImageAtIndex(source,0,nil))
+      XCTAssertEqual(image.width,640);XCTAssertLessThanOrEqual(image.height,640)
+    }
+    XCTAssertThrowsError(try MLXStudioPreview.write(rgb:Data(),width:1920,height:1088,to:file))
+  }
+}

@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -179,3 +180,59 @@ def test_resident_vdn_preflight_discloses_memory_estimate_exclusions():
     document["2"]["inputs"]["block_residency"] = "unknown"
     with pytest.raises(ValueError, match="residency"):
         MODULE.sampling_memory_policy(document)
+
+
+def test_swift_h3_workflow_preflight_does_not_silently_skip(tmp_path, monkeypatch):
+    workflow = tmp_path / "swift-h3-api.json"
+    workflow.write_text(json.dumps({"1": {
+        "class_type": "WeeToddSwiftVideoGenerate",
+        "inputs": {"engine": "h3", "recipe_path": "/missing/recipe.json",
+                   "swift_worker_path": "/missing/worker",
+                   "filename_prefix": "WeeTodd/SwiftH3"},
+    }}))
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--workflow", str(workflow)])
+
+    with pytest.raises(SystemExit, match="comfy-root"):
+        MODULE.main()
+
+
+def test_swift_h3_workflow_preflight_validates_recipe_and_worker(tmp_path, monkeypatch):
+    comfy = tmp_path / "comfy"
+    comfy.mkdir()
+    (comfy / "main.py").write_text("")
+    (comfy / "folder_paths.py").write_text("")
+    recipe = tmp_path / "recipe.json"
+    recipe.write_text(json.dumps({"format": "weetodd-headless-v2", "engine": "h3"}))
+    worker = tmp_path / "worker"
+    worker.write_text("#!/bin/sh\n")
+    worker.chmod(0o755)
+    workflow = tmp_path / "swift-h3-api.json"
+    inputs = {"engine": "h3", "recipe_path": str(recipe),
+              "swift_worker_path": str(worker), "filename_prefix": "WeeTodd/SwiftH3"}
+    workflow.write_text(json.dumps({"1": {
+        "class_type": MODULE.SWIFT_VIDEO_NODE, "inputs": inputs,
+    }}))
+    calls = []
+
+    def preflight(**kwargs):
+        calls.append(kwargs)
+        return {"nativeRuntime": "swift-mlx", "task": "ref2va", "frames": 124}
+
+    monkeypatch.setattr(MODULE, "_run_swift_preflight", preflight)
+    result = MODULE.runtime_preflight_swift_recipe(
+        graph=MODULE.load_api_workflow(workflow), workflow_path=workflow,
+        project=ROOT, comfy_root=comfy,
+    )
+    assert result["runtime_ready"] is True
+    assert result["portable_paths_valid"] is False
+    assert result["task"] == "ref2va"
+    assert result["frames"] == 124
+    assert calls[0]["worker"] == worker
+    assert calls[0]["recipe"] == recipe
+
+    inputs["filename_prefix"] = "../outside"
+    with pytest.raises(ValueError, match="filename_prefix"):
+        MODULE.runtime_preflight_swift_recipe(
+            graph={"1": {"class_type": MODULE.SWIFT_VIDEO_NODE, "inputs": inputs}},
+            workflow_path=workflow, project=ROOT, comfy_root=comfy,
+        )

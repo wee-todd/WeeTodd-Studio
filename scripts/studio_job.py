@@ -16,7 +16,8 @@ from pathlib import Path
 import studio_bridge as bridge
 
 SUPPORTED_JOB_FORMATS = {
-    "weetodd-studio-job-v1", "weetodd-studio-job-v2", "weetodd-studio-job-v3", "weetodd-studio-job-v4"
+    "weetodd-studio-job-v1", "weetodd-studio-job-v2",
+    "weetodd-studio-job-v3", "weetodd-studio-job-v4",
 }
 _SECRET_FIELDS = {
     "apikey", "token", "authorization", "sharedsecret", "password", "clientsecret",
@@ -102,18 +103,24 @@ def validate_remote_jobs(values, project, *, ordered_jobs=None):
 
 def validate_image_jobs(remote, native, project):
     import re
+
     from wee_todd_mlx.image_contracts import validate_image_request
     from wee_todd_remote.contracts import validate_request
     from wee_todd_remote.jobs import validate_job_dependencies
     if not isinstance(remote, list) or not isinstance(native, list):
         raise ValueError("Image jobs must be arrays")
     if not native:
-        return [dict(value, provider="drawThings") for value in validate_remote_jobs(remote, project)]
+        return [
+            dict(value, provider="drawThings")
+            for value in validate_remote_jobs(remote, project)
+        ]
     records = []
     for values, provider in ((remote, "drawThings"), (native, "nativeMLX")):
         for raw in values:
             job = copy.deepcopy(raw)
-            if not isinstance(job, dict) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", job.get("id", "")):
+            if not isinstance(job, dict) or not re.fullmatch(
+                r"[A-Za-z0-9_-]{1,128}", job.get("id", "")
+            ):
                 raise ValueError("Image job ID must use letters, digits, underscores or hyphens")
             _reject_secrets(job)
             job["provider"] = provider
@@ -337,8 +344,11 @@ def _export_job(request, target, input_directory):
     else:
         remote_jobs = validate_remote_jobs(remote_jobs, request["project"]) if remote_jobs else []
     job = {
-        "format": ("weetodd-studio-job-v4" if native_jobs else "weetodd-studio-job-v3" if remote_jobs else
-                   "weetodd-studio-job-v2" if motion_recipes else "weetodd-studio-job-v1"),
+        "format": (
+            "weetodd-studio-job-v4" if native_jobs else
+            "weetodd-studio-job-v3" if remote_jobs else
+            "weetodd-studio-job-v2" if motion_recipes else "weetodd-studio-job-v1"
+        ),
         "scope": "clip" if request.get("clipOnly") else "movie",
         "project": request["project"],
         "globalAssets": request.get("globalAssets", []),
@@ -365,6 +375,10 @@ def _export_job(request, target, input_directory):
         "The app includes WeeToddCLI in Contents/MacOS. "
         "It finds this job's native Python automatically.\n"
         "WeeToddCLI --job JOB.json --output-directory OUTPUT --resume\n\n"
+        "The job retains Studio's Swift H3/LTX 2.5 selection and worker paths. "
+        "A selected Swift route fails if its worker is unavailable; it never falls back "
+        "to Python inference. Override a moved worker with --h3-swift-worker PATH or "
+        "--ltx25-swift-worker PATH.\n\n"
         "Developer Python alternative:\n"
         "You can close WeeTodd Studio before running this job. Use the "
         "existing MLX Python environment.\n"
@@ -474,7 +488,16 @@ def scene_recipe_owners(job):
             owners[clip_id] = owner
     return owners
 
-def preflight(job, output, *, prepare_remote=True):
+def preflight(job, output, *, prepare_remote=True, swift_workers=None):
+    if swift_workers:
+        swift_worker_identity(swift_workers)
+        for record in job["recipes"].values():
+            engine = record["recipe"]["engine"]
+            if engine in {"h3", "ltx25"} and engine not in swift_workers:
+                raise ValueError(
+                    f"Exported job is missing a Swift worker for {engine}; "
+                    "no Python inference fallback is permitted for a Swift-selected job."
+                )
     expected = job.get("execution", {}).get("rendererSHA256")
     if expected and expected != renderer_fingerprint():
         raise ValueError(
@@ -482,7 +505,9 @@ def preflight(job, output, *, prepare_remote=True):
         )
     output.mkdir(parents=True, exist_ok=True)
     scene_owners = scene_recipe_owners(job)
-    image_jobs = validate_image_jobs(job.get("remoteJobs", []), job.get("nativeImageJobs", []), job["project"])
+    image_jobs = validate_image_jobs(
+        job.get("remoteJobs", []), job.get("nativeImageJobs", []), job["project"]
+    )
     remote_jobs = [value for value in image_jobs if value["provider"] != "nativeMLX"]
     for native in (value for value in image_jobs if value["provider"] == "nativeMLX"):
         from wee_todd_mlx.image_service import prepare_image
@@ -520,6 +545,7 @@ def preflight(job, output, *, prepare_remote=True):
             attempt.mkdir(parents=True)
             recipe_path = attempt / "recipe.json"
             bridge.write_json(recipe_path, record["recipe"])
+            worker = (swift_workers or {}).get(record["recipe"]["engine"])
             bridge.run(
                 [
                     sys.executable,
@@ -529,6 +555,7 @@ def preflight(job, output, *, prepare_remote=True):
                     "--output-directory",
                     str(attempt / "result"),
                     "--preflight-only",
+                    *(["--swift-worker", str(worker)] if worker is not None else []),
                 ]
             )
         elif clip["id"] not in remote_clip_ids and clip["id"] not in scene_owners:
@@ -570,24 +597,61 @@ def preflight(job, output, *, prepare_remote=True):
     }
 
 
-def execute(job, output, resume):
+def execute(job, output, resume, *, swift_workers=None):
     output.mkdir(parents=True, exist_ok=True)
     with (output / ".job.lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ValueError("Another process is executing this output folder.") from error
-        return _execute_locked(job, output, resume)
+        return _execute_locked(job, output, resume, swift_workers=swift_workers)
 
 
-def _execute_locked(job, output, resume):
+def swift_worker_identity(swift_workers):
+    identity = {}
+    for engine, selected in (swift_workers or {}).items():
+        if engine not in {"h3", "ltx25"}:
+            raise ValueError(f"Unsupported Swift video engine: {engine}")
+        worker = Path(selected).expanduser().resolve()
+        if not worker.is_file() or not os.access(worker, os.X_OK):
+            raise FileNotFoundError(f"Swift worker is not executable: {worker}")
+        identity[engine] = {"path": str(worker), "sha256": file_hash(worker)}
+    return identity
+
+
+def selected_swift_workers(job, explicit):
+    """Honor the runtime selection frozen by Studio; CLI paths may override it."""
+    selected = dict(explicit)
+    runtime = job.get("runtime", {})
+    engines = {record["recipe"]["engine"] for record in job.get("recipes", {}).values()}
+    for engine, enabled_key, path_key in (
+        ("ltx25", "nativeLTX25Enabled", "ltx25WorkerPath"),
+        ("h3", "nativeH3Enabled", "h3WorkerPath"),
+    ):
+        if engine not in engines or engine in selected:
+            continue
+        enabled = runtime.get(enabled_key)
+        if enabled is None and engine == "ltx25":
+            enabled = bool(runtime.get(path_key))
+        if enabled is not True:
+            continue
+        worker = runtime.get(path_key)
+        if not isinstance(worker, str) or not worker.strip():
+            raise ValueError(f"Studio enabled Swift {engine} but saved no worker path.")
+        selected[engine] = Path(worker)
+    return selected
+
+
+def _execute_locked(job, output, resume, *, swift_workers=None):
     output.mkdir(parents=True, exist_ok=True)
     state_path = output / "job-state.json"
     identity = job["manifestSHA256"]
     inputs = inputs_fingerprint(job)
+    workers_identity = swift_worker_identity(swift_workers)
     state = {
         "manifestSHA256": identity,
         "inputsFingerprint": inputs,
+        "swiftWorkers": workers_identity,
         "completed": {},
         "status": "running",
     }
@@ -600,14 +664,25 @@ def _execute_locked(job, output, resume):
                 "Job or source inputs changed. Choose a new output folder; old "
                 "outputs are preserved."
             )
+        if state.get("swiftWorkers", {}) != workers_identity:
+            raise ValueError(
+                "Swift worker selection changed. Choose a new output folder so resumed "
+                "takes cannot mix different inference backends."
+            )
     project = copy.deepcopy(job["project"])
     atomic_json(state_path, state)
     try:
-        preflight(job, output / "preflight", prepare_remote=False)
+        preflight_options = {"prepare_remote": False}
+        if swift_workers:
+            preflight_options["swift_workers"] = swift_workers
+        preflight(job, output / "preflight", **preflight_options)
         remote_results = {}
-        for remote in validate_image_jobs(job.get("remoteJobs", []), job.get("nativeImageJobs", []), job["project"]):
+        for remote in validate_image_jobs(
+            job.get("remoteJobs", []), job.get("nativeImageJobs", []), job["project"]
+        ):
             if remote["provider"] == "nativeMLX":
                 import uuid
+
                 from wee_todd_mlx.image_service import generate_image
                 key = "native-image-" + remote["id"]
                 previous = state["completed"].get(key, {})
@@ -617,7 +692,9 @@ def _execute_locked(job, output, resume):
                     bridge.emit(event="resume", message=f"Reusing local image {remote['id']}")
                 else:
                     folder = output / "native-images" / remote["id"] / uuid.uuid4().hex
-                    rendered = generate_image(remote["request"], folder, progress=lambda event: bridge.emit(**event))
+                    rendered = generate_image(
+                        remote["request"], folder, progress=lambda event: bridge.emit(**event)
+                    )
                     artifact = Path(rendered["asset"]["path"])
                     result = {"path": str(artifact), "sha256": artifact_hash(artifact),
                               "requestSHA256": digest(remote["request"])}
@@ -744,6 +821,9 @@ def _execute_locked(job, output, resume):
                     message=f"Generating clip {i + 1}/{len(project['clips'])}: {clip['name']}",
                 )
                 render_options = {}
+                worker = (swift_workers or {}).get(recipe["engine"])
+                if worker is not None:
+                    render_options["swift_worker"] = worker
                 if "scene" in recipe:
                     render_options["checkpoint_directory"] = (
                         output / "renders" / clip["id"] / "checkpoints")
@@ -884,6 +964,10 @@ def main():
     parser.add_argument("--output-directory", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--h3-swift-worker", type=Path,
+                        help="Use this native Swift worker for H3 clip recipes")
+    parser.add_argument("--ltx25-swift-worker", type=Path,
+                        help="Use this native Swift worker for LTX 2.5 clip recipes")
     args = parser.parse_args()
     job = json.loads(args.job.read_text())
     if job.get("format") not in SUPPORTED_JOB_FORMATS:
@@ -894,10 +978,14 @@ def main():
         parser.error(
             "Job manifest changed. Re-export it from Studio so recipes and settings agree."
         )
+    swift_workers = {engine: worker for engine, worker in (
+        ("h3", args.h3_swift_worker), ("ltx25", args.ltx25_swift_worker)
+    ) if worker is not None}
+    swift_workers = selected_swift_workers(job, swift_workers)
     result = (
-        preflight(job, args.output_directory / "preflight")
+        preflight(job, args.output_directory / "preflight", swift_workers=swift_workers)
         if args.preflight_only
-        else execute(job, args.output_directory, args.resume)
+        else execute(job, args.output_directory, args.resume, swift_workers=swift_workers)
     )
     bridge.emit(status="success", result=result)
 

@@ -39,7 +39,13 @@ struct PlaybackPreviewPane: View {
       GeometryReader { geo in
         ZStack {
           Color.black
-          if store.previewMode == "Movie" {
+          if let preview = store.nativeRenderPreview, let path = preview.previewPath {
+            CachedImageThumbnail(path: path, maximumPixelSize: 640)
+              .id("native-preview-\(preview.previewRevision ?? 0)")
+              .overlay(alignment: .topLeading) {
+                Text("LIVE · DECODED FRAME").font(.caption.bold()).padding(8).background(.black.opacity(0.65))
+              }
+          } else if store.previewMode == "Movie" {
             NativePlayer(player: store.player)
           } else if let clip = store.previewClip, !clip.sourcePath.isEmpty,
             store.timelinePlaybackIssues[clip.id] == nil {

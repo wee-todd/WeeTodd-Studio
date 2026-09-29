@@ -36,6 +36,8 @@ def preflight_recipe(recipe):
         )
         config = H3GenerationConfig(**recipe["config"])
         config.validate()
+        from minimax_h3_mlx.native_backend import preflight_native_recipe
+        preflight_native_recipe(recipe)
         continuation = continuation_request(recipe)
         if continuation and continuation.get("source_context"):
             config = replace(config, duration_seconds=continuation["sample_duration_seconds"])

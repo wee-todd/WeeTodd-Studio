@@ -60,3 +60,15 @@ def test_failed_check_stops_before_later_commands(tmp_path):
     checks = [[sys.executable, "-c", "raise SystemExit(7)"], [sys.executable, "-c", code]]
     assert module.run_checks(tmp_path, checks) == 7
     assert not marker.exists()
+
+
+def test_core_includes_swift_inference_contract_and_metal_tests_once():
+    checks = plan("--profile", "core", "--profile", "studio", "--profile", "core")
+    inference = [c for c in checks if "integrations/weetodd-inference" in c]
+    assert inference == [["swift", "test", "--package-path", "integrations/weetodd-inference",
+                         "--jobs", "2"]]
+
+
+def test_core_includes_separate_mlx_worker_tests_once():
+    checks = plan("--profile", "core")
+    assert checks.count(["bash", "integrations/weetodd-mlx/scripts/test.sh"]) == 1

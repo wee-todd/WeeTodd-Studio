@@ -1,0 +1,75 @@
+import Foundation
+import LTX25Engine
+
+/// Per-job activation admission, not eager allocation or a process-memory cap.
+/// Stages unload sequentially, so their workspaces are not added together.
+public struct MLXStudioMemoryPlan:Sendable {
+  public let transformerActivationBytes:Int
+  public let videoActivationBytes:Int
+  public let activationCeilingBytes:Int
+
+  public init(request:MLXDistilledRequest,physicalMemory:UInt64,recommendedWorkingSet:UInt64) throws {
+    let gib:UInt64=1024*1024*1024
+    // Leave half of RAM outside this worker's admission, and reserve another
+    // 4 GiB inside it for stage weights, bounded caches and media buffers.
+    // Respect Metal's working set and the engine's existing 32 GiB stage limit.
+    let stageEnvelope=min(physicalMemory/2,recommendedWorkingSet)
+    let ceiling=min(stageEnvelope > 4*gib ? stageEnvelope-4*gib : 0,
+      UInt64(min(MLXMediaPipeline.maximumVideoActivationMiB,MLXMediaPipeline.maximumTransformerActivationMiB))*1024*1024)
+    let recipe=try request.recipe()
+    var transformer=0
+    for geometry in [recipe.low,recipe.high] {
+      let layout=try request.referenceImages.first.map { try MLXReferenceLayout(geometry:geometry,
+        firstStrength:$0.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil) }
+      transformer=max(transformer,try MLXAVBlock.estimatedActivationBytes(configuration:
+        AVBlockConfiguration(videoTokens:layout?.videoTokens ?? geometry.videoTokens,
+          audioTokens:geometry.audioFrames,textTokens:1024),perTokenVideo:layout != nil))
+    }
+    // This plan validates geometry and calculates bytes without allocating a VAE.
+    let video=try MLXVideoDecodePlan(shape:recipe.high.videoShape,configuration:
+      MLXMediaPipeline.videoConfiguration(for:recipe.high,activationBytes:Int.max)).admittedActivationBytes
+    for (stage,needed) in [("transformer",transformer),("video decoder",video)] {
+      guard UInt64(needed) <= ceiling else {
+        throw LTXError.invalid("LTX \(request.width)×\(request.height), \(request.frames) frames: \(stage) needs an estimated \(needed) activation bytes; this Mac's stage allowance is \(ceiling) bytes after memory reserves (engine maximum 32 GiB).")
+      }
+    }
+    transformerActivationBytes=transformer;videoActivationBytes=video;activationCeilingBytes=Int(ceiling)
+  }
+
+  public init(ripple request: MLXRippleRequest, physicalMemory: UInt64,
+    recommendedWorkingSet: UInt64) throws {
+    let gib: UInt64 = 1024 * 1024 * 1024
+    let stageEnvelope = min(physicalMemory / 2, recommendedWorkingSet)
+    let ceiling = min(stageEnvelope > 4 * gib ? stageEnvelope - 4 * gib : 0,
+      UInt64(min(MLXMediaPipeline.maximumVideoActivationMiB,
+        MLXMediaPipeline.maximumTransformerActivationMiB)) * 1024 * 1024)
+    guard ceiling > 0, ceiling <= UInt64(Int.max) else {
+      throw LTXError.invalid("Ripple has no admitted activation budget after system reserves.")
+    }
+    let layout = try MLXReferenceVideoLayout(geometry: request.geometry,
+      strength: request.referenceStrength,
+      anchors: request.anchors.map { RippleImageAnchor(frame: $0.frame, strength: $0.strength) })
+    let configuration = try AVBlockConfiguration(videoTokens: layout.videoTokens,
+      audioTokens: request.geometry.audioFrames, textTokens: 1024)
+    let transformer = try MLXAVBlock.estimatedActivationBytes(configuration: configuration,
+      perTokenVideo: true)
+    let video = try MLXVideoDecodePlan(shape: request.geometry.videoShape,
+      configuration: MLXMediaPipeline.videoConfiguration(for: request.geometry,
+        activationBytes: Int.max)).admittedActivationBytes
+    for (stage, needed) in [("transformer", transformer), ("video decoder", video)] {
+      guard UInt64(needed) <= ceiling else {
+        throw LTXError.invalid("Ripple \(request.width)×\(request.height), \(request.frames) frames: \(stage) needs \(needed) activation bytes; this Mac admits \(ceiling) after reserves.")
+      }
+    }
+    _ = try request.plan(maximumActivationBytes: transformer)
+    _ = try MLXVideoEncodeTilePlan(frames: request.frames, width: request.width,
+      height: request.height)
+    for _ in request.anchors {
+      _ = try MLXImageEncodePlan(width: request.width, height: request.height,
+        maximumOwnedBufferBytes: Int(ceiling))
+    }
+    transformerActivationBytes = transformer
+    videoActivationBytes = video
+    activationCeilingBytes = Int(ceiling)
+  }
+}

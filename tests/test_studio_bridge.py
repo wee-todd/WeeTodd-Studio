@@ -411,6 +411,71 @@ def test_describe_and_compose_share_selection_and_recipe_fingerprint(tmp_path):
     assert '/models/transformer' in described['sourcePaths']
 
 
+def test_ltx_distilled_export_omits_unused_profile_negative_prompt(tmp_path):
+    profile = tmp_path / 'ltx.json'
+    profile.write_text(json.dumps({
+        'format': 'weetodd-headless-v2', 'engine': 'ltx25',
+        'components': {},
+        'config': {'pipeline_mode': 'distilled', 'stage1_sampler': 'euler_ancestral',
+                   'frame_rate': 24, 'negative_prompt': 'legacy unused text'},
+    }))
+    clip = dict(id='clip', name='Shot', engine='ltx25', profileID=str(profile),
+                generationWidth=768, generationHeight=448, seed=42, duration=5,
+                prompt='A person walks through a room.', negativePrompt='',
+                attachments=[], generationSelection={'task': 't2v'})
+    request = dict(project=dict(clips=[clip], assets=[], settings={}), clipID='clip',
+                   runtime=dict(profilesDirectory=str(tmp_path), ffmpegPath='/usr/bin/true',
+                                ffprobePath='/usr/bin/true'))
+    recipe, report = bridge.compose_recipe(request)
+    assert recipe['config']['negative_prompt'] == ''
+    assert any('negative prompt' in warning for warning in report['warnings'])
+    clip['negativePrompt'] = 'user-supplied text'
+    recipe, _ = bridge.compose_recipe(request)
+    assert recipe['config']['negative_prompt'] == 'user-supplied text'
+
+
+def test_swift_h3_export_freezes_ordered_still_reference_hashes(tmp_path):
+    import hashlib
+
+    encoder = tmp_path / 'encoder'
+    encoder.mkdir()
+    (encoder / 'paged_text_encoder_manifest.json').write_text(json.dumps({
+        'format': 'weetodd-h3-qwen-paged-v1', 'skipped_visual_bytes': 762559840,
+    }))
+    profile = tmp_path / 'h3-stills.json'
+    profile.write_text(json.dumps({
+        'format': 'weetodd-headless-v2', 'engine': 'h3',
+        'components': {'task': 'ref2va', 'text_encoder': str(encoder),
+                       'vision_encoder': '/installed/vision.safetensors'},
+        'config': {'steps': 5},
+        'conditioning': {'version': 1, 'task': 'ref2va', 'inputs': []},
+    }))
+    request = generation_request(tmp_path)
+    clip = request['project']['clips'][0]
+    clip['profileID'] = str(profile.resolve())
+    clip['generationSelection'] = {'task': 'ref2va', 'preset': 'custom'}
+    clip['prompt'] = ('integrated_multimodal_description: [Shot 1] The referenced man walks.\n'
+                      'overall_soundscape: Footsteps.\nnon_diegetic_music: N/A')
+    request['runtime']['nativeH3Enabled'] = True
+    for index in range(2):
+        image = tmp_path / f'reference-{index}.png'
+        image.write_bytes(f'ordered image {index}'.encode())
+        asset_id = f'asset-{index}'
+        request['project']['assets'].append({
+            'id': asset_id, 'kind': 'image', 'path': str(image), 'name': asset_id,
+        })
+        clip['attachments'].append({
+            'id': f'attachment-{index}', 'assetID': asset_id, 'role': 'reference',
+        })
+    recipe, report = bridge.compose_recipe(request)
+    assert 'ffprobe' not in recipe
+    assert 'ref2va' in report['generation']['supportedTasks']
+    assert [item['sha256'] for item in recipe['conditioning']['inputs']] == [
+        hashlib.sha256((tmp_path / f'reference-{index}.png').read_bytes()).hexdigest()
+        for index in range(2)
+    ]
+
+
 def test_h3_keyframe_alignment_prefix_preserves_complete_native_prompt(tmp_path):
     request = generation_request(tmp_path)
     clip = request['project']['clips'][0]

@@ -190,7 +190,11 @@ enum ClipState: String {
             destination: "audio:" + region.id.uuidString))
       }
     }
-    if !FileManager.default.isExecutableFile(atPath: runtime.pythonPath) {
+    let needsPythonRenderer = project.clips.contains {
+      $0.engine != .movie && !($0.engine == .ltx25 && runtime.usesNativeLTX25)
+        && !($0.engine == .h3 && runtime.usesNativeH3)
+    }
+    if needsPythonRenderer && !FileManager.default.isExecutableFile(atPath: runtime.pythonPath) {
       items.append(
         ActionItem(
           id: "runtime", priority: 0, title: "Connect the MLX renderer",

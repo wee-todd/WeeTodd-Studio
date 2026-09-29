@@ -15,7 +15,7 @@ struct RenderStatsView: View {
         }
         if let peak = stats.processPeakBytes {
           Text("Process peak · \(peak / 1_000_000_000, specifier: "%.2f") GB")
-            .help("Peak resident memory of this renderer process; not total system memory.")
+            .help(stats.processPeakScope ?? "Peak resident memory of this renderer process; not total system memory.")
         }
         if let peak = stats.mlxPeakBytes {
           Text("\(stats.mlxPeakScope ?? "MLX") peak · \(peak / 1_000_000_000, specifier: "%.2f") GB")

@@ -198,7 +198,8 @@ def resolve_clip_generation(request, clip, *, validate_inputs=True):
         clip.get("generationSelection"), clip,
         profiles(request["runtime"]["profilesDirectory"]),
         {"acceleration": request["runtime"].get("acceleration"),
-         "attached_loras": attached_loras},
+         "attached_loras": attached_loras,
+         "nativeH3StillReferences": request["runtime"].get("nativeH3Enabled") is True},
         validate_inputs=validate_inputs,
     )
 
@@ -350,6 +351,23 @@ def compose_recipe(request):
     # Media belongs to the clip. Preserve imported contract options, never hidden paths.
     imported_contract = recipe.pop("conditioning", {})
     config = recipe["config"]
+    warnings = list(resolved["warnings"])
+    if (
+        engine == "ltx25"
+        and not request.get("_sceneResolved")
+        and config.get("pipeline_mode") == "distilled"
+        and config.get("stage1_sampler", "euler_ancestral") != "euler_ancestral_cfg_pp"
+        and isinstance(config.get("negative_prompt"), str)
+        and config["negative_prompt"].strip()
+        and not str(clip.get("negativePrompt", "")).strip()
+    ):
+        # Ordinary distilled sampling does not encode this inherited profile field.
+        # Keep a user-entered clip value for explicit admission/rejection downstream.
+        config["negative_prompt"] = ""
+        warnings.append(
+            "The selected profile's negative prompt is not evaluated by distilled "
+            "sampling and is omitted."
+        )
     for key, value in (
         ("width", clip["generationWidth"]),
         ("height", clip["generationHeight"]),
@@ -443,6 +461,11 @@ def compose_recipe(request):
             )
         elif role == "reference" and engine == "ltx23":
             item.update(role="control", control_type="ingredients_reference_sheet")
+        elif (role == "reference" and engine == "h3"
+              and request["runtime"].get("nativeH3Enabled") is True):
+            from studio_job import file_hash
+
+            item["sha256"] = file_hash(item["path"])
         inputs.append(item)
     contract = {
         key: value for key, value in imported_contract.items()
@@ -537,16 +560,19 @@ def compose_recipe(request):
             prompt = (
                 "Reference sheet: " + "; ".join(descriptions) + "\n\nGenerated video: " + prompt
             )
-    recipe.update(
-        prompt=prompt,
-        ffmpeg=executable("ffmpeg", settings),
-        ffprobe=executable("ffprobe", settings),
-    )
+    recipe.update(prompt=prompt, ffmpeg=executable("ffmpeg", settings))
+    if not (engine == "h3" and settings.get("nativeH3Enabled") is True):
+        recipe["ffprobe"] = executable("ffprobe", settings)
+    else:
+        recipe.pop("ffprobe", None)
     configure_recipe(recipe, continuity)
     from wee_todd_mlx.task_conditioning import validate_conditioning
 
     report = validate_conditioning(recipe)
-    generation = generation_descriptor(recipe)
+    generation = generation_descriptor(
+        recipe,
+        native_h3_still_references=(engine == "h3" and settings.get("nativeH3Enabled") is True),
+    )
     if "acceleration" in resolved["generation"]:
         generation["acceleration"] = resolved["generation"]["acceleration"]
     if (clip.get("generationSelection") or {}).get("steps") is not None and not any(
@@ -559,7 +585,7 @@ def compose_recipe(request):
         "generation": generation,
         "resolvedFingerprint": fingerprint(recipe),
         "selectionFingerprint": resolved["fingerprint"],
-        "warnings": resolved["warnings"],
+        "warnings": warnings,
         "task": task,
         "conditioning": report,
         "nativeFPS": fps,
@@ -623,7 +649,7 @@ def prepare(request, destination):
     return {"recipePath": str(recipe_path), "prompt": recipe["prompt"], "report": report}
 
 
-def render(prepared, destination, *, checkpoint_directory=None):
+def render(prepared, destination, *, checkpoint_directory=None, swift_worker=None):
     if not Path(prepared).is_file():
         raise ValueError("Prepare and review this clip before rendering.")
     if checkpoint_directory is None and "scene" in json.loads(Path(prepared).read_text()):
@@ -644,6 +670,8 @@ def render(prepared, destination, *, checkpoint_directory=None):
             str(destination),
             *(["--checkpoint-directory", str(checkpoint_directory)]
               if checkpoint_directory is not None else []),
+            *(["--swift-worker", str(swift_worker)]
+              if swift_worker is not None else []),
         ],
         error_result=destination / "result.json",
     )

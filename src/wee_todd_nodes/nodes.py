@@ -5323,6 +5323,16 @@ from .ltx25_nodes import (  # noqa: E402
 NODE_CLASS_MAPPINGS.update(LTX25_NODE_CLASS_MAPPINGS)
 NODE_DISPLAY_NAME_MAPPINGS.update(LTX25_NODE_DISPLAY_NAME_MAPPINGS)
 
+from .swift_video_nodes import (  # noqa: E402
+    NODE_CLASS_MAPPINGS as SWIFT_VIDEO_NODE_CLASS_MAPPINGS,
+)
+from .swift_video_nodes import (  # noqa: E402
+    NODE_DISPLAY_NAME_MAPPINGS as SWIFT_VIDEO_NODE_DISPLAY_NAME_MAPPINGS,
+)
+
+NODE_CLASS_MAPPINGS.update(SWIFT_VIDEO_NODE_CLASS_MAPPINGS)
+NODE_DISPLAY_NAME_MAPPINGS.update(SWIFT_VIDEO_NODE_DISPLAY_NAME_MAPPINGS)
+
 # Control preprocessors use a separate MLX execution layer so their models and
 # intermediate state never become part of either video-generation runtime.
 from .control_preprocessors import (  # noqa: E402

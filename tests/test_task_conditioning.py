@@ -62,6 +62,20 @@ def test_legacy_ref2va_preserves_reference_order():
     ]
 
 
+def test_h3_still_reference_allows_pinned_digest_only_for_image_reference():
+    digest = "a" * 64
+    still = media(role="reference", sha256=digest)
+    result = normalize_conditioning(recipe("h3", "ref2va", [still]), check_files=False)
+    assert result["inputs"][0]["sha256"] == digest
+    for engine, task, input_value in (
+        ("h3", "ref2va", media(role="reference", sha256="wrong")),
+        ("h3", "ref2va", media(role="reference", kind="video", sha256=digest)),
+        ("ltx25", "ref2va", media(role="reference", sha256=digest)),
+    ):
+        with pytest.raises(ValueError, match="sha256"):
+            normalize_conditioning(recipe(engine, task, [input_value]), check_files=False)
+
+
 @pytest.mark.parametrize("engine", ["h3", "ltx23", "ltx25"])
 def test_last_frame_matches_engine_geometry(engine):
     r = recipe(engine, "fflf", [media(frame_index="last")])
