@@ -30,6 +30,14 @@ final class NativeLTXPreparationTests: XCTestCase {
     project.clips[0].attachments[0]=driver
     project.clips[0].attachments[0].strength=0.5
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    let imageFile=root.appendingPathComponent("opening.png");try Data([1]).write(to:imageFile)
+    let image=MediaAsset(name:"Opening",kind:.image,path:imageFile.path)
+    project.assets.append(image)
+    project.clips[0].attachments[0]=driver
+    project.clips[0].attachments.append(Attachment(assetID:image.id,role:.first))
+    let combined=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let combinedInputs=((combined["recipe"] as! [String:Any])["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(combinedInputs.map { $0["role"] as! String },["audio_driver","keyframe"])
   }
   func fixture() throws -> (URL, StudioProject, [String: Any]) {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

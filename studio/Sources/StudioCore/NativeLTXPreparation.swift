@@ -224,7 +224,7 @@ public enum NativeLTXPreparation {
         "path": firstFramePath, "strength": 1.0, "frame_index": 0])
     }
     let allowed: Set<MediaRole> = context.task == "t2v" ? [] : context.task == "i2v" ? [.first]
-      : context.task == "a2v" ? [.audioDriver] : [.first, .last, .keyframe]
+      : context.task == "a2v" ? [.audioDriver, .first] : [.first, .last, .keyframe]
     guard roles.isSubset(of: allowed) else { throw unsupported("attached media conflict with \(context.task); no inputs were discarded") }
     if context.task == "i2v", !roles.contains(.first) { throw StudioError.invalid("Image to video requires a First frame image.") }
     if context.task == "fflf", clip.generationSelection != nil, !roles.isSuperset(of: [.first, .last]) {
@@ -232,6 +232,9 @@ public enum NativeLTXPreparation {
     }
     if context.task == "a2v", attachments.filter({ $0.role == .audioDriver }).count != 1 {
       throw StudioError.invalid("Audio to video requires exactly one source audio attachment.")
+    }
+    if context.task == "a2v", attachments.filter({ $0.role == .first }).count > 1 {
+      throw StudioError.invalid("Audio to video accepts at most one opening-frame image.")
     }
     for attachment in attachments {
       try Task.checkCancellation()

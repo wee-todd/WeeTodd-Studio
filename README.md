@@ -113,6 +113,11 @@ speaking person. Studio admits this single-driver distilled route; phoneme-level
 clips and broader A2V quality remain unqualified. The installed Studio route also completed
 this recipe with Python unavailable, delivered two decoded previews, accepted and reopened the
 take, and produced an MP4 byte-identical to the direct worker with the expected audio SHA-256.
+The Swift A2V route now also accepts one opening-frame image alongside its single audio driver.
+A 49-frame, 512 × 320 worker run finished in 40.27 seconds, retained the exact source-audio
+SHA-256 and landed close to the supplied first frame. A Studio run of that recipe prepared,
+rendered, showed two previews, accepted and reopened the take with Python unavailable. This is
+one short combined-conditioning recipe, not a general lip-sync or long-clip qualification.
 An ordinary LTX 2.3 standard LoRA also
 completed a distinct, coherent five-second 768 × 448 Swift take at strength 0.3 in both stages;
 this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.
@@ -177,6 +182,12 @@ The same recipe also completed through the signed app's bundled H3 worker and pr
 byte-identical MP4. That packaged run took 552.882 seconds, with 414.207 seconds in sampling
 and 119.716 seconds in video decoding; peak MLX was unchanged at 4,720,223,400 bytes and
 system swap stayed at zero. Two runs under different workloads do not establish speed parity.
+A full Studio lifecycle run of that five-second FL2VA recipe also passed with Python unavailable:
+both ordered endpoints were retained through preparation, the render delivered seven decoded
+previews, and the accepted take reopened from a saved project. Render and acceptance took
+591.83 seconds. Its 768 × 448 video and audio fully decoded; this validates the app route for
+that recipe. The Swift worker reported 5.02 GB peak MLX allocation and 5.72 GB peak process
+footprint, excluding FFmpeg. Speed and audible quality remain experimental.
 
 Ripple also has an opt-in **Use Swift MLX for Ripple (experimental)** route in its Runtime
 Settings. It freezes edited images, streams the source guide, runs the pinned author LoRA
@@ -195,6 +206,12 @@ three-second 72-frame take, showed previews, applied it, and reopened the saved 
 That worker took 151.12 seconds and peaked at 3.09 GB MLX and 5.22 GB process footprint.
 Its guide differs from the earlier manually resized test guide, so their movies are not
 expected to have the same bytes. This does not qualify other subjects or source motions.
+A further 768 × 448, three-second worker run combined a timed frame-36 anchor with preserved
+source audio. It completed in 182.60 seconds with two live previews, 3.21 GB peak MLX allocation
+and 4.84 GB peak process footprint (FFmpeg excluded). Decoded audio matched the source timing
+and correlated at 0.999995. Its gray-cat middle anchor conflicted with the white-cat edit prompt;
+the output remained white, so this test does not qualify middle-anchor fidelity. Multi-anchor
+Ripple stays experimental.
 
 ## Choose how to generate
 

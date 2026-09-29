@@ -4,7 +4,7 @@ import Darwin
 import LTX25MLX
 
 final class MLXDistilledRequestTests:XCTestCase {
-  func testVersionFourRequiresOneExactAudioSourceAndNoImageReference() throws {
+  func testVersionFourAllowsAudioSourceWithOptionalFirstImageOnly() throws {
     var value=base();value["version"]=4;value["task"]="a2v"
     value["reference_images"]=[];value["noise_policy"]="mlx_threefry_bf16_v1"
     let source:[String:Any]=["path":"/audio/source.wav","source_start_seconds":1.25,
@@ -17,6 +17,8 @@ final class MLXDistilledRequestTests:XCTestCase {
     value["audio_reference"]=NSNull();XCTAssertThrowsError(try decode(value))
     value["audio_reference"]=source;value["task"]="t2v";XCTAssertThrowsError(try decode(value))
     value["task"]="a2v";value["reference_images"]=[["role":"first","path":"/first.png","strength":1,"crf":33]]
+    XCTAssertEqual(try decode(value).referenceImages.map(\.role),["first"])
+    value["reference_images"]=[["role":"last","path":"/last.png","strength":1,"crf":33]]
     XCTAssertThrowsError(try decode(value))
     value["reference_images"]=[];var bad=source;bad["source_start_seconds"] = -1
     value["audio_reference"]=bad;XCTAssertThrowsError(try decode(value))

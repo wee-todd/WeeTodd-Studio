@@ -58,7 +58,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     audioReference=version < 4 ? nil : try c.decode(MLXAudioReference.self,forKey:.audioReference)
     noisePolicy=version < 3 ? .native : try c.decode(MLXNoisePolicy.self,forKey:.noisePolicy)
     let roles=referenceImages.map(\.role)
-    guard (version == 4 && task == "a2v" && roles.isEmpty && audioReference != nil) ||
+    guard (version == 4 && task == "a2v" && (roles.isEmpty || roles == ["first"]) && audioReference != nil) ||
       (version == 1 && task == "t2v") || ((version == 2 || version == 3) &&
       ((task == "t2v" && roles.isEmpty) || (task == "i2v" && roles == ["first"]) || (task == "fflf" && roles == ["first","last"] && frames>1))) else {
       throw LTXError.invalid("Request version/task must match its explicit ordered endpoint references.")

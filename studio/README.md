@@ -13,7 +13,7 @@ direction and backend choices. This is a source-build preview, not a notarized c
 
 Source builds include a Swift MLX LTX 2.5 worker. In Runtime Settings, **Use Swift MLX for
 LTX 2.5** selects native distilled 8 + 3 step T2V, first-image, first/last-frame and
-single-audio-driver A2V rendering
+single-audio-driver A2V rendering, with an optional first-frame image,
 with compatible standard LoRAs, including LTX 2.3 adapters. The worker reuses installed paged
 weights and the shared renderer. Unsupported controls fail native preflight; turn the option
 off explicitly for advanced workflows still provided by Python.
@@ -42,7 +42,11 @@ SHA-256, and sampled frames showed one coherent speaking person. This is a singl
 take, not phoneme-level sync or longer-clip quality qualification. An installed Studio run of
 this recipe worked with Python unavailable, delivered two decoded previews, accepted and
 reopened the take, and produced an MP4 byte-identical to the direct worker with the expected
-audio SHA-256. A separate five-second
+audio SHA-256. A second 49-frame A2V take combined the same source audio with a first-frame
+image. The Swift worker finished in 40.27 seconds at 512 × 320 and 24 fps; the accepted Studio
+take reopened with Python unavailable, showed two previews and retained the source-audio SHA-256.
+This qualifies that short recipe only, not long audio-driven clips or general lip-sync accuracy.
+A separate five-second
 768 × 448 Swift take with an ordinary LTX 2.3 LoRA at strength 0.3 in both stages completed
 with distinct coherent output; that one adapter result does not qualify every LTX 2.3 LoRA.
 Continuous scenes, continuity/extension, other A2V forms and specialized controls still require
@@ -63,7 +67,13 @@ experimental visual recipe, not audible AV quality, broad FL2VA quality or speed
 The signed app's bundled worker produced a byte-identical MP4 on the same recipe. It took
 552.882 seconds, including 414.207 seconds of sampling and 119.716 seconds of video decoding,
 at the same 4,720,223,400-byte peak MLX allocation and zero swap. This pair is not a matched
-speed comparison.
+speed comparison. A separate Studio lifecycle run of the same five-second recipe passed ordered
+endpoint preparation, rendering, seven decoded previews, take acceptance and project reopening
+with Python unavailable. Render and acceptance took 591.83 seconds; the resulting 768 × 448
+movie decoded fully with synchronized video and audio. Its front, middle and profile frames
+retained the intended turn. The worker reported 5.02 GB peak MLX allocation and 5.72 GB peak
+process footprint, excluding FFmpeg. This proves this recipe's app path, not production speed or general
+audio quality.
 An installed two-reference Studio take passed preparation, worker render, seven decoded previews,
 clip-source adoption, project save and reopen with Python unavailable. Ordered reference preflights
 passed for every count from one through nine, and a real nine-reference exported Studio job
@@ -819,6 +829,12 @@ delivered live previews, applied the take, and reopened the saved project. The w
 151.12 seconds with 3.09 GB peak MLX and 5.22 GB peak process footprint. The earlier direct
 test guide resized the source vertically, so its identical settings do not imply identical
 output pixels. Broader source motion and production quality remain unqualified.
+A further three-second 768 × 448 worker run combined a frame-36 reference and source audio.
+It completed in 182.60 seconds with two live previews, a 3.21 GB MLX peak and a 4.84 GB worker
+footprint (FFmpeg excluded). The decoded audio kept source timing and correlated at 0.999995.
+The middle reference showed the original gray cat while the edit prompt requested a white cat;
+the white output did not land on that gray reference. This establishes execution and audio
+preservation, not timed-anchor fidelity. Keep additional anchors experimental.
 
 Frame numbers are relative to the clip's captured trim interval. Studio adopts the source
 frame rate and extracts matching frames without resampling. Use a constant-frame-rate source;

@@ -1,7 +1,7 @@
 import XCTest
 import MLX
 import LTX25Engine
-import LTX25MLX
+@testable import LTX25MLX
 
 final class MLXDenoiserTests: XCTestCase {
   struct Fixture: Decodable {
@@ -74,6 +74,19 @@ final class MLXDenoiserTests: XCTestCase {
         blockWeights:{ try self.weight("transformer_blocks.\($0)."+$1,$2) }))
     }
     XCTAssertEqual(reads,0)
+  }
+  func testFrozenAudioAndImageReferenceShareCompactVideoRows() throws {
+    let f=try fixture(), runner=try MLXDenoiser(configuration:f.configuration,blockCount:1)
+    let inputs=f.inputs.mapValues { MLXArray($0) }
+    let mask:[Float]=[0,1,0.5,1,0]
+    let prepared=try runner.prepare(inputs,sigmas:[f.sigma],videoDenoiseMask:mask,
+      frozenAudio:true,weights:weight,adapters:{ _ in [] },progress:{ _ in })
+    let result=try runner.evaluatePrepared(inputs,sigma:f.sigma,preparation:prepared,
+      fixedWeights:weight,
+      blockWeights:{ try self.weight("transformer_blocks.\($0)."+$1,$2) },
+      fixedAdapters:{ _ in [] },blockAdapters:{ _ in [:] },progress:{ _ in })
+    XCTAssertEqual(result["video"]?.size,f.configuration.videoTokens*128)
+    XCTAssertEqual(result["audio"]?.size,f.configuration.audioTokens*128)
   }
   func testInvalidInputAndObserverFailureDoNotLeakAndAllowRetry() throws {
     enum Stop:Error { case stop }

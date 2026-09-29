@@ -20,6 +20,7 @@ let package = Package(
     .executableTarget(name: "WeeToddMLXStackProbe", dependencies: ["LTX25MLX"]),
     .executableTarget(name: "WeeToddMLXBlockProbe", dependencies: ["LTX25MLX"]),
     .target(name: "LTX25MLX", dependencies: [
+      .product(name: "InferenceContracts", package: "weetodd-inference"),
       .product(name: "TensorIO", package: "weetodd-inference"),
       .product(name: "LTX25Engine", package: "weetodd-inference"),
       .product(name: "LTX25Text", package: "weetodd-inference"),

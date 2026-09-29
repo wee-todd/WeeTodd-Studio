@@ -181,6 +181,83 @@ final class StudioReliabilityTests: XCTestCase {
       .write(to: directory.appendingPathComponent("studio-qualification.json"), options: .atomic)
   }
 
+  @MainActor func testInstalledNativeH3FL2VAStudioLifecycle() async throws {
+    guard let manifest = ProcessInfo.processInfo.environment["WEETODD_NATIVE_H3_FL2VA_LIFECYCLE"] else {
+      throw XCTSkip("Opt-in installed H3 FL2VA generation")
+    }
+    let config = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: manifest))) as! [String: String]
+    let source = URL(fileURLWithPath: try XCTUnwrap(config["recipe"]))
+    var profile = try JSONSerialization.jsonObject(with: Data(contentsOf: source)) as! [String: Any]
+    let originalInputs = try XCTUnwrap((profile["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]])
+    XCTAssertEqual(originalInputs.map { $0["role"] as? String }, ["first", "last"])
+    let directory = URL(fileURLWithPath: try XCTUnwrap(config["output"]))
+    let profiles = directory.appendingPathComponent("Profiles")
+    try FileManager.default.createDirectory(at: profiles, withIntermediateDirectories: true)
+    var conditioning = profile["conditioning"] as! [String: Any]
+    conditioning["inputs"] = []
+    profile["conditioning"] = conditioning
+    let profileURL = profiles.appendingPathComponent("matched-fl2va.json")
+    try JSONSerialization.data(withJSONObject: profile, options: [.prettyPrinted, .sortedKeys])
+      .write(to: profileURL, options: .atomic)
+    let generation = profile["config"] as! [String: Any]
+    let store = StudioStore(dataDirectory: directory, restoreSession: false)
+    store.runtime = RuntimeSettings(root: "/missing", pythonPath: "/missing/python", profilesDirectory: profiles.path)
+    store.runtime.nativeH3Enabled = true
+    store.runtime.h3WorkerPath = try XCTUnwrap(config["worker"])
+    store.runtime.ffmpegPath = try XCTUnwrap(profile["ffmpeg"] as? String)
+    var clip = Clip(engine: .h3)
+    clip.profileID = profileURL.path
+    clip.prompt = profile["prompt"] as! String
+    clip.duration = generation["duration_seconds"] as! Double
+    clip.generationWidth = generation["width"] as! Int
+    clip.generationHeight = generation["height"] as! Int
+    clip.seed = generation["seed"] as! Int
+    clip.generationSelection = GenerationSelection(task: "fflf")
+    var assets: [MediaAsset] = []
+    for (index, input) in originalInputs.enumerated() {
+      let asset = MediaAsset(name: index == 0 ? "First" : "Last", kind: .image,
+        path: input["path"] as! String)
+      assets.append(asset)
+      clip.attachments.append(Attachment(assetID: asset.id, role: index == 0 ? .first : .last))
+    }
+    store.project.clips = [clip]
+    store.project.assets = assets
+    store.selectedClipID = clip.id
+    await store.reloadProfiles()
+    XCTAssertEqual(store.profiles.count, 1)
+    await store.prepareSelected()
+    XCTAssertNil(store.error)
+    let prepared = URL(fileURLWithPath: try XCTUnwrap(store.preparedRecipe))
+    let recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: prepared)) as! [String: Any]
+    let inputs = try XCTUnwrap((recipe["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]])
+    XCTAssertEqual(inputs.map { $0["path"] as? String }, originalInputs.map { $0["path"] as? String })
+    XCTAssertEqual(inputs.map { $0["sha256"] as? String }, originalInputs.map { $0["sha256"] as? String })
+    var previews = Set<Int>()
+    let observation = store.bridge.$livePreview.sink { event in
+      if let revision = event?.previewRevision { previews.insert(revision) }
+    }
+    defer { observation.cancel() }
+    let started = Date()
+    await store.renderPrepared()
+    XCTAssertNil(store.error)
+    let version = try XCTUnwrap(store.selectedClip?.versions.last)
+    XCTAssertGreaterThan(previews.count, 0)
+    let savedProject = directory.appendingPathComponent("accepted.weetodd")
+    try ProjectStorage.write(store.project, to: savedProject)
+    let reopened = StudioStore(dataDirectory: directory, restoreSession: false)
+    reopened.load(savedProject)
+    XCTAssertEqual(reopened.selectedClip?.sourcePath, version.path)
+    XCTAssertEqual(reopened.selectedClip?.versions.last?.path, version.path)
+    let movie = try await StudioStore.inspectNativeMovie(version.path)
+    XCTAssertEqual(movie["width"] as? Int, clip.generationWidth)
+    XCTAssertEqual(movie["height"] as? Int, clip.generationHeight)
+    let evidence: [String: Any] = ["video": version.path, "recipe": prepared.path,
+      "renderAndAcceptanceSeconds": Date().timeIntervalSince(started),
+      "pythonPath": store.runtime.pythonPath, "decodedPreviewCount": previews.count]
+    try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
+      .write(to: directory.appendingPathComponent("studio-qualification.json"), options: .atomic)
+  }
+
   @MainActor func testNativeH3RejectsAudioDriverBeforePythonPreparation() async throws {
     let fake = SuspendedBridge("unused")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false,
@@ -305,8 +382,9 @@ final class StudioReliabilityTests: XCTestCase {
     let generation=model["config"] as! [String:Any]
     let conditioning=model["conditioning"] as! [String:Any]
     let inputs=try XCTUnwrap(conditioning["inputs"] as? [[String:Any]])
-    XCTAssertEqual(inputs.count,1)
-    let input=try XCTUnwrap(inputs.first)
+    XCTAssertTrue((1...2).contains(inputs.count))
+    let input=try XCTUnwrap(inputs.first { $0["role"] as? String == "audio_driver" })
+    let opening=inputs.first { $0["role"] as? String == "keyframe" }
     XCTAssertEqual(conditioning["task"] as? String,"a2v")
     let root=URL(fileURLWithPath:try XCTUnwrap(options["output"]))
     let profiles=root.appendingPathComponent("Profiles")
@@ -331,18 +409,30 @@ final class StudioReliabilityTests: XCTestCase {
     attachment.audioSourceStart=try XCTUnwrap(input["source_start_seconds"] as? Double)
     attachment.audioSourceDuration=try XCTUnwrap(input["source_duration_seconds"] as? Double)
     clip.attachments=[attachment]
-    store.project.clips=[clip];store.project.assets=[asset];store.selectedClipID=clip.id
+    var assets=[asset]
+    if let opening {
+      XCTAssertEqual(opening["frame_index"] as? Int,0)
+      let image=MediaAsset(name:"Opening frame",kind:.image,path:try XCTUnwrap(opening["path"] as? String))
+      assets.append(image)
+      clip.attachments.append(Attachment(assetID:image.id,role:.first))
+    }
+    store.project.clips=[clip];store.project.assets=assets;store.selectedClipID=clip.id
     await store.reloadProfiles();XCTAssertEqual(store.profiles.count,1)
     await store.describeGeneration();XCTAssertNil(store.validationErrors[clip.id])
     await store.prepareSelected();XCTAssertNil(store.error)
     let prepared=URL(fileURLWithPath:try XCTUnwrap(store.preparedRecipe))
     let preparedModel=try JSONSerialization.jsonObject(with:Data(contentsOf:prepared)) as! [String:Any]
     let preparedInputs=try XCTUnwrap((preparedModel["conditioning"] as? [String:Any])?["inputs"] as? [[String:Any]])
-    XCTAssertEqual(preparedInputs.count,1)
-    let preparedInput=try XCTUnwrap(preparedInputs.first)
+    XCTAssertEqual(preparedInputs.count,inputs.count)
+    let preparedInput=try XCTUnwrap(preparedInputs.first { $0["role"] as? String == "audio_driver" })
     XCTAssertEqual(preparedInput["path"] as? String,asset.path)
     XCTAssertEqual(preparedInput["source_start_seconds"] as? Double,attachment.audioSourceStart)
     XCTAssertEqual(preparedInput["source_duration_seconds"] as? Double,attachment.audioSourceDuration)
+    if let opening {
+      let first=try XCTUnwrap(preparedInputs.first { $0["role"] as? String == "keyframe" })
+      XCTAssertEqual(first["path"] as? String,opening["path"] as? String)
+      XCTAssertEqual(first["frame_index"] as? Int,0)
+    }
     var previewRevisions=Set<Int>()
     let observer=store.bridge.$livePreview.sink { if let revision=$0?.previewRevision { previewRevisions.insert(revision) } }
     defer { observer.cancel() }

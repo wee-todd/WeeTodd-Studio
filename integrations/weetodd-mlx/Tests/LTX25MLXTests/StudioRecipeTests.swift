@@ -6,7 +6,7 @@ final class StudioRecipeTests: XCTestCase {
     var recipe=fixture()
     let source:[String:Any]=["id":"voice","kind":"audio","role":"audio_driver",
       "path":"/source.wav","strength":1,"source_start_seconds":1.25,"source_duration_seconds":2.0]
-    recipe["conditioning"]=["version":1,"task":"a2v","inputs":[source]]
+    recipe["conditioning"]=["version":1,"task":"a2v","audio_policy":"source","inputs":[source]]
     let request=try compile(recipe)
     XCTAssertEqual(request.version,4)
     XCTAssertEqual(request.audioReference?.sourceStartSeconds,1.25)
@@ -20,6 +20,16 @@ final class StudioRecipeTests: XCTestCase {
     XCTAssertThrowsError(try compile(recipe))
     recipe["conditioning"]=["version":1,"task":"a2v","inputs":[source,source]]
     XCTAssertThrowsError(try compile(recipe))
+    let first:[String:Any]=["id":"first","kind":"image","role":"keyframe",
+      "path":"/first.png","strength":1,"frame_index":0]
+    recipe["conditioning"]=["version":1,"task":"a2v","audio_policy":"source",
+      "inputs":[source,first]]
+    let withFirst=try compile(recipe)
+    XCTAssertEqual(withFirst.task,"a2v")
+    XCTAssertEqual(withFirst.referenceImages.map(\.role),["first"])
+    var last=first;last["frame_index"]="last";recipe["conditioning"]=["version":1,"task":"a2v",
+      "inputs":[source,last]]
+    XCTAssertThrowsError(try compile(recipe))
   }
   func fixture() -> [String:Any] {
     ["engine":"ltx25", "format":"weetodd-headless-v2", "prompt":"A cup moves.",
@@ -28,8 +38,8 @@ final class StudioRecipeTests: XCTestCase {
      "config":["pipeline_mode":"distilled", "width":1344,"height":768,"duration_seconds":88.0/24,
        "frame_rate":24,"seed":43,"stage1_steps":8,"stage2_steps":3],
      "conditioning":["version":1,"task":"fflf","inputs":[
-       ["kind":"image","role":"keyframe","path":"/first.png","frame_index":0,"strength":1],
-       ["kind":"image","role":"keyframe","path":"/last.png","frame_index":"last","strength":0.8]]]]
+       ["id":"first","kind":"image","role":"keyframe","path":"/first.png","frame_index":0,"strength":1],
+       ["id":"last","kind":"image","role":"keyframe","path":"/last.png","frame_index":"last","strength":0.8]]]]
   }
   func compile(_ object:[String:Any]) throws -> MLXDistilledRequest {
     try MLXStudioRecipe.compile(data:JSONSerialization.data(withJSONObject:object),outputDirectory:"/output")
@@ -88,6 +98,19 @@ final class StudioRecipeTests: XCTestCase {
     c["inputs"]=Array(inputs.reversed());recipe["conditioning"]=c
     XCTAssertEqual(try compile(recipe).referenceImages.map(\.path),["/first.png","/last.png"])
     c["inputs"]=[inputs[0],inputs[0]];recipe["conditioning"]=c
+    XCTAssertThrowsError(try compile(recipe))
+  }
+  func testSharedConditioningContractRejectsMismatchedTaskPolicyAndIdentity() throws {
+    var recipe=fixture(), c=fixture()["conditioning"] as! [String:Any]
+    c["audio_policy"]="generated";recipe["conditioning"]=c
+    XCTAssertEqual(try compile(recipe).task,"fflf")
+    c["audio_policy"]="source";recipe["conditioning"]=c
+    XCTAssertThrowsError(try compile(recipe))
+    c["audio_policy"]="generated";c["task"]="i2v";recipe["conditioning"]=c
+    XCTAssertThrowsError(try compile(recipe))
+    c["task"]="fflf"
+    var inputs=c["inputs"] as! [[String:Any]];inputs[1]["id"]="first";c["inputs"]=inputs
+    recipe["conditioning"]=c
     XCTAssertThrowsError(try compile(recipe))
   }
 }

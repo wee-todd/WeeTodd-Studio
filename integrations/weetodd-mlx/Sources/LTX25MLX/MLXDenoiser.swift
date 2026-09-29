@@ -112,8 +112,14 @@ public final class MLXDenoiser {
         }
         let index=MLXArray(indices)
         prepared["video_modulation_indices"]=index
-        for name in preparation.frozenAudio ? ["video_modulation"] : ["video_modulation","video_av_modulation"] {
-          let table=concatenated(unique.map { preparation.referenceModulations[$0.bitPattern]![name]! },axis:0)
+        for name in ["video_modulation","video_av_modulation"] {
+          // Frozen source audio routes AV modulation through sigma zero. It is
+          // constant across video token times, but the compact index table
+          // still needs one row per distinct video time for both projections.
+          let rows=preparation.frozenAudio && name == "video_av_modulation"
+            ? Array(repeating:mods[name]!,count:unique.count)
+            : unique.map { preparation.referenceModulations[$0.bitPattern]![name]! }
+          let table=concatenated(rows,axis:0)
           prepared[name]=table
         }
         embedded["video"]=take(concatenated(unique.map { preparation.referenceEmbeddings[$0.bitPattern]! },axis:0),index,axis:0)

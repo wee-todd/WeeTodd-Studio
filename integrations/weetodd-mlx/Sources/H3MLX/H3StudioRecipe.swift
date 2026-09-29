@@ -1,4 +1,5 @@
 import Foundation
+import InferenceContracts
 
 /// Strict bridge from the saved headless H3 recipe to the first Swift T2VA
 /// slice. Every setting this slice cannot execute fails before weights load.
@@ -23,6 +24,7 @@ public enum H3StudioRecipe {
       throw H3CheckpointError.invalid("Swift H3 FL2VA needs a first image and optional last image with generated audio.")
     }
     var paths: [String] = []
+    _ = try ConditioningV1.inputs(conditioning, task: "fflf", audioPolicy: "generated", count: 1...2)
     var ids = Set<String>()
     var anchors: [H3PackedLayout.Anchor] = []
     for (index, input) in inputs.enumerated() {
@@ -81,6 +83,7 @@ public enum H3StudioRecipe {
       throw H3CheckpointError.invalid("Swift H3 still Ref2VA needs one to nine ordered image inputs and generated audio.")
     }
     var paths: [String] = []
+    _ = try ConditioningV1.inputs(conditioning, task: "ref2va", audioPolicy: "generated", count: 1...9)
     var identities = Set<String>()
     for input in inputs {
       guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "strength", "sha256"]),
@@ -212,6 +215,7 @@ public enum H3StudioRecipe {
       throw H3CheckpointError.invalid("Swift H3 currently admits only text-to-audiovisual Euler recipes with at most one supported Turbo LoRA and no unported controls.")
     }
     let adapter = turboLoRA(component)
+    _ = try ConditioningV1.inputs(conditioning, task: "t2v", audioPolicy: "generated", count: 0...0)
     return try H3T2VARequest(prompt: prompt, width: width, height: height,
       durationSeconds: duration, seed: UInt64(seed), requestedSteps: steps,
       transformer: URL(fileURLWithPath: transformer),

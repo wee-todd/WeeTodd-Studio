@@ -1,6 +1,7 @@
 import Foundation
 import CoreFoundation
 import LTX25Engine
+import InferenceContracts
 
 /// Strict adapter for Studio's resolved recipe. This owns no inference or prompt rewriting.
 public enum MLXStudioRecipe {
@@ -83,12 +84,18 @@ public enum MLXStudioRecipe {
     var references:[[String:Any]]=[],task="t2v",audioReference:[String:Any]?
     if let value=root["conditioning"] {
       guard let c=value as? [String:Any] else { throw reject("conditioning") }
-      try keys(c,["version","task","inputs"],"conditioning")
-      guard try integer(c,"version",1...1) == 1,let name=c["task"] as? String,["t2v","i2v","fflf","a2v"].contains(name),
-        let inputs=c["inputs"] as? [[String:Any]],
-        (name == "t2v" ? inputs.isEmpty : name == "i2v" || name == "a2v" ? inputs.count == 1 : (1...2).contains(inputs.count)) else { throw reject("conditioning task/inputs") }
+      guard let name=c["task"] as? String,["t2v","fflf","a2v"].contains(name) else {
+        throw reject("conditioning task")
+      }
+      let inputs=try ConditioningV1.inputs(c,task:name,
+        audioPolicy:name == "a2v" ? "source" : "generated",
+        count:name == "t2v" ? 0...0 : 1...2)
       if name == "a2v" {
-        let input=inputs[0]
+        guard inputs.filter({ $0["role"] as? String == "audio_driver" }).count == 1,
+          inputs.count <= 2,
+          let input=inputs.first(where: { $0["role"] as? String == "audio_driver" }) else {
+          throw reject("A2V requires one audio driver and optional first image")
+        }
         try keys(input,["id","kind","role","path","strength","source_start_seconds","source_duration_seconds"],"conditioning input")
         guard input["kind"] as? String == "audio",input["role"] as? String == "audio_driver",
           let path=input["path"] as? String else { throw reject("A2V audio_driver") }
@@ -97,6 +104,16 @@ public enum MLXStudioRecipe {
         let start=try number(input,"source_start_seconds")
         let sourceDuration=try number(input,"source_duration_seconds")
         audioReference=["path":path,"source_start_seconds":start,"source_duration_seconds":sourceDuration]
+        if let first=inputs.first(where: { $0["role"] as? String != "audio_driver" }) {
+          try keys(first,["id","kind","role","path","strength","frame_index"],"conditioning input")
+          guard first["kind"] as? String == "image",first["role"] as? String == "keyframe",
+            let imagePath=first["path"] as? String,
+            try integer(first,"frame_index",0...0) == 0 else {
+            throw reject("A2V optional image must be the first frame")
+          }
+          let imageStrength=first["strength"] == nil ? 1 : try number(first,"strength")
+          references=[["role":"first","path":imagePath,"strength":imageStrength,"crf":33]]
+        }
         task="a2v"
       } else {
       task=inputs.isEmpty ? "t2v" : inputs.count == 1 ? "i2v":"fflf"
@@ -110,6 +127,10 @@ public enum MLXStudioRecipe {
         references.append(["role":frame == 0 ? "first":"last","path":path,"strength":strength,"crf":33])
       }
       references.sort { ($0["role"] as! String) < ($1["role"] as! String) }
+      guard references.isEmpty || (references.first?["role"] as? String == "first" &&
+        (references.count != 2 || references.last?["role"] as? String == "last")) else {
+        throw reject("first anchor and optional last anchor")
+      }
       }
     }
     var request:[String:Any] = ["version":task == "a2v" ? 4 : 3,"engine":"ltx25","task":task,"prompt":prompt,"width":width,"height":height,"frames":frames,
