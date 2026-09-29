@@ -1,5 +1,7 @@
 import AVFoundation
 import AppKit
+import Combine
+import CryptoKit
 import Foundation
 import StudioCore
 import XCTest
@@ -245,6 +247,103 @@ final class RippleStoreTests: XCTestCase {
     XCTAssertNil(store.error)
     XCTAssertEqual(calls, ["ripple-native-prepare", "ltx-native-render"])
     XCTAssertEqual(store.selectedClip?.rippleTakes?.first?.path, take.path)
+  }
+
+  @MainActor func testInstalledNativeRippleStudioLifecycle() async throws {
+    guard let manifest = ProcessInfo.processInfo.environment["WEETODD_NATIVE_RIPPLE_LIFECYCLE"] else {
+      throw XCTSkip("Opt-in installed LTX 2.5 Ripple Studio lifecycle")
+    }
+    let options = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: manifest))) as! [String: String]
+    let root = URL(fileURLWithPath: try XCTUnwrap(options["output"]))
+    if let reuseProject = options["reuseProject"] {
+      // Inspect a completed take after a test assertion failure without repeating inference.
+      let reopened = StudioStore(dataDirectory: root, restoreSession: false)
+      reopened.load(URL(fileURLWithPath: reuseProject))
+      let clip = try XCTUnwrap(reopened.project.clips.first)
+      let take = try XCTUnwrap(clip.rippleTakes?.last)
+      XCTAssertEqual(clip.sourcePath, take.path)
+      try await NativeRippleMedia.verifyPublishedTake(take.path, draft: take.draft,
+        hasAudio: take.hasAudio)
+      let receipt = try JSONSerialization.jsonObject(with: Data(contentsOf:
+        URL(fileURLWithPath: take.receiptPath))) as! [String: Any]
+      XCTAssertEqual(receipt["editorial_frames"] as? Int, 72)
+      let digest = SHA256.hash(data: try Data(contentsOf: URL(fileURLWithPath: take.path)))
+        .map { String(format: "%02x", $0) }.joined()
+      let evidence: [String: Any] = ["video": take.path, "sha256": digest,
+        "pythonPath": "/unavailable/python", "reopenedWithoutRerender": true]
+      try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
+        .write(to: root.appendingPathComponent("ripple-studio-qualification.json"), options: .atomic)
+      return
+    }
+    let profiles = root.appendingPathComponent("Profiles")
+    try FileManager.default.createDirectory(at: profiles, withIntermediateDirectories: true)
+    let profile = profiles.appendingPathComponent("ripple.json")
+    let components: [String: Any] = [
+      "transformer_path": try XCTUnwrap(options["transformer"]),
+      "text_encoder_path": try XCTUnwrap(options["text"]),
+      "video_vae_path": try XCTUnwrap(options["video"]),
+      "audio_vae_path": try XCTUnwrap(options["audio"]),
+      "loras": [], "ic_loras": []]
+    let profileValue: [String: Any] = ["format": "weetodd-headless-v2", "engine": "ltx25",
+      "config": ["pipeline_mode": "distilled"], "components": components]
+    try JSONSerialization.data(withJSONObject: profileValue, options: [.prettyPrinted, .sortedKeys])
+      .write(to: profile, options: .atomic)
+    let store = StudioStore(dataDirectory: root, restoreSession: false)
+    addTeardownBlock { await MainActor.run { store.invalidateTimelinePlayback() } }
+    store.runtime = RuntimeSettings(root: "/unavailable", pythonPath: "/unavailable/python",
+      profilesDirectory: profiles.path)
+    store.runtime.nativeRippleEnabled = true
+    store.runtime.ltx25WorkerPath = try XCTUnwrap(options["worker"])
+    store.runtime.rippleProfileID = profile.path
+    store.runtime.rippleAdapterPath = try XCTUnwrap(options["adapter"])
+    store.runtime.ffmpegPath = try XCTUnwrap(options["ffmpeg"])
+    var clip = Clip(name: "Kitten", engine: .movie)
+    clip.sourcePath = try XCTUnwrap(options["source"])
+    clip.duration = 3
+    store.project.clips = [clip]
+    store.selectedClipID = clip.id
+    store.openRipple()
+    await store.inspectRipple()
+    XCTAssertNil(store.error)
+    store.updateRipple { draft in
+      draft.prompt = "The kitten has fluffy white fur. Preserve the original kitten motion, hanging toy, background, camera, composition and timing."
+      draft.seed = 42
+      draft.width = 768
+      draft.height = 448
+      draft.frameRate = 24
+      draft.references[0].path = options["edit"]!
+    }
+    var previews = Set<Int>()
+    let observer = store.bridge.$livePreview.sink { if let revision = $0?.previewRevision { previews.insert(revision) } }
+    defer { observer.cancel() }
+    let started = Date()
+    await store.generateRipple()
+    XCTAssertNil(store.error)
+    let take = try XCTUnwrap(store.selectedClip?.rippleTakes?.last)
+    XCTAssertGreaterThan(previews.count, 0)
+    XCTAssertTrue(store.canApplyRipple(take, to: try XCTUnwrap(store.selectedClip)))
+    XCTAssertEqual(store.selectedClip?.sourcePath, options["source"])
+    store.applyRipple(take)
+    XCTAssertNil(store.error)
+    XCTAssertEqual(store.selectedClip?.sourcePath, take.path)
+    let saved = root.appendingPathComponent("accepted.weetodd")
+    try ProjectStorage.write(store.project, to: saved)
+    let reopened = StudioStore(dataDirectory: root, restoreSession: false)
+    reopened.load(saved)
+    XCTAssertEqual(reopened.project.clips.first?.sourcePath, take.path)
+    try await NativeRippleMedia.verifyPublishedTake(take.path, draft: take.draft,
+      hasAudio: take.hasAudio)
+    let receipt = try JSONSerialization.jsonObject(with: Data(contentsOf:
+      URL(fileURLWithPath: take.receiptPath))) as! [String: Any]
+    XCTAssertEqual(receipt["editorial_frames"] as? Int, 72)
+    let digest = SHA256.hash(data: try Data(contentsOf: URL(fileURLWithPath: take.path)))
+      .map { String(format: "%02x", $0) }.joined()
+    if let expected = options["expectedSHA256"] { XCTAssertEqual(digest, expected) }
+    let evidence: [String: Any] = ["video": take.path, "sha256": digest,
+      "renderAndAcceptanceSeconds": Date().timeIntervalSince(started),
+      "decodedPreviewCount": previews.count, "pythonPath": store.runtime.pythonPath]
+    try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
+      .write(to: root.appendingPathComponent("ripple-studio-qualification.json"), options: .atomic)
   }
 
   @MainActor func testNativeRippleInspectionAndFrameExtractionWorkWithoutPython() async throws {

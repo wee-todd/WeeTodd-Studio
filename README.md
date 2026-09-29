@@ -173,6 +173,10 @@ under a concurrent app build, peaked at 4,720,223,400 bytes MLX allocation and 5
 bytes process footprint, and used no swap. Stereo audio was nearly silent under a quiet-room
 prompt, so audible AV quality is unqualified. This is one experimental visual recipe, not broad
 FL2VA quality or performance parity.
+The same recipe also completed through the signed app's bundled H3 worker and produced a
+byte-identical MP4. That packaged run took 552.882 seconds, with 414.207 seconds in sampling
+and 119.716 seconds in video decoding; peak MLX was unchanged at 4,720,223,400 bytes and
+system swap stayed at zero. Two runs under different workloads do not establish speed parity.
 
 Ripple also has an opt-in **Use Swift MLX for Ripple (experimental)** route in its Runtime
 Settings. It freezes edited images, streams the source guide, runs the pinned author LoRA
@@ -185,7 +189,12 @@ completed at 768 × 448 for three seconds (72 editorial frames, 163.34 worker se
 footprint). Both movies fully decoded and sampled frames showed a coherent kitten. These
 measurements exclude FFmpeg and do not establish broader subject, motion, timed-anchor,
 hardware-memory or visual-quality parity. Source-audio mux has a separate small test;
-installed-app qualification remains open.
+the packaged worker reproduced the short direct take byte for byte. A separate Studio
+lifecycle test with Python unavailable prepared a center-cropped source guide, rendered a
+three-second 72-frame take, showed previews, applied it, and reopened the saved project.
+That worker took 151.12 seconds and peaked at 3.09 GB MLX and 5.22 GB process footprint.
+Its guide differs from the earlier manually resized test guide, so their movies are not
+expected to have the same bytes. This does not qualify other subjects or source motions.
 
 ## Choose how to generate
 

@@ -403,6 +403,12 @@ reference encoding; peaks were 9.437 GB MLX and 11.111 GB worker process footpri
 movies fully decoded and sampled frames showed a coherent kitten. These two tests do not qualify
 other source motions, subjects, timed-anchor fidelity, production memory across hardware or
 general visual quality. Process figures exclude the external FFmpeg muxer.
+The app-bundled worker reproduced the short direct take byte for byte. Studio then prepared
+the same source with an aspect-preserving center crop and completed a separate three-second,
+72-frame lifecycle with Python unavailable, live previews, take application and saved-project
+reopening. That worker took 151.12 seconds (3.086 GB peak MLX, 5.215 GB worker footprint).
+The center-cropped Studio guide differs from the manually resized direct guide, so these
+two outputs are not a byte-parity comparison.
 
 H3 FL2VA passed structural route and preflight checks plus one corrected real first/last-frame
 recipe: five seconds at 768 × 448, 124 frames, four evaluations and seed 20260927. Sampled
@@ -411,6 +417,10 @@ of 0.9903/0.9957. The worker took 511.623 seconds under a concurrent app build; 
 allocation was 4,720,223,400 bytes and peak process footprint was 5,742,871,896 bytes, with
 zero system swap. Stereo audio was nearly silent under a quiet-room prompt. This is one
 experimental visual recipe, not audible AV quality or broad FL2VA qualification.
+The signed app's bundled worker produced a byte-identical MP4 on the same recipe in 552.882
+seconds. Its corrected stage report assigns 414.207 seconds to sampling and 119.716 seconds
+to video decoding; peak MLX was again 4,720,223,400 bytes with zero system swap. The two
+runs had different background workloads, so their elapsed times are not a speed comparison.
 
 Earlier one-, two- and nine-still H3 Ref2VA visual observations used vertically inverted
 reference pixels. They remain execution evidence, not likeness qualification. A non-symmetric

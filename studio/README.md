@@ -60,6 +60,10 @@ were 0.9903/0.9957. The worker took 511.623 seconds under a concurrent app build
 4,720,223,400 bytes MLX allocation and 5,742,871,896 bytes process footprint, and used no
 swap. Its stereo audio was nearly silent under a quiet-room prompt. This qualifies one
 experimental visual recipe, not audible AV quality, broad FL2VA quality or speed parity.
+The signed app's bundled worker produced a byte-identical MP4 on the same recipe. It took
+552.882 seconds, including 414.207 seconds of sampling and 119.716 seconds of video decoding,
+at the same 4,720,223,400-byte peak MLX allocation and zero swap. This pair is not a matched
+speed comparison.
 An installed two-reference Studio take passed preparation, worker render, seven decoded previews,
 clip-source adoption, project save and reopen with Python unavailable. Ordered reference preflights
 passed for every count from one through nine, and a real nine-reference exported Studio job
@@ -809,7 +813,12 @@ seconds (120 editorial frames, 865.417 worker seconds, 9.44 GB peak MLX, 11.11 G
 footprint). Both fully decoded and sampled frames showed a coherent kitten. These are two
 specific sources and recipes, not general subject/motion or timed-anchor quality qualification;
 footprints exclude external FFmpeg. Source-audio mux passed a separate short test.
-Installed-app execution remains unqualified.
+A separate installed-worker Studio lifecycle test ran with Python unavailable: it prepared
+the three-second kitten source using an aspect-preserving center crop, rendered 72 frames,
+delivered live previews, applied the take, and reopened the saved project. The worker took
+151.12 seconds with 3.09 GB peak MLX and 5.22 GB peak process footprint. The earlier direct
+test guide resized the source vertically, so its identical settings do not imply identical
+output pixels. Broader source motion and production quality remain unqualified.
 
 Frame numbers are relative to the clip's captured trim interval. Studio adopts the source
 frame rate and extracts matching frames without resampling. Use a constant-frame-rate source;
