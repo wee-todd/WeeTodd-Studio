@@ -106,6 +106,14 @@ reopened it with Python unavailable. Each raw take was byte-identical across tha
 headless Swift route and a saved recipe-backed ComfyUI Swift prompt. I2V's first decoded frame
 closely matched its input; FFLF landed at both supplied endpoints. This is exact-recipe route
 qualification, not a claim that every LTX control or geometry is implemented in Swift.
+In a later packaged-worker check at 768 × 448, 24 fps and 121 frames, I2V and FFLF again
+completed Studio preparation, two decoded previews, take acceptance and project reopening with
+Python unavailable. Their workers took 78.75 and 82.60 seconds and peaked at 5.38 and 5.13 GB
+Swift process footprint, respectively (FFmpeg excluded). FFLF's first and last output frames
+matched center-cropped source stills at 31.78 and 30.84 dB PSNR. A separate saved ComfyUI T2V
+API prompt ran through the packaged Swift worker in 72.28 seconds at a 5.38 GB process peak;
+its result records `python_inference: false`. These are individual 768 × 448 recipes, not a
+general speed or quality guarantee.
 A separate installed-checkpoint Swift A2V test used one selected audio driver for a 49-frame,
 512 × 320 take at 24 fps. It completed in 31.82 worker seconds; its 98,000-sample stereo 48 kHz
 WAV matched the expected trimmed/padded source by SHA-256. Sampled frames showed one coherent
@@ -118,6 +126,12 @@ A 49-frame, 512 × 320 worker run finished in 40.27 seconds, retained the exact 
 SHA-256 and landed close to the supplied first frame. A Studio run of that recipe prepared,
 rendered, showed two previews, accepted and reopened the take with Python unavailable. This is
 one short combined-conditioning recipe, not a general lip-sync or long-clip qualification.
+A higher-resolution Studio A2V check used a voice generated with WeeTodd's Qwen3-TTS and a
+supplied first image. The Swift worker produced 169 frames at 1280 × 768 and 24 fps, delivered
+two decoded previews, and completed in 293.34 seconds at a 13.67 GB peak process footprint
+(FFmpeg excluded). The accepted take reopened with Python unavailable. Its 8+3 distilled
+schedule and 2× latent spatial pass are the existing native path; this single reviewed sample
+does not qualify all voices, durations or lip-sync behavior.
 An ordinary LTX 2.3 standard LoRA also
 completed a distinct, coherent five-second 768 × 448 Swift take at strength 0.3 in both stages;
 this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.
@@ -158,6 +172,11 @@ take delivered seven previews and passed acceptance, project save and reopen wit
 unavailable. Those visual observations also predate the still-reference orientation fix; they
 verify route execution and lifecycle, not identity quality. H3's worker still reports
 experimental production status; other reference media and general adapter support remain open.
+A later recipe-backed ComfyUI T2VA run used the installed FL2VA checkpoint in text-only mode
+with the four-evaluation Turbo LoRA. Its five-second, 768 × 448 robot shot completed in
+579.94 seconds at a 5.23 GB peak Swift process footprint, with coherent arm motion and stereo
+audio. The generated track measured -57.5 dBFS mean and -28.1 dBFS peak; strong sound-effect
+quality and checkpoint-general T2VA behavior remain unqualified.
 A full Studio-initiated run of the same two-reference recipe also completed with Python unavailable:
 Studio received seven decoded previews, saved the take as a version and adopted it on the clip.
 That run took 794.61 seconds, peaked at 5.78 GB worker footprint and 4.96 GB MLX allocation, and
@@ -170,6 +189,12 @@ worker took 750.707 seconds under a concurrent app build, peaked at 4,889,500,85
 allocation and 5,731,812,312 bytes process footprint, with zero swap. Its non-silent stereo
 track measured -29.3 dBFS mean and -2.6 dBFS peak. This is one corrected recipe, not broad
 likeness or speed qualification.
+The corrected packaged worker subsequently passed preflight for each ordered count from one
+through nine distinct stills. At the nine-image boundary it rendered 124 frames at 768 × 448
+with four evaluations, in 882.62 seconds at a 6.06 GB peak Swift process footprint. Reviewed
+frames retained a recognizable Beowulf through the boxing action. The one-image run above took
+750.71 seconds and peaked at 5.73 GB under its own workload; this pair is indicative of this
+reference-count cost, not an isolated throughput benchmark or broad likeness guarantee.
 The H3 FL2VA first/last-frame route passed structural preparation, worker preflight and one
 corrected real reference-conditioned recipe: five seconds at 768 × 448, 124 frames, four
 evaluations and seed 20260927. Sampled frames showed a coherent front-to-profile turn;
@@ -188,6 +213,10 @@ previews, and the accepted take reopened from a saved project. Render and accept
 591.83 seconds. Its 768 × 448 video and audio fully decoded; this validates the app route for
 that recipe. The Swift worker reported 5.02 GB peak MLX allocation and 5.72 GB peak process
 footprint, excluding FFmpeg. Speed and audible quality remain experimental.
+With the same endpoints, seed and four-evaluation settings, a prompt explicitly requesting
+chainmail rattles and a breath kept the front-to-profile visual turn coherent but produced
+audio at about -65 dBFS mean and -47 dBFS peak. That is stronger than the quiet-room control
+yet still too quiet for normal playback; FL2VA generated-sound quality remains unqualified.
 
 Ripple also has an opt-in **Use Swift MLX for Ripple (experimental)** route in its Runtime
 Settings. It freezes edited images, streams the source guide, runs the pinned author LoRA

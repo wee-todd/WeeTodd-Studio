@@ -1,5 +1,31 @@
 # WeeTodd Studio implementation status
 
+Swift native audiovisual qualification 2026-09-29: a Qwen3-TTS-driven LTX 2.5 A2V take
+with an opening image completed at 1280 × 768, 169 frames/24 fps, two decoded previews,
+293.34 worker seconds and 13.67 GB peak Swift process footprint. The accepted Studio take
+reopened with Python unavailable; the user reviewed this sample favorably. Separate final-bundle
+768 × 448, 121-frame I2V and FFLF Studio lifecycles passed preparation, two previews,
+acceptance and reopening with Python unavailable in 78.75/82.60 worker seconds at
+5.38/5.13 GB peak process footprint. I2V frame zero matched its supplied still visually;
+FFLF first/last output frames measured 31.78/30.84 dB PSNR against center-cropped inputs.
+A saved ComfyUI T2V API prompt ran the packaged Swift worker in 72.28 seconds at a 5.38 GB
+process peak; its result reports no Python inference. These are individual recipes, not
+cross-device speed or general quality guarantees. External FFmpeg memory is excluded.
+
+For H3 still Ref2VA, the corrected packaged worker passed preflight at every ordered count
+from one through nine distinct images. A real nine-image, 768 × 448, 124-frame, four-evaluation
+boxing take completed in 882.62 seconds at a 6.06 GB peak Swift process footprint. Reviewed
+frames retained a recognizable Beowulf. The prior matched one-image take took 750.71 seconds
+at 5.73 GB; the workloads were not isolated benchmarks. A same-endpoint FL2VA front-to-profile
+turn remained coherent after a stronger sound prompt, but generated audio averaged about
+-65 dBFS and remains too quiet for normal playback. A saved ComfyUI H3 T2VA robot shot using
+the installed FL2VA checkpoint in text-only mode completed at 768 × 448/124 frames in
+579.94 seconds at a 5.23 GB peak process footprint; the visual arm motion was coherent,
+while generated sound was subdued (-57.5 dBFS mean). Both H3 sound quality and broader
+checkpoint-general quality remain experimental. LTX extension/continuous scenes and
+specialized conditioning, H3 video/audio references, general H3 LoRA stacks, and complete
+Python-free Studio distribution remain open.
+
 H3 INT8 finetunes 2026-09-22 (experimental): standard H3 model setup and shared sampling now
 accept supported Comfy `int8_tensorwise` transformer files directly, including Singularity Ref2VA
 v1.3 INT8. Bounded active-block decoding reverses ConvRot and maps contiguous Q/K/V rows to native

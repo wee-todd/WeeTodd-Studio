@@ -36,6 +36,12 @@ Final isolated-app checks completed T2V, first-image I2V and first/last-frame FF
 prepare, decoded previews, render, acceptance, project save and reopen with Python unavailable.
 For each checked recipe, the raw movie matched its headless and recipe-backed ComfyUI Swift run
 byte for byte. These checks qualify the tested recipes, not every duration or resolution.
+A later 768 × 448, five-second installed-worker regression repeated I2V and FFLF preparation,
+two live decoded previews, acceptance and reopening without Python inference. I2V's opening
+frame matched its input visually; FFLF landed at both endpoints (31.78/30.84 dB PSNR against
+center-cropped first/last source stills). The Swift workers took 78.75/82.60 seconds and reported
+5.38/5.13 GB peak process footprint, excluding FFmpeg. A saved ComfyUI T2V API prompt also
+completed through the packaged Swift worker in 72.28 seconds at a 5.38 GB process peak.
 One additional 49-frame, 512 × 320 Swift A2V test at 24 fps completed in 31.82 worker seconds.
 Its 98,000-sample stereo 48 kHz output WAV matched the expected trimmed/padded driver by
 SHA-256, and sampled frames showed one coherent speaking person. This is a single short speech
@@ -46,6 +52,11 @@ audio SHA-256. A second 49-frame A2V take combined the same source audio with a 
 image. The Swift worker finished in 40.27 seconds at 512 × 320 and 24 fps; the accepted Studio
 take reopened with Python unavailable, showed two previews and retained the source-audio SHA-256.
 This qualifies that short recipe only, not long audio-driven clips or general lip-sync accuracy.
+A higher-resolution A2V run used a voice created in WeeTodd's Qwen3-TTS and one first-frame
+image. The installed Swift worker rendered 169 frames at 1280 × 768 and 24 fps in 293.34 seconds,
+with two decoded previews and a 13.67 GB peak process footprint excluding FFmpeg. The take
+reopened with Python unavailable. The user reviewed this sample favorably; broader voice and
+lip-sync quality remain to be tested.
 A separate five-second
 768 × 448 Swift take with an ordinary LTX 2.3 LoRA at strength 0.3 in both stages completed
 with distinct coherent output; that one adapter result does not qualify every LTX 2.3 LoRA.
@@ -57,6 +68,10 @@ The off-by-default Swift preparation path validates clip inputs, ordered referen
 settings, then requires worker preflight before a take can render. Enable **Use Swift MLX for H3
 (experimental)** in Runtime Settings to try text-to-AV or 1–9 still-image Ref2VA. Other reference
 media, adapter stacks and production quality remain unqualified.
+An additional recipe-backed ComfyUI T2VA run used the installed FL2VA checkpoint without
+image references and the four-evaluation Turbo LoRA. Its 768 × 448, five-second robot shot
+completed in 579.94 seconds at a 5.23 GB peak Swift process footprint. The visual arm motion
+is coherent, while generated stereo audio is subdued (-57.5 dBFS mean, -28.1 dBFS peak).
 H3 FL2VA first/last-frame preparation and worker preflight have structural coverage. One
 corrected real 768 × 448, five-second first/last recipe (124 frames, four evaluations, seed
 20260927) showed a coherent front-to-profile turn; first/last endpoint Pearson correlations
@@ -74,6 +89,10 @@ movie decoded fully with synchronized video and audio. Its front, middle and pro
 retained the intended turn. The worker reported 5.02 GB peak MLX allocation and 5.72 GB peak
 process footprint, excluding FFmpeg. This proves this recipe's app path, not production speed or general
 audio quality.
+An otherwise matched prompt requesting chainmail rattles and breathing kept the visual turn
+coherent but emitted audio at about -65 dBFS mean and -47 dBFS peak. A separately amplified
+listening copy is available for review; the generated soundtrack itself remains too quiet
+for normal playback, so FL2VA sound quality is not qualified.
 An installed two-reference Studio take passed preparation, worker render, seven decoded previews,
 clip-source adoption, project save and reopen with Python unavailable. Ordered reference preflights
 passed for every count from one through nine, and a real nine-reference exported Studio job
@@ -90,6 +109,11 @@ with the red bag; white shirt stripes were invented. The worker took 750.707 sec
 concurrent app build, peaked at 4,889,500,852 bytes MLX and 5,731,812,312 bytes process
 footprint, with zero swap. Its non-silent stereo audio measured -29.3 dBFS mean and -2.6 dBFS
 peak. This is one corrected recipe, not broad likeness or speed qualification.
+The corrected packaged worker then admitted every count from one to nine ordered stills and
+rendered a real nine-image, 768 × 448, five-second Beowulf boxing clip. It took 882.62 seconds,
+peaked at 6.06 GB Swift process footprint, and retained a recognizable subject in the reviewed
+frames. The one-image run took 750.71 seconds at 5.73 GB under a different workload, so this
+pair does not establish an isolated scaling benchmark.
 Still-image asset import uses ImageIO metadata inspection without decoding full-resolution pixels
 or invoking Python; other asset kinds may still use the legacy bridge.
 To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import one to nine
