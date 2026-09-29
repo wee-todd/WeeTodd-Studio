@@ -404,10 +404,12 @@ final class StudioReliabilityTests: XCTestCase {
     clip.seed=try XCTUnwrap(generation["seed"] as? Int)
     clip.generationSelection=GenerationSelection(task:"a2v")
     var asset=MediaAsset(name:"Spoken source",kind:.audio,path:try XCTUnwrap(input["path"] as? String))
-    asset.duration=4
+    let audioStart=try XCTUnwrap(input["source_start_seconds"] as? Double)
+    let audioDuration=try XCTUnwrap(input["source_duration_seconds"] as? Double)
+    asset.duration=audioStart+audioDuration
     var attachment=Attachment(assetID:asset.id,role:.audioDriver)
-    attachment.audioSourceStart=try XCTUnwrap(input["source_start_seconds"] as? Double)
-    attachment.audioSourceDuration=try XCTUnwrap(input["source_duration_seconds"] as? Double)
+    attachment.audioSourceStart=audioStart
+    attachment.audioSourceDuration=audioDuration
     clip.attachments=[attachment]
     var assets=[asset]
     if let opening {
