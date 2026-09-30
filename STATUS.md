@@ -15,6 +15,12 @@ stable join and synchronized audio but included the decoder's causal frame. The 
 worker run took 74.62 seconds at a 3.77 GB peak Swift process footprint and published
 exactly 96 frames at 24 fps with four seconds of stereo AAC audio. The installed-app
 scene acceptance lifecycle and broader visual/audio quality still require qualification.
+A saved ComfyUI API prompt completed through the signed Swift worker in 64.98 seconds,
+publishing 96 frames and four seconds of stereo audio with matching scene ranges. A
+six-shot, 30-second recipe at 768 × 448 passed installed-checkpoint preflight: the
+full-scene video decode needs 18.25 GB of admitted activation space and the largest
+window transformer needs 5.47 GB, below this Mac's 34.36 GB ceiling. That longer
+scene was not generated and its peak process memory is unknown.
 
 Swift native audiovisual qualification 2026-09-29: a Qwen3-TTS-driven LTX 2.5 A2V take
 with an opening image completed at 1280 × 768, 169 frames/24 fps, two decoded previews,

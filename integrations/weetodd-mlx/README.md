@@ -2,7 +2,7 @@
 
 Swift owns this native MLX component; its execution does not invoke Python. Studio can select
 its LTX 2.5 worker for distilled T2V, first-image I2V, first/last-frame, one-driver A2V,
-after-extension and per-clip motion continuation jobs. Its H3 worker
+after-extension, per-clip motion continuation and text-only continuous scenes. Its H3 worker
 is opt-in and experimental for T2VA, timed FL2VA and still-image Ref2VA. Other tasks retain their existing
 routes while native coverage qualifies.
 
@@ -63,6 +63,15 @@ routes while native coverage qualifies.
   Publication strips the repeated video context and crops audio to the exact added-frame
   duration. Studio prepares 25 frames for after-extension and 49 for motion continuation;
   source media, timing, dimensions and combined memory are admitted before weighted work.
+- Experimental continuous scenes sample two to six text-only windows with distinct prompts and
+  seeds, carrying compact interior video and audio latent guides between windows. The complete
+  audiovisual latent chain decodes once. Publication drops the final causal video frame and
+  trims audio to the same editorial duration. Preflight admits all windows and the complete
+  scene decoder before loading weights; Studio reviews and accepts one movie with per-shot ranges.
+  A 384 × 256, four-second recipe passed direct Swift and saved ComfyUI recipe-node runs with
+  96 published frames and four seconds of stereo audio. A six-shot, 30-second, 768 × 448
+  recipe passed installed-checkpoint preflight only. Scene images, audio drivers, checkpoint
+  resume and specialized controls are not yet supported by this Swift scene route.
 - A 128 MiB cache target during stack execution, with explicit trimming at block boundaries
   if MLX overshoots its advisory limit. This is not a hard peak-process-memory limit.
 - Header/shape/packed-storage admission and conservative activation admission, including
@@ -82,8 +91,8 @@ LoRA math is not fused/requantized into the base weights. This preserves packed 
 and avoids dense CPU delta construction, but does not claim bitwise identity to a requantized
 fusion recipe. The block/stack probes apply block targets only; the denoiser and sampler apply
 both fixed and block targets through `MLXDenoiserWeights`. Compatible 2.3 factors are retained.
-IC/MSR/control adapters and conditioning beyond first-frame/FFLF, one-driver A2V and
-experimental after-extension/motion continuation require
+IC/MSR/control adapters and conditioning beyond first-frame/FFLF, one-driver A2V,
+experimental after-extension/motion continuation and text-only scenes require
 separate execution contracts.
 
 ## Build and verify
