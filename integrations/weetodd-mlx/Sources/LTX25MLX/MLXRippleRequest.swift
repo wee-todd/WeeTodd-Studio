@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
-import CryptoKit
 import LTX25Engine
+import InferenceContracts
 
 /// A timed edit is a separate LTX task. Keep its full-rate guide, editorial
 /// interval, and adapter identity explicit instead of coercing it into 8+3.
@@ -144,27 +144,7 @@ public struct MLXRippleRequest: Codable, Sendable {
   }
 
   public func validateSource() throws {
-    let fd = Darwin.open(sourcePath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
-    guard fd >= 0 else { throw LTXError.invalid("Cannot open the Ripple source movie.") }
-    let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-    defer { try? handle.close() }
-    var before = stat()
-    guard fstat(fd, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
-      before.st_size > 0 else { throw LTXError.invalid("Ripple source must be a regular movie file.") }
-    var digest = SHA256()
-    while let bytes = try handle.read(upToCount: 8 * 1024 * 1024), !bytes.isEmpty {
-      try Task.checkCancellation()
-      digest.update(data: bytes)
-    }
-    var after = stat()
-    let actual = digest.finalize().map { String(format: "%02x", $0) }.joined()
-    guard fstat(fd, &after) == 0, before.st_dev == after.st_dev,
-      before.st_ino == after.st_ino, before.st_size == after.st_size,
-      before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
-      before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
-      actual == sourceSHA256 else {
-      throw LTXError.invalid("Ripple source movie differs from the frozen take identity.")
-    }
+    try NativeMediaSource(path: sourcePath, sha256: sourceSHA256).verify()
   }
 
   public func plan(maximumActivationBytes: Int) throws -> MLXSingleStageRipple.Plan {

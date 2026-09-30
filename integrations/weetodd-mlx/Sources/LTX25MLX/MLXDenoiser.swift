@@ -32,8 +32,10 @@ public final class MLXDenoiser {
     let modulations:[UInt32:[String:MLXArray]]
     let embeddings:[UInt32:[String:MLXArray]]
     let videoTimes:[UInt32:[Float]]
+    let audioTimes:[UInt32:[Float]]
     let referenceModulations:[UInt32:[String:MLXArray]]
     let referenceEmbeddings:[UInt32:MLXArray]
+    let referenceAudioEmbeddings:[UInt32:MLXArray]
     let frozenAudio:Bool
   }
 
@@ -59,7 +61,7 @@ public final class MLXDenoiser {
     return largest
   }
 
-  public func evaluate(_ inputs:[String:MLXArray],sigma:Float,videoDenoiseMask:[Float]?=nil,
+  public func evaluate(_ inputs:[String:MLXArray],sigma:Float,videoDenoiseMask:[Float]?=nil,audioDenoiseMask:[Float]?=nil,
     fixedWeights:FixedProvider,blockWeights:BlockProvider,
     fixedAdapters:FixedAdapters = { _ in [] },
     blockAdapters:(Int) throws -> [String:[MLXLoRA]] = { _ in [:] },
@@ -67,8 +69,11 @@ public final class MLXDenoiser {
     _ = try DenoiserMath.timestep(sigma)
     let snapshot=inputs.mapValues { $0.reshaped($0.shape) }
     let preparation:Preparation?
-    if let mask=videoDenoiseMask {
-      preparation=try prepare(snapshot,sigmas:[sigma],videoDenoiseMask:mask,weights:fixedWeights,adapters:fixedAdapters,progress:progress)
+    let videoMask=videoDenoiseMask?.count == configuration.videoTokens && videoDenoiseMask?.allSatisfy({ $0 == 1 }) == true ? nil : videoDenoiseMask
+    let audioMask=audioDenoiseMask?.count == configuration.audioTokens && audioDenoiseMask?.allSatisfy({ $0 == 1 }) == true ? nil : audioDenoiseMask
+    if videoMask != nil || audioMask != nil {
+      preparation=try prepare(snapshot,sigmas:[sigma],videoDenoiseMask:videoMask,audioDenoiseMask:audioMask,
+        weights:fixedWeights,adapters:fixedAdapters,progress:progress)
     } else { preparation=nil }
     return try evaluatePrepared(snapshot,sigma:sigma,preparation:preparation,fixedWeights:fixedWeights,blockWeights:blockWeights,
       fixedAdapters:fixedAdapters,blockAdapters:blockAdapters,progress:progress)
@@ -124,6 +129,19 @@ public final class MLXDenoiser {
         }
         embedded["video"]=take(concatenated(unique.map { preparation.referenceEmbeddings[$0.bitPattern]! },axis:0),index,axis:0)
       }
+      if let tokenTimes=preparation.audioTimes[sigma.bitPattern] {
+        var unique:[Float]=[],lookup:[UInt32:Int32]=[:],indices:[Int32]=[]
+        for time in tokenTimes {
+          if lookup[time.bitPattern] == nil { lookup[time.bitPattern]=Int32(unique.count);unique.append(time) }
+          indices.append(lookup[time.bitPattern]!)
+        }
+        let index=MLXArray(indices)
+        prepared["audio_modulation_indices"]=index
+        for name in ["audio_modulation","audio_av_modulation"] {
+          prepared[name]=concatenated(unique.map { preparation.referenceModulations[$0.bitPattern]![name]! },axis:0)
+        }
+        embedded["audio"]=take(concatenated(unique.map { preparation.referenceAudioEmbeddings[$0.bitPattern]! },axis:0),index,axis:0)
+      }
     } else {
       prepared=try rotary(current); embedded=[:]
       for head in DenoiserLayout.heads(configuration) {
@@ -158,11 +176,12 @@ public final class MLXDenoiser {
     return output
   }
 
-  func prepare(_ inputs:[String:MLXArray],sigmas:[Float],videoDenoiseMask:[Float]?=nil,frozenAudio:Bool=false,weights:FixedProvider,adapters:FixedAdapters,
+  func prepare(_ inputs:[String:MLXArray],sigmas:[Float],videoDenoiseMask:[Float]?=nil,audioDenoiseMask:[Float]?=nil,
+    frozenAudio:Bool=false,weights:FixedProvider,adapters:FixedAdapters,
     progress:(Progress) throws -> Void) throws -> Preparation {
     guard !active, (1...256).contains(sigmas.count) else { throw LTXError.invalid("Invalid or active denoising session.") }
     for sigma in sigmas { _ = try DenoiserMath.timestep(sigma) }
-    var videoTimes:[UInt32:[Float]]=[:], uniqueSigmas:[Float]=[], seen=Set<UInt32>()
+    var videoTimes:[UInt32:[Float]]=[:],audioTimes:[UInt32:[Float]]=[:],uniqueSigmas:[Float]=[],seen=Set<UInt32>()
     if let mask=videoDenoiseMask {
       try stack.admitPerTokenVideo()
       guard mask.count == configuration.videoTokens,mask.allSatisfy({ $0.isFinite && $0>=0 && $0<=1 }) else {
@@ -172,6 +191,14 @@ public final class MLXDenoiser {
       // step; the schedule cache retains only distinct scalar modulations.
       for sigma in sigmas { videoTimes[sigma.bitPattern]=mask.map { sigma*$0 } }
     }
+    if let mask=audioDenoiseMask {
+      guard !frozenAudio else { throw LTXError.invalid("Frozen audio cannot also use a per-token denoise mask.") }
+      try stack.admitPerTokenAudio()
+      guard mask.count == configuration.audioTokens,mask.allSatisfy({ $0.isFinite && $0>=0 && $0<=1 }) else {
+        throw LTXError.invalid("Audio denoise mask must contain one finite strength per token.")
+      }
+      for sigma in sigmas { audioTimes[sigma.bitPattern]=mask.map { sigma*$0 } }
+    }
     for sigma in sigmas {
       let rounded=DenoiserMath.bfloat16(sigma)
       if seen.insert(rounded.bitPattern).inserted { uniqueSigmas.append(rounded) }
@@ -180,6 +207,9 @@ public final class MLXDenoiser {
     let zeroIndex=frozenAudio ? uniqueSigmas.firstIndex(of:0)! : 0
     var referenceSigmas:[Float]=[],referenceSeen=Set<UInt32>()
     for key in videoTimes.keys.sorted() { for sigma in videoTimes[key]! {
+      if referenceSeen.insert(sigma.bitPattern).inserted { referenceSigmas.append(sigma) }
+    } }
+    for key in audioTimes.keys.sorted() { for sigma in audioTimes[key]! {
       if referenceSeen.insert(sigma.bitPattern).inserted { referenceSigmas.append(sigma) }
     } }
     let heads=DenoiserLayout.heads(configuration)
@@ -203,6 +233,7 @@ public final class MLXDenoiser {
     let time=MLXArray(times,[uniqueSigmas.count+referenceSigmas.count,256])
     var modulations:[UInt32:[String:MLXArray]]=[:], embeddings:[UInt32:[String:MLXArray]]=[:]
     var referenceModulations:[UInt32:[String:MLXArray]]=[:],referenceEmbeddings:[UInt32:MLXArray]=[:]
+    var referenceAudioEmbeddings:[UInt32:MLXArray]=[:]
     for head in heads {
       let output=try adaptive(head,time:time,weights:weights,adapters:adapters)
       for (index,sigma) in uniqueSigmas.enumerated() {
@@ -214,17 +245,20 @@ public final class MLXDenoiser {
       }
       for (offset,sigma) in referenceSigmas.enumerated() {
         let index=uniqueSigmas.count+offset
-        if ["video_modulation","video_av_modulation"].contains(head.input) {
+        if ["video_modulation","video_av_modulation","audio_modulation","audio_av_modulation"].contains(head.input) {
           referenceModulations[sigma.bitPattern,default:[:]][head.input]=output.parameters[index..<(index+1)]
         }
         if head.name == "adaln_single" { referenceEmbeddings[sigma.bitPattern]=output.embedded[index..<(index+1)] }
+        if head.name == "audio_adaln_single" { referenceAudioEmbeddings[sigma.bitPattern]=output.embedded[index..<(index+1)] }
       }
       try Task.checkCancellation(); trimCache()
       try progress(Progress(stage:"schedule_"+head.name,completedBlocks:0,activeBytes:Memory.activeMemory,
         cacheBytes:Memory.cacheMemory,stack:nil))
       try Task.checkCancellation()
     }
-    return Preparation(rotary:positions,modulations:modulations,embeddings:embeddings,videoTimes:videoTimes,referenceModulations:referenceModulations,referenceEmbeddings:referenceEmbeddings,frozenAudio:frozenAudio)
+    return Preparation(rotary:positions,modulations:modulations,embeddings:embeddings,videoTimes:videoTimes,audioTimes:audioTimes,
+      referenceModulations:referenceModulations,referenceEmbeddings:referenceEmbeddings,
+      referenceAudioEmbeddings:referenceAudioEmbeddings,frozenAudio:frozenAudio)
   }
 
   func preflightWithoutText(_ inputs:[String:MLXArray],schedule:SamplingSchedule) throws -> [String:MLXArray] {

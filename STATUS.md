@@ -12,6 +12,33 @@ A saved ComfyUI T2V API prompt ran the packaged Swift worker in 72.28 seconds at
 process peak; its result reports no Python inference. These are individual recipes, not
 cross-device speed or general quality guarantees. External FFmpeg memory is excluded.
 
+Swift LTX 2.5 after-extension and per-clip motion continuation now prepare a frozen
+constant-rate audiovisual source tail from the visible accepted-take interval. The ordinary
+extension uses 25 context frames; motion continuation keeps 49. Both stages encode video
+and synchronized audio guides, release them before decoding, and publish only the added
+frames with exactly matching audio duration. An installed-checkpoint 384 × 256, 24-frame
+after-extension of an existing Studio waterfront take completed in 35.44 worker seconds
+with a 2.98 GB peak Swift process footprint, excluding FFmpeg; its published movie has
+24 video frames and 48,000 stereo 48 kHz samples. Four sampled frames retained the
+woman, denim jacket, waterfront and camera direction across the join; source-last to
+output-first measured 24.87 dB PSNR. A synthetic-source run and Studio preparation tests
+also passed. The distinct 49-context-frame motion route completed in 44.52 worker seconds
+at a 3.68 GB peak Swift process footprint, with exactly one second of video/audio and
+25.49 dB source-endpoint to output-first PSNR. Both modes passed installed Studio
+prepare, preflight, render, two-preview, accept and reopen lifecycles with Python
+unavailable. These short cases do not qualify longer motion continuation, seamless
+sound/identity at arbitrary joins, or scene chaining.
+
+H3 FL2VA preparation now accepts one to eight distinct, ordered timed keyframes, including
+interior frame positions. It bounds Qwen visual copies when the full-canvas token count
+exceeds 1,024, retaining full-canvas VAE conditions. Focused recipe/Studio tests and
+installed-checkpoint preflights with three and eight image positions pass. A separate
+three-keyframe 768 × 448, 73-frame, four-evaluation run took 399.77 seconds at a
+3.98 GB peak Swift process footprint, excluding FFmpeg. Front, interior and final
+output frames followed their references at 0.9902/0.9976/0.9956 correlation.
+The requested 2.5 seconds aligned to 73 frames and a 3.05-second movie; Studio now
+places its last anchor on the final frame of the requested visible interval. This is
+one short turn, not broad multi-keyframe quality or performance qualification.
 For H3 still Ref2VA, the corrected packaged worker passed preflight at every ordered count
 from one through nine distinct images. A real nine-image, 768 × 448, 124-frame, four-evaluation
 boxing take completed in 882.62 seconds at a 6.06 GB peak Swift process footprint. Reviewed
@@ -22,8 +49,8 @@ turn remained coherent after a stronger sound prompt, but generated audio averag
 the installed FL2VA checkpoint in text-only mode completed at 768 × 448/124 frames in
 579.94 seconds at a 5.23 GB peak process footprint; the visual arm motion was coherent,
 while generated sound was subdued (-57.5 dBFS mean). Both H3 sound quality and broader
-checkpoint-general quality remain experimental. LTX extension/continuous scenes and
-specialized conditioning, H3 video/audio references, general H3 LoRA stacks, and complete
+checkpoint-general quality remain experimental. LTX continuous scenes and specialized
+conditioning, H3 video/audio references, general H3 LoRA stacks, and complete
 Python-free Studio distribution remain open.
 
 H3 INT8 finetunes 2026-09-22 (experimental): standard H3 model setup and shared sampling now

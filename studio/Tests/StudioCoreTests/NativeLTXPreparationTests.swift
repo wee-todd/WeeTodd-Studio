@@ -24,7 +24,7 @@ final class NativeLTXPreparationTests: XCTestCase {
     XCTAssertEqual(inputs[0]["role"] as? String,"audio_driver")
     XCTAssertEqual(inputs[0]["source_start_seconds"] as? Double,1.25)
     XCTAssertEqual(inputs[0]["source_duration_seconds"] as? Double,49.0/24.0)
-    XCTAssertTrue((try NativeLTXPreparation.catalog(directory:root.path)[0]["generation"] as! [String:Any])["supportedTasks"] as! [String] == ["t2v","i2v","fflf","a2v"])
+    XCTAssertTrue((try NativeLTXPreparation.catalog(directory:root.path)[0]["generation"] as! [String:Any])["supportedTasks"] as! [String] == ["t2v","i2v","fflf","a2v","extension"])
     project.clips[0].attachments[0].audioSourceStart=nil
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
     project.clips[0].attachments[0]=driver
@@ -305,6 +305,69 @@ final class NativeLTXPreparationTests: XCTestCase {
     let output = root.appendingPathComponent("bad-job")
     do { _ = try await NativeLTXPreparation.prepareWithMedia(request: body(), destination: output); XCTFail("Out-of-range trim accepted") }
     catch { XCTAssertFalse(FileManager.default.fileExists(atPath: output.path)) }
+  }
+
+  func testExtensionExtractsOnlyVisibleTailAndPublishesFrozenRecipe() async throws {
+    let ffmpeg = URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg")
+    guard FileManager.default.isExecutableFile(atPath: ffmpeg.path) else { throw XCTSkip("FFmpeg unavailable") }
+    let (root, original, oldRuntime) = try fixture()
+    let movie = root.appendingPathComponent("source.mp4")
+    let process = Process()
+    process.executableURL = ffmpeg
+    process.arguments = ["-v", "error", "-f", "lavfi", "-i",
+      "testsrc2=size=128x64:rate=24:duration=4", "-f", "lavfi", "-i",
+      "sine=frequency=440:sample_rate=48000:duration=4", "-map", "0:v:0",
+      "-map", "1:a:0", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+      "-c:a", "aac", "-shortest", movie.path]
+    try process.run(); process.waitUntilExit(); XCTAssertEqual(process.terminationStatus, 0)
+    var source = Clip(engine: .movie)
+    source.sourcePath = movie.path; source.sourceIn = 1; source.duration = 2
+    var target = original.clips[0]
+    target.duration = 1; target.generationWidth = 128; target.generationHeight = 64
+    target.extensionDirection = "after"; target.extensionSource = movie.path
+    target.extensionClipID = source.id; target.generationSelection = GenerationSelection(task: "extension")
+    var project = original; project.clips = [source, target]
+    var runtime = oldRuntime; runtime["ffmpegPath"] = ffmpeg.path
+    var body = try request(project, runtime); body["clipID"] = target.id.uuidString
+    let description = try NativeLTXPreparation.describe(request: body)
+    XCTAssertEqual(description["readinessErrors"] as? [String], [])
+    let output = root.appendingPathComponent("extension-job")
+    let prepared = try await NativeLTXPreparation.prepareWithMedia(request: body, destination: output)
+    let recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: prepared["recipePath"] as! String))) as! [String: Any]
+    let condition = recipe["conditioning"] as! [String: Any]
+    XCTAssertEqual(condition["task"] as? String, "extension")
+    XCTAssertEqual((condition["extension"] as? [String: Any])?["context_frames"] as? Int, 25)
+    XCTAssertEqual((condition["extension"] as? [String: Any])?["additional_frames"] as? Int, 24)
+    let input = (condition["inputs"] as! [[String: Any]])[0]
+    let tail = URL(fileURLWithPath: input["path"] as! String)
+    XCTAssertTrue(tail.path.hasPrefix(output.path + "/"))
+    XCTAssertEqual((input["sha256"] as? String)?.count, 64)
+    let asset = AVURLAsset(url: tail)
+    let videoTracks = try await asset.loadTracks(withMediaType: .video)
+    let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+    XCTAssertEqual(videoTracks.count, 1)
+    XCTAssertEqual(audioTracks.count, 1)
+    let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: output.appendingPathComponent("editor-request.json"))) as! NSDictionary
+    XCTAssertEqual(saved, body as NSDictionary)
+    XCTAssertEqual(project.clips[1].extensionSource, movie.path)
+    target.attachments = [Attachment(assetID: UUID(), role: .first)]
+    project.clips[1] = target
+    body = try request(project, runtime); body["clipID"] = target.id.uuidString
+    XCTAssertFalse((try NativeLTXPreparation.describe(request: body)["readinessErrors"] as? [String] ?? []).isEmpty)
+    target.attachments = []
+    target.extensionDirection = ""; target.extensionSource = ""; target.extensionClipID = nil
+    target.continuity = ClipContinuity(mode: "motion", sourceClipID: source.id)
+    target.generationSelection = GenerationSelection(task: "t2v")
+    source.sourceIn = 0.5; source.duration = 3
+    project.clips = [source, target]
+    body = try request(project, runtime); body["clipID"] = target.id.uuidString
+    let motion = try await NativeLTXPreparation.prepareWithMedia(request: body,
+      destination: root.appendingPathComponent("motion-job"))
+    let motionRecipe = try JSONSerialization.jsonObject(with:
+      Data(contentsOf: URL(fileURLWithPath: motion["recipePath"] as! String))) as! [String: Any]
+    let motionCondition = motionRecipe["conditioning"] as! [String: Any]
+    XCTAssertEqual((motionCondition["extension"] as? [String: Any])?["context_frames"] as? Int, 49)
+    XCTAssertEqual((motion["report"] as? [String: Any])?["task"] as? String, "extension")
   }
 
 }

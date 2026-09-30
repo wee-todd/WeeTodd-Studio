@@ -7,6 +7,16 @@ import AdapterRuntime
 /// Released distilled T2AV recipe. Header-only preflight admits both stages and
 /// both ordered adapter stacks before payload reads. Each sampler is stage-local.
 public final class MLXDistilledSamplingRunner {
+  public struct ExtensionGuides {
+    public let stageOneVideo:MLXArray
+    public let stageTwoVideo:MLXArray
+    public let audio:MLXArray
+    public init(stageOneVideo:MLXArray,stageTwoVideo:MLXArray,audio:MLXArray) {
+      self.stageOneVideo=stageOneVideo.reshaped(stageOneVideo.shape)
+      self.stageTwoVideo=stageTwoVideo.reshaped(stageTwoVideo.shape)
+      self.audio=audio.reshaped(audio.shape)
+    }
+  }
   private let recipe:DistilledTwoStageRecipe
   private let noisePolicy:MLXNoisePolicy
   private let maximumActivationBytes:Int
@@ -14,25 +24,35 @@ public final class MLXDistilledSamplingRunner {
   private let upscaler:MLXLatentUpscaler
   private let gate=NSLock()
   private let layouts:[MLXReferenceLayout?]
+  private let guideLayouts:[MLXExtensionGuideLayout?]
   public private(set) var stageSeconds:[String:Double]=[:]
 
   public init(recipe:DistilledTwoStageRecipe,transformerRoot:URL,upscalerCheckpoint:URL,
-    statisticsCheckpoint:URL,firstStrength:Float?=nil,lastStrength:Float?=nil,stageOneLoras:[LoRAAdapter]=[],stageTwoLoras:[LoRAAdapter]=[],noisePolicy:MLXNoisePolicy = .native,maximumActivationBytes:Int=2*1024*1024*1024) throws {
+    statisticsCheckpoint:URL,firstStrength:Float?=nil,lastStrength:Float?=nil,
+    extensionContextFrames:Int?=nil,stageOneLoras:[LoRAAdapter]=[],stageTwoLoras:[LoRAAdapter]=[],
+    noisePolicy:MLXNoisePolicy = .native,maximumActivationBytes:Int=2*1024*1024*1024) throws {
     self.recipe=recipe;self.noisePolicy=noisePolicy;self.maximumActivationBytes=maximumActivationBytes
     guard firstStrength != nil || lastStrength == nil else { throw LTXError.invalid("Last-frame reference requires a first frame.") }
+    guard extensionContextFrames == nil || (firstStrength == nil && lastStrength == nil && noisePolicy == .releasedMLX) else {
+      throw LTXError.invalid("LTX extension needs a separate audiovisual source and the released MLX noise policy.")
+    }
     layouts=try [recipe.low,recipe.high].map { g in
       try firstStrength.map { try MLXReferenceLayout(geometry:g,firstStrength:$0,lastStrength:lastStrength) }
     }
+    guideLayouts=try [recipe.low,recipe.high].map { g in
+      try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:g,contextFrames:$0) }
+    }
     // Reject impossible stage-two geometry before even opening stage-one files.
     for (index,g) in [recipe.low,recipe.high].enumerated() {
-      let block=try MLXAVBlock(configuration:Self.configuration(g,layout:layouts[index]),maximumActivationBytes:maximumActivationBytes)
+      let block=try MLXAVBlock(configuration:Self.configuration(g,layout:layouts[index],guide:guideLayouts[index]),maximumActivationBytes:maximumActivationBytes)
       if layouts[index] != nil { try block.admitPerTokenVideo() }
+      if guideLayouts[index] != nil { try block.admitPerTokenAV() }
     }
     _ = try MLXLatentUpscaler.admit(shape:[recipe.low.latentFrames,recipe.low.latentHeight,recipe.low.latentWidth,128],maximumActivationBytes:maximumActivationBytes)
     var sources:[MLXDenoiserWeights]=[]
     for (index,pair) in [(recipe.low,stageOneLoras),(recipe.high,stageTwoLoras)].enumerated() {
       let (g,adapters)=pair
-      let source=try MLXDenoiserWeights(root:transformerRoot,configuration:Self.configuration(g,layout:layouts[index]),adapters:adapters,maximumActivationBytes:maximumActivationBytes)
+      let source=try MLXDenoiserWeights(root:transformerRoot,configuration:Self.configuration(g,layout:layouts[index],guide:guideLayouts[index]),adapters:adapters,maximumActivationBytes:maximumActivationBytes)
       guard source.sourceCheckpoint == "ltx-2.5-22b-distilled-transformer-bf16.safetensors" else {
         throw LTXError.invalid("Released two-stage sampling requires the distilled transformer provenance.")
       }
@@ -41,16 +61,32 @@ public final class MLXDistilledSamplingRunner {
     weights=sources
     upscaler=try MLXLatentUpscaler(checkpoint:upscalerCheckpoint,statisticsCheckpoint:statisticsCheckpoint)
   }
-  private static func configuration(_ g:AVGeometry,layout:MLXReferenceLayout?=nil) throws -> AVBlockConfiguration {
-    try AVBlockConfiguration(videoTokens:layout?.videoTokens ?? g.videoTokens,audioTokens:g.audioFrames,textTokens:1024)
+  private static func configuration(_ g:AVGeometry,layout:MLXReferenceLayout?=nil,
+    guide:MLXExtensionGuideLayout?=nil) throws -> AVBlockConfiguration {
+    try AVBlockConfiguration(videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? g.videoTokens,
+      audioTokens:guide?.audioTokens ?? g.audioFrames,textTokens:1024)
   }
   public func evaluate(videoContext:MLXArray,audioContext:MLXArray,
     references:[(first:MLXArray,last:MLXArray?)]=[],frozenAudio:MLXArray?=nil,
-    progress:(String,Int,Int) throws -> Void = { _,_,_ in }) throws -> [String:MLXArray] {
+    extensionGuides:ExtensionGuides?=nil,
+    progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> [String:MLXArray] {
     guard gate.try() else { throw LTXError.invalid("Two-stage MLX sampler is already active.") }
     defer { Stream.gpu.synchronize(); Memory.clearCache(); gate.unlock() }
     try Task.checkCancellation()
     guard references.count == (layouts[0] == nil ? 0 : 2) else { throw LTXError.invalid("Both stage references must be encoded before sampling.") }
+    guard (extensionGuides != nil) == (guideLayouts[0] != nil),
+      extensionGuides == nil || (frozenAudio == nil && references.isEmpty) else {
+      throw LTXError.invalid("LTX extension needs stage-one, stage-two and audio source guides without endpoint or frozen-audio conditioning.")
+    }
+    if let extensionGuides {
+      for (value,count) in [(extensionGuides.stageOneVideo,guideLayouts[0]!.videoGuideTokens),
+        (extensionGuides.stageTwoVideo,guideLayouts[1]!.videoGuideTokens),
+        (extensionGuides.audio,guideLayouts[0]!.audioGuideTokens)] {
+        guard value.dtype == .float32,value.shape == [count,128],MLX.isFinite(value).all().item(Bool.self) else {
+          throw LTXError.invalid("LTX extension source guide differs from the admitted audiovisual layout.")
+        }
+      }
+    }
     let references=references.map { (first:$0.first.reshaped($0.first.shape),last:$0.last.map { $0.reshaped($0.shape) }) }
     for (index,pair) in references.enumerated() { try layouts[index]!.validate(first:pair.first,last:pair.last) }
     var text:[String:MLXArray]=[:]
@@ -64,26 +100,40 @@ public final class MLXDistilledSamplingRunner {
     func report(_ name:String,_ completed:Int,_ total:Int) throws {
       try Task.checkCancellation(); try progress(name,completed,total); try Task.checkCancellation()
     }
-    return try MLXTwoStageTrajectory().evaluate(recipe:recipe,noisePolicy:noisePolicy,frozenAudio:frozenAudio,sample:{ stage,g,state,schedule,noise in
+    let sampleStage:MLXTwoStageTrajectory.GuideSample={ stage,g,state,guideNoise,schedule,noise in
       let start=Date()
       let output=try autoreleasepool {
         let source=self.weights[stage-1]
         let layout=self.layouts[stage-1]
-        let sampler=try MLXSamplingRunner(configuration:Self.configuration(g,layout:layout),maximumActivationBytes:self.maximumActivationBytes)
+        let guideLayout=self.guideLayouts[stage-1]
+        let sampler=try MLXSamplingRunner(configuration:Self.configuration(g,layout:layout,guide:guideLayout),maximumActivationBytes:self.maximumActivationBytes)
         var inputs=text
         inputs["video_latent"]=state["video"]!; inputs["audio_latent"]=state["audio"]!
         var conditioning:MLXVideoDenoiseCondition?
+        var audioConditioning:MLXAudioDenoiseCondition?
         if let layout {
           let pair=references[stage-1]
           let prepared=try layout.prepare(generated:state["video"]!,first:pair.first,last:pair.last)
           inputs["video_latent"]=prepared.latent;conditioning=prepared.condition
         }
-        let videoTokens=layout?.videoTokens ?? g.videoTokens
-        inputs["video_positions"]=MLXArray(layout?.positions ?? g.videoPositions,[videoTokens,3])
-        inputs["audio_positions"]=MLXArray(g.audioPositions,[g.audioFrames,1])
+        if let guideLayout,let extensionGuides {
+          let sourceVideo=stage == 1 ? extensionGuides.stageOneVideo : extensionGuides.stageTwoVideo
+          let prepared=try guideLayout.prepare(targetVideo:state["video"]!,targetAudio:state["audio"]!,
+            sourceVideo:sourceVideo,sourceAudio:extensionGuides.audio,
+            guideVideoNoise:guideNoise["video"]!,guideAudioNoise:guideNoise["audio"]!,
+            sigma:Float(schedule.sigmas[0]))
+          inputs["video_latent"]=prepared.video;inputs["audio_latent"]=prepared.audio
+          conditioning=prepared.videoCondition;audioConditioning=prepared.audioCondition
+        }
+        let videoTokens=guideLayout?.videoTokens ?? layout?.videoTokens ?? g.videoTokens
+        let audioTokens=guideLayout?.audioTokens ?? g.audioFrames
+        inputs["video_positions"]=MLXArray(guideLayout?.videoPositions ?? layout?.positions ?? g.videoPositions,[videoTokens,3])
+        inputs["audio_positions"]=MLXArray(guideLayout?.audioPositions ?? g.audioPositions,[audioTokens,1])
         let bf16:Set<String> = self.noisePolicy == .releasedMLX
           ? (frozenAudio != nil ? (stage == 1 ? ["video"] : []) : (stage == 1 ? ["video","audio"] : ["audio"])) : []
-        let sampled=try sampler.evaluate(inputs,schedule:schedule,videoConditioning:conditioning,frozenAudio:frozenAudio != nil,bfloat16State:bf16,fixedWeights:source.readFixed,blockWeights:source.readBlock,
+        let sampled=try sampler.evaluate(inputs,schedule:schedule,videoConditioning:conditioning,
+          audioConditioning:audioConditioning,frozenAudio:frozenAudio != nil,bfloat16State:bf16,
+          fixedWeights:source.readFixed,blockWeights:source.readBlock,
           fixedAdapters:source.fixedAdapters,blockAdapters:source.blockAdapters,noise:noise,
           stageProgress:{ _,event in
             if event.completedBlocks==48,let detail=event.stack {
@@ -93,12 +143,13 @@ public final class MLXDistilledSamplingRunner {
             try report("stage\(stage):"+event.stage,event.completedBlocks,48)
           },
           progress:{ event in try report("sampling",(stage == 1 ? 0 : 8)+event.completedSteps,11) })
-        return ["video":sampled["video"]![0..<g.videoTokens],"audio":sampled["audio"]!]
+        return ["video":sampled["video"]![0..<g.videoTokens],"audio":sampled["audio"]![0..<g.audioFrames]]
       }
       self.stageSeconds["stage\(stage)"]=Date().timeIntervalSince(start)
       try report("stage\(stage)_weights_released",stage,2)
       return output
-    },upscale:{ video,shape in
+    }
+    let upscale:MLXTwoStageTrajectory.Upscale={ video,shape in
       Stream.gpu.synchronize(); Memory.clearCache()
       let start=Date()
       let output=try autoreleasepool {
@@ -109,6 +160,16 @@ public final class MLXDistilledSamplingRunner {
       self.stageSeconds["latent_upscale_mlx"]=Date().timeIntervalSince(start)
       try report("upscaler_weights_released",1,1)
       return output
-    })
+    }
+    let trajectory=MLXTwoStageTrajectory()
+    if let guide=guideLayouts[0] {
+      return try trajectory.evaluateWithGuides(recipe:recipe,
+        videoGuideFrames:(guide.contextFrames-1)/8+1,audioGuideTokens:guide.audioGuideTokens,
+        sample:sampleStage,upscale:upscale)
+    }
+    return try trajectory.evaluate(recipe:recipe,noisePolicy:noisePolicy,frozenAudio:frozenAudio,
+      sample:{ stage,g,state,schedule,noise in
+        try sampleStage(stage,g,state,[:],schedule,noise)
+      },upscale:upscale)
   }
 }

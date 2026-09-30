@@ -9,6 +9,38 @@ final class MLXAVBlockTests: XCTestCase {
     let inputs: [String:[Float]]
     let expected: [String:[Float]]
   }
+  func testCompactAudioModulationsMatchExpandedRowsAlongsideVideo() throws {
+    let url=Bundle.module.url(forResource:"block-reference",withExtension:"json",subdirectory:"Fixtures")!
+    let f=try JSONDecoder().decode(Fixture.self,from:Data(contentsOf:url))
+    let compact=try MLXAVBlock(configuration:f.configuration),expanded=try MLXAVBlock(configuration:f.configuration)
+    for block in [compact,expanded] {
+      try block.load { name,shape in
+        let seed=name.utf8.reduce(0) { $0+Int($1) }
+        let norm:Float=name.hasSuffix("q_norm.weight") || name.hasSuffix("k_norm.weight") ? 1 : 0
+        return try MLXWeight(dense:MLXArray((0..<shape.reduce(1,*)).map { Float(($0*17+seed)%31-15)/128+norm },shape))
+      }
+    }
+    var a=f.inputs.mapValues { MLXArray($0) },b=a
+    for (prefix,tokens,names) in [("video",f.configuration.videoTokens,["video_modulation","video_av_modulation"]),
+      ("audio",f.configuration.audioTokens,["audio_modulation","audio_av_modulation"])] {
+      let index=MLXArray((0..<tokens).map { Int32($0%2) })
+      a[prefix+"_modulation_indices"]=index
+      for name in names {
+        let width=compact.inputShapes[name]![1]
+        let table=broadcast(a[name]!.reshaped([1,width]),to:[2,width])+MLXArray([Float(0),Float(0.08)],[2,1])
+        a[name]=table;b[name]=take(table,index,axis:0)
+      }
+    }
+    let actual=try compact.evaluate(a),expected=try expanded.evaluate(b)
+    for key in ["video","audio"] {
+      XCTAssertLessThan((actual[key]!-expected[key]!).abs().max().item(Float.self),0.00003)
+    }
+    for badIndex in [Int32(-1),Int32(2)] {
+      var bad=a
+      bad["audio_modulation_indices"]=broadcast(MLXArray([badIndex]),to:[f.configuration.audioTokens])
+      XCTAssertThrowsError(try compact.validateInputs(bad))
+    }
+  }
   func testCompressedModulationsMatchExpandedWithChangingIndicesAndTables() throws {
     let url=Bundle.module.url(forResource:"block-reference",withExtension:"json",subdirectory:"Fixtures")!
     let f=try JSONDecoder().decode(Fixture.self,from:Data(contentsOf:url))

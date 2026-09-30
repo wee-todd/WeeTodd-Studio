@@ -1,9 +1,33 @@
 import XCTest
 import MLX
 import LTX25Engine
-import LTX25MLX
+@testable import LTX25MLX
 
 final class MLXTwoStageTests:XCTestCase {
+  func testExtensionDrawsTargetAndGuideNoiseFromOneShapedSeedPerStage() throws {
+    let recipe=try DistilledTwoStageRecipe(width:64,height:64,frames:41,fps:24,seed:41)
+    var stages:[Int]=[]
+    _=try MLXTwoStageTrajectory().evaluateWithGuides(recipe:recipe,videoGuideFrames:2,
+      audioGuideTokens:10,sample:{ stage,g,state,guides,_,_ in
+        stages.append(stage)
+        let fullVideo=MLXNoisePolicy.seeded(recipe.seed &+ (stage == 1 ? 0 : 2),
+          tokens:g.videoTokens+guides["video"]!.shape[0]).asType(.float32)
+        XCTAssertEqual(guides["video"]!.asArray(Float.self),
+          fullVideo[g.videoTokens...].asArray(Float.self))
+        if stage == 1 {
+          XCTAssertEqual(state["video"]!.asArray(Float.self),
+            fullVideo[0..<g.videoTokens].asArray(Float.self))
+          let fullAudio=MLXNoisePolicy.seeded(recipe.seed &+ 1,
+            tokens:g.audioFrames+guides["audio"]!.shape[0]).asType(.float32)
+          XCTAssertEqual(state["audio"]!.asArray(Float.self),
+            fullAudio[0..<g.audioFrames].asArray(Float.self))
+          XCTAssertEqual(guides["audio"]!.asArray(Float.self),
+            fullAudio[g.audioFrames...].asArray(Float.self))
+        }
+        return state
+      },upscale:{ value,_ in .zeros([value.shape[0]*4,128]) })
+    XCTAssertEqual(stages,[1,2])
+  }
   func testFrozenSourceAudioSurvivesBothStagesWithoutAudioNoise() throws {
     let recipe=try DistilledTwoStageRecipe(width:64,height:64,frames:9,fps:24,seed:7)
     let source=MLXArray.ones([recipe.low.audioFrames,128])*0.125

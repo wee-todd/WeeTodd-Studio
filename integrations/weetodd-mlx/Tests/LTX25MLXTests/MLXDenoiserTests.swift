@@ -88,6 +88,27 @@ final class MLXDenoiserTests: XCTestCase {
     XCTAssertEqual(result["video"]?.size,f.configuration.videoTokens*128)
     XCTAssertEqual(result["audio"]?.size,f.configuration.audioTokens*128)
   }
+  func testAudioPerTokenTimestepSharesHeadCacheAndRejectsInvalidMasksBeforeWeights() throws {
+    let f=try fixture(),runner=try MLXDenoiser(configuration:f.configuration,blockCount:1)
+    let inputs=f.inputs.mapValues { MLXArray($0) }
+    let blocks:MLXDenoiser.BlockProvider={ try self.weight("transformer_blocks.\($0)."+$1,$2) }
+    let baseline=try runner.evaluate(inputs,sigma:f.sigma,fixedWeights:weight,blockWeights:blocks)
+    let allOne=try runner.evaluate(inputs,sigma:f.sigma,audioDenoiseMask:Array(repeating:1,count:f.configuration.audioTokens),
+      fixedWeights:weight,blockWeights:blocks)
+    for name in ["video","audio"] {
+      XCTAssertLessThan((allOne[name]!-baseline[name]!).abs().max().item(Float.self),0.0001)
+    }
+    let mixed=try runner.evaluate(inputs,sigma:f.sigma,videoDenoiseMask:[0,1,0.5,1,0],
+      audioDenoiseMask:[0,0.5,1],fixedWeights:weight,blockWeights:blocks)
+    XCTAssertTrue(mixed.values.allSatisfy { MLX.isFinite($0).all().item(Bool.self) })
+    XCTAssertGreaterThan((mixed["audio"]!-baseline["audio"]!).abs().max().item(Float.self),0.00001)
+    var reads=0
+    for mask:[Float] in [[0],[0,1,Float.nan],[0,1,-0.1]] {
+      XCTAssertThrowsError(try runner.evaluate(inputs,sigma:f.sigma,audioDenoiseMask:mask,
+        fixedWeights:{ name,shape in reads += 1;return try self.weight(name,shape) },blockWeights:blocks))
+    }
+    XCTAssertEqual(reads,0)
+  }
   func testInvalidInputAndObserverFailureDoNotLeakAndAllowRetry() throws {
     enum Stop:Error { case stop }
     let f=try fixture(), runner=try MLXDenoiser(configuration:f.configuration,blockCount:1)

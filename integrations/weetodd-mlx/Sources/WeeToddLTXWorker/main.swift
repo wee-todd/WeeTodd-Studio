@@ -51,11 +51,17 @@ import MLX
       expectedOutputDirectory:args[4])
     let recipeData=try read(envelope.recipePath)
     try envelope.validateRecipe(recipeData)
-    if let root=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any],
-      root["task"] as? String == "ripple" {
-      try await executeRipple(recipeData:recipeData,envelope:envelope,ffmpegOverride:envelope.ffmpegPath,
-        outputDirectory:args[4],preflight:args[0] == "preflight",started:start)
-      return
+    if let root=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any] {
+      if root["task"] as? String == "ripple" {
+        try await executeRipple(recipeData:recipeData,envelope:envelope,ffmpegOverride:envelope.ffmpegPath,
+          outputDirectory:args[4],preflight:args[0] == "preflight",started:start)
+        return
+      }
+      if (root["conditioning"] as? [String:Any])?["task"] as? String == "extension" {
+        try await executeExtension(recipeData:recipeData,envelope:envelope,
+          outputDirectory:args[4],preflight:args[0] == "preflight",started:start)
+        return
+      }
     }
     let request=try MLXStudioRecipe.compile(data:recipeData,outputDirectory:args[4])
     let recipe=try JSONSerialization.jsonObject(with:recipeData) as! [String:Any]
@@ -109,6 +115,96 @@ import MLX
       try recipeData.write(to:staging.appendingPathComponent("studio-recipe.json"),options:.withoutOverwriting)
       try JSONSerialization.data(withJSONObject:result,options:[.prettyPrinted,.sortedKeys]).write(to:staging.appendingPathComponent("result.json"),options:.withoutOverwriting)
     },progress:{ stage,completed,total in try emit(progress.event(stage:stage,completed:completed,total:total)) })
+    try Task.checkCancellation()
+    try emit(["status":"success","result":result])
+  }
+
+  static func executeExtension(recipeData:Data,envelope:NativeVideoJobEnvelope,
+    outputDirectory:String,preflight:Bool,started:Date) async throws {
+    let compiled=try MLXStudioExtensionRecipe.compile(data:recipeData,
+      outputDirectory:outputDirectory)
+    let request=compiled.request,window=compiled.window
+    let recipe=try JSONSerialization.jsonObject(with:recipeData) as! [String:Any]
+    let configured=envelope.ffmpegPath ?? ""
+    let ffmpeg=configured.isEmpty ? recipe["ffmpeg"] as? String ?? "" : configured
+    guard ffmpeg.hasPrefix("/"),FileManager.default.isExecutableFile(atPath:ffmpeg) else {
+      throw invalid("Select an executable FFmpeg in Runtime Settings.")
+    }
+    let memory=try MLXStudioMemoryPlan(request:request,
+      extensionContextFrames:window.contextFrames,
+      physicalMemory:ProcessInfo.processInfo.physicalMemory,
+      recommendedWorkingSet:UInt64(GPU.deviceInfo().maxRecommendedWorkingSetSize))
+    let interval=try MLXSourceMovieInterval(source:compiled.source,
+      sha256:compiled.sourceSHA256,window:window)
+    let encoder=try MLXExtensionGuideEncoder(window:window,
+      videoCheckpoint:URL(fileURLWithPath:request.videoCheckpoint),
+      audioCheckpoint:URL(fileURLWithPath:request.audioCheckpoint),
+      maximumOwnedBufferBytes:memory.activationCeilingBytes)
+    let pipeline=try MLXMediaPipeline(request:request,
+      extensionContextFrames:window.contextFrames,
+      videoActivationBytes:memory.videoActivationBytes,
+      transformerActivationBytes:memory.transformerActivationBytes,
+      videoBackend:.mlx,audioBackend:.mlx)
+    let sourceStatus=try await interval.preflight()
+    try Task.checkCancellation()
+    if preflight {
+      try emit(["status":"success","result":["nativeRuntime":"swift-mlx",
+        "jobID":envelope.jobID.uuidString,"task":"extension",
+        "frames":window.additionalFrames,"totalFrames":window.totalFrames,
+        "contextFrames":window.contextFrames,"sourceFrames":sourceStatus.sourceFrames,
+        "fps":request.fps,"transformerActivationBytes":memory.transformerActivationBytes,
+        "videoActivationBytes":memory.videoActivationBytes,
+        "activationCeilingBytes":memory.activationCeilingBytes]])
+      return
+    }
+    let inferenceLease=try NativeInferenceLease.acquire {
+      try? emit(["event":"progress","stage":"waiting","fraction":0,
+        "message":"Waiting for another local inference job"])
+    }
+    defer { inferenceLease.release() }
+    let output=URL(fileURLWithPath:outputDirectory)
+    let preview=output.appendingPathExtension("preview.png")
+    let sourceDirectory=output.appendingPathExtension("source-extension-"+UUID().uuidString)
+    defer {
+      try? FileManager.default.removeItem(at:sourceDirectory)
+      try? FileManager.default.removeItem(at:preview)
+    }
+    var progress=MLXStudioProgress(),lastPreview=Date.distantPast,revision=0
+    let prepared=try await interval.prepare(ffmpeg:URL(fileURLWithPath:ffmpeg),
+      directory:sourceDirectory)
+    let guideLease=MLXMediaPipeline.ExtensionGuideLease(try encoder.encode(prepared) {
+      stage,completed,total in
+      try emit(progress.event(stage:stage,completed:completed,total:total))
+    })
+    var result:[String:Any]=[:]
+    _ = try pipeline.run(ffmpeg:URL(fileURLWithPath:ffmpeg),extensionGuideLease:guideLease,
+      decodedPreview:{ index,bytes in
+        guard index == 0 || index == window.additionalFrames-1 ||
+          Date().timeIntervalSince(lastPreview) >= 1 else { return }
+        try Task.checkCancellation()
+        try autoreleasepool {
+          try MLXStudioPreview.write(rgb:bytes,width:request.width,height:request.height,to:preview)
+        }
+        revision += 1;lastPreview=Date()
+        var event=progress.event(stage:"video_decode",completed:index+1,total:window.additionalFrames)
+        event["previewPath"]=preview.path;event["previewRevision"]=revision
+        try emit(event)
+      },beforePublish:{ staging,report in
+        let stages=report["stage_seconds"] as? [String:Double] ?? [:]
+        result=["video":output.appendingPathComponent("render.mp4").path,
+          "jobID":envelope.jobID.uuidString,"task":"extension",
+          "usable_source_in":0.0,"usable_duration":window.additionalDuration,
+          "seconds":Date().timeIntervalSince(started),
+          "sampling_seconds":(stages["stage1"] ?? 0)+(stages["stage2"] ?? 0),
+          "metadata":report,"nativeRuntime":"swift-mlx",
+          "elapsed_scope":"worker initialization through completed media, before atomic publication"]
+        try recipeData.write(to:staging.appendingPathComponent("studio-recipe.json"),
+          options:.withoutOverwriting)
+        try JSONSerialization.data(withJSONObject:result,options:[.prettyPrinted,.sortedKeys])
+          .write(to:staging.appendingPathComponent("result.json"),options:.withoutOverwriting)
+      },progress:{ stage,completed,total in
+        try emit(progress.event(stage:stage,completed:completed,total:total))
+      })
     try Task.checkCancellation()
     try emit(["status":"success","result":result])
   }

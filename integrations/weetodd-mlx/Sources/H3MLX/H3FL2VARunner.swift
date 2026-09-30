@@ -2,8 +2,8 @@ import Foundation
 import MLX
 import MLXRandom
 
-/// FL2VA anchors are conditioned video rows at the generated timeline's
-/// endpoints, never untimed Ref2VA appearance references.
+/// FL2VA anchors are conditioned video rows at explicit generated-frame times,
+/// never untimed Ref2VA appearance references.
 public struct H3FL2VARequest: Sendable {
   public let base: H3T2VARequest
   public let vision: URL
@@ -13,12 +13,28 @@ public struct H3FL2VARequest: Sendable {
   public init(base: H3T2VARequest, vision: URL,
     images: [H3StillReference], anchors: [H3PackedLayout.Anchor]) throws {
     guard vision.isFileURL, vision.path.hasPrefix("/"),
-      (1...2).contains(images.count), images.count == anchors.count,
-      anchors == Array([H3PackedLayout.Anchor.first, .last].prefix(images.count)),
+      (1...8).contains(images.count), images.count == anchors.count,
+      anchors.enumerated().allSatisfy({ index, anchor in
+        let frame: Int
+        switch anchor {
+        case .first: frame = 0
+        case .last: frame = base.geometry.frames - 1
+        case .frame(let value): frame = value
+        }
+        guard (0..<base.geometry.frames).contains(frame) else { return false }
+        if index == 0 { return true }
+        let previous: Int
+        switch anchors[index - 1] {
+        case .first: previous = 0
+        case .last: previous = base.geometry.frames - 1
+        case .frame(let value): previous = value
+        }
+        return previous < frame
+      }),
       images.allSatisfy({ $0.width == base.geometry.width &&
         $0.height == base.geometry.height &&
         $0.rgb8.count == $0.width * $0.height * 3 }) else {
-      throw H3CheckpointError.invalid("H3 FL2VA requires prepared, ordered first/last canvas images.")
+      throw H3CheckpointError.invalid("H3 FL2VA requires one to eight prepared canvas images at unique ascending frame positions.")
     }
     self.base = base
     self.vision = vision
@@ -45,12 +61,8 @@ public enum H3FL2VARunner {
     try Task.checkCancellation()
     let base = request.base
     let tokenizer = try H3QwenTokenizer(url: base.tokenizer)
-    let grids = request.images.map {
-      H3QwenRequest.Grid(temporal: 1,
-        height: $0.height / 16, width: $0.width / 16)
-    }
-    let qwen = try H3QwenRequest.keyframes(prompt: base.prompt,
-      grids: grids, tokenizer: tokenizer)
+    let qwen = try H3FL2VAQwenFrames.prepare(images: request.images,
+      prompt: base.prompt, tokenizer: tokenizer).request
     let layout = try H3PackedLayout(geometry: base.geometry,
       textTags: qwen.tags, anchors: request.anchors)
     let video = try H3Schedule(requestedSteps: base.requestedSteps, shift: 12)
@@ -87,7 +99,10 @@ public enum H3FL2VARunner {
     let base = request.base
     let geometry = admission.geometry
     let textRows = try autoreleasepool { () throws -> [Float] in
-      let packed = try request.images.map {
+      let tokenizer = try H3QwenTokenizer(url: base.tokenizer)
+      let visual = try H3FL2VAQwenFrames.prepare(images: request.images,
+        prompt: base.prompt, tokenizer: tokenizer)
+      let packed = try visual.images.map {
         try H3QwenImageProcessor.packRGB8(image: $0.rgb8,
           width: $0.width, height: $0.height)
       }

@@ -61,7 +61,7 @@ public enum NativeLTXPreparation {
       && (components["distilled_lora_path"] as? String ?? "").isEmpty
       && (components["duration_head_path"] as? String ?? "").isEmpty
       && config["ic_lora_single_stage"] as? Bool != true && !["control", "ref2va"].contains(task)
-    return ["supportedTasks": ordinary ? ["t2v", "i2v", "fflf", "a2v"] : [],
+    return ["supportedTasks": ordinary ? ["t2v", "i2v", "fflf", "a2v", "extension"] : [],
       "controls": ["evaluations": config["stage1_steps"] ?? 8, "refinementSteps": config["stage2_steps"] ?? 3,
         "cfg": config["video_cfg_scale"] ?? 1, "stepsEditable": false, "refinementStepsEditable": false,
         "cfgEditable": false, "shiftEditable": false,
@@ -101,6 +101,7 @@ public enum NativeLTXPreparation {
     let task: String
     let warnings: [String]
     let frameSource: NativeLTXFrameSource?
+    let movieSource: NativeLTXMovieSource?
   }
   private static func resolve(_ request: [String: Any]) throws -> Context {
     guard let projectValue = request["project"], let runtime = request["runtime"] as? [String: Any],
@@ -108,9 +109,12 @@ public enum NativeLTXPreparation {
     let project = try JSONDecoder().decode(StudioProject.self, from: data(projectValue))
     guard let clip = project.clips.first(where: { $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }),
       clip.engine == .ltx25 else { throw StudioError.invalid("Select an LTX 2.5 clip.") }
-    guard ["independent", "frame"].contains(clip.continuityMode),
+    guard ["independent", "frame", "motion"].contains(clip.continuityMode),
       !project.isContinuousSceneMember(clip), clip.audioDriverSelection == nil, clip.musicSource == nil,
-      clip.extensionDirection.isEmpty else { throw unsupported("continuity, continuous scenes, music drivers and extension are not yet ported") }
+      (clip.extensionDirection.isEmpty || clip.extensionDirection == "after"),
+      !(clip.continuityMode != "independent" && !clip.extensionDirection.isEmpty) else {
+      throw unsupported("this continuity, scene, music driver or extension direction is not yet ported")
+    }
     let selection = clip.generationSelection
     guard selection?.steps == nil, selection?.refinementSteps == nil, selection?.cfg == nil,
       selection?.shift == nil, selection?.projectionBackend == nil, selection?.transformerBackend == nil else {
@@ -123,10 +127,16 @@ public enum NativeLTXPreparation {
       throw unsupported("distilled 8 + 3 sampling does not evaluate negative prompts; clear the negative prompt")
     }
     let frameSource = try clip.continuityMode == "frame" ? NativeLTXFrameSource(project: project, clip: clip) : nil
-    let task = frameSource != nil
+    let movieSource = try (clip.continuityMode == "motion" || clip.extensionDirection == "after")
+      ? NativeLTXMovieSource(project: project, clip: clip) : nil
+    if movieSource != nil, let selectedTask = selection?.task,
+      !["t2v", "extension"].contains(selectedTask) {
+      throw unsupported("motion extension cannot combine with selected task \(selectedTask)")
+    }
+    let task = movieSource != nil ? "extension" : frameSource != nil
       ? (clip.attachments.contains { [.last, .keyframe].contains($0.role) } ? "fflf" : "i2v")
       : selection?.task ?? clip.inferredTask
-    guard ["t2v", "i2v", "fflf", "a2v"].contains(task) else { throw unsupported("task \(task) is not yet ported") }
+    guard ["t2v", "i2v", "fflf", "a2v", "extension"].contains(task) else { throw unsupported("task \(task) is not yet ported") }
     let profiles = try catalog(directory: runtime["profilesDirectory"] as? String ?? "")
     var candidates = profiles.filter {
       (clip.profileID == "auto" || $0["id"] as? String == clip.profileID)
@@ -149,7 +159,8 @@ public enum NativeLTXPreparation {
       warnings.append("The selected profile's negative prompt is not evaluated by distilled Swift sampling and is omitted.")
     }
     return Context(project: project, clip: clip, assets: project.assets + assets, runtime: runtime,
-      profile: profile, recipe: selectedRecipe, task: task, warnings: warnings, frameSource: frameSource)
+      profile: profile, recipe: selectedRecipe, task: task, warnings: warnings,
+      frameSource: frameSource, movieSource: movieSource)
   }
   public static func describe(request: [String: Any]) throws -> [String: Any] {
     let context = try resolve(request)
@@ -158,7 +169,9 @@ public enum NativeLTXPreparation {
     do {
       // Only the digest/controls escape description. The movie path identifies
       // the planned dependency; a runnable recipe requires extracted pixels.
-      let composed = try compose(context, firstFramePath: context.frameSource?.url.path)
+      let composed = try compose(context, firstFramePath: context.frameSource?.url.path,
+        moviePath: context.movieSource?.url.path,
+        movieSHA256: context.movieSource == nil ? nil : String(repeating: "0", count: 64))
       content = composed["recipe"] as! [String: Any]
       resolved = (composed["report"] as? [String: Any])?["resolvedFingerprint"] as? String ?? ""
     } catch { errors.append(error.localizedDescription) }
@@ -180,10 +193,14 @@ public enum NativeLTXPreparation {
       "warnings": context.warnings, "readinessErrors": errors]
   }
   public static func compose(request: [String: Any]) throws -> [String: Any] { try compose(resolve(request)) }
-  private static func compose(_ context: Context, firstFramePath: String? = nil) throws -> [String: Any] {
+  private static func compose(_ context: Context, firstFramePath: String? = nil,
+    moviePath: String? = nil, movieSHA256: String? = nil) throws -> [String: Any] {
     try Task.checkCancellation()
     guard context.frameSource == nil || firstFramePath != nil else {
       throw StudioError.invalid("Match previous frame requires native media preparation before composing a runnable recipe.")
+    }
+    guard context.movieSource == nil || (moviePath != nil && movieSHA256 != nil) else {
+      throw StudioError.invalid("Motion extension requires native media preparation before composing a runnable recipe.")
     }
     let clip = context.clip
     let prompt = clip.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -199,8 +216,13 @@ public enum NativeLTXPreparation {
       (64...4096).contains(clip.generationHeight), clip.generationWidth % 64 == 0, clip.generationHeight % 64 == 0 else {
       throw unsupported("invalid duration, frame rate, dimensions, seed or automatic duration")
     }
-    let duration = ceil(clip.duration * fps / 8 - 1e-9) * 8 / fps
-    guard duration <= 20 else { throw unsupported("rounded generation duration exceeds 20 seconds") }
+    let additionalFrames = Int(ceil(clip.duration * fps / 8 - 1e-9)) * 8
+    let contextFrames = context.movieSource == nil ? 0 : clip.continuityMode == "motion" ? 49 : 25
+    let frames = contextFrames + additionalFrames + (context.movieSource == nil ? 1 : 0)
+    let duration = Double(additionalFrames) / fps
+    guard Double(frames - 1) / fps <= 20 else {
+      throw unsupported("rounded generation plus source context exceeds 20 seconds")
+    }
     config["width"] = clip.generationWidth; config["height"] = clip.generationHeight
     config["seed"] = clip.seed; config["duration_seconds"] = duration
     config["negative_prompt"] = ""
@@ -223,7 +245,7 @@ public enum NativeLTXPreparation {
       inputs.append(["id": "continuity-" + clip.id.uuidString, "kind": "image", "role": "keyframe",
         "path": firstFramePath, "strength": 1.0, "frame_index": 0])
     }
-    let allowed: Set<MediaRole> = context.task == "t2v" ? [] : context.task == "i2v" ? [.first]
+    let allowed: Set<MediaRole> = ["t2v", "extension"].contains(context.task) ? [] : context.task == "i2v" ? [.first]
       : context.task == "a2v" ? [.audioDriver, .first] : [.first, .last, .keyframe]
     guard roles.isSubset(of: allowed) else { throw unsupported("attached media conflict with \(context.task); no inputs were discarded") }
     if context.task == "i2v", !roles.contains(.first) { throw StudioError.invalid("Image to video requires a First frame image.") }
@@ -276,8 +298,7 @@ public enum NativeLTXPreparation {
       inputs.append(["id": attachment.id.uuidString, "kind": "image", "role": "keyframe", "path": path,
         "strength": attachment.strength, "frame_index": frame])
     }
-    let frames = Int((duration * fps / 8).rounded(.toNearestOrEven)) * 8 + 1
-    if context.task != "a2v" {
+    if context.task != "a2v" && context.task != "extension" {
       let indices = inputs.map { $0["frame_index"] as? String == "last" ? frames - 1 : $0["frame_index"] as! Int }
       guard Set(indices).count == indices.count, indices.allSatisfy({ $0 == 0 || $0 == frames - 1 }),
         inputs.count <= 2, context.task == "t2v" || indices.contains(0) else {
@@ -290,6 +311,16 @@ public enum NativeLTXPreparation {
     for key in ["version", "task", "inputs", "extension"] { contract.removeValue(forKey: key) }
     if (content["conditioning"] as? [String: Any])?["task"] as? String != task { contract.removeValue(forKey: "audio_policy") }
     contract["version"] = 1; contract["task"] = task; contract["inputs"] = inputs
+    if task == "extension" {
+      guard let moviePath, let movieSHA256, context.movieSource != nil else {
+        throw StudioError.invalid("Select and prepare an LTX extension source movie.")
+      }
+      contract["inputs"] = [["id": "extension-source", "kind": "video", "role": "reference",
+        "path": try canonical(moviePath), "sha256": movieSHA256]]
+      contract["extension"] = ["direction": "after", "context_frames": contextFrames,
+        "additional_frames": additionalFrames]
+      contract["audio_policy"] = "source_reencoded_and_generated_extension"
+    }
     content["conditioning"] = contract; content["config"] = config; content["components"] = components
     content["prompt"] = prompt
     let configured = context.runtime["ffmpegPath"] as? String ?? ""
@@ -303,18 +334,59 @@ public enum NativeLTXPreparation {
     // FFprobe is unnecessary: generated media inspection is native AVFoundation.
     var identity: [String: Any] = ["recipe": content]
     if let source = context.frameSource { identity["continuity"] = source.report }
+    if let source = context.movieSource { identity["continuity"] = source.report }
     var report: [String: Any] = ["profile": URL(fileURLWithPath: context.profile).deletingPathExtension().lastPathComponent,
       "generation": descriptor(content), "resolvedFingerprint": try fingerprint(context.frameSource == nil ? content : identity),
       "selectionFingerprint": try fingerprint(context.recipe), "warnings": context.warnings, "task": task,
       "nativeFPS": fps, "preserveEditorialDuration": true, "movieSettings": try object(clip.settings(in: context.project)),
-      "nativePreparation": "swift", "conditioning": ["frames": frames, "inputs": inputs.count]]
+      "nativePreparation": "swift", "conditioning": ["frames": frames,
+        "inputs": task == "extension" ? 1 : inputs.count]]
     if let source = context.frameSource { report["continuity"] = source.report }
+    if let source = context.movieSource { report["continuity"] = source.report }
     return ["recipe": content, "report": report]
   }
   /// Native media extraction runs off the UI thread. Publish the image, recipe
   /// and original editor request together; never rewrite stored attachments.
   public static func prepareWithMedia(request: [String: Any], destination: URL) async throws -> [String: Any] {
     let context = try resolve(request)
+    if let source = context.movieSource {
+      let provisional = try compose(context, moviePath: source.url.path,
+        movieSHA256: String(repeating: "0", count: 64))
+      let content = provisional["recipe"] as! [String: Any]
+      let config = content["config"] as! [String: Any]
+      let conditioning = content["conditioning"] as! [String: Any]
+      let extensionWindow = conditioning["extension"] as! [String: Any]
+      let contextFrames = extensionWindow["context_frames"] as! Int
+      guard let fps = config["frame_rate"] as? Double,
+        let width = config["width"] as? Int, let height = config["height"] as? Int,
+        let ffmpeg = content["ffmpeg"] as? String else {
+        throw StudioError.invalid("LTX extension source settings are incomplete.")
+      }
+      let parent = destination.deletingLastPathComponent()
+      try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+      let staging = parent.appendingPathComponent(".prepare-" + UUID().uuidString)
+      try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
+      defer { try? FileManager.default.removeItem(at: staging) }
+      let name = "source-tail.mp4"
+      let digest = try await source.extract(to: staging.appendingPathComponent(name),
+        ffmpeg: URL(fileURLWithPath: ffmpeg), fps: fps, width: width, height: height,
+        contextFrames: contextFrames)
+      let composed = try compose(context, moviePath: destination.appendingPathComponent(name).path,
+        movieSHA256: digest)
+      let recipe = composed["recipe"] as! [String: Any]
+      var report = composed["report"] as! [String: Any]
+      var continuity = source.report
+      continuity["preparedSHA256"] = digest
+      continuity["contextFrames"] = contextFrames
+      report["continuity"] = continuity
+      try data(recipe).write(to: staging.appendingPathComponent("recipe.json"), options: .withoutOverwriting)
+      try data(request).write(to: staging.appendingPathComponent("editor-request.json"), options: .withoutOverwriting)
+      try data(continuity).write(to: staging.appendingPathComponent("continuity.json"), options: .withoutOverwriting)
+      try Task.checkCancellation(); try source.verify()
+      try FileManager.default.moveItem(at: staging, to: destination)
+      return ["recipePath": destination.appendingPathComponent("recipe.json").path,
+        "prompt": recipe["prompt"]!, "report": report]
+    }
     guard let source = context.frameSource else { return try prepare(request: request, destination: destination) }
     // Validate prompt, sampling and attachment contracts before decoding media.
     _ = try compose(context, firstFramePath: source.url.path)

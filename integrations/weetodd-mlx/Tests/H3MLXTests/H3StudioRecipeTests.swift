@@ -125,6 +125,11 @@ final class H3StudioRecipeTests: XCTestCase {
     let admitted = try compile(root)
     XCTAssertEqual(admitted.anchors, [.first, .last])
     XCTAssertEqual(loaded, ["/tmp/first.png", "/tmp/last.png"])
+    var visibleLast = root
+    var visibleConditioning = try XCTUnwrap(visibleLast["conditioning"] as? [String: Any])
+    visibleConditioning["inputs"] = [first, last.merging(["frame_index": 59]) { _, new in new }]
+    visibleLast["conditioning"] = visibleConditioning
+    XCTAssertEqual(try compile(visibleLast).anchors, [.first, .frame(59)])
     var bad = root
     bad["conditioning"] = ["version": 1, "task": "fflf", "audio_policy": "generated",
       "inputs": [last, first]]
@@ -132,6 +137,39 @@ final class H3StudioRecipeTests: XCTestCase {
     bad["conditioning"] = ["version": 1, "task": "fflf", "audio_policy": "generated",
       "inputs": [first.merging(["strength": 0.5]) { _, new in new }, last]]
     XCTAssertThrowsError(try compile(bad))
-    XCTAssertEqual(loaded.count, 2, "Invalid controls must fail before media decoding")
+    XCTAssertEqual(loaded.count, 4, "Invalid controls must fail before media decoding")
+  }
+
+  func testFL2VARecipeAdmitsOrderedTimedKeyframesAndRejectsDuplicatesBeforeMediaLoad() throws {
+    var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
+    var components = try XCTUnwrap(root["components"] as? [String: Any])
+    components["task"] = "fl2va"
+    components["vision_encoder"] = "/tmp/vision.safetensors"
+    root["components"] = components
+    let digest = String(repeating: "a", count: 64)
+    func input(_ id: String, _ frame: Any) -> [String: Any] {
+      ["id": id, "kind": "image", "role": "keyframe", "path": "/tmp/\(id).png",
+        "frame_index": frame, "sha256": digest, "strength": 1.0]
+    }
+    var loaded: [String] = []
+    func compile(_ entries: [[String: Any]]) throws -> H3FL2VARequest {
+      root["conditioning"] = ["version": 1, "task": "fflf", "audio_policy": "generated",
+        "inputs": entries]
+      return try H3StudioRecipe.compileFL2VA(data: JSONSerialization.data(withJSONObject: root)) {
+        path, _, width, height in
+        loaded.append(path)
+        return H3StillReference(rgb8: Data(count: width * height * 3),
+          width: width, height: height)
+      }
+    }
+    var last = input("c", "last")
+    last["role"] = "last"
+    let admitted = try compile([input("a", 0), input("b", 24), last])
+    XCTAssertEqual(admitted.anchors, [.first, .frame(24), .last])
+    XCTAssertEqual(loaded, ["/tmp/a.png", "/tmp/b.png", "/tmp/c.png"])
+    XCTAssertThrowsError(try compile([input("a", 0), input("b", 0)]))
+    XCTAssertThrowsError(try compile([input("b", 24), input("a", 0)]))
+    XCTAssertThrowsError(try compile([input("a", 0), input("z", 999)]))
+    XCTAssertEqual(loaded.count, 3)
   }
 }

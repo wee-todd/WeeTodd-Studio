@@ -69,7 +69,8 @@ public final class MLXAVBlock {
 
   /// Pure admission estimate, shared by automatic Studio sizing and execution.
   /// Includes the existing conservative reference-modulation reserve when needed.
-  public static func estimatedActivationBytes(configuration c:AVBlockConfiguration,perTokenVideo:Bool=false) throws -> Int {
+  public static func estimatedActivationBytes(configuration c:AVBlockConfiguration,
+    perTokenVideo:Bool=false,perTokenAudio:Bool=false) throws -> Int {
     try c.validate()
     let vd=c.videoDimension,ad=c.audioDimension,nv=c.videoTokens,na=c.audioTokens,nt=c.textTokens
     // Conservative admission for a single block's linear/FF intermediates.
@@ -84,7 +85,8 @@ public final class MLXAVBlock {
       let fused = q > 8 ? [64,80,128].contains(h) : q <= k && [64,96,128,256].contains(h)
       return fused ? 0 : c.heads*q*k*4*3
     }.max()!
-    return linearBytes+fallbackBytes+(perTokenVideo ? nv*vd*14*4 : 0)
+    return linearBytes+fallbackBytes+(perTokenVideo ? nv*vd*14*4 : 0) +
+      (perTokenAudio ? na*ad*14*4 : 0)
   }
 
   public func load(_ provider:(String,[Int]) throws -> MLXWeight) throws {
@@ -132,10 +134,14 @@ public final class MLXAVBlock {
       var x: [String:MLXArray] = [:]
       for (name,shape) in inputShapes {
         let value=inputs[name]!
-        let perToken=["video_modulation","video_av_modulation"].contains(name) && value.ndim == 2 && (value.shape[0] == configuration.videoTokens || inputs["video_modulation_indices"] != nil)
+        let stream=name.hasPrefix("audio") ? "audio" : "video"
+        let tokens=stream == "audio" ? configuration.audioTokens : configuration.videoTokens
+        let perToken=["video_modulation","video_av_modulation","audio_modulation","audio_av_modulation"].contains(name) && value.ndim == 2 &&
+          (value.shape[0] == tokens || inputs[stream+"_modulation_indices"] != nil)
         x[name]=value.reshaped(perToken ? value.shape : shape)
       }
       x["video_modulation_indices"]=inputs["video_modulation_indices"]
+      x["audio_modulation_indices"]=inputs["audio_modulation_indices"]
       let (graph,arguments,signature)=MLXBlockGraph.bind(configuration:configuration,inputs:x,weights:weights,adapters:adapters)
       let outputs:[MLXArray]
       if compileGraph {
@@ -160,27 +166,49 @@ public final class MLXAVBlock {
       throw LTXError.invalid("Per-token modulation exceeds the activation budget.")
     }
   }
+  func admitPerTokenAudio() throws {
+    guard baseActivationBytes+configuration.audioTokens*configuration.audioDimension*14*4 <= maximumActivationBytes else {
+      throw LTXError.invalid("Per-token audio modulation exceeds the activation budget.")
+    }
+  }
+  func admitPerTokenAV() throws {
+    let extra=(configuration.videoTokens*configuration.videoDimension +
+      configuration.audioTokens*configuration.audioDimension)*14*4
+    guard baseActivationBytes+extra <= maximumActivationBytes else {
+      throw LTXError.invalid("Joint per-token modulation exceeds the activation budget.")
+    }
+  }
   public func validateInputs(_ inputs:[String:MLXArray]) throws {
-    let indices=inputs["video_modulation_indices"]
-    let allowed=Set(inputShapes.keys).union(indices == nil ? [] : ["video_modulation_indices"])
+    let videoIndices=inputs["video_modulation_indices"],audioIndices=inputs["audio_modulation_indices"]
+    let allowed=Set(inputShapes.keys)
+      .union(videoIndices == nil ? [] : ["video_modulation_indices"])
+      .union(audioIndices == nil ? [] : ["audio_modulation_indices"])
     guard Set(inputs.keys) == allowed else { throw LTXError.invalid("Missing or unsupported MLX block input.") }
-    var uniqueRows:Int?
+    var uniqueRows:[String:Int]=[:],perTokenStreams=Set<String>()
     for (name,shape) in inputShapes {
       let value=inputs[name]!
-      let modulation=["video_modulation","video_av_modulation"].contains(name)
-      let compact=indices != nil && modulation && value.ndim==2 && (1...configuration.videoTokens).contains(value.shape[0]) && value.shape[1]==shape[1]
-      let perToken=modulation && value.shape == [configuration.videoTokens,shape[1]]
-      guard value.dtype == .float32, compact || perToken || (indices == nil || !modulation) && (value.shape == shape || value.shape == [shape.reduce(1,*)]) else {
+      let stream=name.hasPrefix("audio") ? "audio" : "video"
+      let tokens=stream == "audio" ? configuration.audioTokens : configuration.videoTokens
+      let indices=stream == "audio" ? audioIndices : videoIndices
+      let modulation=["video_modulation","video_av_modulation","audio_modulation","audio_av_modulation"].contains(name)
+      let compact=indices != nil && modulation && value.ndim==2 && (1...tokens).contains(value.shape[0]) && value.shape[1]==shape[1]
+      let perToken=modulation && value.shape == [tokens,shape[1]]
+      guard value.dtype == .float32, compact || perToken || ((indices == nil || !modulation) && (value.shape == shape || value.shape == [shape.reduce(1,*)])) else {
         throw LTXError.invalid("MLX input shape/dtype differs: \(name)")
       }
       if compact {
-        if let rows=uniqueRows,rows != value.shape[0] { throw LTXError.invalid("Compact modulation row counts differ.") }
-        uniqueRows=value.shape[0]
+        if let rows=uniqueRows[stream],rows != value.shape[0] { throw LTXError.invalid("Compact modulation row counts differ.") }
+        uniqueRows[stream]=value.shape[0]
       }
-      if perToken || compact { try admitPerTokenVideo() }
+      if perToken || compact { perTokenStreams.insert(stream) }
     }
-    if let indices {
-      guard indices.dtype == .int32,indices.shape == [configuration.videoTokens],let rows=uniqueRows,
+    if perTokenStreams.contains("video") { try admitPerTokenVideo() }
+    if perTokenStreams.contains("audio") { try admitPerTokenAudio() }
+    if perTokenStreams.count == 2 { try admitPerTokenAV() }
+    for (stream,indices) in [("video",videoIndices),("audio",audioIndices)] {
+      guard let indices else { continue }
+      let tokens=stream == "audio" ? configuration.audioTokens : configuration.videoTokens
+      guard indices.dtype == .int32,indices.shape == [tokens],let rows=uniqueRows[stream],
         logicalAnd(greaterEqual(indices,0),less(indices,rows)).all().item(Bool.self) else {
         throw LTXError.invalid("Invalid compact modulation indices.")
       }
@@ -200,7 +228,9 @@ public final class MLXAVBlock {
       let values=x[input]!.reshaped([rows,count,width]); let learned=parameter(table)
       return (0..<count).map {
         let value=values[0...,$0,0...] + learned[$0]
-        if ["video_modulation","video_av_modulation"].contains(input),let indices=x["video_modulation_indices"] {
+        let stream=input.hasPrefix("audio") ? "audio" : "video"
+        if ["video_modulation","video_av_modulation","audio_modulation","audio_av_modulation"].contains(input),
+          let indices=x[stream+"_modulation_indices"] {
           return take(value,indices,axis:0)
         }
         return value

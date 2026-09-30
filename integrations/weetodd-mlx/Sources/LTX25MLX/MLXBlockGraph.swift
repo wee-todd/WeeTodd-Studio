@@ -17,7 +17,8 @@ struct MLXBlockGraph {
   static func bind(configuration:AVBlockConfiguration,inputs:[String:MLXArray],
     weights:[String:MLXWeight],adapters:[String:[MLXLoRA]]) -> (Self,[MLXArray],[Int]) {
     var arrays:[MLXArray]=[],inputSlots:[String:Int]=[:],weightSlots:[String:Weight]=[:]
-    var signature=[inputs["video_modulation_indices"] == nil ? 0 : 1]
+    var signature=[inputs["video_modulation_indices"] == nil ? 0 : 1,
+      inputs["audio_modulation_indices"] == nil ? 0 : 1]
     for name in inputs.keys.sorted() { inputSlots[name]=arrays.count;arrays.append(inputs[name]!) }
     for name in weights.keys.sorted() {
       let packed=weights[name]!.graphArrays,start=arrays.count

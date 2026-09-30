@@ -372,6 +372,91 @@ final class StudioReliabilityTests: XCTestCase {
       .write(to: root.appendingPathComponent("qualification.json"))
   }
 
+  @MainActor func testInstalledNativeLTXExtensionLifecycleWithoutPython() async throws {
+    guard let manifest = ProcessInfo.processInfo.environment["WEETODD_NATIVE_LTX_EXTENSION_LIFECYCLE"] else {
+      throw XCTSkip("Opt-in installed LTX 2.5 extension Studio lifecycle")
+    }
+    let options = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: manifest))) as! [String: String]
+    let profileSource = URL(fileURLWithPath: try XCTUnwrap(options["recipe"]))
+    let profile = try JSONSerialization.jsonObject(with: Data(contentsOf: profileSource)) as! [String: Any]
+    let sourcePath = try XCTUnwrap(options["source"])
+    let root = URL(fileURLWithPath: try XCTUnwrap(options["output"]))
+    let profiles = root.appendingPathComponent("Profiles")
+    try FileManager.default.createDirectory(at: profiles, withIntermediateDirectories: true)
+    let profileURL = profiles.appendingPathComponent("distilled.json")
+    try FileManager.default.copyItem(at: profileSource, to: profileURL)
+    let store = StudioStore(dataDirectory: root, restoreSession: false)
+    store.runtime = RuntimeSettings(root: "/unavailable", pythonPath: "/unavailable/python",
+      profilesDirectory: profiles.path)
+    store.runtime.nativeLTX25Enabled = true
+    store.runtime.ltx25WorkerPath = try XCTUnwrap(options["worker"])
+    store.runtime.ffmpegPath = "/opt/homebrew/bin/ffmpeg"
+    var source = Clip(name: "Accepted source", engine: .movie)
+    source.sourcePath = sourcePath
+    source.sourceIn = 0
+    source.duration = 73.0 / 24.0
+    var target = Clip(name: "Extension", engine: .ltx25)
+    target.prompt = try XCTUnwrap(profile["prompt"] as? String)
+    target.profileID = profileURL.path
+    target.duration = 1
+    target.generationWidth = 384; target.generationHeight = 256
+    target.seed = 20260903
+    let motion = options["mode"] == "motion"
+    if motion {
+      target.continuity = ClipContinuity(mode: "motion", sourceClipID: source.id)
+      target.generationSelection = GenerationSelection(task: "t2v")
+    } else {
+      target.extensionDirection = "after"
+      target.extensionSource = sourcePath
+      target.extensionClipID = source.id
+      target.generationSelection = GenerationSelection(task: "extension")
+    }
+    store.project.clips = [source, target]
+    store.selectedClipID = target.id
+    await store.reloadProfiles()
+    XCTAssertEqual(store.profiles.count, 1)
+    await store.describeGeneration()
+    XCTAssertNil(store.validationErrors[target.id])
+    await store.prepareSelected()
+    XCTAssertNil(store.error)
+    let preparedPath = try XCTUnwrap(store.preparedRecipe)
+    let prepared = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: preparedPath))) as! [String: Any]
+    let conditioning = prepared["conditioning"] as! [String: Any]
+    XCTAssertEqual(conditioning["task"] as? String, "extension")
+    XCTAssertEqual((conditioning["extension"] as? [String: Any])?["context_frames"] as? Int,
+      motion ? 49 : 25)
+    let inputs = conditioning["inputs"] as! [[String: Any]]
+    XCTAssertEqual(inputs.count, 1)
+    XCTAssertTrue((inputs[0]["path"] as! String).contains("source-tail.mp4"))
+    var previews = Set<Int>()
+    let observer = store.bridge.$livePreview.sink {
+      if let revision = $0?.previewRevision { previews.insert(revision) }
+    }
+    defer { observer.cancel() }
+    await store.renderPrepared()
+    XCTAssertNil(store.error)
+    XCTAssertFalse(previews.isEmpty)
+    let version = try XCTUnwrap(store.selectedClip?.versions.last)
+    XCTAssertEqual(store.selectedClip?.sourcePath, version.path)
+    XCTAssertEqual(store.selectedClip?.duration, 1)
+    XCTAssertEqual(version.usableSourceIn, 0)
+    XCTAssertEqual(version.usableDuration, 1)
+    let inspected = try await StudioStore.inspectNativeMovie(version.path)
+    XCTAssertEqual(inspected["duration"] as? Double, 1)
+    let document = root.appendingPathComponent("accepted.weetodd")
+    try ProjectStorage.write(store.project, to: document)
+    let reopened = StudioStore(dataDirectory: root, restoreSession: false)
+    reopened.load(document)
+    XCTAssertEqual(reopened.project.clips.last?.sourcePath, version.path)
+    XCTAssertEqual(reopened.project.clips.last?.versions.last?.path, version.path)
+    let evidence: [String: Any] = ["video": version.path, "pythonPath": store.runtime.pythonPath,
+      "mode": motion ? "motion" : "after",
+      "decodedPreviewCount": previews.count, "source": sourcePath,
+      "preparedRecipe": preparedPath]
+    try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
+      .write(to: root.appendingPathComponent("extension-qualification.json"))
+  }
+
   @MainActor func testInstalledNativeLTXA2VStudioLifecycle() async throws {
     guard let manifest=ProcessInfo.processInfo.environment["WEETODD_NATIVE_LTX_A2V_LIFECYCLE"] else {
       throw XCTSkip("Opt-in installed LTX 2.5 A2V Studio lifecycle")

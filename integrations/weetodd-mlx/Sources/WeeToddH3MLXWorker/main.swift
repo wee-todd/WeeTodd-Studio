@@ -156,17 +156,17 @@ import UniformTypeIdentifiers
       textRequest = nil
       endpointRequest = nil
     } else if selectedTask == "fl2va" {
+      let inputItems = ((recipe["conditioning"] as? [String: Any])?["inputs"]
+        as? [[String: Any]]) ?? []
       endpointRequest = try H3StudioRecipe.compileFL2VA(data: recipeData) {
         path, first, width, height in
         let loaded = try H3FL2VAMedia.load(path: path,
           width: width, height: height, first: first)
         sourceImages.append(["path": path, "sha256": loaded.sourceSHA256,
           "width": loaded.sourceWidth, "height": loaded.sourceHeight,
-          "anchor": first ? "first" : "last"])
+          "anchor": inputItems[sourceImages.count]["frame_index"] ?? "unknown"])
         return loaded.image
       }
-      let inputItems = ((recipe["conditioning"] as? [String: Any])?["inputs"]
-        as? [[String: Any]]) ?? []
       guard inputItems.map({ $0["sha256"] as? String }) ==
         sourceImages.map({ $0["sha256"] as? String }) else {
         throw invalid("An H3 endpoint image changed after recipe preparation.")

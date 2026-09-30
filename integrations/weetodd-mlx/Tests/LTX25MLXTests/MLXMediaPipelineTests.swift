@@ -4,6 +4,12 @@ import Foundation
 import LTX25Video
 
 final class MLXMediaPipelineTests:XCTestCase {
+  func testExtensionPublishesExactGeneratedAudioInterval() throws {
+    XCTAssertEqual(try MLXMediaPipeline.extensionAudioRange(contextFrames:25,
+      additionalFrames:24,fps:24,decodedSamples:98400),50000..<98000)
+    XCTAssertThrowsError(try MLXMediaPipeline.extensionAudioRange(contextFrames:25,
+      additionalFrames:24,fps:24,decodedSamples:97999))
+  }
   func testStudioDurationRangeAdmitsWithinWorkerBudgetsAndStillEnforcesMemory() throws {
     let helper=MLXDistilledRequestTests()
     for frames in [121,129,137,145,241,361] {

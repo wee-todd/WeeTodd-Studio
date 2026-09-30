@@ -20,6 +20,25 @@ public enum NativeH3Preparation {
   private static func unsupported(_ detail: String) -> StudioError {
     .invalid("Swift H3 generation is experimental: \(detail).")
   }
+  private static func keyframeIndex(_ attachment: Attachment, duration: Double) -> Int? {
+    guard duration.isFinite, (2.5...15).contains(duration) else { return nil }
+    var frames = Int((duration * 24).rounded(.toNearestOrEven))
+    while frames % 17 != 5 { frames += 1 }
+    switch attachment.role {
+    case .first: return attachment.time == 0 ? 0 : nil
+    // Studio displays the requested editorial interval, not H3's extra
+    // alignment frames. Put its last image on the final visible frame.
+    case .last: return attachment.time == 0
+      ? min(frames - 1, Int(ceil(duration * 24)) - 1) : nil
+    case .keyframe:
+      guard attachment.time.isFinite, attachment.time >= 0,
+        attachment.time <= duration else { return nil }
+      let frame = Int((attachment.time * 24).rounded(.toNearestOrEven))
+      let lastVisible = min(frames - 1, Int(ceil(duration * 24)) - 1)
+      return (0...lastVisible).contains(frame) ? frame : nil
+    default: return nil
+    }
+  }
   private static func data(_ value: Any) throws -> Data {
     try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes])
   }
@@ -201,17 +220,19 @@ public enum NativeH3Preparation {
       throw unsupported("task \(clip.inferredTask) is not ported")
     }
     let supportedRoles: Set<MediaRole> = task == "ref2va" ? [.reference, .lora]
-      : ["i2v", "fflf"].contains(task) ? [.first, .last, .lora] : [.lora]
-    let enabledFrames = clip.attachments.filter { $0.isEnabled && [.first, .last].contains($0.role) }
-      .sorted { $0.role == .first && $1.role == .last }
-    let frameRoles = enabledFrames.map(\.role)
+      : ["i2v", "fflf"].contains(task) ? [.first, .last, .keyframe, .lora] : [.lora]
+    let enabledFrames = clip.attachments.filter {
+      $0.isEnabled && [.first, .last, .keyframe].contains($0.role)
+    }
+    let frameIndices = enabledFrames.compactMap { keyframeIndex($0, duration: clip.duration) }
     guard clip.attachments.allSatisfy({ supportedRoles.contains($0.role) }),
       clip.attachments.filter({ $0.role == .lora && $0.isEnabled }).count <= 1,
       task != "ref2va" || (1...9).contains(clip.attachments.filter({ $0.role == .reference && $0.isEnabled }).count),
       !["i2v", "fflf"].contains(task) ||
-        (task == "i2v" ? frameRoles == [.first]
-          : frameRoles == [.first] || frameRoles == [.first, .last]) else {
-      throw unsupported("this task needs ordered first/last images or one to nine still references and at most one Turbo LoRA")
+        ((1...8).contains(frameIndices.count) && frameIndices.count == enabledFrames.count &&
+          Set(frameIndices).count == frameIndices.count &&
+          (task != "i2v" || (frameIndices.count == 1 && frameIndices[0] == 0))) else {
+      throw unsupported("this task needs one to eight unique timed images or one to nine still references and at most one Turbo LoRA")
     }
     let selection = clip.generationSelection
     guard selection?.refinementSteps == nil, selection?.cfg == nil, selection?.shift == nil,
@@ -291,8 +312,10 @@ public enum NativeH3Preparation {
     }
     var referenceInputs: [[String: Any]] = []
     let endpointAttachments = clip.attachments.filter {
-      $0.isEnabled && Set<MediaRole>([.first, .last]).contains($0.role)
-    }.sorted { $0.role == .first && $1.role == .last }
+      $0.isEnabled && Set<MediaRole>([.first, .last, .keyframe]).contains($0.role)
+    }.sorted {
+      keyframeIndex($0, duration: clip.duration)! < keyframeIndex($1, duration: clip.duration)!
+    }
     let orderedAttachments = ["i2v", "fflf"].contains(clip.inferredTask)
       ? endpointAttachments + clip.attachments.filter { $0.role == .lora }
       : clip.attachments
@@ -300,9 +323,10 @@ public enum NativeH3Preparation {
       guard let asset = availableAssets.last(where: { $0.id == attachment.assetID }) else {
         throw StudioError.invalid("Relink a missing H3 attachment.")
       }
-      if Set<MediaRole>([.reference, .first, .last]).contains(attachment.role) {
+      if Set<MediaRole>([.reference, .first, .last, .keyframe]).contains(attachment.role) {
         guard asset.kind == .image, attachment.strength == 1,
-          attachment.time == 0, attachment.referenceRole == nil,
+          (attachment.role == .keyframe || attachment.time == 0),
+          attachment.referenceRole == nil,
           attachment.referencePriority == nil,
           attachment.referenceFrames == nil,
           attachment.referenceSizePolicy == nil,
@@ -317,7 +341,12 @@ public enum NativeH3Preparation {
           "kind": "image", "role": attachment.role.rawValue, "path": imagePath,
           "strength": 1.0, "sha256": try sourceSHA256(imagePath)]
         if attachment.role == .first { input["frame_index"] = 0 }
-        if attachment.role == .last { input["frame_index"] = "last" }
+        if attachment.role == .last {
+          input["frame_index"] = keyframeIndex(attachment, duration: clip.duration)!
+        }
+        if attachment.role == .keyframe {
+          input["frame_index"] = keyframeIndex(attachment, duration: clip.duration)!
+        }
         referenceInputs.append(input)
         continue
       }

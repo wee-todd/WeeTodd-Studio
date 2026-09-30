@@ -2,6 +2,34 @@ import XCTest
 @testable import LTX25MLX
 
 final class StudioRecipeTests: XCTestCase {
+  func testExtensionRecipeKeepsFrozenSourceAndOneCausalPublicationWindow() throws {
+    var recipe=fixture()
+    var config=recipe["config"] as! [String:Any]
+    config["width"]=768;config["height"]=448;config["duration_seconds"]=4
+    recipe["config"]=config
+    let source:[String:Any]=["id":"source","kind":"video","role":"reference",
+      "path":"/source.mp4","sha256":String(repeating:"a",count:64),"strength":1]
+    recipe["conditioning"]=["version":1,"task":"extension",
+      "audio_policy":"source_reencoded_and_generated_extension","inputs":[source],
+      "extension":["direction":"after","context_frames":25,"additional_frames":96]]
+    let data=try JSONSerialization.data(withJSONObject:recipe)
+    let compiled=try MLXStudioExtensionRecipe.compile(data:data,outputDirectory:"/output")
+    XCTAssertEqual(compiled.request.frames,121)
+    XCTAssertEqual(compiled.window.outputRange,25..<121)
+    XCTAssertEqual(compiled.source.path,"/source.mp4")
+    XCTAssertEqual(compiled.sourceSHA256,String(repeating:"a",count:64))
+    var wrong=recipe
+    var conditioning=wrong["conditioning"] as! [String:Any]
+    var reference=source;reference["sha256"]="invalid";conditioning["inputs"]=[reference]
+    wrong["conditioning"]=conditioning
+    XCTAssertThrowsError(try MLXStudioExtensionRecipe.compile(
+      data:JSONSerialization.data(withJSONObject:wrong),outputDirectory:"/output"))
+    conditioning=recipe["conditioning"] as! [String:Any]
+    conditioning["extension"]=["direction":"before","context_frames":25,"additional_frames":96]
+    wrong["conditioning"]=conditioning
+    XCTAssertThrowsError(try MLXStudioExtensionRecipe.compile(
+      data:JSONSerialization.data(withJSONObject:wrong),outputDirectory:"/output"))
+  }
   func testAudioDrivenRecipeRetainsExactSourceIntervalAndRejectsExtraInputs() throws {
     var recipe=fixture()
     let source:[String:Any]=["id":"voice","kind":"audio","role":"audio_driver",

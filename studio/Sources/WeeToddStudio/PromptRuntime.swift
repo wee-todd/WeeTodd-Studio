@@ -306,7 +306,7 @@ struct RuntimeView: View {
           Toggle("Use Swift MLX for LTX 2.5", isOn: Binding(
             get: { store.runtime.usesNativeLTX25 },
             set: { store.runtime.nativeLTX25Enabled = $0; store.saveRuntime() }))
-          Text("Swift supports distilled 8 + 3 step text, first-image and first/last-frame generation with standard LoRAs. It shows sampling progress and decoded frame previews. Advanced LTX workflows require explicitly turning this off. Profile discovery, job preparation, generation and result inspection use Swift for these supported LTX jobs. Other engines and advanced workflows may still require Python.")
+          Text("Swift supports distilled 8 + 3 step text, first-image, first/last-frame and one-driver audio generation with standard LoRAs. After-extension and motion continuation are experimental. Sampling progress and decoded frame previews are available. Continuous scenes and specialized controls still require selecting the Python route. Profile discovery, preparation, generation and result inspection use Swift for supported LTX jobs.")
             .font(.caption).foregroundStyle(.secondary)
           Toggle("Use Swift MLX for H3 (experimental)", isOn: Binding(
             get: { store.runtime.usesNativeH3 },

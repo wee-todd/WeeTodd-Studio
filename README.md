@@ -59,7 +59,8 @@ Euler sampler, a 48-block audiovisual LTX denoiser, trained Gemma text condition
 video/audio decoders, two-stage spatial refinement and active ordered standard LoRAs. Component checks use installed weights in place,
 with bounded residency and documented numerical limits. That Metal package remains component
 infrastructure; the separately packaged Swift MLX LTX worker below is selectable in Studio for
-its supported tasks. Retirement of Python LTX 2.3 generation remains in progress, while
+its supported T2V, I2V, FFLF, one-driver A2V and experimental after-extension/motion-continuation
+tasks. Retirement of Python LTX 2.3 generation remains in progress, while
 compatible LTX 2.3 LoRAs are retained for LTX 2.5.
 A separate [Swift + MLX audiovisual pipeline](integrations/weetodd-mlx/README.md) now preserves
 packed Q8 weights and streams one block at a time, with complete fixed/block LoRA evaluation,
@@ -136,8 +137,9 @@ An ordinary LTX 2.3 standard LoRA also
 completed a distinct, coherent five-second 768 × 448 Swift take at strength 0.3 in both stages;
 this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.
 
-An experimental Swift MLX H3 worker now runs text-to-audiovisual and ordered still-image Ref2VA
-through the installed Qwen, H3 transformer and separate video/audio VAE components. Studio has
+An experimental Swift MLX H3 worker now runs text-to-audiovisual, timed FL2VA keyframes
+and ordered still-image Ref2VA through the installed Qwen, H3 transformer and separate
+video/audio VAE components. Studio has
 a guarded, off-by-default Swift preparation and worker handoff for these tasks; it admits one
 complete ComfyUI-format H3 Turbo LoRA, up to nine still references for Ref2VA, and rejects
 unsupported media, adapter stacks, controls and profiles before model loading. Enable **Use Swift
@@ -202,7 +204,16 @@ first/last endpoint Pearson correlations were 0.9903/0.9957. The worker took 511
 under a concurrent app build, peaked at 4,720,223,400 bytes MLX allocation and 5,742,871,896
 bytes process footprint, and used no swap. Stereo audio was nearly silent under a quiet-room
 prompt, so audible AV quality is unqualified. This is one experimental visual recipe, not broad
-FL2VA quality or performance parity.
+FL2VA quality or performance parity. The Swift recipe and Studio preparation now admit
+one to eight images at distinct ascending frame positions. A three-image installed-checkpoint
+preflight passed; its full-canvas VAE conditions are retained while Qwen visual copies are
+bounded when needed to fit the 1,024-token window. A separate three-keyframe, 768 × 448,
+73-frame, four-evaluation run took 399.77 seconds and peaked at 3.98 GB Swift process
+footprint, excluding FFmpeg. Front, interior and final outputs measured 0.9902, 0.9976
+and 0.9956 correlation with their corresponding images. This requested 2.5 seconds but
+H3 aligned it to 73 frames (a 3.05-second muxed movie). Studio places its last image on
+the final visible editorial frame, while an explicit headless `"last"` anchors the raw end.
+This tests one short turn, not broad keyframe quality or longer-shot timing.
 The same recipe also completed through the signed app's bundled H3 worker and produced a
 byte-identical MP4. That packaged run took 552.882 seconds, with 414.207 seconds in sampling
 and 119.716 seconds in video decoding; peak MLX was unchanged at 4,720,223,400 bytes and
@@ -1089,6 +1100,14 @@ encodes low- and high-resolution video histories plus synchronized audio through
 VAEs, uses the same 0.5 continuation strength as latent chaining, removes the repeated context,
 and appends the new frames to the full source. Unqualified multi-control stacks and accelerated
 H3 conditioning combinations remain gated.
+The experimental Swift Studio route prepares only the accepted take's visible 25-frame
+tail for **Extend previous take**, or 49 frames for LTX motion continuation, then publishes
+the new segment with exactly matched video/audio duration. A 384 × 256, 24-frame real-source
+after-extension completed in 35.44 worker seconds at a 2.98 GB peak Swift process footprint
+(FFmpeg excluded). A distinct 49-frame motion case took 44.52 worker seconds at a 3.68 GB
+peak Swift process footprint. Both passed installed Studio lifecycles with Python unavailable,
+including two previews and accepted-take reopening. Reviewed frames retained the subject
+and location across each join; longer or more complex continuations remain unqualified.
 Short transport diagnostics do not qualify visual quality.
 Use `scripts/validate_task_conditioning.py` for an explicit candidate-by-task preflight
 matrix and selected diagnostic renders. Do not combine `conditioning` with legacy

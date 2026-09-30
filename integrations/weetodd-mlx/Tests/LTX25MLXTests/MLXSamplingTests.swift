@@ -17,6 +17,28 @@ final class MLXSamplingTests:XCTestCase {
     XCTAssertEqual(result["audio"]!.asArray(Float.self),source.asArray(Float.self))
     XCTAssertTrue(MLX.isFinite(result["video"]!).all().item(Bool.self))
   }
+  func testAudioReferenceMaskProtectsSourceTokensThroughAncestralNoise() throws {
+    let f=try fixture(),runner=try MLXSamplingRunner(configuration:f.configuration,blockCount:1)
+    let inputs=f.inputs.mapValues { MLXArray($0) }
+    let clean=inputs["audio_latent"]!.reshaped([f.configuration.audioTokens,128])
+    let condition=try MLXAudioDenoiseCondition(clean:clean,mask:[0,0.5,1])
+    var previews=0
+    let result=try runner.evaluate(inputs,schedule:SamplingSchedule(sigmas:[1,0.75,0.5,0]),
+      audioConditioning:condition,fixedWeights:weight,
+      blockWeights:{ try self.weight("transformer_blocks.\($0)."+$1,$2) },
+      noise:{ _,_,shape in MLXArray.ones(shape)*4 },preview:{ output,_ in
+        previews += 1
+        XCTAssertEqual(output["audio"]![0].asArray(Float.self),clean[0].asArray(Float.self))
+      })
+    XCTAssertEqual(previews,3)
+    XCTAssertEqual(result["audio"]![0].asArray(Float.self),clean[0].asArray(Float.self))
+    var reads=0
+    XCTAssertThrowsError(try runner.evaluate(inputs,schedule:SamplingSchedule(sigmas:[1,0]),
+      audioConditioning:condition,frozenAudio:true,
+      fixedWeights:{ name,shape in reads += 1;return try self.weight(name,shape) },
+      blockWeights:{ try self.weight("transformer_blocks.\($0)."+$1,$2) }))
+    XCTAssertEqual(reads,0)
+  }
   struct Fixture:Decodable {
     struct Schedule:Decodable { let sigmas:[Double]; let eta:Double }
     let configuration:AVBlockConfiguration

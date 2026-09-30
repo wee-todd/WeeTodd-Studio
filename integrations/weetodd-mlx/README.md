@@ -1,8 +1,9 @@
 # WeeTodd Swift MLX inference
 
 Swift owns this native MLX component; its execution does not invoke Python. Studio can select
-its LTX 2.5 worker for distilled T2V, first-image I2V, first/last-frame and one-driver A2V jobs. Its H3 worker
-is opt-in and experimental for T2VA and still-image Ref2VA. Other tasks retain their existing
+its LTX 2.5 worker for distilled T2V, first-image I2V, first/last-frame, one-driver A2V,
+after-extension and per-clip motion continuation jobs. Its H3 worker
+is opt-in and experimental for T2VA, timed FL2VA and still-image Ref2VA. Other tasks retain their existing
 routes while native coverage qualifies.
 
 ## Implemented
@@ -56,6 +57,12 @@ routes while native coverage qualifies.
   decoding; output frames are never pasted from references. Fractional strengths are explicit.
   Repeated per-token modulations retain distinct rows and token indices; blocks expand one
   parameter slice at a time instead of retaining a full thirteen-parameter video tensor.
+- Extension uses a bounded, SHA-256-verified source movie tail. Video VAEs encode its low/high
+  grids, the audio VAE encodes synchronized sound, and both modalities join the per-token
+  denoiser as protected reference rows. Source guide tensors release before output decode.
+  Publication strips the repeated video context and crops audio to the exact added-frame
+  duration. Studio prepares 25 frames for after-extension and 49 for motion continuation;
+  source media, timing, dimensions and combined memory are admitted before weighted work.
 - A 128 MiB cache target during stack execution, with explicit trimming at block boundaries
   if MLX overshoots its advisory limit. This is not a hard peak-process-memory limit.
 - Header/shape/packed-storage admission and conservative activation admission, including
@@ -75,7 +82,8 @@ LoRA math is not fused/requantized into the base weights. This preserves packed 
 and avoids dense CPU delta construction, but does not claim bitwise identity to a requantized
 fusion recipe. The block/stack probes apply block targets only; the denoiser and sampler apply
 both fixed and block targets through `MLXDenoiserWeights`. Compatible 2.3 factors are retained.
-IC/MSR/control adapters and conditioning beyond first-frame/FFLF and one-driver A2V require
+IC/MSR/control adapters and conditioning beyond first-frame/FFLF, one-driver A2V and
+experimental after-extension/motion continuation require
 separate execution contracts.
 
 ## Build and verify
@@ -417,6 +425,17 @@ of 0.9903/0.9957. The worker took 511.623 seconds under a concurrent app build; 
 allocation was 4,720,223,400 bytes and peak process footprint was 5,742,871,896 bytes, with
 zero system swap. Stereo audio was nearly silent under a quiet-room prompt. This is one
 experimental visual recipe, not audible AV quality or broad FL2VA qualification.
+The Swift FL2VA recipe and Studio preparation now also admit one to eight uniquely timed
+images, including interior keyframes, in ascending frame order. When full-canvas Qwen
+visual patches exceed its 1,024-token window, only the Qwen copies are reduced to a
+bounded 256-pixel side; the video VAE still encodes full-canvas keyframes. Three-image
+and eight-position installed-checkpoint preflights and focused preparation tests pass.
+A separate three-keyframe, 768 × 448, 73-frame, four-evaluation turn took 399.77 seconds
+and peaked at 3.98 GB Swift process footprint, excluding FFmpeg. The first, interior
+and last outputs measured 0.9902/0.9976/0.9956 correlation to their input images.
+The requested 2.5 seconds aligned to 73 frames and a 3.05-second muxed movie. Studio
+targets the last visible editorial frame; explicit headless `"last"` targets the raw end.
+This one short turn does not qualify arbitrary multi-keyframe quality.
 The signed app's bundled worker produced a byte-identical MP4 on the same recipe in 552.882
 seconds. Its corrected stage report assigns 414.207 seconds to sampling and 119.716 seconds
 to video decoding; peak MLX was again 4,720,223,400 bytes with zero system swap. The two

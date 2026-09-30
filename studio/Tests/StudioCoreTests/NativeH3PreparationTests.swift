@@ -212,7 +212,8 @@ final class NativeH3PreparationTests: XCTestCase {
     XCTAssertEqual(conditioning["task"] as? String, "fflf")
     XCTAssertEqual(inputs.map { $0["role"] as? String }, ["first", "last"])
     XCTAssertEqual(inputs[0]["frame_index"] as? Int, 0)
-    XCTAssertEqual(inputs[1]["frame_index"] as? String, "last")
+    XCTAssertEqual(inputs[1]["frame_index"] as? Int, 119,
+      "The last reference must land inside the five-second editorial interval")
     XCTAssertEqual((composed["report"] as! [String: Any])["task"] as? String, "fflf")
     project.clips[0].attachments.reverse()
     let reordered = try NativeH3Preparation.compose(request: request(project, runtime))
@@ -220,6 +221,39 @@ final class NativeH3PreparationTests: XCTestCase {
       as! [String: Any])["inputs"] as! [[String: Any]]
     XCTAssertEqual(reorderedInputs.map { $0["role"] as? String }, ["first", "last"])
     project.clips[0].attachments[1].strength = 0.5
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+  }
+
+  func testFL2VAProfileComposesTimedKeyframesInFrameOrder() throws {
+    let (root, original, runtime) = try fixture()
+    let profile = root.appendingPathComponent("h3.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: profile)) as! [String: Any]
+    var components = recipe["components"] as! [String: Any]
+    components["task"] = "fl2va"
+    components["vision_encoder"] = "/model/qwen-vision.safetensors"
+    recipe["components"] = components
+    recipe["conditioning"] = ["version": 1, "task": "fflf", "inputs": [],
+      "audio_policy": "generated"]
+    try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
+    var project = original
+    project.clips[0].generationSelection = GenerationSelection(task: "fflf")
+    let paths = (0..<3).map { root.appendingPathComponent("key-\($0).png") }
+    for (index, path) in paths.enumerated() { try Data([UInt8(index + 1)]).write(to: path) }
+    let assets = paths.enumerated().map { MediaAsset(name: "Key \($0.offset)",
+      kind: .image, path: $0.element.path) }
+    project.assets = assets
+    project.clips[0].attachments = [
+      Attachment(assetID: assets[2].id, role: .last),
+      Attachment(assetID: assets[1].id, role: .keyframe, time: 1),
+      Attachment(assetID: assets[0].id, role: .first)]
+    let prepared = try NativeH3Preparation.compose(request: request(project, runtime))
+    let inputs = ((prepared["recipe"] as! [String: Any])["conditioning"]
+      as! [String: Any])["inputs"] as! [[String: Any]]
+    XCTAssertEqual(inputs.map { $0["role"] as? String }, ["first", "keyframe", "last"])
+    XCTAssertEqual(inputs[1]["frame_index"] as? Int, 24)
+    project.clips[0].attachments[1].time = 0
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+    project.clips[0].attachments[1].time = 1e300
     XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
   }
 

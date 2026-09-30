@@ -4,7 +4,7 @@ import InferenceContracts
 /// Strict bridge from the saved headless H3 recipe to the first Swift T2VA
 /// slice. Every setting this slice cannot execute fails before weights load.
 public enum H3StudioRecipe {
-  /// Admit FL2VA's timed endpoint contract before reading either image.
+  /// Admit FL2VA's timed keyframe contract before reading any image.
   /// The text recipe validator still owns every shared execution control.
   public static func compileFL2VA(data: Data,
     resolveImage: (String, Bool, Int, Int) throws -> H3StillReference) throws -> H3FL2VARequest {
@@ -20,31 +20,37 @@ public enum H3StudioRecipe {
       conditioning["task"] as? String == "fflf",
       (conditioning["audio_policy"] as? String ?? "generated") == "generated",
       let inputs = conditioning["inputs"] as? [[String: Any]],
-      (1...2).contains(inputs.count) else {
-      throw H3CheckpointError.invalid("Swift H3 FL2VA needs a first image and optional last image with generated audio.")
+      (1...8).contains(inputs.count) else {
+      throw H3CheckpointError.invalid("Swift H3 FL2VA needs one to eight timed images with generated audio.")
     }
     var paths: [String] = []
-    _ = try ConditioningV1.inputs(conditioning, task: "fflf", audioPolicy: "generated", count: 1...2)
+    _ = try ConditioningV1.inputs(conditioning, task: "fflf", audioPolicy: "generated", count: 1...8)
     var ids = Set<String>()
     var anchors: [H3PackedLayout.Anchor] = []
-    for (index, input) in inputs.enumerated() {
-      let expected = index == 0 ? "first" : "last"
-      let expectedFrame = index == 0
-        ? (input["frame_index"] as? Int == 0) : (input["frame_index"] as? String == "last")
+    for input in inputs {
+      let role = input["role"] as? String
+      let frame = input["frame_index"]
+      let anchor: H3PackedLayout.Anchor?
+      if role == "first", frame as? Int == 0 { anchor = .first }
+      else if role == "last", frame as? String == "last" { anchor = .last }
+      else if role == "last", let value = frame as? Int,
+        (0...4095).contains(value) { anchor = .frame(value) }
+      else if role == "keyframe", let value = frame as? Int,
+        (0...4095).contains(value) { anchor = value == 0 ? .first : .frame(value) }
+      else { anchor = nil }
       guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "strength", "sha256", "frame_index"]),
         let id = input["id"] as? String, !id.isEmpty, ids.insert(id).inserted,
-        input["kind"] as? String == "image", input["role"] as? String == expected,
-        expectedFrame,
+        input["kind"] as? String == "image", let anchor,
         let path = input["path"] as? String, path.hasPrefix("/"), !path.utf8.contains(0),
         let digest = input["sha256"] as? String, digest.count == 64,
         digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
         (input["strength"] == nil || (input["strength"] as? NSNumber)
           .map({ CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue == 1 }) == true)
       else {
-        throw H3CheckpointError.invalid("Swift H3 FL2VA accepts ordered first/last images at full strength only.")
+        throw H3CheckpointError.invalid("Swift H3 FL2VA accepts timed image keyframes at full strength only.")
       }
       paths.append(path)
-      anchors.append(index == 0 ? .first : .last)
+      anchors.append(anchor)
     }
     components.removeValue(forKey: "vision_encoder")
     components["task"] = "t2va"
@@ -52,6 +58,19 @@ public enum H3StudioRecipe {
     root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [],
       "audio_policy": "generated"]
     let base = try compile(data: JSONSerialization.data(withJSONObject: root))
+    var priorFrame = -1
+    for anchor in anchors {
+      let frame: Int
+      switch anchor {
+      case .first: frame = 0
+      case .last: frame = base.geometry.frames - 1
+      case .frame(let value): frame = value
+      }
+      guard frame < base.geometry.frames, frame > priorFrame else {
+        throw H3CheckpointError.invalid("Swift H3 FL2VA keyframes must have unique ascending positions inside the generated clip.")
+      }
+      priorFrame = frame
+    }
     let images = try paths.enumerated().map { index, path in
       try resolveImage(path, index == 0, base.geometry.width, base.geometry.height)
     }

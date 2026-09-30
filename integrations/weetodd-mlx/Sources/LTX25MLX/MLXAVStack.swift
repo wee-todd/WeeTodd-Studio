@@ -27,6 +27,7 @@ public final class MLXAVStack {
     block=try MLXAVBlock(configuration:configuration,maximumActivationBytes:maximumActivationBytes,compileGraph:compileGraph); count=blockCount; self.cacheBytes=cacheBytes
   }
   func admitPerTokenVideo() throws { try block.admitPerTokenVideo() }
+  func admitPerTokenAudio() throws { try block.admitPerTokenAudio() }
   public func evaluate(_ inputs:[String:MLXArray],
     weights:(Int,String,[Int]) throws -> MLXWeight,
     adapters:(Int) throws -> [String:[MLXLoRA]] = { _ in [:] },

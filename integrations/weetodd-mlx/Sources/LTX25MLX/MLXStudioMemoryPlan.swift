@@ -8,7 +8,8 @@ public struct MLXStudioMemoryPlan:Sendable {
   public let videoActivationBytes:Int
   public let activationCeilingBytes:Int
 
-  public init(request:MLXDistilledRequest,physicalMemory:UInt64,recommendedWorkingSet:UInt64) throws {
+  public init(request:MLXDistilledRequest,extensionContextFrames:Int?=nil,
+    physicalMemory:UInt64,recommendedWorkingSet:UInt64) throws {
     let gib:UInt64=1024*1024*1024
     // Leave half of RAM outside this worker's admission, and reserve another
     // 4 GiB inside it for stage weights, bounded caches and media buffers.
@@ -21,9 +22,12 @@ public struct MLXStudioMemoryPlan:Sendable {
     for geometry in [recipe.low,recipe.high] {
       let layout=try request.referenceImages.first.map { try MLXReferenceLayout(geometry:geometry,
         firstStrength:$0.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil) }
+      let guide=try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:geometry,contextFrames:$0) }
+      guard layout == nil || guide == nil else { throw LTXError.invalid("Endpoint and extension guides cannot share one LTX task.") }
       transformer=max(transformer,try MLXAVBlock.estimatedActivationBytes(configuration:
-        AVBlockConfiguration(videoTokens:layout?.videoTokens ?? geometry.videoTokens,
-          audioTokens:geometry.audioFrames,textTokens:1024),perTokenVideo:layout != nil))
+        AVBlockConfiguration(videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? geometry.videoTokens,
+          audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
+        perTokenVideo:layout != nil || guide != nil,perTokenAudio:guide != nil))
     }
     // This plan validates geometry and calculates bytes without allocating a VAE.
     let video=try MLXVideoDecodePlan(shape:recipe.high.videoShape,configuration:

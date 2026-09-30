@@ -482,6 +482,10 @@ def compose_recipe(request):
         contract["inputs"] = [
             {"id": "extension-source", "kind": "video", "role": "reference", "path": source}
         ]
+        if engine == "ltx25":
+            from studio_job import file_hash
+
+            contract["inputs"][0]["sha256"] = file_hash(source)
         if inputs:
             raise ValueError(
                 "External extension does not accept extra media attachments in this editor."

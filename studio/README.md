@@ -60,8 +60,17 @@ lip-sync quality remain to be tested.
 A separate five-second
 768 × 448 Swift take with an ordinary LTX 2.3 LoRA at strength 0.3 in both stages completed
 with distinct coherent output; that one adapter result does not qualify every LTX 2.3 LoRA.
-Continuous scenes, continuity/extension, other A2V forms and specialized controls still require
-the explicitly selected Python route. Model setup, asset/library tools and other engines remain
+Swift now also prepares LTX 2.5 after-extension and motion continuation from a bounded,
+hash-verified audiovisual tail of the accepted source's visible interval. The installed
+worker produced a one-second 384 × 256 extension in 35.44 seconds with 24 video frames,
+exactly one second of stereo audio and a 2.98 GB peak Swift process footprint, excluding
+FFmpeg. Four reviewed frames retained the subject and waterfront across the join. The
+distinct 49-frame motion mode completed in 44.52 worker seconds at a 3.68 GB
+peak Swift process footprint. Both modes passed Studio prepare, preflight, render,
+two-preview, acceptance and reopening with Python unavailable. Longer continuity
+and seamless sound remain experimental. Continuous scenes, other A2V
+forms and specialized controls still require the explicitly selected Python route.
+Model setup, asset/library tools and other engines remain
 separate migration work; this is not yet a fully Python-free Studio release.
 The experimental Swift H3 worker has completed text-to-audiovisual and one- and two-still Ref2VA takes.
 The off-by-default Swift preparation path validates clip inputs, ordered references and profile
@@ -72,7 +81,17 @@ An additional recipe-backed ComfyUI T2VA run used the installed FL2VA checkpoint
 image references and the four-evaluation Turbo LoRA. Its 768 × 448, five-second robot shot
 completed in 579.94 seconds at a 5.23 GB peak Swift process footprint. The visual arm motion
 is coherent, while generated stereo audio is subdued (-57.5 dBFS mean, -28.1 dBFS peak).
-H3 FL2VA first/last-frame preparation and worker preflight have structural coverage. One
+H3 FL2VA also prepares up to eight images at distinct frame positions, including interior
+keyframes; three-image and eight-position installed-checkpoint preflights passed. If their
+full-canvas Qwen patches exceed its token window, the worker scales only Qwen's visual copies
+while retaining the full-canvas VAE conditioning images. One three-keyframe, 768 × 448,
+73-frame, four-evaluation turn completed in 399.77 seconds at a 3.98 GB peak Swift process
+footprint, excluding FFmpeg. Front, interior and final outputs followed the corresponding
+images at 0.9902/0.9976/0.9956 correlation; broader timed-anchor quality remains unqualified.
+H3 aligned this requested 2.5-second turn to a 73-frame, 3.05-second muxed movie. Studio
+places the last reference on the final frame visible in the requested clip interval;
+explicit headless `"last"` continues to mean the raw generated endpoint.
+First/last-frame preparation and worker preflight have structural coverage. One
 corrected real 768 × 448, five-second first/last recipe (124 frames, four evaluations, seed
 20260927) showed a coherent front-to-profile turn; first/last endpoint Pearson correlations
 were 0.9903/0.9957. The worker took 511.623 seconds under a concurrent app build, peaked at
@@ -1118,6 +1137,10 @@ LTX motion continuation needs a visible source with audio, at least 49 native fr
 prepares that bounded tail, preserves synchronized timing, and adds only the new segment to the
 timeline. New durations must be multiples of eight native frames. LTX 2.3 requires compatible
 Dev one-stage or original distilled weights; LTX 2.5 requires distilled two-stage generation.
+With **Use Swift MLX for LTX 2.5** enabled (experimental), Studio prepares this 49-frame
+tail in Swift and runs the native worker. **Extend previous take** uses a 25-frame tail
+and supports the after direction in that worker. Both require embedded audio; the
+selected source, dimensions, duration and recipe are checked before model loading.
 Endpoint/audio/reference attachments and unsupported IC/MSR or single-stage combinations are
 rejected without discarding settings. Use **Match previous frame** for endpoint-guided generation.
 LTX already-distilled models do not need an H3 Turbo adapter.
