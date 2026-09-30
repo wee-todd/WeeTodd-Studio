@@ -34,9 +34,10 @@ final class H3VideoReferenceMediaTests: XCTestCase {
     XCTAssertEqual(loaded.reference.width, 256)
     XCTAssertEqual(loaded.reference.height, 256)
     XCTAssertEqual(loaded.reference.rgb8.count, 22 * 256 * 256 * 3)
+    XCTAssertNil(loaded.reference.audio)
   }
 
-  func testMovieWithSoundtrackFailsBeforeDecoding() throws {
+  func testMovieSoundtrackIsBoundedToPreparedVideoInterval() throws {
     let executable = try ffmpeg()
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString)
@@ -52,7 +53,12 @@ final class H3VideoReferenceMediaTests: XCTestCase {
       "-c:v", "mpeg4", "-c:a", "aac", movie.path]
     try process.run(); process.waitUntilExit()
     XCTAssertEqual(process.terminationStatus, 0)
-    XCTAssertThrowsError(try H3VideoReferenceMedia.load(path: movie.path,
-      ffmpeg: executable))
+    let loaded = try H3VideoReferenceMedia.load(path: movie.path,
+      ffmpeg: executable)
+    XCTAssertEqual(loaded.reference.frameCount, 22)
+    let soundtrack = try XCTUnwrap(loaded.reference.audio)
+    XCTAssertGreaterThan(soundtrack.frames, 29_000)
+    XCTAssertLessThanOrEqual(soundtrack.frames, 29_334)
+    XCTAssertEqual(soundtrack.samples.count, 2 * soundtrack.frames)
   }
 }

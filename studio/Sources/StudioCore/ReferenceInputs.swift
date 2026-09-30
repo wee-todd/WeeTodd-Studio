@@ -41,7 +41,7 @@ extension Clip {
       return [
         ReferenceAction(id: "movieAppearance", label: engine == .h3
           ? "Appearance / story · movie reference" : "Appearance / story · make reference sheet",
-          detail: engine == .h3 ? "Swift H3 uses the first 7.3 seconds at 24 fps as a visual motion reference, trimmed to the VAE clip grid. The movie must have no audio track; soundtrack references are not yet ported."
+          detail: engine == .h3 ? "Swift H3 uses the first 7.3 seconds at 24 fps, trimmed to the VAE clip grid. An embedded soundtrack in that interval is encoded as a sound reference."
             : "Samples six frames into a visible Ingredients sheet. This preserves visual context, not the movie's timing or soundtrack. Describe the story in the prompt.",
           role: engine == .ltx25 ? .control : .reference,
           controlType: "ingredients_reference_sheet", preparation: engine == .h3 ? nil : "sheet"),
@@ -56,7 +56,7 @@ extension Clip {
       let driver = ReferenceAction(id: "audioDriver", label: "Audio · drive video",
         detail: "Uses this audio as the timed driver. LTX preserves the supplied audio; this is not a voice/style reference.", role: .audioDriver)
       return engine == .h3 ? [driver, ReferenceAction(id: "audioReference", label: "Audio · reference sound / voice",
-        detail: "H3 Ref2VA also needs a visual reference. Audio references are not yet available through the Swift H3 route.", role: .reference)] : [driver]
+        detail: "H3 Ref2VA also needs a visual reference. Swift H3 uses up to 15 seconds of this audio at 32 kHz as a sound or voice reference; generated audio is still new.", role: .reference)] : [driver]
     default: return []
     }
   }

@@ -160,12 +160,22 @@ import UniformTypeIdentifiers
             "height": image.sourceHeight])
           return .image(image.reference)
         }
+        if kind == "audio" {
+          let audio = try H3AudioReferenceMedia.load(path: path,
+            ffmpeg: URL(fileURLWithPath: configuredFFmpeg))
+          try source.verify()
+          sourceImages.append(["path": path, "sha256": expectedSHA256,
+            "kind": "audio", "preparedSamples": audio.frames,
+            "sampleRate": 32_000])
+          return .audio(audio)
+        }
         let video = try H3VideoReferenceMedia.load(path: path,
           ffmpeg: URL(fileURLWithPath: configuredFFmpeg))
         try source.verify()
         sourceImages.append(["path": path, "sha256": expectedSHA256,
           "kind": "video", "preparedFrames": video.reference.frameCount,
           "decodedFrames": video.decodedFrames,
+          "soundtrackSamples": video.reference.audio?.frames ?? 0,
           "width": video.reference.width, "height": video.reference.height])
         return .video(video.reference)
       }

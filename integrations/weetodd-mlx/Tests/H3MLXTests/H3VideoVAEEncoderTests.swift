@@ -4,6 +4,30 @@ import XCTest
 @testable import H3MLX
 
 final class H3VideoVAEEncoderTests: XCTestCase {
+  func testInstalledMovingVideoMatchesReferenceEncoder() throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let checkpoint = environment["H3_VIDEO_VAE_CHECKPOINT"],
+      let fixture = environment["H3_VIDEO_VAE_ORACLE"] else {
+      throw XCTSkip("Set the installed VAE and moving-video oracle directory.")
+    }
+    for count in [5, 22] {
+      let source = try Data(contentsOf: URL(fileURLWithPath: fixture)
+        .appendingPathComponent("h3-video-input-\(count).rgb"))
+      let reference = try Data(contentsOf: URL(fileURLWithPath: fixture)
+        .appendingPathComponent("h3-video-oracle-\(count).f32"))
+      let actual = try H3VideoVAEEncoder.encodeVideo(
+        checkpointURL: URL(fileURLWithPath: checkpoint), rgb8: Array(source),
+        frameCount: count, width: 64, height: 64)
+      let frames = (count - 5) / 17 * 5 + 2
+      let expected = reference.withUnsafeBytes {
+        MLXArray($0, [1, frames, 4, 4, 24], type: Float.self)
+      }
+      XCTAssertEqual(actual.shape, expected.shape)
+      XCTAssertLessThan(max(abs(actual - expected)).item(Float.self), 0.035,
+        "moving VAE reference with \(count) frames")
+    }
+  }
+
   func testVideoReferenceRejectsUnalignedOrOversizedClipBeforeCheckpointLoad() {
     let unavailable = URL(fileURLWithPath: "/nonexistent/video-vae.safetensors")
     XCTAssertThrowsError(try H3VideoVAEEncoder.encodeVideo(

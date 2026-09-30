@@ -142,9 +142,8 @@ public enum H3StudioRecipe {
       turboLoRAStrength: base.turboLoRAStrength)
   }
 
-  /// Admit ordered still and silent-video Ref2VA media. Audio-bearing video
-  /// and standalone audio remain unsupported until the Swift audio encoder is
-  /// connected; no soundtrack is silently ignored by this recipe bridge.
+  /// Admit ordered still, video and standalone audio Ref2VA media.
+  /// An audio-bearing movie contributes both visual and sound references.
   public static func compileMediaReferences(data: Data,
     resolveReference: (String, String, String) throws -> H3Ref2VAReference) throws
     -> H3Ref2VAStillRequest {
@@ -163,19 +162,21 @@ public enum H3StudioRecipe {
       (conditioning["audio_policy"] as? String ?? "generated") == "generated",
       let inputs = conditioning["inputs"] as? [[String: Any]],
       (1...12).contains(inputs.count) else {
-      throw H3CheckpointError.invalid("Swift H3 Ref2VA needs ordered image or silent-video references.")
+      throw H3CheckpointError.invalid("Swift H3 Ref2VA needs ordered visual and optional audio references.")
     }
     _ = try ConditioningV1.inputs(conditioning, task: "ref2va",
       audioPolicy: "generated", count: 1...12)
     var paths: [(String, String, String)] = []
     var images = 0
     var videos = 0
+    var audios = 0
     for input in inputs {
       let kind = input["kind"] as? String ?? ""
       if kind == "image" { images += 1 }
       if kind == "video" { videos += 1 }
+      if kind == "audio" { audios += 1 }
       guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "strength", "sha256"]),
-        ["image", "video"].contains(kind),
+        ["image", "video", "audio"].contains(kind),
         input["role"] as? String == "reference",
         let path = input["path"] as? String, path.hasPrefix("/"),
         !path.utf8.contains(0),
@@ -184,12 +185,12 @@ public enum H3StudioRecipe {
         (input["strength"] == nil || (input["strength"] as? NSNumber)
           .map({ CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue == 1 }) == true)
       else {
-        throw H3CheckpointError.invalid("Swift H3 Ref2VA accepts full-strength image or silent-video references only.")
+        throw H3CheckpointError.invalid("Swift H3 Ref2VA accepts full-strength image, video or audio references only.")
       }
       paths.append((path, kind, digest))
     }
-    guard images <= 9, videos <= 3 else {
-      throw H3CheckpointError.invalid("Swift H3 Ref2VA allows at most nine images and three videos.")
+    guard images + videos > 0, images <= 9, videos <= 3, audios <= 3 else {
+      throw H3CheckpointError.invalid("Swift H3 Ref2VA needs a visual source and allows at most nine images, three videos and three audio sources.")
     }
     components.removeValue(forKey: "vision_encoder")
     components.removeValue(forKey: "allow_fl2va_weights_for_ref2va")

@@ -76,14 +76,27 @@ The experimental Swift H3 worker has completed text-to-audiovisual and one- and 
 The off-by-default Swift preparation path validates clip inputs, ordered references and profile
 settings, then requires worker preflight before a take can render. Enable **Use Swift MLX for H3
 (experimental)** in Runtime Settings to try text-to-AV, timed keyframes, or ordered Ref2VA with
-up to nine still images and three silent movies. A movie contributes its first 7.3 seconds,
-resampled to 24 fps and trimmed to the VAE clip grid. Audio-bearing movies, standalone audio
-references, adapter stacks and production quality remain unqualified.
+up to nine still images, three movies and three audio-bearing references. A movie
+contributes its first 7.3 seconds, resampled to 24 fps and trimmed to the VAE clip grid;
+an embedded soundtrack from that interval contributes sound-reference latents.
+Standalone audio uses up to 15 seconds at 32 kHz stereo and requires a visual reference.
+Its encoder has a short numerical parity test, but full audio/soundtrack output quality,
+adapter stacks and production quality remain unqualified.
 One mixed still/movie 768 × 448 test completed 73 frames with stereo audio in 739.99 seconds
 at an 8.10 GB peak Swift process footprint (FFmpeg excluded). Appearance was coherent,
 but its reference head turn did not reliably transfer. Multiple-movie quality and matched
 performance have not been established. The Qwen visual-token and H3 packed-row limits
 can reject a combination even within the per-modality reference counts.
+One image plus 6.8-second Qwen TTS voice-reference take produced 73 frames and stereo audio
+at 768 × 448 in 822.33 seconds with a 4.29 GB peak Swift process footprint (FFmpeg excluded).
+The audio-reference encoder took 1.68 seconds; sampling took 595.46 seconds. The sampled
+frames held a stable subject, while voice likeness and intelligibility still need listening
+review. The earlier movie-reference test used different conditioning, so these are not
+isolated speed or memory comparisons.
+An image plus audio-bearing 73-frame source movie also completed a 73-frame, 768 × 448
+Swift take with stereo audio in 841.25 seconds at an 8.10 GB peak worker footprint
+(external FFmpeg excluded). Sampled frames held a stable subject with one speaking pose;
+voice likeness, intelligibility and lip motion still require playback review.
 An additional recipe-backed ComfyUI T2VA run used the installed FL2VA checkpoint without
 image references and the four-evaluation Turbo LoRA. Its 768 × 448, five-second robot shot
 completed in 579.94 seconds at a 5.23 GB peak Swift process footprint. The visual arm motion
@@ -143,8 +156,10 @@ pair does not establish an isolated scaling benchmark.
 Still-image asset import uses ImageIO metadata inspection without decoding full-resolution pixels
 or invoking Python; other asset kinds may still use the legacy bridge.
 To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import up to nine
-images and three silent movies into the clip asset store, then choose **Use in clip → Appearance**
-for each. Movie references use only their first 7.3 seconds and must have no audio track.
+images, three movies and three audio files into the clip asset store, then choose
+**Use in clip → Appearance** for images/movies and **Audio · reference sound / voice** for
+audio. Movie references use only their first 7.3 seconds and include any soundtrack in that interval;
+audio references use at most 15 seconds and need an image or movie alongside them.
 Write a complete H3 prompt, select the installed compatible Ref2VA profile, and use
 **Prepare clip** to inspect the exact settings and run preflight before generating.
 

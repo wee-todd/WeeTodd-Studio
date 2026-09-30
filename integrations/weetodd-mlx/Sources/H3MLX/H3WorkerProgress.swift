@@ -34,6 +34,7 @@ public enum H3WorkerStageBoundary {
     switch stage {
     case "text_weights_released": return "qwen"
     case "reference_video_weights_released": return "referenceVideoEncode"
+    case "reference_audio_weights_released": return "referenceAudioEncode"
     case "keyframe_video_weights_released": return "keyframeVideoEncode"
     case "transformer_prepare" where total == 50:
       return "transformerPreparation"

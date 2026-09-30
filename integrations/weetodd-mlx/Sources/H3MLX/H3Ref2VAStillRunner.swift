@@ -54,11 +54,22 @@ public struct H3Ref2VAStillRequest: Sendable {
       case .video(let video):
         rows + ((video.frameCount - 5) / 17 * 5 + 2) *
           video.width * video.height / 1024
+      case .audio: rows
       }
+    }
+    let conditionAudioRows = mediaReferences.reduce(0) { rows, reference in
+      if case .audio(let audio) = reference {
+        return rows + 2 * ((audio.frames + 799) / 800)
+      }
+      if case .video(let video) = reference, let audio = video.audio {
+        return rows + 2 * ((audio.frames + 799) / 800)
+      }
+      return rows
     }
     guard width * height <= 768 * 1344,
       try geometry.packedRows(textRows: 1,
-        conditionVideoRows: conditionRows, conditionAudioRows: 0) <= 40_000 else {
+        conditionVideoRows: conditionRows,
+        conditionAudioRows: conditionAudioRows) <= 40_000 else {
       throw H3CheckpointError.invalid("H3 reference canvas exceeds packed-row admission.")
     }
     self.prompt = prompt
@@ -111,6 +122,9 @@ public enum H3Ref2VAStillRunner {
     _ = try H3CheckpointLayout(url: request.transformer)
     _ = try H3VideoVAELayout(url: request.videoVAE)
     _ = try H3AudioVAELayout(url: request.audioVAE)
+    if !prepared.layout.conditionAudioIndices.isEmpty {
+      try H3AudioVAEEncoder.inspect(checkpointURL: request.audioVAE)
+    }
     if let turboLoRA = request.turboLoRA {
       _ = try H3LoRAFile(url: turboLoRA,
         strength: request.turboLoRAStrength)
@@ -161,6 +175,20 @@ public enum H3Ref2VAStillRunner {
     progress("reference_video_weights_released", 1, 1)
     try Task.checkCancellation()
 
+    let conditionAudioRows: [Float] = try autoreleasepool {
+      guard admission.layout.conditionAudioIndices.count > 0 else { return [] }
+      let rows = try H3VideoReferencePreparation.encodeAudioRows(
+        references: request.references, layout: admission.layout,
+        audioVAEURL: request.audioVAE)
+      return rows.asType(.float32).asArray(Float.self)
+    }
+    Stream.gpu.synchronize()
+    Memory.clearCache()
+    if !conditionAudioRows.isEmpty {
+      progress("reference_audio_weights_released", 1, 1)
+    }
+    try Task.checkCancellation()
+
     let rawRows = try autoreleasepool { () throws -> ([Float], [Float]) in
       let state = try H3ReferenceDiTState(checkpointURL: request.transformer,
         layout: admission.layout,
@@ -181,11 +209,15 @@ public enum H3Ref2VAStillRunner {
       let video = concatenated([
         MLXArray(conditionVideoRows, [1, conditionCount, 96]), noise.video
       ], axis: 1)
+      let audio = conditionAudioRows.isEmpty ? noise.audio : concatenated([
+        MLXArray(conditionAudioRows,
+          [1, admission.layout.conditionAudioIndices.count, 32]), noise.audio
+      ], axis: 1)
       let sampled = try H3ReferenceSampler.run(predictor: state,
         videoSchedule: admission.videoSchedule,
         audioSchedule: admission.audioSchedule,
         rowSchedule: admission.rowSchedule,
-        videoLatents: video, audioLatents: noise.audio,
+        videoLatents: video, audioLatents: audio,
         progress: { completed, total in progress("sampling", completed, total) },
         blockProgress: { step, completed, total in
           progress("sampling_block_\(step)", completed, total)

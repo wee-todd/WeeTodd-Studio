@@ -100,7 +100,7 @@ final class H3StudioRecipeTests: XCTestCase {
     XCTAssertEqual(paths.count, 2, "No media should load after control rejection")
   }
 
-  func testMixedMediaRecipeRetainsInputOrderAndRejectsUnportedAudio() throws {
+  func testMixedMediaRecipeRetainsInputOrderAndRequiresVisualForAudio() throws {
     var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
     var components = try XCTUnwrap(root["components"] as? [String: Any])
     components["task"] = "ref2va"
@@ -115,7 +115,9 @@ final class H3StudioRecipeTests: XCTestCase {
         ["id": "still", "kind": "image", "role": "reference",
           "path": "/tmp/face.png", "sha256": digest],
         ["id": "movie", "kind": "video", "role": "reference",
-          "path": "/tmp/motion.mp4", "sha256": digest]]]
+          "path": "/tmp/motion.mp4", "sha256": digest],
+        ["id": "voice", "kind": "audio", "role": "reference",
+          "path": "/tmp/voice.wav", "sha256": digest]]]
     var seen: [String] = []
     func compile(_ object: [String: Any]) throws -> H3Ref2VAStillRequest {
       try H3StudioRecipe.compileMediaReferences(
@@ -125,21 +127,25 @@ final class H3StudioRecipeTests: XCTestCase {
             return .image(H3StillReference(rgb8: Data(count: 64 * 64 * 3),
               width: 64, height: 64))
           }
+          if kind == "audio" {
+            return .audio(H3AudioReference(samples: [Float](repeating: 0,
+              count: 3_200), frames: 1_600))
+          }
           return .video(H3VideoReference(rgb8: Data(count: 5 * 64 * 64 * 3),
             frameCount: 5, width: 64, height: 64))
         }
     }
     let result = try compile(root)
-    XCTAssertEqual(result.references.count, 2)
-    XCTAssertEqual(seen, ["image:/tmp/face.png", "video:/tmp/motion.mp4"])
+    XCTAssertEqual(result.references.count, 3)
+    XCTAssertEqual(seen, ["image:/tmp/face.png", "video:/tmp/motion.mp4",
+      "audio:/tmp/voice.wav"])
     var invalid = root
     var conditioning = invalid["conditioning"] as! [String: Any]
-    var inputs = conditioning["inputs"] as! [[String: Any]]
-    inputs[1]["kind"] = "audio"
-    conditioning["inputs"] = inputs
+    let inputs = conditioning["inputs"] as! [[String: Any]]
+    conditioning["inputs"] = [inputs[2]]
     invalid["conditioning"] = conditioning
     XCTAssertThrowsError(try compile(invalid))
-    XCTAssertEqual(seen.count, 2, "Unsupported audio must fail before media loading")
+    XCTAssertEqual(seen.count, 3, "Audio-only must fail before media loading")
   }
 
   func testFL2VARecipeKeepsOrderedEndpointRolesAndRejectsUnportedInputs() throws {

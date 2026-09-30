@@ -138,17 +138,25 @@ completed a distinct, coherent five-second 768 × 448 Swift take at strength 0.3
 this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.
 
 An experimental Swift MLX H3 worker now runs text-to-audiovisual, timed FL2VA keyframes
-and ordered image/silent-video Ref2VA through the installed Qwen, H3 transformer and separate
-video/audio VAE components. Studio has
-a guarded, off-by-default Swift preparation and worker handoff for these tasks; it admits one
-complete ComfyUI-format H3 Turbo LoRA, up to nine images and three silent movies for Ref2VA,
-and rejects unsupported media, adapter stacks, controls and profiles before model loading.
-Each movie reference uses its first 7.3 seconds on a bounded 24 fps grid; audio-bearing movies
-and standalone audio references remain unported. Reference count is further limited by the
+and ordered image/video/audio Ref2VA through the installed Qwen, H3 transformer and separate
+video/audio VAE components. Studio has a guarded, off-by-default Swift preparation and worker
+handoff for these tasks. It admits one complete ComfyUI-format H3 Turbo LoRA, up to nine images,
+three movies and three audio-bearing references for Ref2VA, and rejects unsupported media,
+adapter stacks, controls and profiles before model loading.
+Each movie reference uses its first 7.3 seconds on a bounded 24 fps grid; any embedded audio
+in the selected interval becomes a sound reference. Standalone audio references require a visual
+reference and use at most 15 seconds at 32 kHz stereo. The Swift audio encoder has a two-channel
+numerical parity test, while full audio-reference and soundtrack output quality remain unqualified.
+Reference count is further limited by the
 1,024-token Qwen request window and the 40,000-row H3 admission budget. One mixed image/movie
 768 × 448, 73-frame test completed with audio in 739.99 seconds at an 8.10 GB peak Swift
 process footprint (FFmpeg excluded). Its appearance was coherent, while the source head turn
-did not transfer reliably; video motion quality is still experimental. Enable **Use Swift
+did not transfer reliably; video motion quality is still experimental. A separate image plus
+Qwen TTS voice-reference take completed 73 frames and stereo audio in 822.33 seconds at a
+4.29 GB peak Swift process footprint. A distinct image plus audio-bearing-movie take also
+completed 73 frames with stereo audio in 841.25 seconds at an 8.10 GB peak process
+footprint; its sampled frames were stable, while speech and lip-sync quality need review.
+These differently conditioned takes are not a matched performance comparison. Enable **Use Swift
 MLX for H3 (experimental)** in Studio Runtime Settings to try it; the normal H3 route remains
 unchanged by default. A 768 × 768, five-second,
 one-evaluation text-only wiring run completed in 407.7 seconds,
@@ -168,8 +176,8 @@ frames show coherent motion. A separate one-image Beowulf take through the packa
 842.99 seconds at 768 × 448 with four evaluations, 124 video frames and 32 kHz stereo audio.
 Its peak worker footprint was 5.61 GB and peak MLX allocation 4.90 GB, with no system swap;
 the inspected frames show coherent boxing. Both historical takes used vertically inverted
-still-reference pixels and do not qualify identity or likeness. H3 video
-and audio references, general LoRA stacks and the remaining LTX 2.5 tasks still need native route coverage
+still-reference pixels and do not qualify identity or likeness. Broader H3 video/audio-reference
+quality, general LoRA stacks and the remaining LTX 2.5 tasks still need native route coverage
 before the H3/LTX Python inference paths can be retired.
 A five-second 768 × 448 H3 T2VA Turbo recipe later completed in both headless and saved
 recipe-backed ComfyUI Swift routes with byte-identical video and audio, synchronized endpoints,
@@ -179,7 +187,7 @@ job completed and a separate two-image installed-app
 take delivered seven previews and passed acceptance, project save and reopen with Python
 unavailable. Those visual observations also predate the still-reference orientation fix; they
 verify route execution and lifecycle, not identity quality. H3's worker still reports
-experimental production status; other reference media and general adapter support remain open.
+experimental production status; reference quality and general adapter support remain open.
 A later recipe-backed ComfyUI T2VA run used the installed FL2VA checkpoint in text-only mode
 with the four-evaluation Turbo LoRA. Its five-second, 768 × 448 robot shot completed in
 579.94 seconds at a 5.23 GB peak Swift process footprint, with coherent arm motion and stereo

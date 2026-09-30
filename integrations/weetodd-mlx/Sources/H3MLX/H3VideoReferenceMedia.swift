@@ -17,9 +17,7 @@ public enum H3VideoReferenceMedia {
       throw H3CheckpointError.invalid("H3 video reference needs a local movie and executable FFmpeg.")
     }
     let asset = AVURLAsset(url: URL(fileURLWithPath: path))
-    guard asset.tracks(withMediaType: .audio).isEmpty else {
-      throw H3CheckpointError.invalid("Swift H3 video references cannot yet carry soundtrack audio. Use a silent movie or remove its audio track.")
-    }
+    let hasAudio = !asset.tracks(withMediaType: .audio).isEmpty
     let side = 256
     let frameBytes = side * side * 3
     let maximumFrames = 175
@@ -66,8 +64,11 @@ public enum H3VideoReferenceMedia {
     }
     let selected = (decodedFrames - 5) / 17 * 17 + 5
     bytes.count = selected * frameBytes
+    let soundtrack = try hasAudio ? H3AudioReferenceMedia.load(path: path,
+      ffmpeg: ffmpeg, maximumSeconds: Double(selected) / 24) : nil
     return Loaded(reference: H3VideoReference(rgb8: bytes,
-      frameCount: selected, width: side, height: side),
+      frameCount: selected, width: side, height: side,
+      audio: soundtrack),
       decodedFrames: decodedFrames)
   }
 }

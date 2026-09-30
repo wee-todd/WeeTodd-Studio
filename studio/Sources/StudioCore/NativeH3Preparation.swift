@@ -327,25 +327,28 @@ public enum NativeH3Preparation {
       if Set<MediaRole>([.reference, .first, .last, .keyframe]).contains(attachment.role) {
         let isVideoReference = attachment.role == .reference &&
           (asset.kind == .video || asset.kind == .sequence)
-        guard (asset.kind == .image || isVideoReference), attachment.strength == 1,
+        let isAudioReference = attachment.role == .reference && asset.kind == .audio
+        guard (asset.kind == .image || isVideoReference || isAudioReference),
+          attachment.strength == 1,
           (attachment.role == .keyframe || attachment.time == 0),
           attachment.referenceRole == nil,
           attachment.referencePriority == nil,
           attachment.referenceFrames == nil,
           attachment.referenceSizePolicy == nil,
           attachment.attentionStrength == nil else {
-          throw unsupported("H3 image and video references require full strength and no timing or specialized controls")
+          throw unsupported("H3 image, video and audio references require full strength and no timing or specialized controls")
         }
         let imagePath = try canonical(asset.path)
         guard FileManager.default.isReadableFile(atPath: imagePath) else {
           throw StudioError.invalid("Relink the H3 reference: \(asset.name)")
         }
         var input: [String: Any] = ["id": attachment.id.uuidString,
-          "kind": isVideoReference ? "video" : "image",
+          "kind": isVideoReference ? "video" : isAudioReference ? "audio" : "image",
           "role": attachment.role.rawValue, "path": imagePath,
           "strength": 1.0,
           "sha256": try sourceSHA256(imagePath,
-            maxBytes: isVideoReference ? 4 * 1024 * 1024 * 1024 : 128 * 1024 * 1024)]
+            maxBytes: isVideoReference ? 4 * 1024 * 1024 * 1024
+              : isAudioReference ? 1024 * 1024 * 1024 : 128 * 1024 * 1024)]
         if attachment.role == .first { input["frame_index"] = 0 }
         if attachment.role == .last {
           input["frame_index"] = keyframeIndex(attachment, duration: clip.duration)!
@@ -375,10 +378,11 @@ public enum NativeH3Preparation {
     recipe["components"] = components
     if clip.inferredTask == "ref2va" {
       let imageCount = referenceInputs.filter { $0["kind"] as? String == "image" }.count
-      let videoCount = referenceInputs.count - imageCount
-      guard (1...12).contains(referenceInputs.count),
-        imageCount <= 9, videoCount <= 3 else {
-        throw unsupported("Ref2VA needs at most nine images and three silent videos")
+      let videoCount = referenceInputs.filter { $0["kind"] as? String == "video" }.count
+      let audioCount = referenceInputs.count - imageCount - videoCount
+      guard (1...12).contains(referenceInputs.count), imageCount + videoCount > 0,
+        imageCount <= 9, videoCount <= 3, audioCount <= 3 else {
+        throw unsupported("Ref2VA needs a visual source and allows at most nine images, three videos and three audio references")
       }
       recipe["conditioning"] = ["version": 1, "task": "ref2va",
         "inputs": referenceInputs, "audio_policy": "generated"]
