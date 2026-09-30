@@ -16,9 +16,10 @@ LTX 2.5** selects native distilled 8 + 3 step T2V, first-image, first/last-frame
 single-audio-driver A2V rendering with an optional first-frame image and compatible
 standard LoRAs, including LTX 2.3 adapters. Continuous scenes of
 two to six shots with identical effective components and sampling settings also use Swift.
-The first scene shot may use one opening image. Studio renders the group as one movie and
-accepts all member ranges together. Later scene images, audio drivers and specialized
-controls still use the explicitly selected Python route.
+Any scene shot may use one first-frame image. One consecutive interval of the same
+audio source can drive every shot, including shots with an image. Studio renders the
+group as one movie and accepts all member ranges together. Specialized IC-LoRA, MSR,
+Ingredients and DFR controls still use the explicitly selected Python route.
 The worker reuses installed paged
 weights and the shared renderer. Unsupported controls fail native preflight; turn the option
 off explicitly for advanced workflows still provided by Python.
@@ -73,8 +74,13 @@ FFmpeg. Four reviewed frames retained the subject and waterfront across the join
 distinct 49-frame motion mode completed in 44.52 worker seconds at a 3.68 GB
 peak Swift process footprint. Both modes passed Studio prepare, preflight, render,
 two-preview, acceptance and reopening with Python unavailable. Longer continuity
-and seamless sound remain experimental. Later-image/audio continuous scenes, other A2V
-forms and specialized controls still require the explicitly selected Python route.
+and seamless sound remain experimental. A separate two-shot scene with first-frame
+images on both shots and a continuous Qwen3-TTS audio driver completed in Swift at
+384 × 256, 24 fps and four seconds. The direct worker took 57.82 seconds at a 3.52 GB
+process peak, excluding FFmpeg; its exact cut began at frame 48. A Studio run prepared,
+rendered, accepted both shot ranges as one take, saved and reopened the project with
+Python unavailable. Specialized controls still require the explicitly selected Python
+route.
 Model setup, asset/library tools and other engines remain
 separate migration work; this is not yet a fully Python-free Studio release.
 The experimental Swift H3 worker has completed text-to-audiovisual and one- and two-still Ref2VA takes.
@@ -324,6 +330,8 @@ bounded memory and supports timelines up to one hour. Long timelines can take lo
 For an independent native H3/LTX clip, open **Timeline audio driver** in its inspector. Choose
 **Voice**, **Music**, or **Voice + Music**, select contributing tracks and prepare/audition the exact
 mix. Gains, pan, fades, reverb, ducking and mutes are included; solo does not change the driver. The
+Swift LTX 2.5 route accepts the prepared mix for an independent A2V clip; the current
+Swift H3 worker does not yet implement timeline audio-driver conditioning. The
 **Use timeline soundtrack (mute clip audio)** option prevents doubled audio while retaining the
 original generated movie. Preflight rejects missing, stale or silent drivers. Native frame geometry
 may require a slightly longer reference than the visible clip; uncovered samples are silence-padded.
@@ -1203,25 +1211,31 @@ LTX already-distilled models do not need an H3 Turbo adapter.
 
 Use **Continue scene** (experimental) for connected local LTX 2.5 shots that should play as
 one continuous scene. The native engine carries original video and audio latents between
-overlapping sampling windows and decodes the assembled timeline once. Frame matching and
+overlapping sampling windows. Scenes with a later first-frame image decode groups
+between explicit image cuts separately and join at the exact editorial boundary;
+otherwise the selected full or
+bounded decode mode applies. Frame matching and
 source-video extension remain separate choices for other workflows.
 
 With **Use Swift MLX for LTX 2.5** enabled, the current Swift route accepts text scenes
-with compatible ordinary LoRAs and one opening image on the first shot. Select
-**Image to video** and attach a **First frame** image to that shot; later shots must use
-text-to-video. It preflights the whole group and produces the same grouped review ranges.
+with compatible ordinary LoRAs and one **First frame** image on any shot. Choose
+**Image to video** for that shot. An **Audio to video** scene can use one consecutive
+interval of the same source file on every shot, with an optional first-frame image on
+each. Audio-driven shot durations must land on the eight-frame grid. The worker
+preflights the whole group and produces grouped review ranges.
 Studio uses one full video decode by default. With **Use Swift MLX for LTX 2.5** enabled,
 choose **Video decode → Bounded decode** in the scene inspector to cap each decoder window
 at 361 frames; headless recipes can set their own aligned cap. The choice is saved with
 the scene leader, frozen into the prepared recipe, and shown during take review. Switching
 to the Python renderer requires choosing **Full decode** first. One signed-worker
 30-second scene rendered with no visible cut in inspected decoder-join
-contact frames. Broader long-scene quality and interactive Studio acceptance remain unqualified.
+contact frames. Broader long-scene quality remains unqualified.
 A StudioStore test using that real movie passed grouped review, acceptance and project
-round-trip with a test bridge for preparation/rendering; interactive signed-app review
-after a new generation remains untested.
-Select the Python renderer for later scene image anchors, audio drivers, specialized
-controls or checkpoint-resume behavior. Those options remain available in Studio.
+round-trip with a test bridge for preparation/rendering. A separate two-image,
+continuous-audio Studio job then completed native preparation, rendering, grouped
+acceptance, saving and reopening with Python unavailable. Select the Python renderer
+for specialized controls or checkpoint-resume behavior. Those options remain available
+in Studio.
 
 Continuing windows reuse interior video history while regenerating the previous window's final
 sampled video latent with future context. **Boundary image guidance → Automatic** applies every image

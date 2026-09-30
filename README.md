@@ -86,8 +86,10 @@ Earlier slower attempts remain recorded; the full timing gain is not attributed 
 fixed loading because the contemporary Python control also improved.
 Studio now packages this renderer as `WeeToddLTXWorker` and can launch supported distilled
 T2V, first-image, first/last-frame, single-audio-driver A2V, and continuous scenes
-with compatible per-shot settings and an optional opening image on the first shot
-directly in Swift. Runtime
+with compatible per-shot settings. A scene can use a first-frame image on any shot and
+one continuous audio source across all shots, including both together. A later image
+creates an exact editorial cut; the worker decodes groups between image cuts separately so
+the new subject does not bleed into earlier frames. Runtime
 Settings exposes the Swift/Python choice; unsupported native controls fail preflight without
 silent fallback.
 Studio scenes use a single video decode by default. With Swift LTX selected, the scene
@@ -141,6 +143,15 @@ two decoded previews, and completed in 293.34 seconds at a 13.67 GB peak process
 (FFmpeg excluded). The accepted take reopened with Python unavailable. Its 8+3 distilled
 schedule and 2× latent spatial pass are the existing native path; this single reviewed sample
 does not qualify all voices, durations or lip-sync behavior.
+An installed 384 × 256 two-shot scene used different images at each shot boundary and one
+Qwen3-TTS audio interval. It published 96 frames and four seconds of stereo sound; the
+second image began at frame 48 without appearing in earlier contact frames. The direct
+Swift worker completed in 57.82 seconds with a 3.52 GB process peak, excluding FFmpeg.
+A full Studio preparation, render, grouped acceptance and project reopening also completed
+with Python unavailable. Planned music-video A2V clips can retain their source interval,
+and a prepared timeline audio mix can feed an independent Swift LTX A2V clip. IC-LoRA,
+MSR, Ingredients, DFR and H3 audio-driver/extension controls remain outside the
+qualified Swift paths.
 An ordinary LTX 2.3 standard LoRA also
 completed a distinct, coherent five-second 768 × 448 Swift take at strength 0.3 in both stages;
 this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.

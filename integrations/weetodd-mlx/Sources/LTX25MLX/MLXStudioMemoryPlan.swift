@@ -23,7 +23,9 @@ public struct MLXStudioMemoryPlan:Sendable {
       let layout=try request.referenceImages.first.map { try MLXReferenceLayout(geometry:geometry,
         firstStrength:$0.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil) }
       let guide=try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:geometry,contextFrames:$0) }
-      guard layout == nil || guide == nil else { throw LTXError.invalid("Endpoint and extension guides cannot share one LTX task.") }
+      guard layout?.lastStrength == nil || guide == nil else {
+        throw LTXError.invalid("A last-frame image cannot share an LTX history guide.")
+      }
       transformer=max(transformer,try MLXAVBlock.estimatedActivationBytes(configuration:
         AVBlockConfiguration(videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? geometry.videoTokens,
           audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),

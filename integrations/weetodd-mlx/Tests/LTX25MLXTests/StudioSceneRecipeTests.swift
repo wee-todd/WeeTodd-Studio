@@ -42,6 +42,53 @@ final class StudioSceneRecipeTests: XCTestCase {
     XCTAssertTrue(compiled.requests[1].referenceImages.isEmpty)
   }
 
+  func testLaterShotImageCompilesOnlyForItsOwnWindow() throws {
+    var object=fixture()
+    var scene=object["scene"] as! [String:Any]
+    var segments=scene["segments"] as! [[String:Any]]
+    segments[1]["image_input"]=["id":"second","kind":"image","role":"keyframe",
+      "path":"/second.png","frame_index":0,"strength":0.8]
+    scene["segments"]=segments;object["scene"]=scene
+    let compiled=try MLXStudioSceneRecipe.compile(
+      data:JSONSerialization.data(withJSONObject:object),outputDirectory:"/output")
+    XCTAssertEqual(compiled.requests.map(\.task),["t2v","i2v"])
+    XCTAssertEqual(compiled.requests[1].referenceImages.map(\.path),["/second.png"])
+    XCTAssertEqual(compiled.requests[1].referenceImages.first?.strength,0.8)
+    XCTAssertEqual(compiled.strictBoundaries,[1])
+  }
+
+  func testLaterImageCutsOnlyItsBoundaryAndKeepsEarlierSceneContinuity() throws {
+    var object=fixture()
+    var config=object["config"] as! [String:Any]
+    config["duration_seconds"]=6;object["config"]=config
+    var scene=object["scene"] as! [String:Any]
+    var segments=scene["segments"] as! [[String:Any]]
+    segments[1]["duration_seconds"]=2
+    segments.append(["clip_id":"third","prompt":"A new subject appears.",
+      "duration_seconds":2,"seed":13,
+      "image_input":["id":"third-image","kind":"image","role":"keyframe",
+        "path":"/third.png","frame_index":0,"strength":1]])
+    scene["segments"]=segments;object["scene"]=scene
+    let compiled=try MLXStudioSceneRecipe.compile(
+      data:JSONSerialization.data(withJSONObject:object),outputDirectory:"/output")
+    XCTAssertEqual(compiled.strictBoundaries,[2])
+    XCTAssertEqual(compiled.requests.map(\.task),["t2v","t2v","i2v"])
+  }
+
+  func testContinuousSourceAudioDrivesBothOverlappingWindows() throws {
+    var object=fixture()
+    object["conditioning"]=["version":1,"task":"a2v","audio_policy":"source",
+      "inputs":[["id":"music","kind":"audio","role":"audio_driver",
+        "path":"/music.wav","strength":1,
+        "source_start_seconds":5.0,"source_duration_seconds":5.0]]]
+    let compiled=try MLXStudioSceneRecipe.compile(
+      data:JSONSerialization.data(withJSONObject:object),outputDirectory:"/output")
+    XCTAssertEqual(compiled.requests.map(\.task),["a2v","a2v"])
+    XCTAssertEqual(compiled.requests[0].audioReference?.sourceStartSeconds,5)
+    XCTAssertEqual(compiled.requests[1].audioReference?.sourceStartSeconds,6)
+    XCTAssertEqual(compiled.requests[1].audioReference?.sourceDurationSeconds,4)
+  }
+
   func testExplicitWindowedDecodeKeepsOrdinarySceneSampling() throws {
     var object=fixture()
     var scene=object["scene"] as! [String:Any]

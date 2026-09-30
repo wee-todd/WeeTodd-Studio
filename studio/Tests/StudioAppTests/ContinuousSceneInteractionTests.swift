@@ -37,6 +37,97 @@ import XCTest
 }
 
 final class ContinuousSceneInteractionTests: XCTestCase {
+  @MainActor func testInstalledNativeTwoShotImageAudioSceneLifecycle() async throws {
+    guard let manifest = ProcessInfo.processInfo.environment["WEETODD_NATIVE_LTX_SCENE_LIFECYCLE"] else {
+      throw XCTSkip("Opt-in installed LTX 2.5 two-shot scene lifecycle")
+    }
+    let options = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: manifest))) as! [String: String]
+    let source = try XCTUnwrap(options["recipe"])
+    let model = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: source))) as! [String: Any]
+    let scene = try XCTUnwrap(model["scene"] as? [String: Any])
+    let segments = try XCTUnwrap(scene["segments"] as? [[String: Any]])
+    XCTAssertEqual(segments.count, 2)
+    let conditioning = try XCTUnwrap(model["conditioning"] as? [String: Any])
+    let inputs = try XCTUnwrap(conditioning["inputs"] as? [[String: Any]])
+    let driver = try XCTUnwrap(inputs.first { $0["role"] as? String == "audio_driver" })
+    let opening = try XCTUnwrap(inputs.first { $0["role"] as? String == "keyframe" })
+    let later = try XCTUnwrap(segments[1]["image_input"] as? [String: Any])
+    let root = URL(fileURLWithPath: try XCTUnwrap(options["output"]))
+    let profiles = root.appendingPathComponent("Profiles")
+    try FileManager.default.createDirectory(at: profiles, withIntermediateDirectories: true)
+    var profile = model
+    profile.removeValue(forKey: "scene")
+    try JSONSerialization.data(withJSONObject: profile).write(to: profiles.appendingPathComponent("scene.json"))
+    let store = StudioStore(dataDirectory: root, restoreSession: false)
+    store.runtime = RuntimeSettings(root: "/unavailable", pythonPath: "/unavailable/python",
+      profilesDirectory: profiles.path)
+    store.runtime.nativeLTX25Enabled = true
+    store.runtime.ltx25WorkerPath = try XCTUnwrap(options["worker"])
+    store.runtime.ffmpegPath = try XCTUnwrap(model["ffmpeg"] as? String)
+    let config = try XCTUnwrap(model["config"] as? [String: Any])
+    let fps = try XCTUnwrap(config["frame_rate"] as? Double)
+    var voice = MediaAsset(name: "Scene voice", kind: .audio,
+      path: try XCTUnwrap(driver["path"] as? String))
+    voice.duration = 10
+    let firstImage = MediaAsset(name: "Opening", kind: .image,
+      path: try XCTUnwrap(opening["path"] as? String))
+    let secondImage = MediaAsset(name: "Later shot", kind: .image,
+      path: try XCTUnwrap(later["path"] as? String))
+    store.project.assets = [voice, firstImage, secondImage]
+    var clips: [Clip] = []
+    let originalStart = try XCTUnwrap(driver["source_start_seconds"] as? Double)
+    var elapsed = 0.0
+    for index in segments.indices {
+      let segment = segments[index]
+      var clip = Clip(name: "Shot \(index + 1)", engine: .ltx25)
+      clip.prompt = try XCTUnwrap(segment["prompt"] as? String)
+      clip.duration = try XCTUnwrap(segment["duration_seconds"] as? Double)
+      XCTAssertEqual((clip.duration * fps / 8).rounded() * 8, clip.duration * fps)
+      clip.generationWidth = try XCTUnwrap(config["width"] as? Int)
+      clip.generationHeight = try XCTUnwrap(config["height"] as? Int)
+      clip.seed = try XCTUnwrap(segment["seed"] as? Int)
+      clip.generationSelection = GenerationSelection(task: "a2v")
+      var audio = Attachment(assetID: voice.id, role: .audioDriver)
+      audio.audioSourceStart = originalStart + elapsed
+      audio.audioSourceDuration = clip.duration
+      clip.attachments = [audio, Attachment(assetID: index == 0 ? firstImage.id : secondImage.id, role: .first)]
+      if index > 0 { clip.continuity = ClipContinuity(mode: "scene", sourceClipID: clips[index - 1].id) }
+      clips.append(clip)
+      elapsed += clip.duration
+    }
+    store.project.clips = clips
+    store.select(clips[1].id)
+    await store.reloadProfiles()
+    XCTAssertEqual(store.profiles.count, 1)
+    await store.describeGeneration()
+    XCTAssertNil(store.validationErrors[clips[1].id])
+    await store.generateSelected()
+    XCTAssertNil(store.error)
+    let pending = try XCTUnwrap(store.pendingContinuousScene)
+    XCTAssertEqual(pending.report.members.count, 2)
+    XCTAssertTrue(store.canAcceptContinuousScene)
+    await store.acceptContinuousScene()
+    XCTAssertNil(store.error)
+    let movie = try XCTUnwrap(store.project.clips[0].sourcePath.isEmpty ? nil : store.project.clips[0].sourcePath)
+    XCTAssertEqual(store.project.clips[1].sourcePath, movie)
+    let inspected = try await StudioStore.inspectNativeMovie(movie)
+    XCTAssertEqual(inspected["duration"] as? Double, 4)
+    XCTAssertEqual(inspected["fps"] as? Double, fps)
+    let reportPath = URL(fileURLWithPath: movie).deletingLastPathComponent().appendingPathComponent("report.json")
+    let report = try JSONSerialization.jsonObject(with: Data(contentsOf: reportPath)) as! [String: Any]
+    XCTAssertEqual(report["frames"] as? Int, 96)
+    XCTAssertEqual(report["python_inference"] as? Bool, false)
+    let saved = root.appendingPathComponent("accepted.weetodd")
+    try ProjectStorage.write(store.project, to: saved)
+    let reopened = StudioStore(dataDirectory: root, restoreSession: false)
+    reopened.load(saved)
+    XCTAssertEqual(reopened.project.clips.map(\.sourcePath), [movie, movie])
+    let evidence: [String: Any] = ["video": movie, "pythonPath": store.runtime.pythonPath,
+      "sceneTakeID": store.project.clips[0].versions.last?.sceneTakeID?.uuidString ?? "",
+      "frames": report["frames"] ?? 0]
+    try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
+      .write(to: root.appendingPathComponent("scene-studio-qualification.json"), options: .atomic)
+  }
   @MainActor func testInstalledWindowedSceneMovieAcceptsAndReopensAsOneTake() async throws {
     guard let path = ProcessInfo.processInfo.environment["WEETODD_LTX_WINDOWED_SCENE_SAMPLE"],
       FileManager.default.fileExists(atPath: path) else {

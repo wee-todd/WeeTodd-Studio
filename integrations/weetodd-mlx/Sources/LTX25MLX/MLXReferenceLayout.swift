@@ -2,13 +2,14 @@ import Foundation
 import MLX
 import LTX25Engine
 
-/// First-frame replacement plus at most one appended last-frame reference.
+/// One aligned frame replacement plus at most one appended last-frame reference.
 /// This layout needs no inter-reference attention mask. Multiple appended
 /// references, IC/MSR and arbitrary frame positions have separate contracts.
 public struct MLXReferenceLayout:Sendable {
   public let geometry:AVGeometry
   public let firstStrength:Float
   public let lastStrength:Float?
+  public let firstFrame:Int
   public var frameTokens:Int { geometry.latentHeight*geometry.latentWidth }
   public var videoTokens:Int { geometry.videoTokens+(lastStrength == nil ? 0 : frameTokens) }
   public var positions:[Float] {
@@ -21,11 +22,16 @@ public struct MLXReferenceLayout:Sendable {
     }
     return result
   }
-  public init(geometry:AVGeometry,firstStrength:Float,lastStrength:Float?) throws {
+  public init(geometry:AVGeometry,firstStrength:Float,lastStrength:Float?,firstFrame:Int=0) throws {
     guard firstStrength.isFinite,(0...1).contains(firstStrength),
       lastStrength.map({ $0.isFinite && (0...1).contains($0) }) ?? true,
-      lastStrength == nil || geometry.frames>1 else { throw LTXError.invalid("Invalid endpoint strengths or frame count.") }
+      lastStrength == nil || geometry.frames>1,
+      firstFrame>=0,firstFrame<geometry.frames,firstFrame%8==0,
+      firstFrame == 0 || lastStrength == nil else {
+      throw LTXError.invalid("Invalid aligned image frame, endpoint strengths or frame count.")
+    }
     self.geometry=geometry;self.firstStrength=firstStrength;self.lastStrength=lastStrength
+    self.firstFrame=firstFrame
     guard videoTokens<=131072 else { throw LTXError.invalid("Reference tokens exceed video admission.") }
   }
   public func validate(first:MLXArray,last:MLXArray?) throws {
@@ -44,10 +50,20 @@ public struct MLXReferenceLayout:Sendable {
     // Match the existing distilled recipe: scalar noise blend occurs before
     // conditioning; anchors replace/append clean tokens at both resolutions.
     // Strength controls the denoise mask, not an extra initial interpolation.
-    var parts=[first.reshaped(first.shape)]
-    if geometry.videoTokens>frameTokens { parts.append(generated[frameTokens..<geometry.videoTokens]) }
-    var clean=[first.reshaped(first.shape),MLXArray.zeros([geometry.videoTokens-frameTokens,128])]
-    var mask=[Float](repeating:1-firstStrength,count:frameTokens)+[Float](repeating:1,count:geometry.videoTokens-frameTokens)
+    let start=firstFrame/8*frameTokens
+    var parts:[MLXArray]=[],clean:[MLXArray]=[]
+    if start>0 {
+      parts.append(generated[0..<start]);clean.append(MLXArray.zeros([start,128]))
+    }
+    parts.append(first.reshaped(first.shape));clean.append(first.reshaped(first.shape))
+    let end=start+frameTokens
+    if end<geometry.videoTokens {
+      parts.append(generated[end..<geometry.videoTokens])
+      clean.append(MLXArray.zeros([geometry.videoTokens-end,128]))
+    }
+    var mask=[Float](repeating:1,count:start)
+    mask += [Float](repeating:1-firstStrength,count:frameTokens)
+    mask += [Float](repeating:1,count:geometry.videoTokens-end)
     if let last,let strength=lastStrength {
       parts.append(last.reshaped(last.shape));clean.append(last.reshaped(last.shape))
       mask += [Float](repeating:1-strength,count:frameTokens)

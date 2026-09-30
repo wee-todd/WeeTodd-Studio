@@ -193,7 +193,9 @@ struct PendingContinuousSceneTake: Identifiable {
       for clip in accepted.clips where versions[clip.id] != nil {
         let body: [String: Any] = ["project": try accepted.object(), "clipID": clip.id.uuidString,
           "globalAssets": try JSONSerialization.jsonObject(with: JSONEncoder().encode(globalAssets))]
-        let description = try await descriptionBridge.invoke("describe-generation", runtime: settings, payload: body)
+        let describeCommand = clip.engine == .ltx25 && settings.usesNativeLTX25
+          ? "ltx-native-describe" : "describe-generation"
+        let description = try await descriptionBridge.invoke(describeCommand, runtime: settings, payload: body)
         guard documentSessionID == take.documentSessionID, project == before,
           pendingContinuousScene?.id == take.id,
           continuousSceneDependencyKey(for: before.clips.first(where: { $0.id == clip.id })!) == take.requestKey else {

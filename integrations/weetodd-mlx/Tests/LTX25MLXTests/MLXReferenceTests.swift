@@ -4,6 +4,20 @@ import LTX25Engine
 import LTX25MLX
 
 final class MLXReferenceTests:XCTestCase {
+  func testTimedSceneAnchorLandsAtTheFirstNewShotFrame() throws {
+    let g=try AVGeometry(width:64,height:32,frames:41,fps:24)
+    let layout=try MLXReferenceLayout(geometry:g,firstStrength:0.8,lastStrength:nil,firstFrame:24)
+    let frameTokens=g.latentHeight*g.latentWidth
+    let targetIndex=3*frameTokens
+    let reference=MLXArray.ones([frameTokens,128])*0.7
+    let prepared=try layout.prepare(generated:.ones([g.videoTokens,128])*(-1),first:reference,last:nil)
+    XCTAssertEqual(prepared.latent[targetIndex,0].item(Float.self),0.7)
+    XCTAssertEqual(prepared.latent[0,0].item(Float.self),-1)
+    XCTAssertEqual(prepared.condition.mask[targetIndex],0.2,accuracy:0.0001)
+    XCTAssertEqual(prepared.condition.mask[0],1)
+    XCTAssertEqual(prepared.condition.clean[targetIndex,0].item(Float.self),0.7)
+    XCTAssertThrowsError(try MLXReferenceLayout(geometry:g,firstStrength:1,lastStrength:nil,firstFrame:25))
+  }
   func testFirstLatentAndAppendedLastUsePixelFramePositionsAndStrengthMasks() throws {
     let g=try AVGeometry(width:64,height:32,frames:17,fps:24)
     let layout=try MLXReferenceLayout(geometry:g,firstStrength:1,lastStrength:0.75)

@@ -4,6 +4,44 @@ import LTX25Engine
 @testable import LTX25MLX
 
 final class MLXExtensionGuideLayoutTests:XCTestCase {
+  func testTimedImageAndCarriedAudiovisualHistoryKeepBothMasks() throws {
+    let geometry=try AVGeometry(width:64,height:32,frames:41,fps:24)
+    let image=try MLXReferenceLayout(geometry:geometry,firstStrength:0.8,lastStrength:nil,firstFrame:24)
+    let guide=try MLXExtensionGuideLayout(geometry:geometry,contextFrames:25,
+      videoGuideLatentFrames:3,audioGuideTokens:27)
+    let reference=MLXArray.ones([image.frameTokens,128])*0.7
+    let anchored=try image.prepare(generated:.zeros([geometry.videoTokens,128]),first:reference,last:nil)
+    let sourceVideo=MLXArray.ones([guide.videoGuideTokens,128])*0.3
+    let sourceAudio=MLXArray.ones([guide.audioGuideTokens,128])*0.4
+    let prepared=try guide.prepare(targetVideo:anchored.latent,
+      targetVideoCondition:anchored.condition,targetAudio:.zeros([geometry.audioFrames,128]),
+      sourceVideo:sourceVideo,sourceAudio:sourceAudio,
+      guideVideoNoise:.zeros(sourceVideo.shape),guideAudioNoise:.zeros(sourceAudio.shape),sigma:1)
+    let anchorIndex=3*image.frameTokens
+    XCTAssertEqual(prepared.video[anchorIndex,0].item(Float.self),0.7)
+    XCTAssertEqual(prepared.videoCondition.clean[anchorIndex,0].item(Float.self),0.7)
+    XCTAssertEqual(prepared.videoCondition.mask[anchorIndex],0.2,accuracy:0.0001)
+    XCTAssertEqual(prepared.videoCondition.mask[geometry.videoTokens],0.5)
+    XCTAssertEqual(prepared.audioCondition.mask[geometry.audioFrames],0.5)
+  }
+  func testGuidedWindowKeepsExactSourceAudioWhileHistoryRemainsConditioned() throws {
+    let geometry=try AVGeometry(width:64,height:32,frames:41,fps:24)
+    let guide=try MLXExtensionGuideLayout(geometry:geometry,contextFrames:25,
+      videoGuideLatentFrames:3,audioGuideTokens:27)
+    let driver=MLXArray.ones([geometry.audioFrames,128])*0.8
+    let sourceVideo=MLXArray.ones([guide.videoGuideTokens,128])*0.3
+    let sourceAudio=MLXArray.ones([guide.audioGuideTokens,128])*0.4
+    let frozen=try MLXAudioDenoiseCondition(clean:driver,
+      mask:Array(repeating:Float(0),count:geometry.audioFrames))
+    let prepared=try guide.prepare(targetVideo:.zeros([geometry.videoTokens,128]),
+      targetAudio:driver,targetAudioCondition:frozen,
+      sourceVideo:sourceVideo,sourceAudio:sourceAudio,
+      guideVideoNoise:.zeros(sourceVideo.shape),guideAudioNoise:.zeros(sourceAudio.shape),sigma:1)
+    XCTAssertEqual(prepared.audioCondition.mask[0],0)
+    XCTAssertEqual(prepared.audioCondition.mask[geometry.audioFrames],0.5)
+    XCTAssertEqual(prepared.audioCondition.clean[0,0].item(Float.self),0.8)
+    XCTAssertEqual(prepared.audioCondition.clean[geometry.audioFrames,0].item(Float.self),0.4)
+  }
   func testSceneCanGuideInteriorVideoAndExactAudioOverlap() throws {
     let geometry=try AVGeometry(width:64,height:64,frames:97,fps:24)
     let layout=try MLXExtensionGuideLayout(geometry:geometry,contextFrames:25,

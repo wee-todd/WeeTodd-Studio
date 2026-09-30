@@ -4,14 +4,16 @@ import LTX25Engine
 
 /// Strict native scene admission. Each shot is compiled through the ordinary
 /// Studio recipe validator after resolving its exact causal sampling window.
-/// The first window may use one opening image; later windows use the sampled
-/// audiovisual history. Interior/last images and audio drivers remain gated.
+/// Each window may use one shot-boundary image alongside sampled audiovisual
+/// history. One continuous audio driver can span every shot. Interior/last
+/// images and unrelated per-shot audio sources remain gated.
 public enum MLXStudioSceneRecipe {
   public struct Compiled {
     public let plan: LTX25ScenePlan
     public let requests: [MLXDistilledRequest]
     public let clipIDs: [String]
     public let decodeMode: MLXSceneDecodeMode
+    public let strictBoundaries: Set<Int>
   }
 
   public static func compile(data: Data, outputDirectory: String) throws -> Compiled {
@@ -47,8 +49,14 @@ public enum MLXStudioSceneRecipe {
         sceneTask == "fflf" && sceneInputs.count == 1 &&
         sceneInputs[0]["kind"] as? String == "image" &&
         sceneInputs[0]["role"] as? String == "keyframe" &&
-        sceneInputs[0]["frame_index"] as? Int == 0) else {
-      throw LTXError.invalid("Swift LTX scenes accept text or one opening image on the first shot; later images and audio drivers are unsupported.")
+        sceneInputs[0]["frame_index"] as? Int == 0 ||
+        sceneTask == "a2v" && (1...2).contains(sceneInputs.count) &&
+        sceneInputs.filter({ $0["role"] as? String == "audio_driver" &&
+          $0["kind"] as? String == "audio" }).count == 1 &&
+        sceneInputs.filter({ $0["role"] as? String == "keyframe" &&
+          $0["kind"] as? String == "image" &&
+          $0["frame_index"] as? Int == 0 }).count == sceneInputs.count - 1) else {
+      throw LTXError.invalid("Swift LTX scenes need text, one opening image, or one continuous audio driver with an optional image.")
     }
     guard scene["decode_mode"] == nil || scene["decode_mode"] is String else {
       throw LTXError.invalid("Scene decode mode must be single or windowed.")
@@ -82,7 +90,7 @@ public enum MLXStudioSceneRecipe {
     var ids: [String] = [], prompts: [String] = [], durations: [Double] = []
     var seeds: [Int] = []
     for entry in entries {
-      guard Set(entry.keys) == ["clip_id","prompt","duration_seconds","seed"],
+      guard Set(entry.keys).subtracting(["image_input"]) == ["clip_id","prompt","duration_seconds","seed"],
         let id = entry["clip_id"] as? String, !id.isEmpty, id.utf8.count <= 128,
         let prompt = entry["prompt"] as? String,
         !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -119,24 +127,54 @@ public enum MLXStudioSceneRecipe {
       windowConfig["duration_seconds"] = Double(plan.windowFrames[index] - 1) / fps
       windowConfig["seed"] = seeds[index]
       ordinary["config"] = windowConfig
-      if index > 0, sceneTask == "fflf" {
+      if index > 0 {
         var laterConditioning = conditioning
-        laterConditioning["task"] = "t2v"
-        laterConditioning["inputs"] = []
+        var image: [String: Any]?
+        if let imageInput = entries[index]["image_input"] {
+          guard let validatedImage = imageInput as? [String: Any],
+            validatedImage["kind"] as? String == "image",
+            validatedImage["role"] as? String == "keyframe",
+            validatedImage["frame_index"] as? Int == 0 else {
+            throw LTXError.invalid("A later scene image must be a first-frame keyframe for its shot.")
+          }
+          image = validatedImage
+        }
+        if sceneTask == "a2v" {
+          guard var driver = sceneInputs.first(where: { $0["role"] as? String == "audio_driver" }),
+            let originalStart = driver["source_start_seconds"] as? Double else {
+            throw LTXError.invalid("Swift LTX scene audio driver has no source in-point.")
+          }
+          driver["source_start_seconds"] = originalStart + Double(plan.windowStarts[index]) / fps
+          driver["source_duration_seconds"] = Double(plan.totalFrames - 1 - plan.windowStarts[index]) / fps
+          laterConditioning["task"] = "a2v"
+          laterConditioning["inputs"] = [driver] + (image.map { [$0] } ?? [])
+        } else {
+          laterConditioning["task"] = image == nil ? "t2v" : "fflf"
+          laterConditioning["inputs"] = image.map { [$0] } ?? []
+        }
         ordinary["conditioning"] = laterConditioning
+      } else if entries[index]["image_input"] != nil {
+        throw LTXError.invalid("The first scene image belongs in the opening conditioning contract.")
       }
       let windowData = try JSONSerialization.data(withJSONObject: ordinary)
       let request = try MLXStudioRecipe.compile(data: windowData,
         outputDirectory: outputDirectory + "/window-\(index)")
       guard request.frames == plan.windowFrames[index],
-        request.task == (index == 0 && sceneTask == "fflf" ? "i2v" : "t2v"),
-        (index == 0 || request.referenceImages.isEmpty),
+        request.task == (sceneTask == "a2v" ? "a2v" :
+          ((index == 0 ? sceneTask == "fflf" : entries[index]["image_input"] != nil) ? "i2v" : "t2v")),
+        request.referenceImages.count <= 1,
         request.noisePolicy == .releasedMLX else {
         throw LTXError.invalid("Swift LTX scene window changed its validated sampling contract.")
       }
       requests.append(request)
     }
+    // A full-scene VAE can pull a new image into earlier frames even when its
+    // latent join is hard. Decode only at explicit image cuts (or every join
+    // under strict policy), retaining ordinary continuity within each group.
+    let imageBoundaries = Set((1..<entries.count).filter { entries[$0]["image_input"] != nil })
+    let strictBoundaries = policy == "strict"
+      ? Set(1..<entries.count) : imageBoundaries
     return Compiled(plan: plan, requests: requests, clipIDs: ids,
-      decodeMode: decodeMode)
+      decodeMode: decodeMode, strictBoundaries: strictBoundaries)
   }
 }

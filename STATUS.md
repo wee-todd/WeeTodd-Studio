@@ -1,5 +1,25 @@
 # WeeTodd Studio implementation status
 
+Swift LTX 2.5 scene conditioning 2026-09-30 (experimental): Studio and the shared
+worker now accept a first-frame image on any of two to six compatible shots and one
+continuous source-audio interval across the entire scene. A later image replaces the
+anchor at its exact aligned shot boundary while compact video/audio history continues.
+When a scene has a later image, the worker decodes groups between image cuts separately and joins their
+editorial frame ranges; a full-scene VAE decode had visibly pulled the new subject into
+frames before the cut. The final 384 × 256 two-shot worker run produced 96 frames at
+24 fps and four seconds of source audio in 57.82 seconds at a 3.52 GB Swift process peak,
+excluding FFmpeg. Inspected frames 0–47 showed the first subject and frames 48–95 the
+second. A three-shot follow-up preserved continuity across two robot shots and cut to
+the new subject at frame 96; it published 144 frames and six seconds of audio in
+86.78 worker seconds at a 3.71 GB Swift process peak. A full Studio
+prepare/render/review/accept/save/reopen run with Python unavailable
+accepted both ranges as one take; native scene acceptance no longer calls the Python
+description bridge. Dependency reporting includes later-shot image files. Planned
+music-video A2V source intervals are checked against their frozen audio attachments,
+and a previously prepared timeline mix can drive an independent Swift LTX A2V clip.
+Specialized IC-LoRA/MSR/Ingredients/DFR paths and H3 timeline audio/extension controls
+have not yet been ported or qualified in Swift.
+
 Swift LTX 2.5 continuous scenes 2026-09-29 (experimental): the shared Swift worker
 now plans two to six shots as aligned overlapping audiovisual windows, retains
 compact latent guide tails between windows, then decodes the complete scene once. The
@@ -7,9 +27,10 @@ publisher excludes the final causal video frame and trims audio to the exact edi
 duration. Studio prepares compatible shots as one frozen recipe with ordered prompts,
 seeds and ordinary LoRAs, returns a scene range report, and uses the existing grouped
 review and acceptance flow. One opening image on the first shot uses the existing
-I2V encoder at both sampling resolutions; later image anchors, audio drivers and
-specialized adapters
-remain on the explicitly selected Python route; broader scene quality needs review.
+I2V encoder at both sampling resolutions; at this checkpoint later image anchors,
+audio drivers and specialized adapters remained on the explicitly selected Python
+route. The first two were added in the 2026-09-30 entry above; broader scene quality
+still needs review.
 A first 384 × 256,
 four-second, two-shot native worker smoke completed in 84.23 seconds at a 3.76 GB peak
 Swift process footprint (FFmpeg excluded); the initial 97-frame output established a
@@ -135,8 +156,9 @@ turn remained coherent after a stronger sound prompt, but generated audio averag
 the installed FL2VA checkpoint in text-only mode completed at 768 × 448/124 frames in
 579.94 seconds at a 5.23 GB peak process footprint; the visual arm motion was coherent,
 while generated sound was subdued (-57.5 dBFS mean). Both H3 sound quality and broader
-checkpoint-general quality remain experimental. LTX image/audio continuous scenes and specialized
-conditioning, H3 audio/video-reference quality, broader video Ref2VA qualification,
+checkpoint-general quality remain experimental. At that checkpoint, LTX image/audio
+continuous scenes and specialized conditioning, H3 audio/video-reference quality,
+broader video Ref2VA qualification,
 real multi-adapter H3 quality and unsupported LoRA layouts, and complete
 Python-free Studio distribution remain open.
 

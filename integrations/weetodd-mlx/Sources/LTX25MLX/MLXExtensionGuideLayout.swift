@@ -48,7 +48,8 @@ public struct MLXExtensionGuideLayout {
     return target+Array(target.prefix(audioGuideTokens))
   }
 
-  public func prepare(targetVideo:MLXArray,targetAudio:MLXArray,
+  public func prepare(targetVideo:MLXArray,targetVideoCondition:MLXVideoDenoiseCondition?=nil,
+    targetAudio:MLXArray,targetAudioCondition:MLXAudioDenoiseCondition?=nil,
     sourceVideo:MLXArray,sourceAudio:MLXArray,
     guideVideoNoise:MLXArray,guideAudioNoise:MLXArray,sigma:Float) throws ->
     (video:MLXArray,audio:MLXArray,videoCondition:MLXVideoDenoiseCondition,audioCondition:MLXAudioDenoiseCondition) {
@@ -62,16 +63,28 @@ public struct MLXExtensionGuideLayout {
         throw LTXError.invalid("Invalid LTX extension \(label) tokens.")
       }
     }
+    if let targetVideoCondition {
+      guard targetVideoCondition.clean.shape == targetVideo.shape,
+        targetVideoCondition.mask.count == geometry.videoTokens else {
+        throw LTXError.invalid("LTX image anchor does not match the audiovisual scene target.")
+      }
+    }
+    if let targetAudioCondition {
+      guard targetAudioCondition.clean.shape == targetAudio.shape,
+        targetAudioCondition.mask.count == geometry.audioFrames else {
+        throw LTXError.invalid("LTX audio driver does not match the audiovisual scene target.")
+      }
+    }
     let guideSigma=sigma*(1-strength)
     let videoGuide=sourceVideo*(1-guideSigma)+guideVideoNoise*guideSigma
     let audioGuide=sourceAudio*(1-guideSigma)+guideAudioNoise*guideSigma
     let video=concatenated([targetVideo,videoGuide],axis:0)
     let audio=concatenated([targetAudio,audioGuide],axis:0)
-    let videoClean=concatenated([MLXArray.zeros(targetVideo.shape),sourceVideo],axis:0)
-    let audioClean=concatenated([MLXArray.zeros(targetAudio.shape),sourceAudio],axis:0)
-    let videoMask=Array(repeating:Float(1),count:geometry.videoTokens) +
+    let videoClean=concatenated([targetVideoCondition?.clean ?? MLXArray.zeros(targetVideo.shape),sourceVideo],axis:0)
+    let audioClean=concatenated([targetAudioCondition?.clean ?? MLXArray.zeros(targetAudio.shape),sourceAudio],axis:0)
+    let videoMask=(targetVideoCondition?.mask ?? Array(repeating:Float(1),count:geometry.videoTokens)) +
       Array(repeating:1-strength,count:videoGuideTokens)
-    let audioMask=Array(repeating:Float(1),count:geometry.audioFrames) +
+    let audioMask=(targetAudioCondition?.mask ?? Array(repeating:Float(1),count:geometry.audioFrames)) +
       Array(repeating:1-strength,count:audioGuideTokens)
     return (video,audio,try MLXVideoDenoiseCondition(clean:videoClean,mask:videoMask),
       try MLXAudioDenoiseCondition(clean:audioClean,mask:audioMask))

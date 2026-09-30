@@ -23,9 +23,9 @@ public struct MLXSourceAudioInterval: Sendable {
   public init(source: URL, sourceStartSeconds: Double, sourceDurationSeconds: Double? = nil, durationSeconds: Double) throws {
     guard source.isFileURL, source.path.hasPrefix("/"), !source.path.utf8.contains(0),
       sourceStartSeconds.isFinite, (0...86400).contains(sourceStartSeconds),
-      durationSeconds.isFinite, (0.001...20.1).contains(durationSeconds),
+      durationSeconds.isFinite, (0.001...30.1).contains(durationSeconds),
       sourceDurationSeconds == nil || (sourceDurationSeconds!.isFinite && (0.001...86400).contains(sourceDurationSeconds!)) else {
-      throw LTXError.invalid("A2V source needs an absolute local audio file, a finite nonnegative in-point, and 0.001–20 seconds of output.")
+      throw LTXError.invalid("A2V source needs an absolute local audio file, a finite nonnegative in-point, and 0.001–30 seconds of output.")
     }
     let resolved = source.standardizedFileURL.resolvingSymlinksInPath()
     self.source = resolved

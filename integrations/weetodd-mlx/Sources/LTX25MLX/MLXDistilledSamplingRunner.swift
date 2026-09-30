@@ -29,21 +29,22 @@ public final class MLXDistilledSamplingRunner {
 
   public init(recipe:DistilledTwoStageRecipe,transformerRoot:URL,upscalerCheckpoint:URL,
     statisticsCheckpoint:URL,firstStrength:Float?=nil,lastStrength:Float?=nil,
+    firstFrame:Int=0,
     extensionContextFrames:Int?=nil,
     extensionVideoGuideLatentFrames:Int?=nil,extensionAudioGuideTokens:Int?=nil,
     stageOneLoras:[LoRAAdapter]=[],stageTwoLoras:[LoRAAdapter]=[],
     noisePolicy:MLXNoisePolicy = .native,maximumActivationBytes:Int=2*1024*1024*1024) throws {
     self.recipe=recipe;self.noisePolicy=noisePolicy;self.maximumActivationBytes=maximumActivationBytes
     guard firstStrength != nil || lastStrength == nil else { throw LTXError.invalid("Last-frame reference requires a first frame.") }
-    guard extensionContextFrames == nil || (firstStrength == nil && lastStrength == nil && noisePolicy == .releasedMLX) else {
-      throw LTXError.invalid("LTX extension needs a separate audiovisual source and the released MLX noise policy.")
+    guard extensionContextFrames == nil || (lastStrength == nil && noisePolicy == .releasedMLX) else {
+      throw LTXError.invalid("LTX extension needs the released MLX noise policy and no last-frame reference.")
     }
     guard extensionContextFrames != nil ||
       (extensionVideoGuideLatentFrames == nil && extensionAudioGuideTokens == nil) else {
       throw LTXError.invalid("LTX guide overrides require a causal source context.")
     }
     layouts=try [recipe.low,recipe.high].map { g in
-      try firstStrength.map { try MLXReferenceLayout(geometry:g,firstStrength:$0,lastStrength:lastStrength) }
+      try firstStrength.map { try MLXReferenceLayout(geometry:g,firstStrength:$0,lastStrength:lastStrength,firstFrame:firstFrame) }
     }
     guideLayouts=try [recipe.low,recipe.high].map { g in
       try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:g,contextFrames:$0,
@@ -93,8 +94,11 @@ public final class MLXDistilledSamplingRunner {
     try Task.checkCancellation()
     guard references.count == (layouts[0] == nil ? 0 : 2) else { throw LTXError.invalid("Both stage references must be encoded before sampling.") }
     guard (extensionGuides != nil) == (guideLayouts[0] != nil),
-      extensionGuides == nil || (frozenAudio == nil && references.isEmpty) else {
-      throw LTXError.invalid("LTX extension needs stage-one, stage-two and audio source guides without endpoint or frozen-audio conditioning.")
+      frozenAudio == nil || (frozenAudio!.dtype == .float32 &&
+        frozenAudio!.shape == [recipe.low.audioFrames,128] &&
+        recipe.low.audioFrames == recipe.high.audioFrames &&
+        MLX.isFinite(frozenAudio!).all().item(Bool.self)) else {
+      throw LTXError.invalid("LTX source audio must fit both stages and any audiovisual history guides.")
     }
     if let extensionGuides {
       for (value,count) in [(extensionGuides.stageOneVideo,guideLayouts[0]!.videoGuideTokens),
@@ -136,7 +140,14 @@ public final class MLXDistilledSamplingRunner {
         }
         if let guideLayout,let extensionGuides {
           let sourceVideo=stage == 1 ? extensionGuides.stageOneVideo : extensionGuides.stageTwoVideo
-          let prepared=try guideLayout.prepare(targetVideo:state["video"]!,targetAudio:state["audio"]!,
+          let targetAudio=frozenAudio ?? state["audio"]!
+          let targetAudioCondition=try frozenAudio.map {
+            try MLXAudioDenoiseCondition(clean:$0,
+              mask:Array(repeating:Float(0),count:g.audioFrames))
+          }
+          let prepared=try guideLayout.prepare(targetVideo:inputs["video_latent"]!,
+            targetVideoCondition:conditioning,targetAudio:targetAudio,
+            targetAudioCondition:targetAudioCondition,
             sourceVideo:sourceVideo,sourceAudio:extensionGuides.audio,
             guideVideoNoise:guideNoise["video"]!,guideAudioNoise:guideNoise["audio"]!,
             sigma:Float(schedule.sigmas[0]))
@@ -150,7 +161,8 @@ public final class MLXDistilledSamplingRunner {
         let bf16:Set<String> = self.noisePolicy == .releasedMLX
           ? (frozenAudio != nil ? (stage == 1 ? ["video"] : []) : (stage == 1 ? ["video","audio"] : ["audio"])) : []
         let sampled=try sampler.evaluate(inputs,schedule:schedule,videoConditioning:conditioning,
-          audioConditioning:audioConditioning,frozenAudio:frozenAudio != nil,bfloat16State:bf16,
+          audioConditioning:audioConditioning,
+          frozenAudio:frozenAudio != nil && guideLayout == nil,bfloat16State:bf16,
           fixedWeights:source.readFixed,blockWeights:source.readBlock,
           fixedAdapters:source.fixedAdapters,blockAdapters:source.blockAdapters,noise:noise,
           stageProgress:{ _,event in

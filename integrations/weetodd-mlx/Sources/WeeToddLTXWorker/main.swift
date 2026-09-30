@@ -150,7 +150,8 @@ import MLX
     let decodePlan=try MLXSceneDecodeWindowPlan(geometry:geometry,
       maximumActivationBytes:ceiling,
       maximumWindowFrames:compiled.decodeMode.maximumWindowFrames)
-    if case .single=compiled.decodeMode,decodePlan.latentRanges.count != 1 {
+    if case .single=compiled.decodeMode,decodePlan.latentRanges.count != 1,
+      compiled.strictBoundaries.isEmpty {
       throw invalid("The complete LTX scene exceeds this Mac's admitted video decoder memory allowance.")
     }
     _=try MLXSceneSampler.preflight(compiled,
@@ -173,9 +174,34 @@ import MLX
     }
     defer { lease.release() }
     Memory.peakMemory=0
+    let audioRoot=URL(fileURLWithPath:outputDirectory)
+      .appendingPathExtension("source-audio-"+UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at:audioRoot) }
+    var preparedAudio:[MLXSourceAudioInterval.Prepared?]=[]
+    var sourcePublication:MLXSourceAudioInterval.Prepared?
+    if let firstSource=first.audioReference {
+      for (index,request) in compiled.requests.enumerated() {
+        guard let source=request.audioReference else {
+          throw invalid("Every audio-driven scene window needs the continuous source interval.")
+        }
+        let interval=try MLXSourceAudioInterval(source:URL(fileURLWithPath:source.path),
+          sourceStartSeconds:source.sourceStartSeconds,
+          sourceDurationSeconds:source.sourceDurationSeconds,
+          durationSeconds:Double(request.frames)/request.fps)
+        preparedAudio.append(try await interval.extract(ffmpeg:URL(fileURLWithPath:ffmpeg),
+          directory:audioRoot.appendingPathComponent("window-\(index)")))
+      }
+      let full=try MLXSourceAudioInterval(source:URL(fileURLWithPath:firstSource.path),
+        sourceStartSeconds:firstSource.sourceStartSeconds,
+        sourceDurationSeconds:firstSource.sourceDurationSeconds,
+        durationSeconds:Double(MLXSceneMediaPublisher.deliveredFrames(plan:compiled.plan))/compiled.plan.fps)
+      sourcePublication=try await full.extract(ffmpeg:URL(fileURLWithPath:ffmpeg),
+        directory:audioRoot.appendingPathComponent("publication"))
+    }
     var progress=MLXStudioProgress(sceneWindowCount:compiled.requests.count)
     let sampled=try MLXSceneSampler.sample(compiled,
       ffmpeg:URL(fileURLWithPath:ffmpeg),
+      preparedAudio:preparedAudio,
       maximumActivationBytes:transformer) { stage,completed,total in
       try emit(progress.event(stage:stage,completed:completed,total:total))
     }
@@ -189,6 +215,7 @@ import MLX
       audioCheckpoint:URL(fileURLWithPath:first.audioCheckpoint),
       ffmpeg:URL(fileURLWithPath:ffmpeg),output:output,
       decodePlan:decodePlan,decodeMode:compiled.decodeMode,
+      sourceAudio:sourcePublication,
       preview:{ index,bytes in
         guard index == 0 || index == geometry.frames-2 ||
           Date().timeIntervalSince(lastPreview) >= 1 else { return }

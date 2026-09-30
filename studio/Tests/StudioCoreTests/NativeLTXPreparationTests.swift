@@ -1,6 +1,7 @@
 import XCTest
 import AVFoundation
 import AppKit
+import CryptoKit
 @testable import StudioCore
 
 final class NativeLTXPreparationTests: XCTestCase {
@@ -38,6 +39,26 @@ final class NativeLTXPreparationTests: XCTestCase {
     let combined=try NativeLTXPreparation.compose(request:request(project,runtime))
     let combinedInputs=((combined["recipe"] as! [String:Any])["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
     XCTAssertEqual(combinedInputs.map { $0["role"] as! String },["audio_driver","keyframe"])
+  }
+  func testPreparedTimelineAudioDriverFeedsNativeA2VWithoutDiscardingSelection() throws {
+    let (root,original,runtime)=try fixture()
+    let mixed=root.appendingPathComponent("timeline-driver.wav")
+    try Data([1]).write(to:mixed)
+    var project=original
+    project.clips[0].duration=2
+    project.clips[0].generationSelection?.task="a2v"
+    project.clips[0].audioDriverSelection=AudioDriverSelection(mode:.voice)
+    project.clips[0].audioDriverMixKey="frozen-mix-key"
+    var asset=MediaAsset(name:"Timeline mix",kind:.audio,path:mixed.path,scope:.clip,owner:project.clips[0].id)
+    asset.duration=2
+    project.assets=[asset]
+    project.clips[0].attachments=[Attachment(assetID:asset.id,role:.audioDriver)]
+    let composed=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let inputs=((composed["recipe"] as! [String:Any])["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(inputs[0]["source_start_seconds"] as? Double,0)
+    XCTAssertEqual(inputs[0]["source_duration_seconds"] as? Double,2)
+    project.clips[0].audioDriverMixKey=nil
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
   }
   func fixture() throws -> (URL, StudioProject, [String: Any]) {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -166,13 +187,16 @@ final class NativeLTXPreparationTests: XCTestCase {
     project.clips[0].duration = 0.5
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
   }
-  func testSwiftSceneCarriesOpeningImageWithoutApplyingItToLaterShots() throws {
+  func testSwiftSceneCarriesOpeningAndLaterShotImagesInTheirOwnWindows() throws {
     let (root,original,runtime)=try fixture()
     let opening=root.appendingPathComponent("opening.png")
     try Data([1]).write(to:opening)
     let image=MediaAsset(name:"Opening",kind:.image,path:opening.path)
+    let laterImage=root.appendingPathComponent("later.png")
+    try Data([2]).write(to:laterImage)
+    let laterAsset=MediaAsset(name:"Later",kind:.image,path:laterImage.path)
     var project=original
-    project.assets=[image]
+    project.assets=[image,laterAsset]
     project.clips[0].duration=2
     project.clips[0].generationSelection?.task="i2v"
     project.clips[0].attachments=[Attachment(assetID:image.id,role:.first)]
@@ -188,7 +212,58 @@ final class NativeLTXPreparationTests: XCTestCase {
     XCTAssertEqual(conditioning["task"] as? String,"fflf")
     XCTAssertEqual((conditioning["inputs"] as? [[String:Any]])?.count,1)
     XCTAssertEqual(((composed["report"] as! [String:Any])["conditioning"] as! [String:Any])["inputs"] as? Int,1)
-    project.clips[1].attachments=[Attachment(assetID:image.id,role:.first)]
+    project.clips[1].attachments=[Attachment(assetID:laterAsset.id,role:.first)]
+    project.clips[1].generationSelection?.task="i2v"
+    let laterSong=root.appendingPathComponent("later-song.wav")
+    try Data([3]).write(to:laterSong)
+    let laterHash=SHA256.hash(data:Data([3])).map { String(format:"%02x",$0) }.joined()
+    project.clips[1].musicSource=MusicShotSource(path:laterSong.path,sha256:laterHash,
+      start:0,duration:2,task:"t2v")
+    let later=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let laterRecipe=later["recipe"] as! [String:Any]
+    let segments=((laterRecipe["scene"] as! [String:Any])["segments"] as! [[String:Any]])
+    XCTAssertNil(segments[0]["image_input"])
+    XCTAssertEqual((segments[1]["image_input"] as? [String:Any])?["path"] as? String,laterImage.path)
+    XCTAssertEqual((segments[1]["image_input"] as? [String:Any])?["frame_index"] as? Int,0)
+    let described=try NativeLTXPreparation.describe(request:request(project,runtime))
+    XCTAssertTrue((described["sourcePaths"] as? [String] ?? []).contains(laterImage.path))
+    XCTAssertTrue((described["sourcePaths"] as? [String] ?? []).contains(laterSong.path))
+    XCTAssertTrue((described["readinessErrors"] as? [String] ?? []).isEmpty)
+    let prepared=try NativeLTXPreparation.prepare(request:request(project,runtime),
+      destination:root.appendingPathComponent("two-image-scene"))
+    XCTAssertNotNil(prepared["recipePath"])
+  }
+  func testSwiftSceneUsesConsecutiveIntervalsOfOneSourceAudioFile() throws {
+    let (root,original,runtime)=try fixture()
+    let music=root.appendingPathComponent("song.wav");try Data([1]).write(to:music)
+    var asset=MediaAsset(name:"Song",kind:.audio,path:music.path);asset.duration=8
+    var project=original;project.assets=[asset]
+    project.clips[0].duration=2
+    project.clips[0].generationSelection?.task="a2v"
+    var first=Attachment(assetID:asset.id,role:.audioDriver)
+    first.audioSourceStart=1;first.audioSourceDuration=2
+    project.clips[0].attachments=[first]
+    var follower=project.clips[0]
+    follower.id=UUID();follower.duration=3;follower.seed=44
+    follower.continuity=ClipContinuity(mode:"scene",sourceClipID:project.clips[0].id)
+    var second=Attachment(assetID:asset.id,role:.audioDriver)
+    second.audioSourceStart=3;second.audioSourceDuration=3
+    follower.attachments=[second];project.clips.append(follower)
+    let composed=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let recipe=composed["recipe"] as! [String:Any]
+    let conditioning=recipe["conditioning"] as! [String:Any]
+    XCTAssertEqual(conditioning["task"] as? String,"a2v")
+    let input=(conditioning["inputs"] as! [[String:Any]])[0]
+    XCTAssertEqual(input["source_start_seconds"] as? Double,1)
+    XCTAssertEqual(input["source_duration_seconds"] as? Double,5)
+    let hash=SHA256.hash(data:Data([1])).map { String(format:"%02x",$0) }.joined()
+    project.clips[0].musicSource=MusicShotSource(path:music.path,sha256:hash,start:1,duration:2,task:"a2v")
+    project.clips[1].musicSource=MusicShotSource(path:music.path,sha256:hash,start:3,duration:3,task:"a2v")
+    XCTAssertNoThrow(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project.clips[1].musicSource?.start=3.25
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project.clips[1].musicSource?.start=3
+    project.clips[1].attachments[0].audioSourceStart=3.25
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
   }
   func testSwiftSceneFrozenRecipeUsesSavedBoundedDecodeChoice() throws {

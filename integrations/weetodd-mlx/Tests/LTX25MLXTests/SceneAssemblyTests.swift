@@ -109,4 +109,38 @@ final class SceneAssemblyTests: XCTestCase {
     XCTAssertEqual(output.audio[51, 0].item(Float.self), 1)
     XCTAssertEqual(output.audio[52, 0].item(Float.self), 2)
   }
+  func testImageBoundaryDoesNotBlendTheNextShotIntoEarlierFrames() throws {
+    let plan = try LTX25ScenePlan(durations: [2, 3], fps: 24)
+    let first = MLXArray((0..<7).flatMap { [Float](repeating:Float($0),count:128) },[7,128])
+    let second = MLXArray((100..<113).flatMap { [Float](repeating:Float($0),count:128) },[13,128])
+    let output = try MLXSceneLatentAssembly.assemble(video:[first,second],
+      audio:[.ones([52,128]),.ones([102,128])],plan:plan,
+      latentHeight:1,latentWidth:1,strictBoundaries:[1])
+    XCTAssertEqual(output.video[4,0].item(Float.self),4)
+    XCTAssertEqual(output.video[5,0].item(Float.self),5)
+    XCTAssertEqual(output.video[6,0].item(Float.self),103)
+  }
+  func testStrictPublicationRoutesExactEditorialFramesFromEachWindow() throws {
+    let plan=try LTX25ScenePlan(durations:[2,2,2],fps:24)
+    let routes=try MLXSceneMediaPublisher.strictFrameRoutes(plan:plan)
+    XCTAssertEqual(routes.map(\.local.lowerBound),[0,24,24])
+    XCTAssertEqual(routes.map(\.local.upperBound),[48,72,72])
+    XCTAssertEqual(routes.map(\.outputStart),[0,48,96])
+    XCTAssertEqual(routes.reduce(0) { $0+$1.local.count },144)
+  }
+  func testImageCutGroupsAdjacentUnanchoredShotsForContinuousDecode() throws {
+    let plan=try LTX25ScenePlan(durations:[2,2,2],fps:24)
+    let routes=try MLXSceneMediaPublisher.strictFrameRoutes(plan:plan,strictBoundaries:[2])
+    XCTAssertEqual(routes.map(\.windows),[0..<2,2..<3])
+    XCTAssertEqual(routes.map(\.local),[0..<96,24..<72])
+    XCTAssertEqual(routes.map(\.outputStart),[0,96])
+    XCTAssertEqual(routes.map(\.frames),[97,73])
+    let first=MLXArray((0..<7).flatMap { [Float](repeating:Float($0),count:128) },[7,128])
+    let second=MLXArray((100..<110).flatMap { [Float](repeating:Float($0),count:128) },[10,128])
+    let third=MLXArray((200..<210).flatMap { [Float](repeating:Float($0),count:128) },[10,128])
+    let group=try MLXSceneLatentAssembly.assembleVideoGroup(video:[first,second,third],
+      plan:plan,windows:0..<2,latentHeight:1,latentWidth:1)
+    XCTAssertEqual(group.shape,[13,128])
+    XCTAssertEqual(group[5,0].item(Float.self),53.5)
+  }
 }

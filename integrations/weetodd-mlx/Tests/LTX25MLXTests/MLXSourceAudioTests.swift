@@ -3,6 +3,13 @@ import XCTest
 @testable import LTX25MLX
 
 final class MLXSourceAudioTests: XCTestCase {
+  func testScenePublicationAdmitsThirtySecondSourceInterval() throws {
+    let source=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".wav")
+    try Data([1]).write(to:source)
+    defer { try? FileManager.default.removeItem(at:source) }
+    XCTAssertNoThrow(try MLXSourceAudioInterval(source:source,
+      sourceStartSeconds:0,durationSeconds:30))
+  }
   private func wave(_ url: URL) throws {
     let rate = 48_000, count = rate * 2
     var bytes = Data()

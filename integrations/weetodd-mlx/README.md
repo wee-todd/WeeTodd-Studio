@@ -2,8 +2,8 @@
 
 Swift owns this native MLX component; its execution does not invoke Python. Studio can select
 its LTX 2.5 worker for distilled T2V, first-image I2V, first/last-frame, one-driver A2V,
-after-extension, per-clip motion continuation and continuous scenes with an optional
-opening image on the first shot. Its H3 worker
+after-extension, per-clip motion continuation and continuous scenes with optional
+first-frame images on any shot and one continuous source-audio driver. Its H3 worker
 is opt-in and experimental for T2VA, timed FL2VA and still-image Ref2VA. Other tasks retain their existing
 routes while native coverage qualifies.
 
@@ -65,17 +65,23 @@ routes while native coverage qualifies.
   duration. Studio prepares 25 frames for after-extension and 49 for motion continuation;
   source media, timing, dimensions and combined memory are admitted before weighted work.
 - Experimental continuous scenes sample two to six windows with distinct prompts and
-  seeds, carrying compact interior video and audio latent guides between windows. The complete
-  audiovisual latent chain decodes once. Publication drops the final causal video frame and
+  seeds, carrying compact interior video and audio latent guides between windows. An
+  opening image on any shot is encoded at both resolutions and can coexist with the
+  same source-audio driver on every shot. Scenes with a later image decode groups
+  between image cuts separately and join on exact editorial frames, avoiding full-scene
+  VAE bleed across that cut; other scenes retain the selected single or bounded decode
+  route. Publication drops the final causal video frame and
   trims audio to the same editorial duration. Preflight admits all windows and the complete
   scene decoder before loading weights; Studio reviews and accepts one movie with per-shot ranges.
   A 384 × 256, four-second recipe passed direct Swift and saved ComfyUI recipe-node runs with
   96 published frames and four seconds of stereo audio. A six-shot, 30-second, 768 × 448
   recipe passed installed-checkpoint preflight. A separate four-second first-image
   scene passed a signed-worker render with 96 frames and four seconds of stereo audio;
-  its first frame measured 33.34 dB PSNR against the supplied image. Later scene images,
-  audio drivers, checkpoint resume and specialized controls are not yet supported by this
-  Swift scene route.
+  its first frame measured 33.34 dB PSNR against the supplied image. A subsequent
+  two-image scene with a continuous Qwen3-TTS driver published 96 frames and four
+  seconds of source audio in 57.82 seconds at a 3.52 GB Swift-process peak, excluding
+  FFmpeg. Studio also rendered and accepted both ranges with Python unavailable.
+  Checkpoint resume and specialized controls are not yet supported by this Swift scene route.
 - Scene video decoding has an explicit headless experimental `scene.decode_mode: "windowed"`
   option. An optional `scene.decode_window_frames` cap must be `8n+1` and at least 33;
   preflight rejects a cap below 57 when the scene needs an interior decode window.
@@ -112,7 +118,7 @@ and avoids dense CPU delta construction, but does not claim bitwise identity to 
 fusion recipe. The block/stack probes apply block targets only; the denoiser and sampler apply
 both fixed and block targets through `MLXDenoiserWeights`. Compatible 2.3 factors are retained.
 IC/MSR/control adapters and conditioning beyond first-frame/FFLF, one-driver A2V,
-experimental after-extension/motion continuation and opening-image scenes require
+experimental after-extension/motion continuation and first-frame/audio scenes require
 separate execution contracts.
 
 ## Build and verify

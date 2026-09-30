@@ -39,6 +39,37 @@ public enum NativeLTXPreparation {
     guard bytes.count <= limit else { throw StudioError.invalid("JSON file grew beyond its inspection limit.") }
     return bytes
   }
+  private static func verifyPlannedAudio(_ source: MusicShotSource) throws -> String {
+    let path = try canonical(source.path)
+    guard source.sha256.count == 64,
+      source.sha256.allSatisfy(\.isHexDigit),
+      source.start.isFinite, source.start >= 0,
+      source.duration.isFinite, source.duration > 0,
+      ["a2v", "t2v"].contains(source.task) else {
+      throw StudioError.invalid("The planned song source has invalid timing, task or checksum.")
+    }
+    let fd = Darwin.open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK)
+    guard fd >= 0 else { throw StudioError.invalid("Relink the planned song source.") }
+    let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    defer { try? handle.close() }
+    var status = stat()
+    guard fstat(fd, &status) == 0, status.st_mode & S_IFMT == S_IFREG,
+      (1...4 * 1024 * 1024 * 1024).contains(status.st_size) else {
+      throw StudioError.invalid("The planned song source must be a regular file under 4 GB.")
+    }
+    var digest = SHA256(), readBytes: Int64 = 0
+    while let block = try handle.read(upToCount: 4 * 1024 * 1024), !block.isEmpty {
+      try Task.checkCancellation()
+      readBytes += Int64(block.count)
+      guard readBytes <= status.st_size else { throw StudioError.invalid("The planned song changed while reading.") }
+      digest.update(data: block)
+    }
+    guard readBytes == status.st_size,
+      digest.finalize().map({ String(format: "%02x", $0) }).joined().caseInsensitiveCompare(source.sha256) == .orderedSame else {
+      throw StudioError.invalid("The planned song changed. Reanalyze or relink the source before rendering.")
+    }
+    return path
+  }
   private static func recipe(_ path: String) throws -> [String: Any] {
     guard let result = try JSONSerialization.jsonObject(with: read(path, limit: 1024 * 1024)) as? [String: Any],
       result["format"] as? String == "weetodd-headless-v2", result["engine"] as? String == "ltx25",
@@ -119,11 +150,11 @@ public enum NativeLTXPreparation {
       independent.clips[index].continuity = ClipContinuity(mode: "independent")
     }
     var recipes: [[String: Any]] = [], reports: [[String: Any]] = []
-    for (memberIndex, member) in members.enumerated() {
+    for member in members {
       guard member.extensionDirection.isEmpty, member.extensionSource.isEmpty,
-        member.audioDriverSelection == nil, member.musicSource == nil,
-        member.attachments.allSatisfy({ $0.role == .lora || memberIndex == 0 && $0.role == .first }) else {
-        throw unsupported("Swift continuous scenes accept one opening image on the first shot and ordinary LoRAs; remove later images, audio and extension inputs")
+        member.audioDriverSelection == nil,
+        member.attachments.allSatisfy({ [.lora, .first, .audioDriver].contains($0.role) }) else {
+        throw unsupported("Swift continuous scenes accept a boundary image, one continuous source-audio driver and ordinary LoRAs")
       }
       var one = request
       one["project"] = try object(independent)
@@ -131,8 +162,12 @@ public enum NativeLTXPreparation {
       let composed = try compose(resolve(one))
       let recipe = composed["recipe"] as! [String: Any]
       let task = (recipe["conditioning"] as? [String: Any])?["task"] as? String
-      guard task == (memberIndex == 0 && member.attachments.contains { $0.role == .first } ? "fflf" : "t2v") else {
-        throw unsupported("only the first Swift scene shot may select image-to-video; later shots need text-to-video")
+      let hasImage = member.attachments.contains { $0.role == .first }
+      let hasAudio = member.attachments.contains { $0.role == .audioDriver }
+      guard task == (hasAudio ? "a2v" : hasImage ? "fflf" : "t2v"),
+        (((recipe["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]])?.count ?? 0) ==
+          (hasImage ? 1 : 0) + (hasAudio ? 1 : 0) else {
+        throw unsupported("each Swift scene shot accepts one first-frame image and one source-audio interval")
       }
       recipes.append(recipe); reports.append(composed["report"] as! [String: Any])
     }
@@ -162,19 +197,60 @@ public enum NativeLTXPreparation {
       lengths.dropFirst().allSatisfy({ $0 > 0 }) else {
       throw unsupported("scene durations must resolve to positive eight-frame shot ranges, with at least 32 frames in the first shot, within 30 seconds")
     }
+    let drivers: [[String: Any]?] = recipes.map { recipe in
+      ((recipe["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]])?
+        .first(where: { $0["role"] as? String == "audio_driver" })
+    }
+    guard drivers.allSatisfy({ $0 == nil }) || drivers.allSatisfy({ $0 != nil }) else {
+      throw unsupported("audio-driven scenes need one consecutive interval of the same source on every shot")
+    }
+    if let firstDriver = drivers.first!,
+      let path = firstDriver["path"] as? String,
+      let start = firstDriver["source_start_seconds"] as? Double {
+      var elapsed = 0.0
+      for (index, member) in members.enumerated() {
+        guard let driver = drivers[index],
+          driver["path"] as? String == path,
+          let selectedStart = driver["source_start_seconds"] as? Double,
+          let selectedDuration = driver["source_duration_seconds"] as? Double,
+          abs(selectedStart - (start + elapsed)) <= 1e-4,
+          selectedDuration + 1e-4 >= member.duration,
+          abs(Double(lengths[index]) / fps - member.duration) <= 1e-4 else {
+          throw unsupported("audio-driven scene shots need grid-aligned durations and consecutive intervals of the same source")
+        }
+        elapsed += member.duration
+      }
+    }
     var content = recipes[0]
     var sceneConfig = config
     sceneConfig["duration_seconds"] = Double(boundaries.last!) / fps
     content["config"] = sceneConfig
+    if drivers.first! != nil {
+      var conditioning = content["conditioning"] as! [String: Any]
+      var inputs = conditioning["inputs"] as! [[String: Any]]
+      guard let index = inputs.firstIndex(where: { $0["role"] as? String == "audio_driver" }) else {
+        throw unsupported("the scene audio driver disappeared during recipe resolution")
+      }
+      inputs[index]["source_duration_seconds"] = Double(boundaries.last!) / fps
+      conditioning["inputs"] = inputs
+      content["conditioning"] = conditioning
+    }
     let sharedSound = members[0].soundscape.trimmingCharacters(in: .whitespacesAndNewlines)
     let sharedMusic = members[0].music.trimmingCharacters(in: .whitespacesAndNewlines)
-    let segments: [[String: Any]] = zip(members, recipes).map { member, recipe in
+    let segments: [[String: Any]] = zip(members, recipes).enumerated().map { index, pair in
+      let (member, recipe) = pair
       var prompt = recipe["prompt"] as! String
       if !sharedSound.isEmpty { prompt += "\nSound: " + sharedSound }
       if !sharedMusic.isEmpty && sharedMusic != "N/A" { prompt += "\nMusic: " + sharedMusic }
-      return ["clip_id": member.id.uuidString, "prompt": prompt,
+      var segment: [String: Any] = ["clip_id": member.id.uuidString, "prompt": prompt,
         "duration_seconds": member.duration,
         "seed": (recipe["config"] as! [String: Any])["seed"]!]
+      if index > 0,
+        let image = ((recipe["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]])?
+          .first(where: { $0["role"] as? String == "keyframe" }) {
+        segment["image_input"] = image
+      }
+      return segment
     }
     let decodeMode = members[0].continuity?.sceneDecodeMode ?? "single"
     guard ["single", "windowed"].contains(decodeMode) else {
@@ -201,7 +277,7 @@ public enum NativeLTXPreparation {
       "segment_frame_counts": lengths, "total_frames": boundaries.last! + 1]
     report["task"] = "scene"
     report["conditioning"] = ["frames": boundaries.last! + 1,
-      "inputs": ((recipes[0]["conditioning"] as? [String: Any])?["inputs"] as? [Any])?.count ?? 0]
+      "inputs": recipes.reduce(0) { $0 + (((($1["conditioning"] as? [String: Any])?["inputs"] as? [Any])?.count) ?? 0) }]
     report["resolvedFingerprint"] = try fingerprint(content)
     report["warnings"] = reports.flatMap { $0["warnings"] as? [String] ?? [] }
     return ["recipe": content, "report": report]
@@ -212,8 +288,11 @@ public enum NativeLTXPreparation {
     let project = try JSONDecoder().decode(StudioProject.self, from: data(projectValue))
     guard let clip = project.clips.first(where: { $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }),
       clip.engine == .ltx25 else { throw StudioError.invalid("Select an LTX 2.5 clip.") }
+    if clip.audioDriverSelection != nil && clip.audioDriverMixKey?.isEmpty != false {
+      throw StudioError.invalid("Prepare and audition the current timeline audio mix before native A2V generation.")
+    }
     guard ["independent", "frame", "motion"].contains(clip.continuityMode),
-      !project.isContinuousSceneMember(clip), clip.audioDriverSelection == nil, clip.musicSource == nil,
+      !project.isContinuousSceneMember(clip),
       (clip.extensionDirection.isEmpty || clip.extensionDirection == "after"),
       !(clip.continuityMode != "independent" && !clip.extensionDirection.isEmpty) else {
       throw unsupported("this continuity, scene, music driver or extension direction is not yet ported")
@@ -240,6 +319,9 @@ public enum NativeLTXPreparation {
       ? (clip.attachments.contains { [.last, .keyframe].contains($0.role) } ? "fflf" : "i2v")
       : selection?.task ?? clip.inferredTask
     guard ["t2v", "i2v", "fflf", "a2v", "extension"].contains(task) else { throw unsupported("task \(task) is not yet ported") }
+    guard clip.audioDriverSelection == nil || task == "a2v" else {
+      throw unsupported("a prepared timeline audio driver requires the A2V task")
+    }
     let profiles = try catalog(directory: runtime["profilesDirectory"] as? String ?? "")
     var candidates = profiles.filter {
       (clip.profileID == "auto" || $0["id"] as? String == clip.profileID)
@@ -278,6 +360,13 @@ public enum NativeLTXPreparation {
       do {
         let composed = try composeScene(request, project: project, members: members)
         result["fingerprint"] = (composed["report"] as? [String: Any])?["resolvedFingerprint"]
+        let scene = (composed["recipe"] as? [String: Any])?["scene"] as? [String: Any]
+        let segments = scene?["segments"] as? [[String: Any]] ?? []
+        let laterImages = try segments.compactMap { ($0["image_input"] as? [String: Any])?["path"] as? String }
+          .map(canonical)
+        let plannedSound = try members.compactMap { $0.musicSource?.path }.map(canonical)
+        result["sourcePaths"] = Array(Set((result["sourcePaths"] as? [String] ?? []) +
+          laterImages + plannedSound)).sorted()
       } catch {
         result["readinessErrors"] = (result["readinessErrors"] as? [String] ?? []) + [error.localizedDescription]
       }
@@ -302,6 +391,7 @@ public enum NativeLTXPreparation {
       return []
     }
     var dependencies = paths(content["components"] ?? [:]) + paths(content["conditioning"] ?? [:])
+    if let source = context.clip.musicSource { dependencies.append(try canonical(source.path)) }
     for dependency in dependencies {
       for name in ["paged_manifest.json", "model_identity.json", "conversion_provenance.json"] {
         let path = URL(fileURLWithPath: dependency).appendingPathComponent(name).path
@@ -402,9 +492,18 @@ public enum NativeLTXPreparation {
         loras.append([path, attachment.strength]); continue
       }
       if attachment.role == .audioDriver {
+        let preparedTimelineMix = clip.audioDriverSelection != nil
+        guard !preparedTimelineMix || (clip.audioDriverMixKey?.isEmpty == false &&
+          asset.scope == .clip && asset.owner == clip.id &&
+          attachment.audioSourceStart == nil && attachment.audioSourceDuration == nil &&
+          asset.duration + 0.01 >= duration) else {
+          throw StudioError.invalid("Prepare the current timeline audio mix before native A2V generation.")
+        }
+        let start = preparedTimelineMix ? 0 : attachment.audioSourceStart
+        let sourceDuration = preparedTimelineMix ? duration : attachment.audioSourceDuration
         guard asset.kind == .audio, attachment.strength == 1,
-          let start = attachment.audioSourceStart, start.isFinite, (0...86400).contains(start),
-          let sourceDuration = attachment.audioSourceDuration, sourceDuration.isFinite,
+          let start, start.isFinite, (0...86400).contains(start),
+          let sourceDuration, sourceDuration.isFinite,
           (0.001...86400).contains(sourceDuration),
           asset.duration <= 0 || start + sourceDuration <= asset.duration + 0.01 else {
           throw StudioError.invalid("Choose one audio source with strength 1 and an explicit valid source in-point and duration.")
@@ -428,6 +527,24 @@ public enum NativeLTXPreparation {
       guard Set(indices).count == indices.count, indices.allSatisfy({ $0 == 0 || $0 == frames - 1 }),
         inputs.count <= 2, context.task == "t2v" || indices.contains(0) else {
         throw unsupported("only unique first and last endpoints are supported")
+      }
+    }
+    if let source = clip.musicSource {
+      let sourcePath = try verifyPlannedAudio(source)
+      guard source.task == (context.task == "a2v" ? "a2v" : "t2v"),
+        source.duration <= clip.duration + 1e-4,
+        clip.duration - source.duration < 1 / fps + 1e-4 else {
+        throw StudioError.invalid("The planned song task or duration differs from this clip.")
+      }
+      if source.task == "a2v" {
+        guard let driver = inputs.first(where: { $0["role"] as? String == "audio_driver" }),
+          driver["path"] as? String == sourcePath,
+          let start = driver["source_start_seconds"] as? Double,
+          let duration = driver["source_duration_seconds"] as? Double,
+          abs(start - source.start) < 1e-4,
+          abs(duration - source.duration) < 1e-4 else {
+          throw StudioError.invalid("The planned song and A2V attachment must select the same source interval.")
+        }
       }
     }
     if !loras.isEmpty { components["loras"] = loras }

@@ -60,6 +60,18 @@ final class MLXStudioMemoryPlanTests:XCTestCase {
     XCTAssertThrowsError(try MLXMediaPipeline.admit(request,videoActivationBytes:plan.videoActivationBytes,
       transformerActivationBytes:plan.transformerActivationBytes-1,videoBackend:.mlx,audioBackend:.mlx))
   }
+  func testLaterSceneImageAndHistoryAreAdmittedTogether() throws {
+    let helper=MLXDistilledRequestTests()
+    var values=helper.base()
+    values["width"]=384;values["height"]=256;values["frames"]=73
+    values["version"]=2;values["task"]="i2v"
+    values["reference_images"]=[["role":"first","path":"/images/shot-two.png",
+      "strength":0.8,"crf":33]]
+    let request=try helper.decode(values)
+    let plan=try MLXStudioMemoryPlan(request:request,extensionContextFrames:25,
+      physicalMemory:256*UInt64(gib),recommendedWorkingSet:192*UInt64(gib))
+    XCTAssertGreaterThan(plan.transformerActivationBytes,0)
+  }
   func testHostReservesMetalWorkingSetAndEngineCeilingRemainEnforced() throws {
     for (physical,metal) in [(32,24),(256,16),(0,0),(8,6)] {
       XCTAssertThrowsError(try MLXStudioMemoryPlan(request:request(),physicalMemory:UInt64(physical*gib),recommendedWorkingSet:UInt64(metal*gib))) { error in
