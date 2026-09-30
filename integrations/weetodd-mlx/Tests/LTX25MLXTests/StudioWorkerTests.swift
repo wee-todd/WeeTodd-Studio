@@ -3,6 +3,16 @@ import ImageIO
 @testable import LTX25MLX
 
 final class StudioWorkerTests: XCTestCase {
+  func testSceneOpeningImageReportsPreparationAndEncodingBeforeSampling() {
+    var progress=MLXStudioProgress(sceneWindowCount:2)
+    let preparing=progress.event(stage:"scene_reference_prepare:1:first",completed:1,total:2)
+    let encoding=progress.event(stage:"scene_reference_encode:1",completed:21,total:42)
+    let ready=progress.event(stage:"scene_reference_weights_released",completed:1,total:1)
+    XCTAssertTrue((preparing["message"] as! String).contains("opening image"))
+    XCTAssertTrue((encoding["message"] as! String).contains("opening image"))
+    XCTAssertTrue((ready["message"] as! String).contains("ready"))
+    XCTAssertGreaterThanOrEqual(ready["fraction"] as! Double,encoding["fraction"] as! Double)
+  }
   func testSceneProgressAdvancesAcrossBothWindowsBeforeDecode() throws {
     var progress=MLXStudioProgress(sceneWindowCount:2)
     let stages:[(String,Int,Int)]=[

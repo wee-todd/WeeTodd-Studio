@@ -4,7 +4,8 @@ import LTX25Engine
 
 /// Strict native scene admission. Each shot is compiled through the ordinary
 /// Studio recipe validator after resolving its exact causal sampling window.
-/// Image/audio scene conditioning remains gated until its Swift route is tested.
+/// The first window may use one opening image; later windows use the sampled
+/// audiovisual history. Interior/last images and audio drivers remain gated.
 public enum MLXStudioSceneRecipe {
   public struct Compiled {
     public let plan: LTX25ScenePlan
@@ -39,9 +40,14 @@ public enum MLXStudioSceneRecipe {
       let durationNumber = config["duration_seconds"] as? NSNumber,
       CFGetTypeID(durationNumber) != CFBooleanGetTypeID(),
       let conditioning = root["conditioning"] as? [String: Any],
-      conditioning["task"] as? String == "t2v",
-      (conditioning["inputs"] as? [Any])?.isEmpty == true else {
-      throw LTXError.invalid("Swift LTX scenes currently require a strict T2V scene recipe with no unsupported conditioning.")
+      let sceneTask = conditioning["task"] as? String,
+      let sceneInputs = conditioning["inputs"] as? [[String: Any]],
+      (sceneTask == "t2v" && sceneInputs.isEmpty ||
+        sceneTask == "fflf" && sceneInputs.count == 1 &&
+        sceneInputs[0]["kind"] as? String == "image" &&
+        sceneInputs[0]["role"] as? String == "keyframe" &&
+        sceneInputs[0]["frame_index"] as? Int == 0) else {
+      throw LTXError.invalid("Swift LTX scenes accept text or one opening image on the first shot; later images and audio drivers are unsupported.")
     }
     var ids: [String] = [], prompts: [String] = [], durations: [Double] = []
     var seeds: [Int] = []
@@ -83,10 +89,18 @@ public enum MLXStudioSceneRecipe {
       windowConfig["duration_seconds"] = Double(plan.windowFrames[index] - 1) / fps
       windowConfig["seed"] = seeds[index]
       ordinary["config"] = windowConfig
+      if index > 0, sceneTask == "fflf" {
+        var laterConditioning = conditioning
+        laterConditioning["task"] = "t2v"
+        laterConditioning["inputs"] = []
+        ordinary["conditioning"] = laterConditioning
+      }
       let windowData = try JSONSerialization.data(withJSONObject: ordinary)
       let request = try MLXStudioRecipe.compile(data: windowData,
         outputDirectory: outputDirectory + "/window-\(index)")
-      guard request.frames == plan.windowFrames[index], request.task == "t2v",
+      guard request.frames == plan.windowFrames[index],
+        request.task == (index == 0 && sceneTask == "fflf" ? "i2v" : "t2v"),
+        (index == 0 || request.referenceImages.isEmpty),
         request.noisePolicy == .releasedMLX else {
         throw LTXError.invalid("Swift LTX scene window changed its validated sampling contract.")
       }

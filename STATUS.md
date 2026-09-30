@@ -1,12 +1,14 @@
 # WeeTodd Studio implementation status
 
 Swift LTX 2.5 continuous scenes 2026-09-29 (experimental): the shared Swift worker
-now plans two to six text-only shots as aligned overlapping audiovisual windows, retains
+now plans two to six shots as aligned overlapping audiovisual windows, retains
 compact latent guide tails between windows, then decodes the complete scene once. The
 publisher excludes the final causal video frame and trims audio to the exact editorial
 duration. Studio prepares compatible shots as one frozen recipe with ordered prompts,
 seeds and ordinary LoRAs, returns a scene range report, and uses the existing grouped
-review and acceptance flow. Image anchors, audio drivers and specialized adapters
+review and acceptance flow. One opening image on the first shot uses the existing
+I2V encoder at both sampling resolutions; later image anchors, audio drivers and
+specialized adapters
 remain on the explicitly selected Python route; broader scene quality needs review.
 A first 384 × 256,
 four-second, two-shot native worker smoke completed in 84.23 seconds at a 3.76 GB peak
@@ -21,6 +23,12 @@ six-shot, 30-second recipe at 768 × 448 passed installed-checkpoint preflight: 
 full-scene video decode needs 18.25 GB of admitted activation space and the largest
 window transformer needs 5.47 GB, below this Mac's 34.36 GB ceiling. That longer
 scene was not generated and its peak process memory is unknown.
+A signed-app worker render with an opening image completed the same four-second scene
+in 64.98 worker seconds with a 3.71 GB peak Swift process footprint. It published 96 frames
+and four seconds of stereo audio. The first delivered frame measured 33.34 dB PSNR
+against the supplied PNG, and inspected contact frames retained the subject and set
+across the join. A first-image scene's Studio acceptance lifecycle and broader image
+quality remain unqualified.
 
 Swift native audiovisual qualification 2026-09-29: a Qwen3-TTS-driven LTX 2.5 A2V take
 with an opening image completed at 1280 × 768, 169 frames/24 fps, two decoded previews,

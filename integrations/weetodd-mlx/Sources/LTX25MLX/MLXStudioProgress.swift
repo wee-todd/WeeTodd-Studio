@@ -18,7 +18,13 @@ public struct MLXStudioProgress {
         (1...sceneWindowCount).contains(value) else { return nil }
       return value
     }
-    if let index=sceneIndex("scene_text_") {
+    if stage.hasPrefix("scene_reference_prepare:") {
+      message="Preparing scene opening image"
+    } else if stage.hasPrefix("scene_reference_encode:") {
+      next=0.08;message="Encoding scene opening image · \(completed)/\(total)"
+    } else if stage == "scene_reference_weights_released" {
+      next=0.08;message="Scene opening image ready"
+    } else if let index=sceneIndex("scene_text_") {
       next=0.01+0.06*(Double(index-1)+part)/Double(sceneWindowCount)
       message="Encoding scene prompt \(index)/\(sceneWindowCount)"
     } else if stage == "scene_text_weights_released" {

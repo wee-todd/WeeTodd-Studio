@@ -14,10 +14,11 @@ direction and backend choices. This is a source-build preview, not a notarized c
 Source builds include a Swift MLX LTX 2.5 worker. In Runtime Settings, **Use Swift MLX for
 LTX 2.5** selects native distilled 8 + 3 step T2V, first-image, first/last-frame and
 single-audio-driver A2V rendering with an optional first-frame image and compatible
-standard LoRAs, including LTX 2.3 adapters. Text-only continuous scenes of
+standard LoRAs, including LTX 2.3 adapters. Continuous scenes of
 two to six shots with identical effective components and sampling settings also use Swift.
-Studio renders the group as one movie and accepts all member ranges together. Scene images,
-audio drivers and specialized controls still use the explicitly selected Python route.
+The first scene shot may use one opening image. Studio renders the group as one movie and
+accepts all member ranges together. Later scene images, audio drivers and specialized
+controls still use the explicitly selected Python route.
 The worker reuses installed paged
 weights and the shared renderer. Unsupported controls fail native preflight; turn the option
 off explicitly for advanced workflows still provided by Python.
@@ -72,7 +73,7 @@ FFmpeg. Four reviewed frames retained the subject and waterfront across the join
 distinct 49-frame motion mode completed in 44.52 worker seconds at a 3.68 GB
 peak Swift process footprint. Both modes passed Studio prepare, preflight, render,
 two-preview, acceptance and reopening with Python unavailable. Longer continuity
-and seamless sound remain experimental. Image/audio continuous scenes, other A2V
+and seamless sound remain experimental. Later-image/audio continuous scenes, other A2V
 forms and specialized controls still require the explicitly selected Python route.
 Model setup, asset/library tools and other engines remain
 separate migration work; this is not yet a fully Python-free Studio release.
@@ -1191,9 +1192,11 @@ one continuous scene. The native engine carries original video and audio latents
 overlapping sampling windows and decodes the assembled timeline once. Frame matching and
 source-video extension remain separate choices for other workflows.
 
-With **Use Swift MLX for LTX 2.5** enabled, the current Swift route accepts text-only scenes
-with compatible ordinary LoRAs. It preflights the whole group and produces the same grouped
-review ranges. Select the Python renderer for scene image anchors, audio drivers, specialized
+With **Use Swift MLX for LTX 2.5** enabled, the current Swift route accepts text scenes
+with compatible ordinary LoRAs and one opening image on the first shot. Select
+**Image to video** and attach a **First frame** image to that shot; later shots must use
+text-to-video. It preflights the whole group and produces the same grouped review ranges.
+Select the Python renderer for later scene image anchors, audio drivers, specialized
 controls or checkpoint-resume behavior. Those options remain available in Studio.
 
 Continuing windows reuse interior video history while regenerating the previous window's final

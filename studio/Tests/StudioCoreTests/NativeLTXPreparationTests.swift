@@ -166,6 +166,31 @@ final class NativeLTXPreparationTests: XCTestCase {
     project.clips[0].duration = 0.5
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
   }
+  func testSwiftSceneCarriesOpeningImageWithoutApplyingItToLaterShots() throws {
+    let (root,original,runtime)=try fixture()
+    let opening=root.appendingPathComponent("opening.png")
+    try Data([1]).write(to:opening)
+    let image=MediaAsset(name:"Opening",kind:.image,path:opening.path)
+    var project=original
+    project.assets=[image]
+    project.clips[0].duration=2
+    project.clips[0].generationSelection?.task="i2v"
+    project.clips[0].attachments=[Attachment(assetID:image.id,role:.first)]
+    var follower=project.clips[0]
+    follower.id=UUID();follower.prompt="The warrior turns."
+    follower.generationSelection?.task="t2v"
+    follower.attachments=[]
+    follower.continuity=ClipContinuity(mode:"scene",sourceClipID:project.clips[0].id)
+    project.clips.append(follower)
+    let composed=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let recipe=composed["recipe"] as! [String:Any]
+    let conditioning=recipe["conditioning"] as! [String:Any]
+    XCTAssertEqual(conditioning["task"] as? String,"fflf")
+    XCTAssertEqual((conditioning["inputs"] as? [[String:Any]])?.count,1)
+    XCTAssertEqual(((composed["report"] as! [String:Any])["conditioning"] as! [String:Any])["inputs"] as? Int,1)
+    project.clips[1].attachments=[Attachment(assetID:image.id,role:.first)]
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+  }
   func testRejectsNegativePromptThatDistilledSwiftCannotEvaluate() throws {
     let (_, original, runtime) = try fixture()
     var project = original

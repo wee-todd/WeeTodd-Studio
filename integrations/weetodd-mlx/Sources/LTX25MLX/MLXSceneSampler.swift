@@ -5,7 +5,8 @@ import LTX25Video
 import LTX25Audio
 
 /// Samples native scene windows with the same released two-stage renderer used
-/// for ordinary clips. Only compact audiovisual tails cross a window boundary.
+/// for ordinary clips. The first window may use the ordinary opening-image VAE;
+/// only compact audiovisual tails cross subsequent window boundaries.
 public enum MLXSceneSampler {
   public struct Result {
     public let video: MLXArray
@@ -65,15 +66,25 @@ public enum MLXSceneSampler {
         request.videoCheckpoint == first.videoCheckpoint,
         request.audioCheckpoint == first.audioCheckpoint,
         request.spatialUpscalerCheckpoint == first.spatialUpscalerCheckpoint,
-        request.task == "t2v", request.referenceImages.isEmpty,
+        request.task == (index == 0 && !request.referenceImages.isEmpty ? "i2v" : "t2v"),
+        (index == 0 || request.referenceImages.isEmpty),
+        request.referenceImages.count <= 1,
         request.audioReference == nil, request.noisePolicy == .releasedMLX else {
         throw LTXError.invalid("Swift LTX scene windows need identical components and admitted geometry.")
       }
       _ = try MLXTextEncodingPlan(promptTokens: text.tokenize(request.prompt).count)
+      if index == 0, !request.referenceImages.isEmpty {
+        try MLXReferenceImage.inspect(URL(fileURLWithPath: request.referenceImages[0].path))
+        for g in [recipe.low, recipe.high] {
+          _ = try MLXImageEncodePlan(width: g.width, height: g.height)
+        }
+        _ = try MLXImageEncoder(checkpoint: URL(fileURLWithPath: request.videoCheckpoint))
+      }
       _ = try MLXDistilledSamplingRunner(recipe: recipe,
         transformerRoot: URL(fileURLWithPath: request.transformerRoot),
         upscalerCheckpoint: URL(fileURLWithPath: request.spatialUpscalerCheckpoint),
         statisticsCheckpoint: URL(fileURLWithPath: request.videoCheckpoint),
+        firstStrength: index == 0 ? request.referenceImages.first?.strength : nil,
         extensionContextFrames: index == 0 ? nil : plan.overlapFrames,
         extensionVideoGuideLatentFrames: index == 0 ? nil : plan.videoOverlapLatentFrames - 1,
         extensionAudioGuideTokens: index == 0 ? nil : plan.joinAudioTokens[index - 1],
@@ -86,6 +97,7 @@ public enum MLXSceneSampler {
   }
 
   public static func sample(_ compiled: MLXStudioSceneRecipe.Compiled,
+    ffmpeg: URL,
     maximumActivationBytes: Int,
     progress: @escaping (String, Int, Int) throws -> Void = { _, _, _ in }) throws -> Result {
     let plan = compiled.plan, requests = compiled.requests
@@ -94,6 +106,21 @@ public enum MLXSceneSampler {
     }
     let geometry = try AVGeometry(width: first.width, height: first.height,
       frames: plan.totalFrames, fps: plan.fps)
+    let firstRecipe = try first.recipe()
+    let imageDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("weetodd-scene-image-" + UUID().uuidString)
+    if !first.referenceImages.isEmpty {
+      try FileManager.default.createDirectory(at: imageDirectory,
+        withIntermediateDirectories: false)
+    }
+    defer { try? FileManager.default.removeItem(at: imageDirectory) }
+    let preparedImages = try first.referenceImages.isEmpty ? [] :
+      MLXReferenceImage.prepareStages(first.referenceImages,
+        sizes: [(firstRecipe.low.width, firstRecipe.low.height),
+          (firstRecipe.high.width, firstRecipe.high.height)],
+        ffmpeg: ffmpeg, directory: imageDirectory) { index, role in
+          try progress("scene_reference_prepare:\(index + 1):" + role, index + 1, 2)
+        }
     let contexts = try autoreleasepool { () -> [MLXTextEncoder.Output] in
       let encoder = try MLXTextEncoder(gemmaRoot: URL(fileURLWithPath: first.gemmaRoot),
         connectorURL: URL(fileURLWithPath: first.connectorCheckpoint))
@@ -110,13 +137,33 @@ public enum MLXSceneSampler {
     }
     Stream.gpu.synchronize(); Memory.clearCache()
     try progress("scene_text_weights_released", 1, 1)
+    var openingReferences: [(first: MLXArray, last: MLXArray?)] = try autoreleasepool {
+      guard !preparedImages.isEmpty else { return [] }
+      let encoder = try MLXImageEncoder(
+        checkpoint: URL(fileURLWithPath: first.videoCheckpoint))
+      var stages: [(first: MLXArray, last: MLXArray?)] = []
+      for (index, images) in preparedImages.enumerated() {
+        let image = images[0]
+        let encoded = try encoder.encode(MLXArray(try image.pixels(),
+          [1, image.height, image.width, 3])) { completed in
+            try progress("scene_reference_encode:\(index + 1)", completed, 42)
+          }
+        stages.append((encoded, nil))
+      }
+      return stages
+    }
+    Stream.gpu.synchronize(); Memory.clearCache()
+    if !openingReferences.isEmpty {
+      try progress("scene_reference_weights_released", 1, 1)
+    }
     var videoWindows: [MLXArray] = [], audioWindows: [MLXArray] = []
     var prior: MLXDistilledSamplingRunner.ExtensionGuides?
     var seconds: [Double] = []
     for index in requests.indices {
       try Task.checkCancellation()
       let request = requests[index], recipe = try request.recipe()
-      guard request.task == "t2v", request.referenceImages.isEmpty,
+      guard request.task == (index == 0 && !request.referenceImages.isEmpty ? "i2v" : "t2v"),
+        (index == 0 || request.referenceImages.isEmpty),
         request.audioReference == nil, request.noisePolicy == .releasedMLX,
         request.width == geometry.width, request.height == geometry.height,
         request.fps == geometry.fps, request.frames == plan.windowFrames[index] else {
@@ -126,6 +173,7 @@ public enum MLXSceneSampler {
         transformerRoot: URL(fileURLWithPath: request.transformerRoot),
         upscalerCheckpoint: URL(fileURLWithPath: request.spatialUpscalerCheckpoint),
         statisticsCheckpoint: URL(fileURLWithPath: request.videoCheckpoint),
+        firstStrength: index == 0 ? request.referenceImages.first?.strength : nil,
         extensionContextFrames: index == 0 ? nil : plan.overlapFrames,
         extensionVideoGuideLatentFrames: index == 0 ? nil : plan.videoOverlapLatentFrames - 1,
         extensionAudioGuideTokens: index == 0 ? nil : plan.joinAudioTokens[index - 1],
@@ -138,6 +186,7 @@ public enum MLXSceneSampler {
       let sampled = try sampler.evaluateWithStageOneCapture(
         videoContext: contexts[index].video,
         audioContext: contexts[index].audio,
+        references: index == 0 ? openingReferences : [],
         extensionGuides: prior,
         stageOneVideoObserver: { low in
           guard index < requests.count - 1 else { return }
@@ -150,6 +199,7 @@ public enum MLXSceneSampler {
           try progress("scene_window_\(index + 1):" + stage, completed, total)
         })
       let video = sampled["video"]!, audio = sampled["audio"]!
+      if index == 0 { openingReferences.removeAll() }
       seconds.append(Date().timeIntervalSince(started))
       videoWindows.append(video); audioWindows.append(audio)
       if index < requests.count - 1 {

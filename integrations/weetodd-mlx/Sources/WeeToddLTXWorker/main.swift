@@ -171,6 +171,7 @@ import MLX
     Memory.peakMemory=0
     var progress=MLXStudioProgress(sceneWindowCount:compiled.requests.count)
     let sampled=try MLXSceneSampler.sample(compiled,
+      ffmpeg:URL(fileURLWithPath:ffmpeg),
       maximumActivationBytes:transformer) { stage,completed,total in
       try emit(progress.event(stage:stage,completed:completed,total:total))
     }

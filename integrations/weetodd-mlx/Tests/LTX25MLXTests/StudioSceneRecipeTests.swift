@@ -28,11 +28,28 @@ final class StudioSceneRecipeTests: XCTestCase {
     XCTAssertEqual(compiled.requests.map(\.task),["t2v","t2v"])
   }
 
-  func testRejectsUnsupportedSceneConditioningBeforeWeightedWork() throws {
+  func testOpeningImageAppliesOnlyToFirstWindow() throws {
     var object=fixture()
     var conditioning=object["conditioning"] as! [String:Any]
+    conditioning["task"]="fflf"
     conditioning["inputs"]=[["id":"first","kind":"image","role":"keyframe",
       "path":"/first.png","frame_index":0,"strength":1]]
+    object["conditioning"]=conditioning
+    let compiled=try MLXStudioSceneRecipe.compile(
+      data:JSONSerialization.data(withJSONObject:object),outputDirectory:"/output")
+    XCTAssertEqual(compiled.requests.map(\.task),["i2v","t2v"])
+    XCTAssertEqual(compiled.requests[0].referenceImages.map(\.path),["/first.png"])
+    XCTAssertTrue(compiled.requests[1].referenceImages.isEmpty)
+  }
+
+  func testRejectsLaterOrAdditionalSceneImagesBeforeWeightedWork() throws {
+    var object=fixture()
+    var conditioning=object["conditioning"] as! [String:Any]
+    conditioning["task"]="fflf"
+    conditioning["inputs"]=[["id":"first","kind":"image","role":"keyframe",
+      "path":"/first.png","frame_index":0,"strength":1],
+      ["id":"last","kind":"image","role":"keyframe",
+      "path":"/last.png","frame_index":"last","strength":1]]
     object["conditioning"]=conditioning
     XCTAssertThrowsError(try MLXStudioSceneRecipe.compile(
       data:JSONSerialization.data(withJSONObject:object),outputDirectory:"/output"))

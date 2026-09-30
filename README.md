@@ -85,8 +85,9 @@ to the earlier Swift clip; this does not claim pixel-identical Swift/Python vide
 Earlier slower attempts remain recorded; the full timing gain is not attributed solely to
 fixed loading because the contemporary Python control also improved.
 Studio now packages this renderer as `WeeToddLTXWorker` and can launch supported distilled
-T2V, first-image, first/last-frame, single-audio-driver A2V, and text-only continuous scenes
-with compatible per-shot settings directly in Swift. Runtime
+T2V, first-image, first/last-frame, single-audio-driver A2V, and continuous scenes
+with compatible per-shot settings and an optional opening image on the first shot
+directly in Swift. Runtime
 Settings exposes the Swift/Python choice; unsupported native controls fail preflight without
 silent fallback.
 Sampling progress, bounded decoded-frame previews, cancellation and immutable take publication

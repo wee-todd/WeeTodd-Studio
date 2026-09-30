@@ -119,19 +119,20 @@ public enum NativeLTXPreparation {
       independent.clips[index].continuity = ClipContinuity(mode: "independent")
     }
     var recipes: [[String: Any]] = [], reports: [[String: Any]] = []
-    for member in members {
+    for (memberIndex, member) in members.enumerated() {
       guard member.extensionDirection.isEmpty, member.extensionSource.isEmpty,
         member.audioDriverSelection == nil, member.musicSource == nil,
-        member.attachments.allSatisfy({ $0.role == .lora }) else {
-        throw unsupported("Swift continuous scenes currently support text and ordinary LoRAs; remove image, audio and extension inputs")
+        member.attachments.allSatisfy({ $0.role == .lora || memberIndex == 0 && $0.role == .first }) else {
+        throw unsupported("Swift continuous scenes accept one opening image on the first shot and ordinary LoRAs; remove later images, audio and extension inputs")
       }
       var one = request
       one["project"] = try object(independent)
       one["clipID"] = member.id.uuidString
       let composed = try compose(resolve(one))
       let recipe = composed["recipe"] as! [String: Any]
-      guard (recipe["conditioning"] as? [String: Any])?["task"] as? String == "t2v" else {
-        throw unsupported("each Swift scene shot must select text-to-video")
+      let task = (recipe["conditioning"] as? [String: Any])?["task"] as? String
+      guard task == (memberIndex == 0 && member.attachments.contains { $0.role == .first } ? "fflf" : "t2v") else {
+        throw unsupported("only the first Swift scene shot may select image-to-video; later shots need text-to-video")
       }
       recipes.append(recipe); reports.append(composed["report"] as! [String: Any])
     }
@@ -189,7 +190,8 @@ public enum NativeLTXPreparation {
     report["scenePlan"] = ["requested_durations": members.map(\.duration),
       "segment_frame_counts": lengths, "total_frames": boundaries.last! + 1]
     report["task"] = "scene"
-    report["conditioning"] = ["frames": boundaries.last! + 1, "inputs": 0]
+    report["conditioning"] = ["frames": boundaries.last! + 1,
+      "inputs": ((recipes[0]["conditioning"] as? [String: Any])?["inputs"] as? [Any])?.count ?? 0]
     report["resolvedFingerprint"] = try fingerprint(content)
     report["warnings"] = reports.flatMap { $0["warnings"] as? [String] ?? [] }
     return ["recipe": content, "report": report]
