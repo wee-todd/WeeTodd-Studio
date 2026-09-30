@@ -1205,7 +1205,10 @@ at 361 frames; headless recipes can set their own aligned cap. The choice is sav
 the scene leader, frozen into the prepared recipe, and shown during take review. Switching
 to the Python renderer requires choosing **Full decode** first. One signed-worker
 30-second scene rendered with no visible cut in inspected decoder-join
-contact frames. Broader long-scene quality and Studio acceptance remain unqualified.
+contact frames. Broader long-scene quality and interactive Studio acceptance remain unqualified.
+A StudioStore test using that real movie passed grouped review, acceptance and project
+round-trip with a test bridge for preparation/rendering; interactive signed-app review
+after a new generation remains untested.
 Select the Python renderer for later scene image anchors, audio drivers, specialized
 controls or checkpoint-resume behavior. Those options remain available in Studio.
 

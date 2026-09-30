@@ -15,13 +15,15 @@ import XCTest
   func invoke(_ command: String, _ runtime: RuntimeSettings, _ payload: [String: Any], _ output: URL?) async throws -> [String: Any] {
     calls.append(command)
     switch command {
-    case "describe-generation":
+    case "describe-generation", "ltx-native-describe":
       let project = payload["project"] as? [String: Any] ?? [:]
       let clips = project["clips"] as? [[String: Any]] ?? []
       return ["fingerprint": "scene-resolved-" + clips.map { String(describing: $0["duration"]) }.joined(),
         "sourcePaths": ["/tmp/scene-component.weights"], "readinessErrors": []]
-    case "prepare": return ["recipePath": "/tmp/scene/prepared/recipe.json", "prompt": "Entire scene prompt", "report": ["scene": scene, "resolvedFingerprint": "scene-resolved"]]
-    case "render":
+    case "prepare", "ltx-native-prepare":
+      return ["recipePath": "/tmp/scene/prepared/recipe.json", "prompt": "Entire scene prompt", "report": ["scene": scene, "resolvedFingerprint": "scene-resolved"]]
+    case "ltx-native-preflight": return ["status": "success"]
+    case "render", "ltx-native-render":
       renderOutputs.append(output)
       if suspend {
         return try await withCheckedThrowingContinuation { continuation = $0; entered?() }
@@ -35,6 +37,41 @@ import XCTest
 }
 
 final class ContinuousSceneInteractionTests: XCTestCase {
+  @MainActor func testInstalledWindowedSceneMovieAcceptsAndReopensAsOneTake() async throws {
+    guard let path = ProcessInfo.processInfo.environment["WEETODD_LTX_WINDOWED_SCENE_SAMPLE"],
+      FileManager.default.fileExists(atPath: path) else {
+      throw XCTSkip("Set WEETODD_LTX_WINDOWED_SCENE_SAMPLE to an installed 30-second scene movie.")
+    }
+    let (store, bridge) = try fixture()
+    bridge.video = path
+    store.runtime.nativeLTX25Enabled = true
+    var clips: [Clip] = []
+    for index in 0..<6 {
+      var clip = Clip(name: "Shot \(index + 1)", engine: .ltx25)
+      clip.prompt = "A red robot remains in a workshop."
+      clip.duration = 5
+      if index == 0 { clip.continuity = ClipContinuity(sceneDecodeMode: "windowed") }
+      else { clip.continuity = ClipContinuity(mode: "scene", sourceClipID: clips[index - 1].id) }
+      clips.append(clip)
+    }
+    store.project.clips = clips
+    store.select(clips[2].id)
+    bridge.scene = ["version": 1, "frame_rate": 24.0,
+      "publication_mode": "windowed_decode_native_latent_chain", "members": clips.enumerated().map {
+        ["clip_id": $0.element.id.uuidString, "source_in": Double($0.offset * 5), "duration": 5.0]
+      }]
+    await store.generateSelected()
+    XCTAssertNil(store.error)
+    XCTAssertEqual(store.pendingContinuousScene?.report.publicationMode,
+      "windowed_decode_native_latent_chain")
+    XCTAssertTrue(store.canAcceptContinuousScene)
+    await store.acceptContinuousScene()
+    XCTAssertNil(store.error)
+    XCTAssertEqual(store.project.clips.map(\.sourcePath), Array(repeating: path, count: 6))
+    let reopened = try JSONDecoder().decode(StudioProject.self, from: JSONEncoder().encode(store.project))
+    XCTAssertEqual(Set(reopened.clips.compactMap { $0.versions.last?.sceneTakeID }).count, 1)
+    XCTAssertEqual(reopened.clips.first?.continuity?.sceneDecodeMode, "windowed")
+  }
   @MainActor func testRetryKeepsCandidateFilesSeparateAndDefersAcceptanceWhileRendering() async throws {
     let (store, bridge) = try fixture()
     await store.generateSelected()

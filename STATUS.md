@@ -54,7 +54,10 @@ estimate is not measured peak process memory. The signed worker then rendered th
 the red robot and workshop across all five shot joins. Both decode-window joins had
 below-median downscaled frame-to-frame change and no visible cut in the contact frames.
 This is one recipe, not broad long-scene quality, memory or speed qualification;
-Studio review/acceptance of windowed results and low-memory hardware remain open.
+a StudioStore native-route test then used that real MP4 with a six-shot project and a
+test bridge for prepare/render. Movie inspection, grouped review, acceptance and project
+encode/decode passed. Interactive signed-app review after a new generation and
+low-memory hardware remain unqualified.
 
 Swift native audiovisual qualification 2026-09-29: a Qwen3-TTS-driven LTX 2.5 A2V take
 with an opening image completed at 1280 × 768, 169 frames/24 fps, two decoded previews,
