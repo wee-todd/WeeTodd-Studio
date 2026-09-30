@@ -2,6 +2,50 @@ import Foundation
 import MLX
 import TensorIO
 
+public struct H3LoRAAdapter: Sendable {
+  public let url: URL
+  public let strength: Float
+
+  public init(url: URL, strength: Float) throws {
+    guard url.isFileURL, url.path.hasPrefix("/"), strength.isFinite,
+      (0...2).contains(strength) else {
+      throw H3CheckpointError.invalid("Invalid H3 LoRA path or strength.")
+    }
+    self.url = url
+    self.strength = strength
+  }
+}
+
+protocol H3LoRAApplying {
+  func apply(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool) throws -> MLXArray
+}
+
+/// Ordered activation-space updates. Each file maps only the active projection;
+/// no merged checkpoint or resident adapter-weight stack is created.
+final class H3LoRAStack: H3LoRAApplying {
+  private let files: [H3LoRAFile]
+
+  init(adapters: [H3LoRAAdapter]) throws {
+    guard (1...4).contains(adapters.count),
+      Set(adapters.map { $0.url.standardizedFileURL.path }).count == adapters.count else {
+      throw H3CheckpointError.invalid("H3 supports one to four distinct ordered LoRAs.")
+    }
+    files = try adapters.map { try H3LoRAFile(url: $0.url,
+      strength: $0.strength) }
+  }
+
+  func apply(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool = false) throws -> MLXArray {
+    var value = base
+    for file in files {
+      value = try file.apply(base: value, input: input,
+        target: target, reorderQKV: reorderQKV)
+    }
+    return value
+  }
+}
+
 /// Apply a LoRA in activation space. H3's installed transformer projections
 /// are weight-decoded one at a time, so merging a 2 GB adapter into the base
 /// checkpoint would create another large resident copy.
@@ -24,10 +68,10 @@ enum H3LoRAProjection {
   }
 }
 
-/// The released ComfyUI Turbo adapter is validated once from its safetensors
-/// header. Projection pairs are then mapped only while their matching block
-/// executes, preserving H3's staged weight residency.
-final class H3LoRAFile {
+/// Compatible ComfyUI H3 adapters are validated once from their safetensors
+/// headers. Declared projections are mapped only while their block executes,
+/// preserving H3's staged weight residency.
+final class H3LoRAFile: H3LoRAApplying {
   let url: URL
   let strength: Float
   let targetCount: Int
@@ -41,42 +85,50 @@ final class H3LoRAFile {
     let file = try SafeTensorFile(url: url)
     guard file.metadata["target_format"] == "ComfyUI generic LoRA",
       file.metadata["qkv_fusion"]?.contains("block diagonal B") == true else {
-      throw H3CheckpointError.invalid("H3 Turbo LoRA metadata or QKV layout is unsupported.")
+      throw H3CheckpointError.invalid("H3 LoRA metadata or QKV layout is unsupported.")
     }
-    var targets: [String: (rank: Int, alpha: Float)] = [:]
+    var supported: [String: (rows: Int, columns: Int)] = [:]
     for group in 0..<52 {
       let prefix = group < 50
         ? "diffusion_model.blocks.\(group)."
         : "diffusion_model.token_refiner.blocks.\(group - 50)."
-      for (suffix, rows, columns, rank) in [
-        ("attn.qkv_proj", 21504, 5376, 384),
-        ("attn.out_proj", 5376, 7168, 128),
-        ("mlp.fc1", 28672, 5376, 128),
-        ("mlp.fc2", 5376, 14336, 128),
+      for (suffix, rows, columns) in [
+        ("attn.qkv_proj", 21504, 5376),
+        ("attn.out_proj", 5376, 7168),
+        ("mlp.fc1", 28672, 5376),
+        ("mlp.fc2", 5376, 14336),
       ] {
-        let target = prefix + suffix
-        let aName = target + ".lora_A.weight"
+        supported[prefix + suffix] = (rows, columns)
+      }
+    }
+    var targets: [String: (rank: Int, alpha: Float)] = [:]
+    for aName in file.tensors.keys where aName.hasSuffix(".lora_A.weight") {
+        let target = String(aName.dropLast(".lora_A.weight".count))
+        guard let dimensions = supported[target], let a = file.tensors[aName],
+          a.dtype == "BF16", a.shape.count == 2,
+          let rankValue = a.shape.first, (1...512).contains(rankValue),
+          a.shape[1] == UInt64(dimensions.columns) else {
+          throw H3CheckpointError.invalid("Unsupported H3 LoRA target or down projection: \(target)")
+        }
+        let rank = Int(rankValue)
         let bName = target + ".lora_B.weight"
         let alphaName = target + ".alpha"
-        guard let a = file.tensors[aName], a.dtype == "BF16",
-          a.shape == [UInt64(rank), UInt64(columns)],
-          let b = file.tensors[bName], b.dtype == "BF16",
-          b.shape == [UInt64(rows), UInt64(rank)],
+        guard let b = file.tensors[bName], b.dtype == "BF16",
+          b.shape == [UInt64(dimensions.rows), rankValue],
           let alphaDescriptor = file.tensors[alphaName],
           alphaDescriptor.dtype == "F32", alphaDescriptor.shape.isEmpty else {
-          throw H3CheckpointError.invalid("Incomplete H3 Turbo LoRA target: \(target)")
+          throw H3CheckpointError.invalid("Incomplete H3 LoRA target: \(target)")
         }
         let alpha = try file.withTensorBytes(named: alphaName) {
           $0.loadUnaligned(as: Float.self)
         }
         guard alpha.isFinite, alpha >= 0 else {
-          throw H3CheckpointError.invalid("Invalid H3 Turbo LoRA alpha: \(target)")
+          throw H3CheckpointError.invalid("Invalid H3 LoRA alpha: \(target)")
         }
         targets[target] = (rank, alpha)
-      }
     }
-    guard file.tensors.count == targets.count * 3 else {
-      throw H3CheckpointError.invalid("H3 Turbo LoRA contains unsupported extra targets.")
+    guard !targets.isEmpty, file.tensors.count == targets.count * 3 else {
+      throw H3CheckpointError.invalid("H3 LoRA contains unsupported extra targets.")
     }
     self.url = url
     self.strength = strength
@@ -88,9 +140,7 @@ final class H3LoRAFile {
 
   func apply(base: MLXArray, input: MLXArray,
     target: String, reorderQKV: Bool = false) throws -> MLXArray {
-    guard let info = targets[target] else {
-      throw H3CheckpointError.invalid("H3 LoRA target is missing: \(target)")
-    }
+    guard let info = targets[target] else { return base }
     let aName = target + ".lora_A.weight"
     let bName = target + ".lora_B.weight"
     let aShape = [info.rank, input.shape.last!]

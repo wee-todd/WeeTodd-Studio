@@ -1127,12 +1127,15 @@ small synthetic header fixtures; these checks do not qualify LoRA visual quality
 
 **Adapter file details** exposes layout and the optional linked AdaLN input grid. Adapters with
 AdaLN targets need that grid; the validator reports missing or incompatible auxiliary data before
-weighted work. A stack may contain one enabled Turbo adapter. Unsupported reference/control tasks,
+weighted work. The experimental Swift H3 route accepts up to four distinct ordered compatible
+ComfyUI-format adapters with independent strengths, including sparse projection sets and variable
+ranks. Other LoRA layouts, including AdaLN, remain on the existing route. Unsupported reference/control tasks,
 conflicting acceleration recipes, explicitly incompatible step metadata and invalid layouts are
 rejected. Existing custom recipes containing their own Turbo stack retain their saved schedule.
 
-Header checks and regression tests verify parameter transport and compatibility checks. They do not
-establish visual quality, timing, memory fit, or Turbo plus motion-continuation quality for every file.
+Header checks and regression tests verify parameter transport and compatibility checks. Only the
+single installed Turbo adapter has a real Swift render check; multi-adapter visual quality, timing,
+memory fit, and motion-continuation quality remain unqualified.
 
 ### Clip continuity in Studio
 

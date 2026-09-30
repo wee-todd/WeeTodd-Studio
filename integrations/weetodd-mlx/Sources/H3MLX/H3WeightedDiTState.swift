@@ -50,7 +50,7 @@ final class H3WeightedDiTState {
   private let layout: Layout
   private let blockCount: Int
   private let projectionMode: H3ProjectionMode
-  private let lora: H3LoRAFile?
+  private let lora: (any H3LoRAApplying)?
   private var text: MLXArray?
   private var timeEmbeddings: MLXArray?
   private var modulations: [MLXArray]?
@@ -71,6 +71,7 @@ final class H3WeightedDiTState {
     blockCount: Int,
     projectionMode: H3ProjectionMode = .weightDecoded,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
+    additionalLoRAs: [H3LoRAAdapter] = [],
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     let textRows = layout.textRows
     guard (1...50).contains(blockCount),
@@ -86,8 +87,12 @@ final class H3WeightedDiTState {
     self.layout = layout
     self.blockCount = blockCount
     self.projectionMode = projectionMode
-    self.lora = try turboLoRAURL.map { try H3LoRAFile(url: $0,
-      strength: turboLoRAStrength) }
+    var adapters = additionalLoRAs
+    if let turboLoRAURL {
+      adapters.insert(try H3LoRAAdapter(url: turboLoRAURL,
+        strength: turboLoRAStrength), at: 0)
+    }
+    self.lora = try adapters.isEmpty ? nil : H3LoRAStack(adapters: adapters)
     self.text = nil
     self.timeEmbeddings = nil
     self.modulations = nil

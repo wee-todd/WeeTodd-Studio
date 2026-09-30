@@ -139,7 +139,8 @@ public enum H3StudioRecipe {
       qwenVision: URL(fileURLWithPath: vision), tokenizer: base.tokenizer,
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       turboLoRA: base.turboLoRA,
-      turboLoRAStrength: base.turboLoRAStrength)
+      turboLoRAStrength: base.turboLoRAStrength,
+      additionalLoRAs: base.additionalLoRAs)
   }
 
   /// Admit ordered still, video and standalone audio Ref2VA media.
@@ -208,7 +209,8 @@ public enum H3StudioRecipe {
       qwenVision: URL(fileURLWithPath: vision), tokenizer: base.tokenizer,
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       turboLoRA: base.turboLoRA,
-      turboLoRAStrength: base.turboLoRAStrength)
+      turboLoRAStrength: base.turboLoRAStrength,
+      additionalLoRAs: base.additionalLoRAs)
   }
 
   public static func compile(data: Data) throws -> H3T2VARequest {
@@ -235,15 +237,22 @@ public enum H3StudioRecipe {
         CFGetTypeID(number) != CFBooleanGetTypeID() else { return false }
       return number.doubleValue == 0
     }
-    func turboLoRA(_ object: [String: Any]) -> (URL, Float)? {
-      guard let entries = object["loras"] as? [Any], entries.count == 1,
-        let pair = entries[0] as? [Any], pair.count == 2,
-        let path = pair[0] as? String, path.hasPrefix("/"),
-        let number = pair[1] as? NSNumber,
-        CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
-      let strength = number.floatValue
-      guard strength.isFinite, (0...2).contains(strength) else { return nil }
-      return (URL(fileURLWithPath: path), strength)
+    func turboLoRAs(_ object: [String: Any]) -> [(URL, Float)]? {
+      guard let entries = object["loras"] as? [[Any]],
+        (1...4).contains(entries.count) else { return nil }
+      var adapters: [(URL, Float)] = []
+      for pair in entries {
+        guard pair.count == 2, let path = pair[0] as? String,
+          path.hasPrefix("/"), !path.utf8.contains(0),
+          let number = pair[1] as? NSNumber,
+          CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let strength = number.floatValue
+        guard strength.isFinite, (0...2).contains(strength) else { return nil }
+        adapters.append((URL(fileURLWithPath: path), strength))
+      }
+      guard Set(adapters.map { $0.0.standardizedFileURL.path }).count == adapters.count
+      else { return nil }
+      return adapters
     }
     guard data.count <= 1024 * 1024,
       let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -262,7 +271,7 @@ public enum H3StudioRecipe {
         "task", "loras"]),
       oneOf(component, "task", default: "t2va", ["t2va"]),
       (component["loras"] == nil || emptyArray(component, "loras")
-        || turboLoRA(component) != nil),
+        || turboLoRAs(component) != nil),
       let transformer = component["transformer"] as? String,
       let qwen = component["text_encoder"] as? String,
       let tokenizer = component["tokenizer"] as? String,
@@ -300,9 +309,12 @@ public enum H3StudioRecipe {
       let duration = config["duration_seconds"] as? Double,
       let steps = config["steps"] as? Int,
       let seed = config["seed"] as? Int, (0...Int(UInt32.max)).contains(seed) else {
-      throw H3CheckpointError.invalid("Swift H3 currently admits only text-to-audiovisual Euler recipes with at most one supported Turbo LoRA and no unported controls.")
+      throw H3CheckpointError.invalid("Swift H3 currently admits only text-to-audiovisual Euler recipes with up to four distinct supported Turbo LoRAs and no unported controls.")
     }
-    let adapter = turboLoRA(component)
+    let adapters = turboLoRAs(component) ?? []
+    let additional = try adapters.dropFirst().map {
+      try H3LoRAAdapter(url: $0.0, strength: $0.1)
+    }
     _ = try ConditioningV1.inputs(conditioning, task: "t2v", audioPolicy: "generated", count: 0...0)
     return try H3T2VARequest(prompt: prompt, width: width, height: height,
       durationSeconds: duration, seed: UInt64(seed), requestedSteps: steps,
@@ -311,6 +323,8 @@ public enum H3StudioRecipe {
       tokenizer: URL(fileURLWithPath: tokenizer),
       videoVAE: URL(fileURLWithPath: video),
       audioVAE: URL(fileURLWithPath: audio),
-      turboLoRA: adapter?.0, turboLoRAStrength: adapter?.1 ?? 1)
+      turboLoRA: adapters.first?.0,
+      turboLoRAStrength: adapters.first?.1 ?? 1,
+      additionalLoRAs: additional)
   }
 }

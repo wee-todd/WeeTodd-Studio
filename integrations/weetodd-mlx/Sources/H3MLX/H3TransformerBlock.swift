@@ -66,7 +66,7 @@ public enum H3TransformerBlock {
     input: MLXArray, modulation: MLXArray,
     modulationIndices: MLXArray, positions: MLXArray,
     projectionMode: H3ProjectionMode = .weightDecoded,
-    lora: H3LoRAFile? = nil,
+    lora: (any H3LoRAApplying)? = nil,
     rotaryAngles: H3RotaryAngles? = nil,
     rowWindow: Int = 16384,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {

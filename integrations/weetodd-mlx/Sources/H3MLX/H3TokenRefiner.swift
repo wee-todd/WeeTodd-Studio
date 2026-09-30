@@ -13,7 +13,7 @@ public enum H3TokenRefiner {
   }
 
   static func evaluate(checkpointURL: URL, input: MLXArray,
-    lora: H3LoRAFile?) throws -> MLXArray {
+    lora: (any H3LoRAApplying)?) throws -> MLXArray {
     var value = input
     for index in 0..<2 {
       value = try evaluateBlock(checkpointURL: checkpointURL,
@@ -44,7 +44,7 @@ public enum H3TokenRefiner {
   }
 
   static func evaluateBlock(checkpointURL: URL, index: Int,
-    input: MLXArray, lora: H3LoRAFile? = nil,
+    input: MLXArray, lora: (any H3LoRAApplying)? = nil,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard (0..<2).contains(index), input.ndim == 3,
       input.shape[0] == 1, (1...1024).contains(input.shape[1]),

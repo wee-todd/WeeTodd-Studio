@@ -101,14 +101,20 @@ public enum NativeH3Preparation {
     return recipe
   }
   private static func supportedTurboLoRA(_ value: Any?) -> Bool {
-    guard let entries = value as? [Any], entries.count <= 1 else { return value == nil }
-    guard let entry = entries.first else { return true }
-    guard let pair = entry as? [Any], pair.count == 2,
-      let path = pair[0] as? String, path.hasPrefix("/"),
-      let number = pair[1] as? NSNumber,
-      CFGetTypeID(number) != CFBooleanGetTypeID() else { return false }
-    let strength = number.doubleValue
-    return strength.isFinite && (0...2).contains(strength)
+    guard let entries = value as? [[Any]], entries.count <= 4 else { return value == nil }
+    var paths = Set<String>()
+    for pair in entries {
+      guard pair.count == 2,
+        let path = pair[0] as? String, path.hasPrefix("/"),
+        !path.utf8.contains(0),
+        let number = pair[1] as? NSNumber,
+        CFGetTypeID(number) != CFBooleanGetTypeID(),
+        number.doubleValue.isFinite,
+        (0...2).contains(number.doubleValue),
+        paths.insert(URL(fileURLWithPath: path).standardizedFileURL.path).inserted
+      else { return false }
+    }
+    return true
   }
   private static func emptyProfileLoRA(_ value: Any?) -> Bool {
     value == nil || (value as? [Any])?.isEmpty == true
@@ -227,13 +233,13 @@ public enum NativeH3Preparation {
     }
     let frameIndices = enabledFrames.compactMap { keyframeIndex($0, duration: clip.duration) }
     guard clip.attachments.allSatisfy({ supportedRoles.contains($0.role) }),
-      clip.attachments.filter({ $0.role == .lora && $0.isEnabled }).count <= 1,
+      clip.attachments.filter({ $0.role == .lora && $0.isEnabled }).count <= 4,
       task != "ref2va" || (1...12).contains(clip.attachments.filter({ $0.role == .reference && $0.isEnabled }).count),
       !["i2v", "fflf"].contains(task) ||
         ((1...8).contains(frameIndices.count) && frameIndices.count == enabledFrames.count &&
           Set(frameIndices).count == frameIndices.count &&
           (task != "i2v" || (frameIndices.count == 1 && frameIndices[0] == 0))) else {
-      throw unsupported("this task needs one to eight unique timed images or one to twelve references and at most one Turbo LoRA")
+      throw unsupported("this task needs one to eight unique timed images or one to twelve references and at most four Turbo LoRAs")
     }
     let selection = clip.generationSelection
     guard selection?.refinementSteps == nil, selection?.cfg == nil, selection?.shift == nil,
@@ -359,8 +365,8 @@ public enum NativeH3Preparation {
         referenceInputs.append(input)
         continue
       }
-      guard loras.isEmpty else {
-        throw unsupported("select only one Turbo LoRA, including the profile adapter")
+      guard loras.count < 4 else {
+        throw unsupported("select at most four Turbo LoRAs, including profile adapters")
       }
       try LoRAMember(asset: asset, strength: attachment.strength).validate(for: .h3)
       guard asset.loraAdalnInputGrid == nil,
@@ -371,6 +377,13 @@ public enum NativeH3Preparation {
       let adapterPath = try canonical(asset.path)
       guard FileManager.default.isReadableFile(atPath: adapterPath) else {
         throw StudioError.invalid("Relink the H3 Turbo LoRA: \(asset.name)")
+      }
+      let normalizedPath = URL(fileURLWithPath: adapterPath).standardizedFileURL.path
+      guard !loras.contains(where: {
+        guard let path = $0.first as? String else { return false }
+        return URL(fileURLWithPath: path).standardizedFileURL.path == normalizedPath
+      }) else {
+        throw unsupported("the same H3 LoRA is attached more than once")
       }
       loras.append([adapterPath, attachment.strength])
     }

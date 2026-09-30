@@ -17,19 +17,26 @@ public struct H3T2VARequest: Sendable {
   public let audioVAE: URL
   public let turboLoRA: URL?
   public let turboLoRAStrength: Float
+  public let additionalLoRAs: [H3LoRAAdapter]
+  public let loRAAdapters: [H3LoRAAdapter]
 
   public init(prompt: String, width: Int, height: Int,
     durationSeconds: Double, seed: UInt64, requestedSteps: Int,
     transformer: URL, qwenPages: URL, tokenizer: URL,
     videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
-    turboLoRAStrength: Float = 1) throws {
+    turboLoRAStrength: Float = 1,
+    additionalLoRAs: [H3LoRAAdapter] = []) throws {
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
       [transformer, qwenPages, tokenizer, videoVAE, audioVAE]
         .allSatisfy({ $0.isFileURL && $0.path.hasPrefix("/") }),
       turboLoRA == nil || (turboLoRA!.isFileURL &&
         turboLoRA!.path.hasPrefix("/") && turboLoRAStrength.isFinite &&
-        (0...2).contains(turboLoRAStrength)) else {
+        (0...2).contains(turboLoRAStrength)),
+      (turboLoRA == nil ? 0 : 1) + additionalLoRAs.count <= 4,
+      Set(([turboLoRA].compactMap { $0 } + additionalLoRAs.map(\.url))
+        .map { $0.standardizedFileURL.path }).count ==
+        (turboLoRA == nil ? 0 : 1) + additionalLoRAs.count else {
       throw H3CheckpointError.invalid("Invalid H3 text-to-audiovisual request.")
     }
     let geometry = try H3Geometry(width: width, height: height,
@@ -53,6 +60,11 @@ public struct H3T2VARequest: Sendable {
     self.audioVAE = audioVAE
     self.turboLoRA = turboLoRA
     self.turboLoRAStrength = turboLoRAStrength
+    self.additionalLoRAs = additionalLoRAs
+    let primary = try turboLoRA.map {
+      [try H3LoRAAdapter(url: $0, strength: turboLoRAStrength)]
+    } ?? []
+    self.loRAAdapters = primary + additionalLoRAs
   }
 }
 
@@ -92,9 +104,9 @@ public enum H3T2VARunner {
     _ = try H3CheckpointLayout(url: request.transformer)
     _ = try H3VideoVAELayout(url: request.videoVAE)
     _ = try H3AudioVAELayout(url: request.audioVAE)
-    if let turboLoRA = request.turboLoRA {
-      _ = try H3LoRAFile(url: turboLoRA,
-        strength: request.turboLoRAStrength)
+    for adapter in request.loRAAdapters {
+      _ = try H3LoRAFile(url: adapter.url,
+        strength: adapter.strength)
     }
     return Admission(geometry: request.geometry,
       textRows: qwen.tags.count, packedRows: layout.tags.count,
@@ -126,7 +138,8 @@ public enum H3T2VARunner {
           .reshaped([1, admission.textRows, 5120]),
         timestepTable: admission.rowSchedule.table,
         turboLoRAURL: request.turboLoRA,
-        turboLoRAStrength: request.turboLoRAStrength) { completed, total in
+        turboLoRAStrength: request.turboLoRAStrength,
+        additionalLoRAs: request.additionalLoRAs) { completed, total in
         progress("transformer_prepare", completed, total)
       }
       defer { state.unload() }

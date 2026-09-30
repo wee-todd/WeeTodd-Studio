@@ -82,8 +82,8 @@ public enum H3FL2VARunner {
     }
     try H3VideoVAEEncoder.preflight(checkpointURL: base.videoVAE)
     _ = try H3AudioVAELayout(url: base.audioVAE)
-    if let turbo = base.turboLoRA {
-      _ = try H3LoRAFile(url: turbo, strength: base.turboLoRAStrength)
+    for adapter in base.loRAAdapters {
+      _ = try H3LoRAFile(url: adapter.url, strength: adapter.strength)
     }
     return Admission(geometry: base.geometry, packedRows: layout.tags.count,
       evaluations: video.timesteps.count, textRows: qwen.tags.count,
@@ -158,7 +158,8 @@ public enum H3FL2VARunner {
           [1, admission.textRows, 5120]).asType(.bfloat16),
         timestepTable: admission.rowSchedule.table,
         turboLoRAURL: base.turboLoRA,
-        turboLoRAStrength: base.turboLoRAStrength) { completed, total in
+        turboLoRAStrength: base.turboLoRAStrength,
+        additionalLoRAs: base.additionalLoRAs) { completed, total in
           progress("transformer_prepare", completed, total)
         }
       defer { state.unload() }

@@ -88,7 +88,12 @@ final class NativeH3PreparationTests: XCTestCase {
       ["/model/second.safetensors", 1.0]]
     recipe["components"] = components
     try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
-    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+    let stacked = try NativeH3Preparation.compose(request: request(project, runtime))
+    let stackedComponents = (stacked["recipe"] as! [String: Any])["components"] as! [String: Any]
+    let entries = stackedComponents["loras"] as! [[Any]]
+    XCTAssertEqual(entries.map { $0[0] as! String },
+      ["/model/turbo.safetensors", "/model/second.safetensors"])
+    XCTAssertEqual(entries.map { ($0[1] as! NSNumber).doubleValue }, [0.8, 1.0])
   }
 
   func testSelectedEvaluationsBecomeOneExtraSigmaGridPoint() throws {
@@ -124,6 +129,20 @@ final class NativeH3PreparationTests: XCTestCase {
     let pair = (components["loras"] as! [[Any]])[0]
     XCTAssertEqual(pair[0] as? String, path.path)
     XCTAssertEqual(pair[1] as? Double, 0.8)
+    let secondPath = root.appendingPathComponent("second.safetensors")
+    try Data([0]).write(to: secondPath)
+    var secondAsset = MediaAsset(name: "Second Turbo", kind: .lora,
+      path: secondPath.path)
+    secondAsset.loraModel = .h3
+    secondAsset.loraProfile = "turbo"
+    secondAsset.loraLayout = "contiguous_qkv"
+    project.assets.append(secondAsset)
+    project.clips[0].attachments.append(Attachment(assetID: secondAsset.id,
+      role: .lora))
+    let stacked = try NativeH3Preparation.compose(request: request(project, runtime))
+    let stackedComponents = (stacked["recipe"] as! [String: Any])["components"] as! [String: Any]
+    XCTAssertEqual((stackedComponents["loras"] as! [[Any]]).map { $0[0] as! String },
+      [path.path, secondPath.path])
     var recipe = try JSONSerialization.jsonObject(with:
       Data(contentsOf: root.appendingPathComponent("h3.json"))) as! [String: Any]
     var configured = recipe["components"] as! [String: Any]

@@ -37,7 +37,13 @@ final class H3StudioRecipeTests: XCTestCase {
     XCTAssertEqual(withTurbo.turboLoRA?.path, "/tmp/turbo.safetensors")
     XCTAssertEqual(withTurbo.turboLoRAStrength, 1)
     adapter["loras"] = [["/tmp/turbo.safetensors", 1.0],
-      ["/tmp/second.safetensors", 1.0]]
+      ["/tmp/second.safetensors", 0.4]]
+    let stacked = try H3StudioRecipe.compile(data: recipe(components: adapter))
+    XCTAssertEqual(stacked.loRAAdapters.map(\.url.path),
+      ["/tmp/turbo.safetensors", "/tmp/second.safetensors"])
+    XCTAssertEqual(stacked.loRAAdapters.map(\.strength), [1, 0.4])
+    adapter["loras"] = [["/tmp/turbo.safetensors", 1.0],
+      ["/tmp/turbo.safetensors", 0.4]]
     XCTAssertThrowsError(try H3StudioRecipe.compile(data: recipe(components: adapter)))
     adapter["loras"] = [["/tmp/turbo.safetensors", "strong"]]
     XCTAssertThrowsError(try H3StudioRecipe.compile(data: recipe(components: adapter)))

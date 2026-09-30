@@ -17,32 +17,41 @@ public struct H3Ref2VAStillRequest: Sendable {
   public let audioVAE: URL
   public let turboLoRA: URL?
   public let turboLoRAStrength: Float
+  public let additionalLoRAs: [H3LoRAAdapter]
+  public let loRAAdapters: [H3LoRAAdapter]
 
   public init(prompt: String, references: [H3StillReference], width: Int,
     height: Int, durationSeconds: Double, seed: UInt64, requestedSteps: Int,
     transformer: URL, qwenPages: URL, qwenVision: URL, tokenizer: URL,
     videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
-    turboLoRAStrength: Float = 1) throws {
+    turboLoRAStrength: Float = 1,
+    additionalLoRAs: [H3LoRAAdapter] = []) throws {
     try self.init(prompt: prompt, mediaReferences: references.map { .image($0) },
       width: width, height: height, durationSeconds: durationSeconds,
       seed: seed, requestedSteps: requestedSteps, transformer: transformer,
       qwenPages: qwenPages, qwenVision: qwenVision, tokenizer: tokenizer,
       videoVAE: videoVAE, audioVAE: audioVAE, turboLoRA: turboLoRA,
-      turboLoRAStrength: turboLoRAStrength)
+      turboLoRAStrength: turboLoRAStrength,
+      additionalLoRAs: additionalLoRAs)
   }
 
   public init(prompt: String, mediaReferences: [H3Ref2VAReference], width: Int,
     height: Int, durationSeconds: Double, seed: UInt64, requestedSteps: Int,
     transformer: URL, qwenPages: URL, qwenVision: URL, tokenizer: URL,
     videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
-    turboLoRAStrength: Float = 1) throws {
+    turboLoRAStrength: Float = 1,
+    additionalLoRAs: [H3LoRAAdapter] = []) throws {
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
       [transformer, qwenPages, qwenVision, tokenizer, videoVAE, audioVAE]
         .allSatisfy({ $0.isFileURL && $0.path.hasPrefix("/") }),
       turboLoRA == nil || (turboLoRA!.isFileURL &&
         turboLoRA!.path.hasPrefix("/") && turboLoRAStrength.isFinite &&
-        (0...2).contains(turboLoRAStrength)) else {
+        (0...2).contains(turboLoRAStrength)),
+      (turboLoRA == nil ? 0 : 1) + additionalLoRAs.count <= 4,
+      Set(([turboLoRA].compactMap { $0 } + additionalLoRAs.map(\.url))
+        .map { $0.standardizedFileURL.path }).count ==
+        (turboLoRA == nil ? 0 : 1) + additionalLoRAs.count else {
       throw H3CheckpointError.invalid("Invalid H3 visual-reference request.")
     }
     try H3VideoReferencePreparation.validate(mediaReferences)
@@ -85,6 +94,11 @@ public struct H3Ref2VAStillRequest: Sendable {
     self.audioVAE = audioVAE
     self.turboLoRA = turboLoRA
     self.turboLoRAStrength = turboLoRAStrength
+    self.additionalLoRAs = additionalLoRAs
+    let primary = try turboLoRA.map {
+      [try H3LoRAAdapter(url: $0, strength: turboLoRAStrength)]
+    } ?? []
+    self.loRAAdapters = primary + additionalLoRAs
   }
 }
 
@@ -125,9 +139,9 @@ public enum H3Ref2VAStillRunner {
     if !prepared.layout.conditionAudioIndices.isEmpty {
       try H3AudioVAEEncoder.inspect(checkpointURL: request.audioVAE)
     }
-    if let turboLoRA = request.turboLoRA {
-      _ = try H3LoRAFile(url: turboLoRA,
-        strength: request.turboLoRAStrength)
+    for adapter in request.loRAAdapters {
+      _ = try H3LoRAFile(url: adapter.url,
+        strength: adapter.strength)
     }
     return Admission(geometry: request.geometry,
       textRows: prepared.qwenRequest.tags.count,
@@ -196,7 +210,8 @@ public enum H3Ref2VAStillRunner {
           [1, admission.textRows, 5120]).asType(.bfloat16),
         timestepTable: admission.rowSchedule.table,
         turboLoRAURL: request.turboLoRA,
-        turboLoRAStrength: request.turboLoRAStrength) { completed, total in
+        turboLoRAStrength: request.turboLoRAStrength,
+        additionalLoRAs: request.additionalLoRAs) { completed, total in
           progress("transformer_prepare", completed, total)
         }
       defer { state.unload() }

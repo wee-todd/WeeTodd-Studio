@@ -78,7 +78,7 @@ the installed FL2VA checkpoint in text-only mode completed at 768 × 448/124 fra
 while generated sound was subdued (-57.5 dBFS mean). Both H3 sound quality and broader
 checkpoint-general quality remain experimental. LTX continuous scenes and specialized
 conditioning, H3 audio/video-reference quality, broader video Ref2VA qualification,
-general H3 LoRA stacks, and complete
+real multi-adapter H3 quality and unsupported LoRA layouts, and complete
 Python-free Studio distribution remain open.
 
 H3 INT8 finetunes 2026-09-22 (experimental): standard H3 model setup and shared sampling now

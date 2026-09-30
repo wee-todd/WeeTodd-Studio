@@ -140,9 +140,12 @@ this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.
 An experimental Swift MLX H3 worker now runs text-to-audiovisual, timed FL2VA keyframes
 and ordered image/video/audio Ref2VA through the installed Qwen, H3 transformer and separate
 video/audio VAE components. Studio has a guarded, off-by-default Swift preparation and worker
-handoff for these tasks. It admits one complete ComfyUI-format H3 Turbo LoRA, up to nine images,
+handoff for these tasks. It admits up to four distinct, ordered ComfyUI-format H3 LoRAs with
+independent strengths and supported projection/QKV layouts; sparse target sets and variable
+ranks are accepted. Only the installed Turbo adapter has a real Swift render qualification.
+It admits up to nine images,
 three movies and three audio-bearing references for Ref2VA, and rejects unsupported media,
-adapter stacks, controls and profiles before model loading.
+unsupported adapter layouts, controls and profiles before model loading.
 Each movie reference uses its first 7.3 seconds on a bounded 24 fps grid; any embedded audio
 in the selected interval becomes a sound reference. Standalone audio references require a visual
 reference and use at most 15 seconds at 32 kHz stereo. The Swift audio encoder has a two-channel
