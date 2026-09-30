@@ -166,7 +166,11 @@ audiovisual robot clip in 403.78 seconds, with a 4.10 GB peak Swift-process foot
 qualifies that pair's execution only; neither arbitrary LoRA combinations nor a
 matched speed improvement has been established.
 Still-image asset import uses ImageIO metadata inspection without decoding full-resolution pixels
-or invoking Python; other asset kinds may still use the legacy bridge.
+or invoking Python. MOV/MP4/M4V movies and MP3/M4A/WAV/AIFF/CAF audio now load track metadata
+through AVFoundation, so these H3 reference assets can also be linked when Python is unavailable.
+Other formats, text and LoRA files still use the existing inspection bridge. Importing a linked
+asset does not establish that its codec or duration is valid for a specific generation task;
+the selected worker checks that during preparation.
 To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import up to nine
 images, three movies and three audio files into the clip asset store, then choose
 **Use in clip → Appearance** for images/movies and **Audio · reference sound / voice** for

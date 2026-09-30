@@ -140,6 +140,13 @@ conditioning, H3 audio/video-reference quality, broader video Ref2VA qualificati
 real multi-adapter H3 quality and unsupported LoRA layouts, and complete
 Python-free Studio distribution remain open.
 
+Studio now inspects imported MOV/MP4/M4V and MP3/M4A/WAV/AIFF/CAF track metadata
+with AVFoundation, without launching Python or decoding media frames. Focused
+temporary-file tests import a MOV and WAV into an H3 clip while Python is unavailable.
+This closes the standard media-linking dependency for H3 references; worker task,
+codec and duration admission remain separate, and text/LoRA/unrecognized imports
+still use the inspection bridge.
+
 Swift H3 now also validates the installed projection-only Lightx FL2V four-step
 LoRA conversion whose 0.125 training scale is already baked into its B matrices.
 It requires the exact conversion metadata and complete A/B pairs, then applies

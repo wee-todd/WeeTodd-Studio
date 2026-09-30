@@ -790,7 +790,8 @@ extension Encodable {
     _ urls: [URL], scope: AssetScope, addToTimeline: Bool = false, loraModel: LoRAModel? = nil,
     loraProfile: String? = nil, loraLayout: String? = nil, loraAdalnInputGrid: String? = nil
   ) async {
-    if scope == .clip && selectedClipID == nil && !addToTimeline {
+    let importedClipID = selectedClipID
+    if scope == .clip && importedClipID == nil && !addToTimeline {
       error = "Select a clip before importing into its asset store."
       return
     }
@@ -806,13 +807,15 @@ extension Encodable {
         let info: [String: Any]
         if let still = try NativeAssetInspection.inspectStill(url) {
           info = still
+        } else if let media = try await NativeAssetInspection.inspectAVMedia(url) {
+          info = media
         } else {
           info = try await bridge.invoke("inspect", runtime: runtime, payload: inspection)
         }
         let kind = AssetKind(rawValue: info["kind"] as? String ?? "video") ?? .video
         var asset = MediaAsset(
           name: url.deletingPathExtension().lastPathComponent, kind: kind, path: url.path,
-          scope: scope, owner: scope == .clip ? selectedClipID : nil)
+          scope: scope, owner: scope == .clip ? importedClipID : nil)
         asset.duration = info["duration"] as? Double ?? 0
         asset.width = info["width"] as? Int ?? 0
         asset.height = info["height"] as? Int ?? 0
