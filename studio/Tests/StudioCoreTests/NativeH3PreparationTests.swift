@@ -181,6 +181,41 @@ final class NativeH3PreparationTests: XCTestCase {
     XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
   }
 
+  func testMixedReferenceProfilePreservesVideoIdentityAndRejectsFourVideos() throws {
+    let (root, original, runtime) = try fixture()
+    let profile = root.appendingPathComponent("h3.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: profile)) as! [String: Any]
+    var components = recipe["components"] as! [String: Any]
+    components["task"] = "ref2va"
+    components["vision_encoder"] = "/model/qwen-vision.safetensors"
+    recipe["components"] = components
+    recipe["conditioning"] = ["version": 1, "task": "ref2va",
+      "inputs": [], "audio_policy": "generated"]
+    try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
+    var project = original
+    project.clips[0].generationSelection = GenerationSelection(task: "ref2va")
+    let imagePath = root.appendingPathComponent("subject.png")
+    let videoPath = root.appendingPathComponent("motion.mp4")
+    try Data([1, 2, 3]).write(to: imagePath)
+    try Data([4, 5, 6]).write(to: videoPath)
+    let image = MediaAsset(name: "Subject", kind: .image, path: imagePath.path)
+    let video = MediaAsset(name: "Motion", kind: .video, path: videoPath.path)
+    project.assets = [image, video]
+    project.clips[0].attachments = [
+      Attachment(assetID: image.id, role: .reference),
+      Attachment(assetID: video.id, role: .reference)]
+    let prepared = try NativeH3Preparation.compose(request: request(project, runtime))
+    let inputs = ((prepared["recipe"] as! [String: Any])["conditioning"]
+      as! [String: Any])["inputs"] as! [[String: Any]]
+    XCTAssertEqual(inputs.map { $0["kind"] as? String }, ["image", "video"])
+    XCTAssertEqual(inputs.map { $0["path"] as? String },
+      [imagePath.path, videoPath.path])
+    XCTAssertEqual((inputs[1]["sha256"] as? String)?.count, 64)
+    project.clips[0].attachments = Array(repeating:
+      Attachment(assetID: video.id, role: .reference), count: 4)
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+  }
+
   func testFL2VAProfileComposesTrueFirstAndLastEndpoints() throws {
     let (root, original, runtime) = try fixture()
     let profile = root.appendingPathComponent("h3.json")

@@ -142,6 +142,74 @@ public enum H3StudioRecipe {
       turboLoRAStrength: base.turboLoRAStrength)
   }
 
+  /// Admit ordered still and silent-video Ref2VA media. Audio-bearing video
+  /// and standalone audio remain unsupported until the Swift audio encoder is
+  /// connected; no soundtrack is silently ignored by this recipe bridge.
+  public static func compileMediaReferences(data: Data,
+    resolveReference: (String, String, String) throws -> H3Ref2VAReference) throws
+    -> H3Ref2VAStillRequest {
+    guard data.count <= 1024 * 1024,
+      var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+      var components = root["components"] as? [String: Any],
+      components["task"] as? String == "ref2va",
+      components["allow_fl2va_weights_for_ref2va"] == nil ||
+        components["allow_fl2va_weights_for_ref2va"] as? Bool == false,
+      let vision = (components["vision_encoder"] as? String) ??
+        (components["text_encoder"] as? String), vision.hasPrefix("/"),
+      let conditioning = root["conditioning"] as? [String: Any],
+      Set(conditioning.keys).isSubset(of: ["version", "task", "inputs", "audio_policy"]),
+      conditioning["version"] as? Int == 1,
+      conditioning["task"] as? String == "ref2va",
+      (conditioning["audio_policy"] as? String ?? "generated") == "generated",
+      let inputs = conditioning["inputs"] as? [[String: Any]],
+      (1...12).contains(inputs.count) else {
+      throw H3CheckpointError.invalid("Swift H3 Ref2VA needs ordered image or silent-video references.")
+    }
+    _ = try ConditioningV1.inputs(conditioning, task: "ref2va",
+      audioPolicy: "generated", count: 1...12)
+    var paths: [(String, String, String)] = []
+    var images = 0
+    var videos = 0
+    for input in inputs {
+      let kind = input["kind"] as? String ?? ""
+      if kind == "image" { images += 1 }
+      if kind == "video" { videos += 1 }
+      guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "strength", "sha256"]),
+        ["image", "video"].contains(kind),
+        input["role"] as? String == "reference",
+        let path = input["path"] as? String, path.hasPrefix("/"),
+        !path.utf8.contains(0),
+        let digest = input["sha256"] as? String, digest.count == 64,
+        digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+        (input["strength"] == nil || (input["strength"] as? NSNumber)
+          .map({ CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue == 1 }) == true)
+      else {
+        throw H3CheckpointError.invalid("Swift H3 Ref2VA accepts full-strength image or silent-video references only.")
+      }
+      paths.append((path, kind, digest))
+    }
+    guard images <= 9, videos <= 3 else {
+      throw H3CheckpointError.invalid("Swift H3 Ref2VA allows at most nine images and three videos.")
+    }
+    components.removeValue(forKey: "vision_encoder")
+    components.removeValue(forKey: "allow_fl2va_weights_for_ref2va")
+    components["task"] = "t2va"
+    root["components"] = components
+    root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [],
+      "audio_policy": "generated"]
+    let base = try compile(data: JSONSerialization.data(withJSONObject: root))
+    let references = try paths.map { try resolveReference($0.0, $0.1, $0.2) }
+    return try H3Ref2VAStillRequest(prompt: base.prompt,
+      mediaReferences: references, width: base.geometry.width,
+      height: base.geometry.height, durationSeconds: base.durationSeconds,
+      seed: base.seed, requestedSteps: base.requestedSteps,
+      transformer: base.transformer, qwenPages: base.qwenPages,
+      qwenVision: URL(fileURLWithPath: vision), tokenizer: base.tokenizer,
+      videoVAE: base.videoVAE, audioVAE: base.audioVAE,
+      turboLoRA: base.turboLoRA,
+      turboLoRAStrength: base.turboLoRAStrength)
+  }
+
   public static func compile(data: Data) throws -> H3T2VARequest {
     func emptyArray(_ object: [String: Any], _ key: String) -> Bool {
       guard let value = object[key] else { return true }

@@ -136,16 +136,38 @@ import UniformTypeIdentifiers
     try envelope.validateRecipe(recipeData)
     let recipe = try JSONSerialization.jsonObject(with: recipeData) as! [String: Any]
     let selectedTask = (recipe["components"] as? [String: Any])?["task"] as? String ?? "t2va"
+    let configuredFFmpeg = envelope.ffmpegPath ?? recipe["ffmpeg"] as? String ?? ""
+    guard configuredFFmpeg.hasPrefix("/"),
+      FileManager.default.isExecutableFile(atPath: configuredFFmpeg) else {
+      throw invalid("Select an executable FFmpeg in Runtime Settings.")
+    }
     var sourceImages: [[String: Any]] = []
     let stillRequest: H3Ref2VAStillRequest?
     let endpointRequest: H3FL2VARequest?
     let textRequest: H3T2VARequest?
     if selectedTask == "ref2va" {
-      stillRequest = try H3StudioRecipe.compileStillReferences(data: recipeData) { path in
-        let image = try H3StillReferenceMedia.load(path: path)
-        sourceImages.append(["path": path, "sha256": image.sourceSHA256,
-          "width": image.sourceWidth, "height": image.sourceHeight])
-        return image.reference
+      stillRequest = try H3StudioRecipe.compileMediaReferences(data: recipeData) {
+        path, kind, expectedSHA256 in
+        let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
+        try source.verify()
+        if kind == "image" {
+          let image = try H3StillReferenceMedia.load(path: path)
+          guard image.sourceSHA256 == expectedSHA256 else {
+            throw invalid("An H3 reference image changed after recipe preparation.")
+          }
+          sourceImages.append(["path": path, "sha256": image.sourceSHA256,
+            "kind": "image", "width": image.sourceWidth,
+            "height": image.sourceHeight])
+          return .image(image.reference)
+        }
+        let video = try H3VideoReferenceMedia.load(path: path,
+          ffmpeg: URL(fileURLWithPath: configuredFFmpeg))
+        try source.verify()
+        sourceImages.append(["path": path, "sha256": expectedSHA256,
+          "kind": "video", "preparedFrames": video.reference.frameCount,
+          "decodedFrames": video.decodedFrames,
+          "width": video.reference.width, "height": video.reference.height])
+        return .video(video.reference)
       }
       let inputItems = ((recipe["conditioning"] as? [String: Any])?["inputs"]
         as? [[String: Any]]) ?? []
@@ -177,11 +199,6 @@ import UniformTypeIdentifiers
       textRequest = try H3StudioRecipe.compile(data: recipeData)
       stillRequest = nil
       endpointRequest = nil
-    }
-    let configuredFFmpeg = envelope.ffmpegPath ?? recipe["ffmpeg"] as? String ?? ""
-    guard configuredFFmpeg.hasPrefix("/"),
-      FileManager.default.isExecutableFile(atPath: configuredFFmpeg) else {
-      throw invalid("Select an executable FFmpeg in Runtime Settings.")
     }
     let admission: (geometry: H3Geometry, packedRows: Int, evaluations: Int)
     if let stillRequest {

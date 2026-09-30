@@ -138,11 +138,17 @@ completed a distinct, coherent five-second 768 × 448 Swift take at strength 0.3
 this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.
 
 An experimental Swift MLX H3 worker now runs text-to-audiovisual, timed FL2VA keyframes
-and ordered still-image Ref2VA through the installed Qwen, H3 transformer and separate
+and ordered image/silent-video Ref2VA through the installed Qwen, H3 transformer and separate
 video/audio VAE components. Studio has
 a guarded, off-by-default Swift preparation and worker handoff for these tasks; it admits one
-complete ComfyUI-format H3 Turbo LoRA, up to nine still references for Ref2VA, and rejects
-unsupported media, adapter stacks, controls and profiles before model loading. Enable **Use Swift
+complete ComfyUI-format H3 Turbo LoRA, up to nine images and three silent movies for Ref2VA,
+and rejects unsupported media, adapter stacks, controls and profiles before model loading.
+Each movie reference uses its first 7.3 seconds on a bounded 24 fps grid; audio-bearing movies
+and standalone audio references remain unported. Reference count is further limited by the
+1,024-token Qwen request window and the 40,000-row H3 admission budget. One mixed image/movie
+768 × 448, 73-frame test completed with audio in 739.99 seconds at an 8.10 GB peak Swift
+process footprint (FFmpeg excluded). Its appearance was coherent, while the source head turn
+did not transfer reliably; video motion quality is still experimental. Enable **Use Swift
 MLX for H3 (experimental)** in Studio Runtime Settings to try it; the normal H3 route remains
 unchanged by default. A 768 × 768, five-second,
 one-evaluation text-only wiring run completed in 407.7 seconds,

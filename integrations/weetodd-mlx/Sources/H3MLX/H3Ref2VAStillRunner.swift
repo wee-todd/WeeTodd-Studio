@@ -1,11 +1,11 @@
 import Foundation
 import MLX
 
-/// An in-memory, ordered still-reference request. The worker is responsible for
-/// bounded decode and source-file identity before constructing these RGB bytes.
+/// An in-memory, ordered visual-reference request. The worker is responsible
+/// for bounded decode and source-file identity before constructing RGB bytes.
 public struct H3Ref2VAStillRequest: Sendable {
   public let prompt: String
-  public let references: [H3StillReference]
+  public let references: [H3Ref2VAReference]
   public let geometry: H3Geometry
   public let seed: UInt64
   public let requestedSteps: Int
@@ -23,34 +23,46 @@ public struct H3Ref2VAStillRequest: Sendable {
     transformer: URL, qwenPages: URL, qwenVision: URL, tokenizer: URL,
     videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
     turboLoRAStrength: Float = 1) throws {
+    try self.init(prompt: prompt, mediaReferences: references.map { .image($0) },
+      width: width, height: height, durationSeconds: durationSeconds,
+      seed: seed, requestedSteps: requestedSteps, transformer: transformer,
+      qwenPages: qwenPages, qwenVision: qwenVision, tokenizer: tokenizer,
+      videoVAE: videoVAE, audioVAE: audioVAE, turboLoRA: turboLoRA,
+      turboLoRAStrength: turboLoRAStrength)
+  }
+
+  public init(prompt: String, mediaReferences: [H3Ref2VAReference], width: Int,
+    height: Int, durationSeconds: Double, seed: UInt64, requestedSteps: Int,
+    transformer: URL, qwenPages: URL, qwenVision: URL, tokenizer: URL,
+    videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
+    turboLoRAStrength: Float = 1) throws {
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
-      (1...9).contains(references.count),
-      references.allSatisfy({ reference in
-        (64...256).contains(reference.width) &&
-          (64...256).contains(reference.height) &&
-          reference.width.isMultiple(of: 32) &&
-          reference.height.isMultiple(of: 32) &&
-          reference.rgb8.count == reference.width * reference.height * 3
-      }),
       [transformer, qwenPages, qwenVision, tokenizer, videoVAE, audioVAE]
         .allSatisfy({ $0.isFileURL && $0.path.hasPrefix("/") }),
       turboLoRA == nil || (turboLoRA!.isFileURL &&
         turboLoRA!.path.hasPrefix("/") && turboLoRAStrength.isFinite &&
         (0...2).contains(turboLoRAStrength)) else {
-      throw H3CheckpointError.invalid("Invalid H3 still-reference request.")
+      throw H3CheckpointError.invalid("Invalid H3 visual-reference request.")
     }
+    try H3VideoReferencePreparation.validate(mediaReferences)
     let geometry = try H3Geometry(width: width, height: height,
       durationSeconds: durationSeconds)
+    let conditionRows = mediaReferences.reduce(0) { rows, reference in
+      switch reference {
+      case .image(let image): rows + image.width * image.height / 1024
+      case .video(let video):
+        rows + ((video.frameCount - 5) / 17 * 5 + 2) *
+          video.width * video.height / 1024
+      }
+    }
     guard width * height <= 768 * 1344,
       try geometry.packedRows(textRows: 1,
-        conditionVideoRows: references.reduce(0) {
-          $0 + $1.width * $1.height / 1024
-        }, conditionAudioRows: 0) <= 40_000 else {
+        conditionVideoRows: conditionRows, conditionAudioRows: 0) <= 40_000 else {
       throw H3CheckpointError.invalid("H3 reference canvas exceeds packed-row admission.")
     }
     self.prompt = prompt
-    self.references = references
+    self.references = mediaReferences
     self.geometry = geometry
     self.seed = seed
     self.requestedSteps = requestedSteps
@@ -81,7 +93,7 @@ public enum H3Ref2VAStillRunner {
 
   public static func preflight(_ request: H3Ref2VAStillRequest) throws -> Admission {
     try Task.checkCancellation()
-    let prepared = try H3StillReferencePreparation.prepare(prompt: request.prompt,
+    let prepared = try H3VideoReferencePreparation.prepare(prompt: request.prompt,
       geometry: request.geometry, references: request.references,
       tokenizerURL: request.tokenizer)
     let video = try H3Schedule(requestedSteps: request.requestedSteps, shift: 12)
@@ -117,12 +129,12 @@ public enum H3Ref2VAStillRunner {
     let admission = try preflight(request)
     let geometry = admission.geometry
     let textRows = try autoreleasepool { () throws -> [Float] in
-      let prepared = try H3StillReferencePreparation.prepare(prompt: request.prompt,
+      let prepared = try H3VideoReferencePreparation.prepare(prompt: request.prompt,
         geometry: geometry, references: request.references,
         tokenizerURL: request.tokenizer)
       let encoded = try H3QwenTextEncoder.encodeReferences(
         prompt: request.prompt, pixels: prepared.qwenPixels,
-        references: prepared.qwenGrids.map { .image(grid: $0) },
+        references: prepared.qwenReferences,
         checkpointRoot: request.qwenPages,
         visionCheckpointURL: request.qwenVision,
         tokenizerURL: request.tokenizer) { completed, total in
@@ -139,7 +151,7 @@ public enum H3Ref2VAStillRunner {
     try Task.checkCancellation()
 
     let conditionVideoRows = try autoreleasepool { () throws -> [Float] in
-      let rows = try H3StillReferencePreparation.encodeVideoRows(
+      let rows = try H3VideoReferencePreparation.encodeVideoRows(
         references: request.references, layout: admission.layout,
         videoVAEURL: request.videoVAE)
       return rows.asType(.float32).asArray(Float.self)

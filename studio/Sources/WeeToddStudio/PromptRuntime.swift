@@ -311,7 +311,7 @@ struct RuntimeView: View {
           Toggle("Use Swift MLX for H3 (experimental)", isOn: Binding(
             get: { store.runtime.usesNativeH3 },
             set: { store.runtime.nativeH3Enabled = $0; store.saveRuntime() }))
-          Text("Swift H3 currently supports text-to-audiovisual clips and one to nine ordered still-image Ref2VA references, with at most one compatible Turbo LoRA. Unsupported H3 tasks and controls fail preparation. This path is experimental; check its output before using it in a project.")
+          Text("Swift H3 supports text-to-audiovisual, timed image keyframes and ordered Ref2VA references: at most nine images and three silent movies, plus one compatible Turbo LoRA. A movie reference uses its first 7.3 seconds. Audio references and other H3 controls are not yet ported. This path is experimental; check its output before using it in a project.")
             .font(.caption).foregroundStyle(.secondary)
           PathPicker(
             label: "Model recipes folder", value: $store.runtime.profilesDirectory, directory: true)

@@ -36,14 +36,41 @@ public enum H3VideoVAEEncoder {
       width: width, height: height, samplePosterior: true)
   }
 
+  /// Encode a 24 fps reference movie on the model's 17-frame clip grid.
+  /// Only one clip enters the encoder at a time; the final short clip repeats
+  /// its last pixel frame, matching the released VAE's token-drop contract.
+  /// The deterministic posterior means have shape [1, 2 + 5*n, H/16, W/16, 24].
+  public static func encodeVideo(checkpointURL: URL, rgb8: [UInt8],
+    frameCount: Int, width: Int, height: Int) throws -> MLXArray {
+    guard frameCount >= 5, frameCount <= 175,
+      (frameCount - 5).isMultiple(of: 17),
+      (32...256).contains(width), (32...256).contains(height),
+      width.isMultiple(of: 32), height.isMultiple(of: 32),
+      rgb8.count == frameCount * width * height * 3 else {
+      throw H3CheckpointError.invalid("H3 reference video needs 5 + 17*n frames on the 24 fps grid.")
+    }
+    return try encodeFrames(checkpointURL: checkpointURL, rgb8: rgb8,
+      frameCount: frameCount, width: width, height: height,
+      samplePosterior: false)
+  }
+
   private static func encodeStill(checkpointURL: URL, rgb8: [UInt8],
     width: Int, height: Int, samplePosterior: Bool) throws -> MLXArray {
+    try encodeFrames(checkpointURL: checkpointURL, rgb8: rgb8,
+      frameCount: 1, width: width, height: height,
+      samplePosterior: samplePosterior)
+  }
+
+  private static func encodeFrames(checkpointURL: URL, rgb8: [UInt8],
+    frameCount: Int, width: Int, height: Int,
+    samplePosterior: Bool) throws -> MLXArray {
     guard checkpointURL.isFileURL,
       (32...2048).contains(width), (32...2048).contains(height),
       width * height <= 768 * 1344,
       width.isMultiple(of: 16), height.isMultiple(of: 16),
-      rgb8.count == width * height * 3 else {
-      throw H3CheckpointError.invalid("H3 still-reference encoder requires bounded 16-pixel RGB geometry.")
+      frameCount > 0, frameCount <= 175,
+      rgb8.count == frameCount * width * height * 3 else {
+      throw H3CheckpointError.invalid("H3 video encoder requires bounded 16-pixel RGB geometry.")
     }
     _ = try H3VideoVAELayout(url: checkpointURL)
     let file = try SafeTensorFile(url: checkpointURL)
@@ -91,51 +118,72 @@ public enum H3VideoVAEEncoder {
       return result
     }
 
-    let floats = rgb8.map { Float($0) / 255 }
     let mean = MLXArray([Float(0.485), 0.456, 0.406]).reshaped([1, 1, 1, 1, 3])
     let std = MLXArray([Float(0.229), 0.224, 0.225]).reshaped([1, 1, 1, 1, 3])
-    let pixels = MLXArray(floats, [1, 1, height, width, 3])
-    var value = ((pixels - mean) / std).asType(.float16)
-    value = try conv(value, name: "encoder.conv_in", out: channels[0],
-      kernel: 3, spatialPadding: 1, temporalPadding: 2)
-    for index in channels.indices {
+    var moments: [MLXArray] = []
+    let frameBytes = width * height * 3
+    let clipCount = frameCount == 1 ? 1 : (frameCount + 16) / 17
+    for clipIndex in 0..<clipCount {
       try Task.checkCancellation()
-      let out = channels[index]
-      for layer in 0..<2 {
-        value = try block(value,
-          name: "encoder.down.\(index).block.\(layer)", out: out)
-        eval(value)
-        Memory.clearCache()
+      let first = clipIndex * 17
+      let count = frameCount == 1 ? 1 : 17
+      var floats = [Float]()
+      floats.reserveCapacity(count * frameBytes)
+      for localFrame in 0..<count {
+        let sourceFrame = min(first + localFrame, frameCount - 1)
+        let lower = sourceFrame * frameBytes
+        floats.append(contentsOf: rgb8[lower..<(lower + frameBytes)]
+          .map { Float($0) / 255 })
       }
-      let temporal = temporalFactors[index]
-      let spatial = spatialFactors[index]
-      if temporal * spatial > 1 {
-        if spatial == 2 {
-          value = try H3VideoVAEEncoderOps.reflectSpatial(value,
-            axis: 2, before: 0, after: 1)
-          value = try H3VideoVAEEncoderOps.reflectSpatial(value,
-            axis: 3, before: 0, after: 1)
+      let pixels = MLXArray(floats, [1, count, height, width, 3])
+      var value = ((pixels - mean) / std).asType(.float16)
+      value = try conv(value, name: "encoder.conv_in", out: channels[0],
+        kernel: 3, spatialPadding: 1, temporalPadding: 2)
+      for index in channels.indices {
+        try Task.checkCancellation()
+        let out = channels[index]
+        for layer in 0..<2 {
+          value = try block(value,
+            name: "encoder.down.\(index).block.\(layer)", out: out)
+          eval(value)
+          Memory.clearCache()
         }
-        value = try conv(value,
-          name: "encoder.down.\(index).downsample.conv", out: out,
-          kernel: 3, temporalPadding: 2,
-          stride: IntOrTriple((temporal, spatial, spatial)))
-        eval(value)
-        Memory.clearCache()
+        let temporal = temporalFactors[index]
+        let spatial = spatialFactors[index]
+        if temporal * spatial > 1 {
+          if spatial == 2 {
+            value = try H3VideoVAEEncoderOps.reflectSpatial(value,
+              axis: 2, before: 0, after: 1)
+            value = try H3VideoVAEEncoderOps.reflectSpatial(value,
+              axis: 3, before: 0, after: 1)
+          }
+          value = try conv(value,
+            name: "encoder.down.\(index).downsample.conv", out: out,
+            kernel: 3, temporalPadding: 2,
+            stride: IntOrTriple((temporal, spatial, spatial)))
+          eval(value)
+          Memory.clearCache()
+        }
       }
+      value = try norm(value, name: "encoder.norm_out")
+      value = try conv(silu(value), name: "encoder.conv_out", out: 48,
+        kernel: 3, spatialPadding: 1, temporalPadding: 2)
+      value = try conv(value, name: "quant_conv", out: 48, kernel: 1)
+      let expected = count == 1 ? 1 : 5
+      guard value.shape == [1, expected, height / 16, width / 16, 48] else {
+        throw H3CheckpointError.invalid("H3 video encoder produced unexpected latent geometry.")
+      }
+      moments.append(value)
+      eval(value)
+      Memory.clearCache()
     }
-    value = try norm(value, name: "encoder.norm_out")
-    value = try conv(silu(value), name: "encoder.conv_out", out: 48,
-      kernel: 3, spatialPadding: 1, temporalPadding: 2)
-    value = try conv(value, name: "quant_conv", out: 48, kernel: 1)
-    guard value.shape == [1, 1, height / 16, width / 16, 48] else {
-      throw H3CheckpointError.invalid("H3 video encoder produced unexpected latent geometry.")
-    }
-    let latentMean = value[0..<1, 0..<1, 0..<(height / 16),
+    let joined = moments.count == 1 ? moments[0] : concatenated(moments, axis: 1)
+    let latentFrames = frameCount == 1 ? 1 : (frameCount - 5) / 17 * 5 + 2
+    let latentMean = joined[0..<1, 0..<latentFrames, 0..<(height / 16),
       0..<(width / 16), 0..<24].asType(.float32)
     let latent: MLXArray
     if samplePosterior {
-      let logVariance = clip(value[0..<1, 0..<1, 0..<(height / 16),
+      let logVariance = clip(joined[0..<1, 0..<latentFrames, 0..<(height / 16),
         0..<(width / 16), 24..<48].asType(.float32), min: -30, max: 20)
       let deviation = exp(0.5 * logVariance)
       latent = (latentMean + deviation * MLXRandom.normal(latentMean.shape))

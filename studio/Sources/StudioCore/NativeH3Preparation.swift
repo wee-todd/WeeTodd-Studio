@@ -52,27 +52,28 @@ public enum NativeH3Preparation {
     }
     return URL(fileURLWithPath: expanded).standardizedFileURL.resolvingSymlinksInPath().path
   }
-  private static func sourceSHA256(_ path: String) throws -> String {
+  private static func sourceSHA256(_ path: String,
+    maxBytes: Int64 = 128 * 1024 * 1024) throws -> String {
     let fd = Darwin.open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK)
-    guard fd >= 0 else { throw StudioError.invalid("Cannot read an H3 reference image.") }
+    guard fd >= 0 else { throw StudioError.invalid("Cannot read an H3 reference.") }
     let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
     defer { try? handle.close() }
     var status = stat()
     guard fstat(fd, &status) == 0, status.st_mode & S_IFMT == S_IFREG,
-      (1...128 * 1024 * 1024).contains(status.st_size) else {
-      throw StudioError.invalid("H3 reference must be a regular image under 128 MiB.")
+      (1...maxBytes).contains(status.st_size) else {
+      throw StudioError.invalid("H3 reference must be a bounded regular media file.")
     }
     var digest = SHA256()
     var read = 0
     while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
       read += chunk.count
       guard read <= Int(status.st_size) else {
-        throw StudioError.invalid("H3 reference image changed during preparation.")
+        throw StudioError.invalid("H3 reference changed during preparation.")
       }
       digest.update(data: chunk)
     }
     guard read == Int(status.st_size) else {
-      throw StudioError.invalid("H3 reference image changed during preparation.")
+      throw StudioError.invalid("H3 reference changed during preparation.")
     }
     return digest.finalize().map { String(format: "%02x", $0) }.joined()
   }
@@ -227,12 +228,12 @@ public enum NativeH3Preparation {
     let frameIndices = enabledFrames.compactMap { keyframeIndex($0, duration: clip.duration) }
     guard clip.attachments.allSatisfy({ supportedRoles.contains($0.role) }),
       clip.attachments.filter({ $0.role == .lora && $0.isEnabled }).count <= 1,
-      task != "ref2va" || (1...9).contains(clip.attachments.filter({ $0.role == .reference && $0.isEnabled }).count),
+      task != "ref2va" || (1...12).contains(clip.attachments.filter({ $0.role == .reference && $0.isEnabled }).count),
       !["i2v", "fflf"].contains(task) ||
         ((1...8).contains(frameIndices.count) && frameIndices.count == enabledFrames.count &&
           Set(frameIndices).count == frameIndices.count &&
           (task != "i2v" || (frameIndices.count == 1 && frameIndices[0] == 0))) else {
-      throw unsupported("this task needs one to eight unique timed images or one to nine still references and at most one Turbo LoRA")
+      throw unsupported("this task needs one to eight unique timed images or one to twelve references and at most one Turbo LoRA")
     }
     let selection = clip.generationSelection
     guard selection?.refinementSteps == nil, selection?.cfg == nil, selection?.shift == nil,
@@ -324,22 +325,27 @@ public enum NativeH3Preparation {
         throw StudioError.invalid("Relink a missing H3 attachment.")
       }
       if Set<MediaRole>([.reference, .first, .last, .keyframe]).contains(attachment.role) {
-        guard asset.kind == .image, attachment.strength == 1,
+        let isVideoReference = attachment.role == .reference &&
+          (asset.kind == .video || asset.kind == .sequence)
+        guard (asset.kind == .image || isVideoReference), attachment.strength == 1,
           (attachment.role == .keyframe || attachment.time == 0),
           attachment.referenceRole == nil,
           attachment.referencePriority == nil,
           attachment.referenceFrames == nil,
           attachment.referenceSizePolicy == nil,
           attachment.attentionStrength == nil else {
-          throw unsupported("H3 images require full strength and no timing or specialized controls")
+          throw unsupported("H3 image and video references require full strength and no timing or specialized controls")
         }
         let imagePath = try canonical(asset.path)
         guard FileManager.default.isReadableFile(atPath: imagePath) else {
-          throw StudioError.invalid("Relink the H3 reference image: \(asset.name)")
+          throw StudioError.invalid("Relink the H3 reference: \(asset.name)")
         }
         var input: [String: Any] = ["id": attachment.id.uuidString,
-          "kind": "image", "role": attachment.role.rawValue, "path": imagePath,
-          "strength": 1.0, "sha256": try sourceSHA256(imagePath)]
+          "kind": isVideoReference ? "video" : "image",
+          "role": attachment.role.rawValue, "path": imagePath,
+          "strength": 1.0,
+          "sha256": try sourceSHA256(imagePath,
+            maxBytes: isVideoReference ? 4 * 1024 * 1024 * 1024 : 128 * 1024 * 1024)]
         if attachment.role == .first { input["frame_index"] = 0 }
         if attachment.role == .last {
           input["frame_index"] = keyframeIndex(attachment, duration: clip.duration)!
@@ -368,8 +374,11 @@ public enum NativeH3Preparation {
     if !loras.isEmpty { components["loras"] = loras }
     recipe["components"] = components
     if clip.inferredTask == "ref2va" {
-      guard (1...9).contains(referenceInputs.count) else {
-        throw unsupported("still Ref2VA needs one to nine enabled images")
+      let imageCount = referenceInputs.filter { $0["kind"] as? String == "image" }.count
+      let videoCount = referenceInputs.count - imageCount
+      guard (1...12).contains(referenceInputs.count),
+        imageCount <= 9, videoCount <= 3 else {
+        throw unsupported("Ref2VA needs at most nine images and three silent videos")
       }
       recipe["conditioning"] = ["version": 1, "task": "ref2va",
         "inputs": referenceInputs, "audio_policy": "generated"]

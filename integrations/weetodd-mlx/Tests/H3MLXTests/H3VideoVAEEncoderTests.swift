@@ -4,6 +4,43 @@ import XCTest
 @testable import H3MLX
 
 final class H3VideoVAEEncoderTests: XCTestCase {
+  func testVideoReferenceRejectsUnalignedOrOversizedClipBeforeCheckpointLoad() {
+    let unavailable = URL(fileURLWithPath: "/nonexistent/video-vae.safetensors")
+    XCTAssertThrowsError(try H3VideoVAEEncoder.encodeVideo(
+      checkpointURL: unavailable, rgb8: [UInt8](repeating: 0,
+        count: 6 * 64 * 64 * 3), frameCount: 6, width: 64, height: 64))
+    XCTAssertThrowsError(try H3VideoVAEEncoder.encodeVideo(
+      checkpointURL: unavailable, rgb8: [UInt8](repeating: 0,
+        count: 5 * 288 * 64 * 3), frameCount: 5, width: 288, height: 64))
+  }
+
+  func testInstalledVideoReferenceEncodesAlignedClip() throws {
+    guard let path = ProcessInfo.processInfo.environment["H3_VIDEO_VAE_CHECKPOINT"] else {
+      throw XCTSkip("Set H3_VIDEO_VAE_CHECKPOINT for installed video encoder qualification.")
+    }
+    let frames = [UInt8](repeating: 127, count: 5 * 64 * 64 * 3)
+    let latents = try H3VideoVAEEncoder.encodeVideo(
+      checkpointURL: URL(fileURLWithPath: path), rgb8: frames,
+      frameCount: 5, width: 64, height: 64)
+    XCTAssertEqual(latents.shape, [1, 2, 4, 4, 24])
+    XCTAssertTrue(MLX.isFinite(latents).all().item(Bool.self))
+    let still = try H3VideoVAEEncoder.encodeStill(
+      checkpointURL: URL(fileURLWithPath: path),
+      rgb8: [UInt8](repeating: 127, count: 64 * 64 * 3),
+      width: 64, height: 64)
+    for channel in 0..<24 {
+      XCTAssertEqual(latents[0, 0, 0, 0, channel].item(Float.self),
+        still[0, 0, 0, 0, channel].item(Float.self), accuracy: 0.005,
+        "first causal latent channel \(channel)")
+    }
+    let longer = try H3VideoVAEEncoder.encodeVideo(
+      checkpointURL: URL(fileURLWithPath: path),
+      rgb8: [UInt8](repeating: 127, count: 22 * 64 * 64 * 3),
+      frameCount: 22, width: 64, height: 64)
+    XCTAssertEqual(longer.shape, [1, 7, 4, 4, 24])
+    XCTAssertTrue(MLX.isFinite(longer).all().item(Bool.self))
+  }
+
   func testInstalledStillReferenceEncodesOneDeterministicPosteriorMean() throws {
     guard let path = ProcessInfo.processInfo.environment["H3_VIDEO_VAE_CHECKPOINT"] else {
       throw XCTSkip("Set H3_VIDEO_VAE_CHECKPOINT for installed still-image encoder qualification.")

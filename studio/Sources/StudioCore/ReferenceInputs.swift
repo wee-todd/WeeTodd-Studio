@@ -41,7 +41,7 @@ extension Clip {
       return [
         ReferenceAction(id: "movieAppearance", label: engine == .h3
           ? "Appearance / story · movie reference" : "Appearance / story · make reference sheet",
-          detail: engine == .h3 ? "Movie references remain available through the existing H3 renderer; the Swift H3 route currently accepts still images only."
+          detail: engine == .h3 ? "Swift H3 uses the first 7.3 seconds at 24 fps as a visual motion reference, trimmed to the VAE clip grid. The movie must have no audio track; soundtrack references are not yet ported."
             : "Samples six frames into a visible Ingredients sheet. This preserves visual context, not the movie's timing or soundtrack. Describe the story in the prompt.",
           role: engine == .ltx25 ? .control : .reference,
           controlType: "ingredients_reference_sheet", preparation: engine == .h3 ? nil : "sheet"),

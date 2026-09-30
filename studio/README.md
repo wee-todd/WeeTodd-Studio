@@ -75,8 +75,15 @@ separate migration work; this is not yet a fully Python-free Studio release.
 The experimental Swift H3 worker has completed text-to-audiovisual and one- and two-still Ref2VA takes.
 The off-by-default Swift preparation path validates clip inputs, ordered references and profile
 settings, then requires worker preflight before a take can render. Enable **Use Swift MLX for H3
-(experimental)** in Runtime Settings to try text-to-AV or 1–9 still-image Ref2VA. Other reference
-media, adapter stacks and production quality remain unqualified.
+(experimental)** in Runtime Settings to try text-to-AV, timed keyframes, or ordered Ref2VA with
+up to nine still images and three silent movies. A movie contributes its first 7.3 seconds,
+resampled to 24 fps and trimmed to the VAE clip grid. Audio-bearing movies, standalone audio
+references, adapter stacks and production quality remain unqualified.
+One mixed still/movie 768 × 448 test completed 73 frames with stereo audio in 739.99 seconds
+at an 8.10 GB peak Swift process footprint (FFmpeg excluded). Appearance was coherent,
+but its reference head turn did not reliably transfer. Multiple-movie quality and matched
+performance have not been established. The Qwen visual-token and H3 packed-row limits
+can reject a combination even within the per-modality reference counts.
 An additional recipe-backed ComfyUI T2VA run used the installed FL2VA checkpoint without
 image references and the four-evaluation Turbo LoRA. Its 768 × 448, five-second robot shot
 completed in 579.94 seconds at a 5.23 GB peak Swift process footprint. The visual arm motion
@@ -135,9 +142,10 @@ frames. The one-image run took 750.71 seconds at 5.73 GB under a different workl
 pair does not establish an isolated scaling benchmark.
 Still-image asset import uses ImageIO metadata inspection without decoding full-resolution pixels
 or invoking Python; other asset kinds may still use the legacy bridge.
-To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import one to nine
-images into the clip asset store, then choose **Use in clip → Appearance · image reference** for
-each. Write a complete H3 prompt, select the installed compatible Ref2VA profile, and use
+To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import up to nine
+images and three silent movies into the clip asset store, then choose **Use in clip → Appearance**
+for each. Movie references use only their first 7.3 seconds and must have no audio track.
+Write a complete H3 prompt, select the installed compatible Ref2VA profile, and use
 **Prepare clip** to inspect the exact settings and run preflight before generating.
 
 | Your goal | Go to |

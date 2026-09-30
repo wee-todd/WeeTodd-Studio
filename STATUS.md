@@ -39,6 +39,17 @@ output frames followed their references at 0.9902/0.9976/0.9956 correlation.
 The requested 2.5 seconds aligned to 73 frames and a 3.05-second movie; Studio now
 places its last anchor on the final frame of the requested visible interval. This is
 one short turn, not broad multi-keyframe quality or performance qualification.
+Swift H3 Ref2VA now admits ordered still images and silent movie references. The worker
+decodes at most 175 frames from the start of each movie on a 24 fps grid, trims to
+the 5 + 17n VAE grid, and
+keeps each source hash frozen through preparation. A mixed Beowulf still plus 73-frame
+silent movie run produced 73 output frames and stereo audio at 768 × 448 in 739.99 seconds,
+with an 8.10 GB peak Swift process footprint (FFmpeg excluded). Qwen took 21.93 seconds,
+reference video encoding 6.41 seconds, and sampling 597.30 seconds. The reviewed output
+retained a coherent long-haired, bearded subject, but did not follow the movie's
+front-to-profile head turn. Motion transfer quality, longer references, multiple movie
+references and matched performance remain unqualified. Audio-bearing movies and standalone
+audio references still fail Swift preparation.
 For H3 still Ref2VA, the corrected packaged worker passed preflight at every ordered count
 from one through nine distinct images. A real nine-image, 768 × 448, 124-frame, four-evaluation
 boxing take completed in 882.62 seconds at a 6.06 GB peak Swift process footprint. Reviewed
@@ -50,7 +61,8 @@ the installed FL2VA checkpoint in text-only mode completed at 768 × 448/124 fra
 579.94 seconds at a 5.23 GB peak process footprint; the visual arm motion was coherent,
 while generated sound was subdued (-57.5 dBFS mean). Both H3 sound quality and broader
 checkpoint-general quality remain experimental. LTX continuous scenes and specialized
-conditioning, H3 video/audio references, general H3 LoRA stacks, and complete
+conditioning, H3 audio-bearing/standalone audio references, broader silent-video
+Ref2VA qualification, general H3 LoRA stacks, and complete
 Python-free Studio distribution remain open.
 
 H3 INT8 finetunes 2026-09-22 (experimental): standard H3 model setup and shared sampling now

@@ -100,6 +100,48 @@ final class H3StudioRecipeTests: XCTestCase {
     XCTAssertEqual(paths.count, 2, "No media should load after control rejection")
   }
 
+  func testMixedMediaRecipeRetainsInputOrderAndRejectsUnportedAudio() throws {
+    var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
+    var components = try XCTUnwrap(root["components"] as? [String: Any])
+    components["task"] = "ref2va"
+    components["vision_encoder"] = "/tmp/qwen-vision.safetensors"
+    root["components"] = components
+    var config = try XCTUnwrap(root["config"] as? [String: Any])
+    config["width"] = 64; config["height"] = 64
+    root["config"] = config
+    let digest = String(repeating: "a", count: 64)
+    root["conditioning"] = ["version": 1, "task": "ref2va",
+      "audio_policy": "generated", "inputs": [
+        ["id": "still", "kind": "image", "role": "reference",
+          "path": "/tmp/face.png", "sha256": digest],
+        ["id": "movie", "kind": "video", "role": "reference",
+          "path": "/tmp/motion.mp4", "sha256": digest]]]
+    var seen: [String] = []
+    func compile(_ object: [String: Any]) throws -> H3Ref2VAStillRequest {
+      try H3StudioRecipe.compileMediaReferences(
+        data: JSONSerialization.data(withJSONObject: object)) { path, kind, _ in
+          seen.append("\(kind):\(path)")
+          if kind == "image" {
+            return .image(H3StillReference(rgb8: Data(count: 64 * 64 * 3),
+              width: 64, height: 64))
+          }
+          return .video(H3VideoReference(rgb8: Data(count: 5 * 64 * 64 * 3),
+            frameCount: 5, width: 64, height: 64))
+        }
+    }
+    let result = try compile(root)
+    XCTAssertEqual(result.references.count, 2)
+    XCTAssertEqual(seen, ["image:/tmp/face.png", "video:/tmp/motion.mp4"])
+    var invalid = root
+    var conditioning = invalid["conditioning"] as! [String: Any]
+    var inputs = conditioning["inputs"] as! [[String: Any]]
+    inputs[1]["kind"] = "audio"
+    conditioning["inputs"] = inputs
+    invalid["conditioning"] = conditioning
+    XCTAssertThrowsError(try compile(invalid))
+    XCTAssertEqual(seen.count, 2, "Unsupported audio must fail before media loading")
+  }
+
   func testFL2VARecipeKeepsOrderedEndpointRolesAndRejectsUnportedInputs() throws {
     var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
     var components = try XCTUnwrap(root["components"] as? [String: Any])
