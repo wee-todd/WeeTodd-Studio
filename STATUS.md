@@ -152,8 +152,17 @@ full-rank Lightx FL2V adapter at strength 1 completed in 526.35 seconds at 768 Ã
 124 frames and 32 kHz stereo audio. The Swift process peaked at 6.12 GB with external
 FFmpeg excluded, and model state unloaded afterward. Five inspected frames showed a
 coherent red robot and arm wave; measured audio mean was -36.8 dBFS. Sound quality,
-the resized-rank adapter's full output, multi-adapter output and matched speed/memory
-remain unqualified.
+the resized-rank adapter's solo output and matched speed/memory remain unqualified.
+A second signed-worker T2VA recipe stacked the full-rank and resized-rank Lightx
+FL2V adapters at strength 0.5 each. Installed-checkpoint preflight passed, and the
+73-frame, 768 Ã— 448 output with 32 kHz stereo audio completed in 403.78 worker
+seconds at a 4.10 GB peak Swift-process footprint, excluding FFmpeg. Three inspected
+frames showed the same red robot progressively raising an arm; this qualifies one
+two-adapter execution, not arbitrary adapter combinations or their relative quality.
+The 2.5-second request aligned to H3's 73-frame grid and muxed to 3.05 seconds;
+its different duration and seed preclude a speed comparison with the earlier
+single-adapter run. Audio measured -33.8 dBFS mean and 0.0 dBFS peak after AAC
+muxing; listening quality remains unqualified.
 
 H3 INT8 finetunes 2026-09-22 (experimental): standard H3 model setup and shared sampling now
 accept supported Comfy `int8_tensorwise` transformer files directly, including Singularity Ref2VA

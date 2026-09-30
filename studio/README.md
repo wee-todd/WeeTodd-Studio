@@ -158,6 +158,13 @@ rendered a real nine-image, 768 × 448, five-second Beowulf boxing clip. It took
 peaked at 6.06 GB Swift process footprint, and retained a recognizable subject in the reviewed
 frames. The one-image run took 750.71 seconds at 5.73 GB under a different workload, so this
 pair does not establish an isolated scaling benchmark.
+Swift H3 preparation accepts up to four compatible LoRAs in a stack. One installed
+FL2VA test combined the full-rank and resized Lightx four-step adapters at strength
+0.5 each. The signed worker passed preflight and generated a 73-frame, 768 × 448
+audiovisual robot clip in 403.78 seconds, with a 4.10 GB peak Swift-process footprint
+(external FFmpeg excluded). Three inspected frames show a coherent arm raise. This
+qualifies that pair's execution only; neither arbitrary LoRA combinations nor a
+matched speed improvement has been established.
 Still-image asset import uses ImageIO metadata inspection without decoding full-resolution pixels
 or invoking Python; other asset kinds may still use the legacy bridge.
 To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import up to nine
