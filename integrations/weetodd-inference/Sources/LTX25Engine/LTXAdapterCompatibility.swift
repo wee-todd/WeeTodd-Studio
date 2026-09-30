@@ -26,6 +26,30 @@ public enum LTXAdapterCompatibility {
       normalize: normalize)
   }
 
+  /// A task adapter needs both compatible matrices and a complete, typed
+  /// conditioning signature. Never admit it through `standardPlan` alone.
+  public static func unionControlPlan(file: SafeTensorFile, strength: Float) throws -> LoRAPlan {
+    guard file.metadata["model_version"] == "2.3.0",
+      file.metadata["reference_downscale_factor"] == "2",
+      file.metadata["reference_temporal_scale_factor"].map({ $0 == "1" }) ?? true,
+      file.metadata["reference_spatial_scale_factor"] == nil,
+      file.metadata["adapter_family"].map({ $0 == "union_control" }) ?? true else {
+      throw LTXError.invalid("Union Control needs the compatible LTX 2.3 IC-LoRA reference metadata.")
+    }
+    let plan = try LoRAPlan(file: file, strength: strength,
+      targetShapes: targetShapes, normalize: normalize)
+    let expected = Set((0..<48).flatMap { block in
+      ["attn1.to_k", "attn1.to_out", "attn1.to_q", "attn1.to_v",
+       "attn2.to_k", "attn2.to_out", "attn2.to_q", "attn2.to_v",
+       "ff.proj_in", "ff.proj_out"].map { "transformer_blocks.\(block).\($0)" }
+    })
+    guard plan.pairs.count == 480, Set(plan.pairs.map(\.target)) == expected,
+      plan.pairs.allSatisfy({ $0.rank == 64 }) else {
+      throw LTXError.invalid("Union Control needs its complete 48-block, rank-64 task adapter.")
+    }
+    return plan
+  }
+
   public static func normalize(_ source: String) -> String? {
     var key = source
     let prefixes = ["base_model.model.model.diffusion_model.", "base_model.model.diffusion_model.",

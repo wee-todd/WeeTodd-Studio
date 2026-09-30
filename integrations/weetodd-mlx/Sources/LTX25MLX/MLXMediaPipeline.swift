@@ -5,6 +5,7 @@ import LTX25Engine
 import LTX25Video
 import LTX25Audio
 import InferenceMedia
+import InferenceContracts
 
 /// Developer end-to-end audiovisual integration, with no Python or NNC dependency.
 /// The worker/UI protocol and production-size streaming are separate release gates.
@@ -66,20 +67,28 @@ public final class MLXMediaPipeline {
       throw LTXError.invalid("Developer decoder workspace must be positive and at most \(maximumVideoActivationMiB) MiB.")
     }
     let recipe=try request.recipe(), g=recipe.high
-    for geometry in [recipe.low,recipe.high] {
+    for (index,geometry) in [recipe.low,recipe.high].enumerated() {
       let layout=try request.referenceImages.first.map { try MLXReferenceLayout(geometry:geometry,firstStrength:$0.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil) }
       let guide=try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:geometry,contextFrames:$0) }
+      let union=try index == 0
+        ? request.unionControlGuide.map { try MLXUnionControlLayout(geometry:geometry,strength:$0.referenceStrength) }
+        : nil
       guard layout == nil || guide == nil else { throw LTXError.invalid("LTX extension cannot combine with endpoint references.") }
       let block=try MLXAVBlock(configuration:AVBlockConfiguration(
-        videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? geometry.videoTokens,
+        videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? geometry.videoTokens,
         audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
         maximumActivationBytes:transformerActivationBytes)
-      if layout != nil { try block.admitPerTokenVideo() }
+      if layout != nil || union != nil { try block.admitPerTokenVideo() }
       if guide != nil { try block.admitPerTokenAV() }
       _ = try MLXDenoiser.admitRotary(configuration:block.configuration,maximumActivationBytes:transformerActivationBytes)
     }
     if !request.referenceImages.isEmpty {
       for geometry in [recipe.low,recipe.high] { _ = try MLXImageEncodePlan(width:geometry.width,height:geometry.height) }
+    }
+    if request.unionControlGuide != nil {
+      _ = try MLXVideoEncodeTilePlan(frames:recipe.low.frames,
+        width:recipe.low.width/2,height:recipe.low.height/2,
+        maximumOwnedBufferBytes:videoActivationBytes)
     }
     let c=videoConfiguration(for:g,activationBytes:videoActivationBytes)
     let videoShape:[Int],videoBytes:Int
@@ -114,9 +123,21 @@ public final class MLXMediaPipeline {
       upscalerCheckpoint:URL(fileURLWithPath:request.spatialUpscalerCheckpoint),statisticsCheckpoint:URL(fileURLWithPath:request.videoCheckpoint),
       firstStrength:request.referenceImages.first?.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil,
       extensionContextFrames:extensionContextFrames,
+      unionControlGuide:request.unionControlGuide,
       stageOneLoras:request.stageOneLoras,stageTwoLoras:request.stageTwoLoras,noisePolicy:request.noisePolicy,maximumActivationBytes:transformerActivationBytes)
     for reference in request.referenceImages { try MLXReferenceImage.inspect(URL(fileURLWithPath:reference.path)) }
     if !request.referenceImages.isEmpty { _ = try MLXImageEncoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint)) }
+    if let union=request.unionControlGuide {
+      try NativeMediaSource(path:union.path,sha256:union.sourceSHA256).verify()
+      let recipe=try request.recipe()
+      let attributes=try FileManager.default.attributesOfItem(atPath:union.path)
+      let expected=Int64(recipe.low.frames)*Int64(recipe.low.height/2)*Int64(recipe.low.width/2)*3
+      guard attributes[.type] as? FileAttributeType == .typeRegular,
+        (attributes[.size] as? NSNumber)?.int64Value == expected else {
+        throw LTXError.invalid("Union Control RGB24 guide must match the half-resolution stage-one timeline.")
+      }
+      _ = try MLXVideoEncoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint))
+    }
     if let source=request.audioReference {
       _ = try MLXSourceAudioInterval(source:URL(fileURLWithPath:source.path),
         sourceStartSeconds:source.sourceStartSeconds,sourceDurationSeconds:source.sourceDurationSeconds,
@@ -205,8 +226,19 @@ public final class MLXMediaPipeline {
       ids=contexts.tokenIDs; timings["text"]=Date().timeIntervalSince(textStarted)
       try report("text_weights_released")
       let referenceStart=Date()
-      let references:[(first:MLXArray,last:MLXArray?)]=try autoreleasepool {
-        guard !request.referenceImages.isEmpty else { return [] }
+      let preparedGuides:([(first:MLXArray,last:MLXArray?)],MLXArray?)=try autoreleasepool {
+        if let union=request.unionControlGuide {
+          let plan=try MLXVideoEncodeTilePlan(frames:recipe.low.frames,
+            width:recipe.low.width/2,height:recipe.low.height/2,
+            maximumOwnedBufferBytes:videoActivationBytes)
+          let encoded=try MLXTiledVideoEncoder.encode(guide:URL(fileURLWithPath:union.path),
+            checkpoint:URL(fileURLWithPath:request.videoCheckpoint),plan:plan) {
+            try report("control_guide_encode",$0,$1)
+          }
+          try NativeMediaSource(path:union.path,sha256:union.sourceSHA256).verify()
+          return ([],encoded.reshaped([plan.latentShape[0]*plan.latentShape[1]*plan.latentShape[2],128]))
+        }
+        guard !request.referenceImages.isEmpty else { return ([],nil) }
         let encoder=try MLXImageEncoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint))
         var cached:[URL:MLXArray]=[:],prepared:[(first:MLXArray,last:MLXArray?)]=[]
         for (index,images) in preparedImages.enumerated() {
@@ -223,12 +255,16 @@ public final class MLXMediaPipeline {
           }
           prepared.append((tokens[0],tokens.count == 2 ? tokens[1] : nil))
         }
-        return prepared
+        return (prepared,nil)
       }
       try fm.removeItem(at:imageDirectory)
-      if !references.isEmpty { timings["reference_encode"]=Date().timeIntervalSince(referenceStart);try report("reference_weights_released") }
-      let sampled=try sampler.evaluate(videoContext:contexts.video,audioContext:contexts.audio,references:references,
-        frozenAudio:frozenAudio,extensionGuides:extensionGuideLease?.guides,progress:report)
+      if !preparedGuides.0.isEmpty || preparedGuides.1 != nil {
+        timings["reference_encode"]=Date().timeIntervalSince(referenceStart)
+        try report("reference_weights_released")
+      }
+      let sampled=try sampler.evaluate(videoContext:contexts.video,audioContext:contexts.audio,references:preparedGuides.0,
+        frozenAudio:frozenAudio,extensionGuides:extensionGuideLease?.guides,
+        unionGuide:preparedGuides.1,progress:report)
       timings.merge(sampler.stageSeconds) { _,new in new }
       // One final evaluated download for existing native decoders. The contexts
       // and all MLX latent handles leave scope before a VAE owns weighted buffers.
@@ -357,6 +393,15 @@ public final class MLXMediaPipeline {
       metadata["extension_context_frames"]=contextFrames
       metadata["extension_generated_frames"]=publishedFrames
       metadata["reference_conditioning"]="appended synchronized source video/audio latent guides at half strength"
+    }
+    if let union=request.unionControlGuide {
+      metadata["reference_count"]=1
+      metadata["reference_preparation"]="frozen preprocessed RGB24 guide, half the stage-one canvas"
+      metadata["reference_conditioning"]="VAE-encoded half-resolution Union guide appended in stage one; clean stage two"
+      metadata["union_guide_sha256"]=union.sourceSHA256
+      metadata["union_adapter_scope"]="stage_one_only"
+    } else if request.referenceImages.isEmpty && extensionContextFrames == nil {
+      metadata["reference_conditioning"]="none"
     }
     if let videoCacheBytes { metadata["video_allocator_cache_limit_bytes"]=videoCacheBytes }
     try JSONSerialization.data(withJSONObject:metadata,options:[.prettyPrinted,.sortedKeys])

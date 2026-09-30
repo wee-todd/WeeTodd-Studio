@@ -69,7 +69,17 @@ import MLX
         return
       }
     }
-    let request=try MLXStudioRecipe.compile(data:recipeData,outputDirectory:args[4])
+    let request:MLXDistilledRequest
+    if let direct=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any],
+      direct["version"] as? Int == 5,direct["task"] as? String == "union_control" {
+      request=try JSONDecoder().decode(MLXDistilledRequest.self,from:recipeData)
+      guard URL(fileURLWithPath:request.outputDirectory).standardizedFileURL.path ==
+        URL(fileURLWithPath:args[4]).standardizedFileURL.path else {
+        throw invalid("Union Control request output must match the authenticated job envelope.")
+      }
+    } else {
+      request=try MLXStudioRecipe.compile(data:recipeData,outputDirectory:args[4])
+    }
     let recipe=try JSONSerialization.jsonObject(with:recipeData) as! [String:Any]
     let configured=envelope.ffmpegPath ?? ""
     let ffmpeg=configured.isEmpty ? recipe["ffmpeg"] as? String ?? "" : configured

@@ -4,6 +4,35 @@ import Darwin
 import LTX25MLX
 
 final class MLXDistilledRequestTests:XCTestCase {
+  func testUnionControlRequestHasDedicatedGuideAndCleanSecondStage() throws {
+    var value=base();value["version"]=5;value["task"]="union_control"
+    value["noise_policy"]="mlx_threefry_bf16_v1"
+    value["reference_images"]=[];value["audio_reference"]=NSNull()
+    value["union_control_guide"]=["path":"/guide.rgb","source_sha256":String(repeating:"a",count:64),
+      "adapter_path":"/union.safetensors",
+      "adapter_strength":1.0,"reference_strength":1.0]
+    let request=try decode(value)
+    XCTAssertEqual(request.unionControlGuide?.path,"/guide.rgb")
+    XCTAssertEqual(request.stageTwoLoras.count,0)
+    XCTAssertEqual(try decode(JSONSerialization.jsonObject(with:JSONEncoder().encode(request)) as! [String:Any]).task,
+      "union_control")
+    value["task"]="t2v";XCTAssertThrowsError(try decode(value))
+    value["task"]="union_control";value["audio_reference"]=["path":"/audio.wav",
+      "source_start_seconds":0,"source_duration_seconds":1]
+    XCTAssertThrowsError(try decode(value))
+    value["audio_reference"]=NSNull()
+    value["stage_one_loras"]=[["path":"/union.safetensors","strength":1]]
+    XCTAssertThrowsError(try decode(value))
+    value["stage_one_loras"]=[]
+    value["union_control_guide"]=["path":"/guide.rgb","source_sha256":String(repeating:"a",count:64),
+      "adapter_path":"/union.safetensors",
+      "adapter_strength":0,"reference_strength":1]
+    XCTAssertThrowsError(try decode(value))
+    value["union_control_guide"]=["path":"/guide.rgb","source_sha256":"not-a-digest",
+      "adapter_path":"/union.safetensors",
+      "adapter_strength":1,"reference_strength":1]
+    XCTAssertThrowsError(try decode(value))
+  }
   func testVersionFourAllowsAudioSourceWithOptionalFirstImageOnly() throws {
     var value=base();value["version"]=4;value["task"]="a2v"
     value["reference_images"]=[];value["noise_policy"]="mlx_threefry_bf16_v1"

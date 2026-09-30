@@ -62,6 +62,22 @@ final class LTXAdapterCompatibilityTests: XCTestCase {
     }
   }
 
+  func testUnionControlRejectsIncompleteOrMisclassifiedTaskAdapter() throws {
+    let tensors: [(String, [Int], String)] = [
+      ("diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.weight", [64, 4096], "BF16"),
+      ("diffusion_model.transformer_blocks.0.attn1.to_q.lora_B.weight", [4096, 64], "BF16")]
+    for metadata in [
+      ["model_version":"2.3.0","reference_downscale_factor":"2"],
+      ["model_version":"2.3.0","reference_downscale_factor":"1"],
+      ["model_version":"2.3.0","reference_downscale_factor":"2",
+        "reference_spatial_scale_factor":"2"]] {
+      try withTensorFile(metadata:metadata,tensors:tensors) { url in
+        let file=try SafeTensorFile(url:url)
+        XCTAssertThrowsError(try LTXAdapterCompatibility.unionControlPlan(file:file,strength:1))
+      }
+    }
+  }
+
   func testDifferentSourceAliasesCannotApplyTwiceToSameDestination() throws {
     var tensors: [(String, [Int], String)] = []
     for prefix in ["diffusion_model.", "model.diffusion_model."] {

@@ -1,5 +1,21 @@
 # WeeTodd Studio implementation status
 
+Swift LTX 2.5 Union Control 2026-09-30 (experimental headless route): a strict
+version-5 request now accepts one hash-frozen, full-timeline RGB24 guide at half
+the stage-one canvas resolution. The Swift worker validates the installed LTX 2.3
+Union adapter's 48-block, 480-pair rank-64 signature, encodes the guide with its
+video VAE, applies the adapter only during the eight stage-one evaluations, and
+uses the clean transformer for three stage-two refinement evaluations. A direct Swift render
+completed 33 frames at 512 × 256/24 fps with stereo audio in 46.54 seconds;
+stage one took 23.05 seconds, stage two 7.82 seconds, and peak Swift-process
+footprint was 3.11 GB (external FFmpeg excluded). Sampled output frames showed
+a coherent boxer and gym, but the prompt did not identify the source boxer, and
+the output changed his appearance; control fidelity and visual quality are not
+accepted from this test. The final hash-frozen request passed the shared worker's
+installed-checkpoint preflight. Studio's control-attachment UI and ComfyUI export
+have not been switched to this Swift route; broader IC-LoRA families, dimensions,
+previews, cancellation, quality and matched performance remain open.
+
 Swift H3 independent A2V 2026-09-30 (experimental): Studio can prepare one bounded
 audio-driver interval, optionally with an opening image, for a Ref2VA checkpoint. The
 shared Swift worker places both at target frame zero, stages Qwen and the audio/video
@@ -36,8 +52,9 @@ accepted both ranges as one take; native scene acceptance no longer calls the Py
 description bridge. Dependency reporting includes later-shot image files. Planned
 music-video A2V source intervals are checked against their frozen audio attachments,
 and a previously prepared timeline mix can drive an independent Swift LTX A2V clip.
-Specialized IC-LoRA/MSR/Ingredients/DFR paths and H3 extension controls
-have not yet been ported or qualified in Swift. H3 A2V is described above.
+Studio's specialized IC-LoRA/MSR/Ingredients/DFR paths and H3 extension controls
+have not yet been ported or qualified in Swift. The separate headless Union
+Control route is described above. H3 A2V is described above.
 
 Swift LTX 2.5 continuous scenes 2026-09-29 (experimental): the shared Swift worker
 now plans two to six shots as aligned overlapping audiovisual windows, retains

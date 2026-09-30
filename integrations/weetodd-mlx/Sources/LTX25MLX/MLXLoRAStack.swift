@@ -8,14 +8,17 @@ import TensorIO
 public final class MLXLoRAStack {
   private struct Entry { let file:SafeTensorFile; let pair:LoRAPlan.Pair }
   private let entries:[Entry]
-  public init(adapters:[LoRAAdapter],maximumFactorBytes:Int=512*1024*1024) throws {
+  public init(adapters:[LoRAAdapter],unionControlAdapterPath:String?=nil,
+    maximumFactorBytes:Int=512*1024*1024) throws {
     guard adapters.count <= 16, maximumFactorBytes > 0 else { throw LTXError.invalid("Invalid adapter count or factor budget.") }
     var result:[Entry]=[], bytes:[String:UInt64]=[:]
     for adapter in adapters {
       try Task.checkCancellation(); try adapter.validate()
       guard adapter.enabled else { continue }
       let file=try SafeTensorFile(url:URL(fileURLWithPath:adapter.path),maximumHeaderBytes:4*1024*1024)
-      let plan=try LTXAdapterCompatibility.standardPlan(file:file,strength:adapter.strength)
+      let plan=try adapter.path == unionControlAdapterPath
+        ? LTXAdapterCompatibility.unionControlPlan(file:file,strength:adapter.strength)
+        : LTXAdapterCompatibility.standardPlan(file:file,strength:adapter.strength)
       for pair in plan.pairs {
         guard [pair.downTensor,pair.upTensor].allSatisfy({ ["BF16","F16","F32"].contains(file.tensors[$0]!.dtype) }) else {
           throw LTXError.invalid("Swift MLX adapters require BF16/F16/F32 factors.")

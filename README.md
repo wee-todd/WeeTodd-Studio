@@ -149,8 +149,11 @@ second image began at frame 48 without appearing in earlier contact frames. The 
 Swift worker completed in 57.82 seconds with a 3.52 GB process peak, excluding FFmpeg.
 A full Studio preparation, render, grouped acceptance and project reopening also completed
 with Python unavailable. Planned music-video A2V clips can retain their source interval,
-and a prepared timeline audio mix can feed an independent Swift LTX A2V clip. IC-LoRA,
-MSR, Ingredients, DFR and H3 extension controls remain outside the qualified Swift paths.
+and a prepared timeline audio mix can feed an independent Swift LTX A2V clip. A developer
+Swift Union Control route now accepts a frozen half-resolution RGB24 guide and the installed
+LTX 2.3 Union IC-LoRA, with the task adapter active only in stage one. Studio's ordinary
+control-attachment UI, MSR, Ingredients, DFR and H3 extension controls remain outside the
+qualified Swift paths.
 Independent H3 A2V with a bounded timeline audio driver and optional opening image is
 experimental; its source conditions generated sound and motion rather than being copied.
 
@@ -1506,6 +1509,17 @@ and publishes the original source track. General video-reference input requires 
 transformer. Lightricks' official LTX 2.5 workflows use selected LTX 2.3 22B IC-LoRAs. The loader
 therefore accepts an older adapter only when every target and tensor shape matches the LTX 2.5 22B
 block layout. The loader still rejects the specialized Pixel-Spatial upscaler from this path.
+
+The experimental Swift headless Union Control route uses a strict version-5
+`MLXDistilledRequest` with `task="union_control"` and a `union_control_guide` containing
+`path`, `source_sha256`, `adapter_path`, `adapter_strength`, and `reference_strength`.
+The guide is preprocessed RGB24 at half the stage-one canvas width and height, covering
+the complete `8n+1` frame timeline. The worker verifies its SHA-256 and exact byte count
+before inference, encodes it with the video VAE, applies the structurally checked rank-64
+Union adapter during stage one, then refines with a clean stage-two transformer. This
+route has one short real Swift result and worker preflight; Studio's control attachment
+and ComfyUI export still use their existing Python route. Visual control quality and
+production-size speed and memory are not qualified.
 
 Use **LTX 2.5 IC-LoRA Control Guide** for Canny edges, depth maps, pose skeletons, Motion Track, or
 another preprocessed control video. Connect the IMAGE batch from the matching preprocessor.

@@ -85,7 +85,9 @@ public final class MLXDenoiserWeights {
   public let sourceCheckpoint:String?
   public var blockCount:Int { pages.count }
   public var largestBlockBytes:Int { pages.map(\.storageBytes).max() ?? 0 }
-  public init(root:URL,configuration:AVBlockConfiguration,adapters:[LoRAAdapter]=[],maximumActivationBytes:Int=2*1024*1024*1024) throws {
+  public init(root:URL,configuration:AVBlockConfiguration,adapters:[LoRAAdapter]=[],
+    unionControlAdapterPath:String?=nil,
+    maximumActivationBytes:Int=2*1024*1024*1024) throws {
     try configuration.validate()
     guard root.isFileURL else { throw LTXError.invalid("Paged transformer must be local.") }
     let root=root.resolvingSymlinksInPath().standardizedFileURL
@@ -131,7 +133,8 @@ public final class MLXDenoiserWeights {
       }
       pages.append(page)
     }
-    let stack=try MLXLoRAStack(adapters:adapters)
+    let stack=try MLXLoRAStack(adapters:adapters,
+      unionControlAdapterPath:unionControlAdapterPath)
     var targets=Dictionary(uniqueKeysWithValues:DenoiserLayout.weightShapes(configuration)
       .filter { $0.key.hasSuffix(".weight") }.map { (String($0.key.dropLast(7)),$0.value) })
     for index in 0..<48 {
