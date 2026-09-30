@@ -183,7 +183,7 @@ public enum NativeH3Preparation {
     let config = recipe["config"] as? [String: Any] ?? [:]
     let modelTask = (recipe["components"] as? [String: Any])?["task"] as? String
     let task = modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"
-    return ["supportedTasks": [task], "controls": [
+    return ["supportedTasks": task == "ref2va" ? ["ref2va", "a2v"] : [task], "controls": [
       "evaluations": max(0, (config["steps"] as? Int ?? 20) - 1),
       "stepsEditable": true, "refinementStepsEditable": false,
       "cfgEditable": false, "shiftEditable": false,
@@ -217,22 +217,26 @@ public enum NativeH3Preparation {
     let project = try JSONDecoder().decode(StudioProject.self, from: data(projectValue))
     guard let clip = project.clips.first(where: { $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }),
       clip.engine == .h3 else { throw StudioError.invalid("Select an H3 clip.") }
-    guard clip.continuityMode == "independent", !project.isContinuousSceneMember(clip),
-      clip.audioDriverSelection == nil, clip.musicSource == nil,
-      clip.extensionDirection.isEmpty, clip.extensionSource.isEmpty else {
-      throw unsupported("continuity, music drivers and extension are not ported")
-    }
     let task = clip.inferredTask
-    guard ["t2v", "t2va", "i2v", "fflf", "ref2va"].contains(task) else {
+    guard clip.continuityMode == "independent", !project.isContinuousSceneMember(clip),
+      (clip.audioDriverSelection == nil || task == "a2v"), clip.musicSource == nil,
+      clip.extensionDirection.isEmpty, clip.extensionSource.isEmpty else {
+      throw unsupported("continuity, planned music and extension are not ported")
+    }
+    guard ["t2v", "t2va", "i2v", "fflf", "ref2va", "a2v"].contains(task) else {
       throw unsupported("task \(clip.inferredTask) is not ported")
     }
     let supportedRoles: Set<MediaRole> = task == "ref2va" ? [.reference, .lora]
+      : task == "a2v" ? [.audioDriver, .first, .lora]
       : ["i2v", "fflf"].contains(task) ? [.first, .last, .keyframe, .lora] : [.lora]
     let enabledFrames = clip.attachments.filter {
       $0.isEnabled && [.first, .last, .keyframe].contains($0.role)
     }
     let frameIndices = enabledFrames.compactMap { keyframeIndex($0, duration: clip.duration) }
+    let audioDrivers = clip.attachments.filter { $0.role == .audioDriver && $0.isEnabled }
+    let openingImages = clip.attachments.filter { $0.role == .first && $0.isEnabled }
     guard clip.attachments.allSatisfy({ supportedRoles.contains($0.role) }),
+      (task != "a2v" || (audioDrivers.count == 1 && openingImages.count <= 1)),
       clip.attachments.filter({ $0.role == .lora && $0.isEnabled }).count <= 4,
       task != "ref2va" || (1...12).contains(clip.attachments.filter({ $0.role == .reference && $0.isEnabled }).count),
       !["i2v", "fflf"].contains(task) ||
@@ -251,7 +255,8 @@ public enum NativeH3Preparation {
       throw unsupported("guidance, memory, backend or negative-prompt overrides cannot be executed")
     }
     let profiles = try catalog(directory: runtime["profilesDirectory"] as? String ?? "")
-    let catalogTask = task == "ref2va" ? "ref2va" : ["i2v", "fflf"].contains(task) ? "fflf" : "t2v"
+    let catalogTask = ["ref2va", "a2v"].contains(task) ? "ref2va"
+      : ["i2v", "fflf"].contains(task) ? "fflf" : "t2v"
     guard let chosen = profiles.first(where: {
       $0["task"] as? String == catalogTask &&
         (clip.profileID == "auto" || $0["id"] as? String == clip.profileID)
@@ -330,10 +335,11 @@ public enum NativeH3Preparation {
       guard let asset = availableAssets.last(where: { $0.id == attachment.assetID }) else {
         throw StudioError.invalid("Relink a missing H3 attachment.")
       }
-      if Set<MediaRole>([.reference, .first, .last, .keyframe]).contains(attachment.role) {
+      if Set<MediaRole>([.reference, .first, .last, .keyframe, .audioDriver]).contains(attachment.role) {
         let isVideoReference = attachment.role == .reference &&
           (asset.kind == .video || asset.kind == .sequence)
-        let isAudioReference = attachment.role == .reference && asset.kind == .audio
+        let isAudioReference = (attachment.role == .reference || attachment.role == .audioDriver)
+          && asset.kind == .audio
         guard (asset.kind == .image || isVideoReference || isAudioReference),
           attachment.strength == 1,
           (attachment.role == .keyframe || attachment.time == 0),
@@ -355,7 +361,31 @@ public enum NativeH3Preparation {
           "sha256": try sourceSHA256(imagePath,
             maxBytes: isVideoReference ? 4 * 1024 * 1024 * 1024
               : isAudioReference ? 1024 * 1024 * 1024 : 128 * 1024 * 1024)]
-        if attachment.role == .first { input["frame_index"] = 0 }
+        if attachment.role == .audioDriver {
+          input["role"] = "audio_driver"
+          let preparedMix = clip.audioDriverSelection != nil
+          guard !preparedMix || (clip.audioDriverMixKey?.isEmpty == false &&
+            asset.scope == .clip && asset.owner == clip.id &&
+            attachment.audioSourceStart == nil &&
+            attachment.audioSourceDuration == nil &&
+            asset.duration + 0.01 >= clip.duration) else {
+            throw unsupported("prepare the current timeline audio mix before H3 A2V")
+          }
+          let start = preparedMix ? 0 : attachment.audioSourceStart
+          let length = preparedMix ? clip.duration : attachment.audioSourceDuration
+          guard let start, start.isFinite, (0...86400).contains(start),
+            let length, length.isFinite,
+            length >= clip.duration - 0.001, length <= 15,
+            asset.duration <= 0 || start + length <= asset.duration + 0.01 else {
+            throw unsupported("H3 A2V needs a source interval covering the visible clip")
+          }
+          input["source_start_seconds"] = start
+          input["source_duration_seconds"] = length
+        }
+        if attachment.role == .first {
+          input["frame_index"] = 0
+          if clip.inferredTask == "a2v" { input["role"] = "keyframe" }
+        }
         if attachment.role == .last {
           input["frame_index"] = keyframeIndex(attachment, duration: clip.duration)!
         }
@@ -389,7 +419,10 @@ public enum NativeH3Preparation {
     }
     if !loras.isEmpty { components["loras"] = loras }
     recipe["components"] = components
-    if clip.inferredTask == "ref2va" {
+    if clip.inferredTask == "a2v" {
+      recipe["conditioning"] = ["version": 1, "task": "a2v",
+        "inputs": referenceInputs, "audio_policy": "generated"]
+    } else if clip.inferredTask == "ref2va" {
       let imageCount = referenceInputs.filter { $0["kind"] as? String == "image" }.count
       let videoCount = referenceInputs.filter { $0["kind"] as? String == "video" }.count
       let audioCount = referenceInputs.count - imageCount - videoCount
@@ -415,7 +448,7 @@ public enum NativeH3Preparation {
     let report: [String: Any] = ["profile": URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent,
       "generation": descriptor(recipe), "resolvedFingerprint": try fingerprint(recipe),
       "selectionFingerprint": try fingerprint(original),
-      "task": clip.inferredTask == "ref2va" ? "ref2va"
+      "task": ["ref2va", "a2v"].contains(clip.inferredTask) ? clip.inferredTask
         : ["i2v", "fflf"].contains(clip.inferredTask) ? "fflf" : "t2v", "nativeFPS": 24,
       "nativePreparation": "swift", "productionQualified": false,
       "movieSettings": try JSONSerialization.jsonObject(with: JSONEncoder().encode(clip.settings(in: project))),

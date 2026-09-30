@@ -83,15 +83,19 @@ Python unavailable. Specialized controls still require the explicitly selected P
 route.
 Model setup, asset/library tools and other engines remain
 separate migration work; this is not yet a fully Python-free Studio release.
-The experimental Swift H3 worker has completed text-to-audiovisual and one- and two-still Ref2VA takes.
+The experimental Swift H3 worker has completed text-to-audiovisual, reference-conditioned
+and independent audio-driven takes.
 The off-by-default Swift preparation path validates clip inputs, ordered references and profile
 settings, then requires worker preflight before a take can render. Enable **Use Swift MLX for H3
 (experimental)** in Runtime Settings to try text-to-AV, timed keyframes, or ordered Ref2VA with
 up to nine still images, three movies and three audio-bearing references. A movie
 contributes its first 7.3 seconds, resampled to 24 fps and trimmed to the VAE clip grid;
 an embedded soundtrack from that interval contributes sound-reference latents.
-Standalone audio uses up to 15 seconds at 32 kHz stereo and requires a visual reference.
-Its encoder has a short numerical parity test, but full audio/soundtrack output quality,
+Standalone audio used as an ordinary Ref2VA reference requires a visual reference. The
+separate **Audio to video** task accepts one 2.5–15-second driver interval covering the
+clip and optionally one opening image. It generates a new soundtrack and motion from the
+source; it does not copy the original audio into the finished movie.
+The H3 audio encoder has a short numerical parity test, but full audio/soundtrack output quality,
 adapter stacks and production quality remain unqualified.
 One mixed still/movie 768 × 448 test completed 73 frames with stereo audio in 739.99 seconds
 at an 8.10 GB peak Swift process footprint (FFmpeg excluded). Appearance was coherent,
@@ -330,11 +334,12 @@ bounded memory and supports timelines up to one hour. Long timelines can take lo
 For an independent native H3/LTX clip, open **Timeline audio driver** in its inspector. Choose
 **Voice**, **Music**, or **Voice + Music**, select contributing tracks and prepare/audition the exact
 mix. Gains, pan, fades, reverb, ducking and mutes are included; solo does not change the driver. The
-Swift LTX 2.5 route accepts the prepared mix for an independent A2V clip; the current
-Swift H3 worker does not yet implement timeline audio-driver conditioning. The
-**Use timeline soundtrack (mute clip audio)** option prevents doubled audio while retaining the
-original generated movie. Preflight rejects missing, stale or silent drivers. Native frame geometry
-may require a slightly longer reference than the visible clip; uncovered samples are silence-padded.
+Swift LTX 2.5 and experimental Swift H3 routes accept the prepared mix for an
+independent A2V clip. H3 requires a compatible Ref2VA checkpoint and can also use one
+opening-frame image. **Use timeline soundtrack (mute clip audio)** prevents doubled audio
+while retaining the original generated movie. Preflight rejects missing, stale or silent
+drivers. Native frame geometry may require a slightly longer reference than the visible
+clip; uncovered samples are silence-padded.
 Draw Things routing and planned continuous-song scene sources retain their existing separate contracts.
 Director workflow upgrades are deferred.
 

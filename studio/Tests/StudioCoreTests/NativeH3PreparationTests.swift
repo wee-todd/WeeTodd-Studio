@@ -62,6 +62,70 @@ final class NativeH3PreparationTests: XCTestCase {
     XCTAssertEqual((result["report"] as? [String: Any])?["nativePreparation"] as? String, "swift")
   }
 
+  func testComposesTimedAudioDriverFromPreparedMix() throws {
+    let (root, original, runtime) = try fixture()
+    let profile = root.appendingPathComponent("h3.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: profile)) as! [String: Any]
+    var components = recipe["components"] as! [String: Any]
+    components["task"] = "ref2va"
+    recipe["components"] = components
+    recipe["conditioning"] = ["version": 1, "task": "ref2va",
+      "inputs": [], "audio_policy": "generated"]
+    try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
+    let voicePath = root.appendingPathComponent("voice.wav")
+    try Data([1, 2, 3]).write(to: voicePath)
+    var project = original
+    var voice = MediaAsset(name: "Prepared voice", kind: .audio, path: voicePath.path)
+    voice.scope = .clip; voice.owner = project.clips[0].id; voice.duration = 5
+    project.assets = [voice]
+    project.clips[0].generationSelection = GenerationSelection(task: "a2v")
+    project.clips[0].audioDriverSelection = AudioDriverSelection(mode: .voice)
+    project.clips[0].audioDriverMixKey = "prepared"
+    project.clips[0].attachments = [Attachment(assetID: voice.id, role: .audioDriver)]
+    let result = try NativeH3Preparation.compose(request: request(project, runtime))
+    let prepared = result["recipe"] as! [String: Any]
+    let contract = prepared["conditioning"] as! [String: Any]
+    XCTAssertEqual(contract["task"] as? String, "a2v")
+    let inputs = contract["inputs"] as! [[String: Any]]
+    XCTAssertEqual(inputs.count, 1)
+    XCTAssertEqual(inputs[0]["role"] as? String, "audio_driver")
+    XCTAssertEqual(inputs[0]["source_start_seconds"] as? Double, 0)
+    XCTAssertEqual(inputs[0]["source_duration_seconds"] as? Double, 5)
+    project.clips[0].audioDriverMixKey = nil
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+  }
+
+  func testA2VOpeningImageUsesKeyframeContract() throws {
+    let (root, original, runtime) = try fixture()
+    let profile = root.appendingPathComponent("h3.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: profile)) as! [String: Any]
+    var components = recipe["components"] as! [String: Any]
+    components["task"] = "ref2va"
+    recipe["components"] = components
+    recipe["conditioning"] = ["version": 1, "task": "ref2va",
+      "inputs": [], "audio_policy": "generated"]
+    try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
+    let voiceURL = root.appendingPathComponent("voice.wav")
+    let imageURL = root.appendingPathComponent("opening.png")
+    try Data([1, 2, 3]).write(to: voiceURL)
+    try Data([4, 5, 6]).write(to: imageURL)
+    var project = original
+    var voice = MediaAsset(name: "Voice", kind: .audio, path: voiceURL.path)
+    voice.duration = 5
+    let image = MediaAsset(name: "Opening", kind: .image, path: imageURL.path)
+    project.assets = [voice, image]
+    project.clips[0].generationSelection = GenerationSelection(task: "a2v")
+    var driver = Attachment(assetID: voice.id, role: .audioDriver)
+    driver.audioSourceStart = 0
+    driver.audioSourceDuration = 5
+    project.clips[0].attachments = [driver, Attachment(assetID: image.id, role: .first)]
+    let result = try NativeH3Preparation.compose(request: request(project, runtime))
+    let prepared = result["recipe"] as! [String: Any]
+    let inputs = (prepared["conditioning"] as! [String: Any])["inputs"] as! [[String: Any]]
+    XCTAssertEqual(inputs.map { $0["role"] as? String }, ["audio_driver", "keyframe"])
+    XCTAssertEqual(inputs[1]["frame_index"] as? Int, 0)
+  }
+
   func testRejectsUnsupportedMediaSamplingAndProfileOptions() throws {
     let (root, original, runtime) = try fixture()
     var project = original

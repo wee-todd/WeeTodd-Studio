@@ -150,16 +150,19 @@ Swift worker completed in 57.82 seconds with a 3.52 GB process peak, excluding F
 A full Studio preparation, render, grouped acceptance and project reopening also completed
 with Python unavailable. Planned music-video A2V clips can retain their source interval,
 and a prepared timeline audio mix can feed an independent Swift LTX A2V clip. IC-LoRA,
-MSR, Ingredients, DFR and H3 audio-driver/extension controls remain outside the
-qualified Swift paths.
+MSR, Ingredients, DFR and H3 extension controls remain outside the qualified Swift paths.
+Independent H3 A2V with a bounded timeline audio driver and optional opening image is
+experimental; its source conditions generated sound and motion rather than being copied.
+
 An ordinary LTX 2.3 standard LoRA also
 completed a distinct, coherent five-second 768 × 448 Swift take at strength 0.3 in both stages;
 this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.
 
-An experimental Swift MLX H3 worker now runs text-to-audiovisual, timed FL2VA keyframes
-and ordered image/video/audio Ref2VA through the installed Qwen, H3 transformer and separate
-video/audio VAE components. Studio has a guarded, off-by-default Swift preparation and worker
-handoff for these tasks. It admits up to four distinct, ordered ComfyUI-format H3 LoRAs with
+An experimental Swift MLX H3 worker now runs text-to-audiovisual, timed FL2VA keyframes,
+ordered image/video/audio Ref2VA and independent A2V through the installed Qwen, H3
+transformer and separate video/audio VAE components. Studio has a guarded, off-by-default
+Swift preparation and worker handoff for these tasks. It admits up to four distinct,
+ordered ComfyUI-format H3 LoRAs with
 independent strengths and supported projection/QKV layouts; sparse target sets and variable
 ranks are accepted. Installed converted Lightx FL2V four-step LoRAs with baked scaling
 pass header and projection checks; the full-rank adapter also completed one signed-app
@@ -172,6 +175,9 @@ Each movie reference uses its first 7.3 seconds on a bounded 24 fps grid; any em
 in the selected interval becomes a sound reference. Standalone audio references require a visual
 reference and use at most 15 seconds at 32 kHz stereo. The Swift audio encoder has a two-channel
 numerical parity test, while full audio-reference and soundtrack output quality remain unqualified.
+Independent A2V uses a Ref2VA checkpoint with one 2.5–15-second source-audio interval
+covering the requested clip and optionally one opening image. Its soundtrack is newly generated;
+the source audio is not copied to the movie. Audio-only A2V needs no visual reference.
 Reference count is further limited by the
 1,024-token Qwen request window and the 40,000-row H3 admission budget. One mixed image/movie
 768 × 448, 73-frame test completed with audio in 739.99 seconds at an 8.10 GB peak Swift

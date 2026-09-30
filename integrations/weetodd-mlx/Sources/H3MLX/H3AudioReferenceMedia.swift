@@ -4,17 +4,22 @@ import Foundation
 /// Source identity is verified by the worker before and after this operation.
 public enum H3AudioReferenceMedia {
   public static func load(path: String, ffmpeg: URL,
+    startSeconds: Double = 0, durationSeconds: Double? = nil,
     maximumSeconds: Double = 15) throws -> H3AudioReference {
     guard path.hasPrefix("/"), !path.utf8.contains(0), ffmpeg.isFileURL,
       FileManager.default.isExecutableFile(atPath: ffmpeg.path),
-      maximumSeconds.isFinite, (0.2...15).contains(maximumSeconds) else {
+      maximumSeconds.isFinite, (0.2...15).contains(maximumSeconds),
+      startSeconds.isFinite, (0...86400).contains(startSeconds),
+      durationSeconds == nil || (durationSeconds!.isFinite &&
+        (0.025...maximumSeconds).contains(durationSeconds!)) else {
       throw H3CheckpointError.invalid("H3 audio reference needs a local source and FFmpeg.")
     }
     let maximumFrames = min(480_000, Int(ceil(maximumSeconds * 32_000)))
     let process = Process()
     process.executableURL = ffmpeg
     process.arguments = ["-v", "error", "-nostdin", "-i", path,
-      "-map", "0:a:0", "-t", String(maximumSeconds),
+      "-ss", String(startSeconds), "-map", "0:a:0",
+      "-t", String(durationSeconds ?? maximumSeconds),
       "-ac", "2", "-ar", "32000",
       "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1"]
     let output = Pipe()
@@ -48,10 +53,18 @@ public enum H3AudioReferenceMedia {
       bytes.count >= 800 * 2 * 4 else {
       throw H3CheckpointError.invalid("H3 reference audio could not be decoded to 32 kHz stereo PCM.")
     }
-    let frames = min(bytes.count / 8, maximumFrames)
+    let decodedFrames = min(bytes.count / 8, maximumFrames)
+    let frames: Int
+    if let durationSeconds {
+      let expected = Int((durationSeconds * 32_000).rounded())
+      guard decodedFrames >= expected - 32 else {
+        throw H3CheckpointError.invalid("H3 audio driver source does not cover its selected interval.")
+      }
+      frames = expected
+    } else { frames = decodedFrames }
     var samples = [Float](repeating: 0, count: frames * 2)
     bytes.withUnsafeBytes { raw in
-      for frame in 0..<frames {
+      for frame in 0..<min(frames, decodedFrames) {
         samples[frame] = Float(bitPattern: UInt32(littleEndian:
           raw.loadUnaligned(fromByteOffset: frame * 8, as: UInt32.self)))
         samples[frames + frame] = Float(bitPattern: UInt32(littleEndian:

@@ -30,5 +30,12 @@ final class H3AudioReferenceMediaTests: XCTestCase {
     XCTAssertTrue(loaded.samples.allSatisfy(\.isFinite))
     XCTAssertEqual(loaded.samples[8_000], loaded.samples[40_000],
       accuracy: 1e-6, "Mono source duplicates into stereo")
+    let interval = try H3AudioReferenceMedia.load(path: source.path,
+      ffmpeg: ffmpeg, startSeconds: 0.25, durationSeconds: 0.5)
+    XCTAssertEqual(interval.frames, 16_000)
+    XCTAssertEqual(interval.samples.count, 32_000)
+    XCTAssertThrowsError(try H3AudioReferenceMedia.load(path: source.path,
+      ffmpeg: ffmpeg, startSeconds: 0.75, durationSeconds: 0.5),
+      "A driver interval extending past the source must fail")
   }
 }

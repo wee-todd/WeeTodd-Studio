@@ -213,6 +213,101 @@ public enum H3StudioRecipe {
       additionalLoRAs: base.additionalLoRAs)
   }
 
+  /// An A2V driver is placed at frame zero of the target packed timeline.
+  /// The source waveform conditions generated sound and motion; it is never
+  /// copied into the output movie. An optional opening still uses the same
+  /// target origin. Check the entire contract before resolving media.
+  public static func compileA2V(data: Data,
+    resolveReference: (String, String, Double, Double) throws -> H3Ref2VAReference)
+    throws -> H3Ref2VAStillRequest {
+    guard data.count <= 1024 * 1024,
+      var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+      var components = root["components"] as? [String: Any],
+      components["task"] as? String == "ref2va",
+      components["allow_fl2va_weights_for_ref2va"] == nil ||
+        components["allow_fl2va_weights_for_ref2va"] as? Bool == false,
+      let conditioning = root["conditioning"] as? [String: Any],
+      let inputs = try? ConditioningV1.inputs(conditioning,
+        task: "a2v", audioPolicy: "generated", count: 1...2),
+      let config = root["config"] as? [String: Any],
+      let duration = config["duration_seconds"] as? Double,
+      duration.isFinite, (2.5...15).contains(duration) else {
+      throw H3CheckpointError.invalid("Swift H3 A2V needs one timed audio driver and an optional opening image.")
+    }
+    var driver: (String, String, Double, Double)?
+    var image: (String, String)?
+    for input in inputs {
+      let role = input["role"] as? String
+      let kind = input["kind"] as? String
+      let path = input["path"] as? String
+      let digest = input["sha256"] as? String
+      guard let path, path.hasPrefix("/"), !path.utf8.contains(0),
+        let digest, digest.count == 64,
+        digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+        (input["strength"] == nil || (input["strength"] as? NSNumber)
+          .map({ CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue == 1 }) == true)
+      else { throw H3CheckpointError.invalid("H3 A2V input path, hash or strength is invalid.") }
+      if role == "audio_driver" && kind == "audio" && driver == nil {
+        guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "sha256",
+          "strength", "source_start_seconds", "source_duration_seconds"]),
+          let start = input["source_start_seconds"] as? Double,
+          let length = input["source_duration_seconds"] as? Double,
+          start.isFinite, (0...86400).contains(start), length.isFinite,
+          length >= duration - 0.001, length <= 15 else {
+          throw H3CheckpointError.invalid("H3 A2V needs a bounded source interval covering the clip.")
+        }
+        driver = (path, digest, start, length)
+      } else if role == "keyframe" && kind == "image" && image == nil {
+        guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "sha256",
+          "strength", "frame_index"]), input["frame_index"] as? Int == 0 else {
+          throw H3CheckpointError.invalid("H3 A2V accepts one opening image at frame zero.")
+        }
+        image = (path, digest)
+      } else {
+        throw H3CheckpointError.invalid("H3 A2V accepts one audio driver and at most one opening image.")
+      }
+    }
+    guard let driver else { throw H3CheckpointError.invalid("H3 A2V audio driver is missing.") }
+    let vision = (components["vision_encoder"] as? String) ??
+      (components["text_encoder"] as? String)
+    guard let vision, vision.hasPrefix("/") else {
+      throw H3CheckpointError.invalid("H3 A2V needs an installed Qwen encoder.")
+    }
+    components.removeValue(forKey: "vision_encoder")
+    components.removeValue(forKey: "allow_fl2va_weights_for_ref2va")
+    components["task"] = "t2va"
+    root["components"] = components
+    root["conditioning"] = ["version": 1, "task": "t2v",
+      "inputs": [], "audio_policy": "generated"]
+    let base = try compile(data: JSONSerialization.data(withJSONObject: root))
+    var references: [H3Ref2VAReference] = []
+    for input in inputs {
+      if input["role"] as? String == "keyframe", let image {
+        let resolved = try resolveReference(image.0, image.1, 0, 0)
+        guard case .image(let still) = resolved else {
+          throw H3CheckpointError.invalid("H3 A2V opening image resolved to another media type.")
+        }
+        references.append(.timedImage(still, frame: 0))
+      } else {
+        let resolved = try resolveReference(driver.0, driver.1, driver.2, driver.3)
+        guard case .audio(let sound) = resolved else {
+          throw H3CheckpointError.invalid("H3 A2V driver resolved to another media type.")
+        }
+        references.append(.timedAudio(sound, frame: 0))
+      }
+    }
+    return try H3Ref2VAStillRequest(prompt: base.prompt,
+      mediaReferences: references, width: base.geometry.width,
+      height: base.geometry.height, durationSeconds: base.durationSeconds,
+      seed: base.seed, requestedSteps: base.requestedSteps,
+      transformer: base.transformer, qwenPages: base.qwenPages,
+      qwenVision: URL(fileURLWithPath: vision), tokenizer: base.tokenizer,
+      videoVAE: base.videoVAE, audioVAE: base.audioVAE,
+      turboLoRA: base.turboLoRA,
+      turboLoRAStrength: base.turboLoRAStrength,
+      additionalLoRAs: base.additionalLoRAs)
+  }
+
   public static func compile(data: Data) throws -> H3T2VARequest {
     func emptyArray(_ object: [String: Any], _ key: String) -> Bool {
       guard let value = object[key] else { return true }

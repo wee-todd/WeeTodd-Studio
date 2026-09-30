@@ -21,13 +21,20 @@ public enum H3QwenTextEncoder {
   static func encodeWithTrace(prompt: String, checkpointRoot: URL,
     tokenizerURL: URL, progress: (Int, Int) throws -> Void,
     observe: (Int, MLXArray) throws -> Void) throws -> Output {
+    let tokenizer = try H3QwenTokenizer(url: tokenizerURL)
+    let request = try H3QwenRequest.text(prompt, tokenizer: tokenizer)
+    return try encodeTextRequest(request: request, checkpointRoot: checkpointRoot,
+      progress: progress, observe: observe)
+  }
+
+  private static func encodeTextRequest(request: H3QwenRequest,
+    checkpointRoot: URL, progress: (Int, Int) throws -> Void,
+    observe: (Int, MLXArray) throws -> Void) throws -> Output {
     guard Device.defaultDevice().deviceType == .gpu else {
       throw H3CheckpointError.invalid("H3 Qwen conditioning requires an MLX Metal device.")
     }
     try Task.checkCancellation()
     let layout = try H3QwenCheckpointLayout.inspect(root: checkpointRoot)
-    let tokenizer = try H3QwenTokenizer(url: tokenizerURL)
-    let request = try H3QwenRequest.text(prompt, tokenizer: tokenizer)
     let ids = request.tokenIDs
     let previousCacheLimit = Memory.cacheLimit
     Memory.cacheLimit = 128 * 1024 * 1024
@@ -96,6 +103,11 @@ public enum H3QwenTextEncoder {
       case .video(let blocks, _): return blocks.map(\.grid)
       case .audio: return []
       }
+    }
+    if request.visualRanges.isEmpty {
+      return try encodeTextRequest(request: request,
+        checkpointRoot: checkpointRoot, progress: progress,
+        observe: { _, _ in })
     }
     return try encodeVisualRequest(request: request, pixels: pixels,
       grids: grids, checkpointRoot: checkpointRoot,

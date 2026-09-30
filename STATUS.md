@@ -1,5 +1,24 @@
 # WeeTodd Studio implementation status
 
+Swift H3 independent A2V 2026-09-30 (experimental): Studio can prepare one bounded
+audio-driver interval, optionally with an opening image, for a Ref2VA checkpoint. The
+shared Swift worker places both at target frame zero, stages Qwen and the audio/video
+reference encoders, and generates synchronized video and new audio. The source waveform
+conditions the result; it is not copied. Preparation freezes the source hash and exact
+interval, and rejects unsupported controls before loading weights. A 384 × 256, 2.5-second
+request with a Qwen3-TTS driver excerpt and Beowulf opening image completed as 73 frames
+at 24 fps plus 32 kHz stereo sound in 490.47 worker seconds. The Swift process peaked
+at 2.47 GB with external FFmpeg excluded; sampling took 411.72 seconds. Three inspected
+frames retained the supplied character. Audio-only A2V initially exposed an empty-video-
+row MLX array conversion crash; the runner now skips that conversion and video-VAE loading.
+The corrected audio-only route then passed a full Studio prepare, preflight, render,
+four-preview, accept, save and reopen lifecycle with Python unavailable. It published
+73 frames and 32 kHz stereo sound in 557.04 worker seconds at a 2.81 GB Swift-process
+peak; sampling took 426.41 seconds. Three inspected frames showed a coherent speaking
+subject, and output audio measured -23.0 dBFS mean and -7.2 dBFS peak. These two
+different conditioning cases are not an isolated speed comparison. Sound likeness,
+intelligibility, lip sync and broader speed/quality remain unqualified.
+
 Swift LTX 2.5 scene conditioning 2026-09-30 (experimental): Studio and the shared
 worker now accept a first-frame image on any of two to six compatible shots and one
 continuous source-audio interval across the entire scene. A later image replaces the
@@ -17,8 +36,8 @@ accepted both ranges as one take; native scene acceptance no longer calls the Py
 description bridge. Dependency reporting includes later-shot image files. Planned
 music-video A2V source intervals are checked against their frozen audio attachments,
 and a previously prepared timeline mix can drive an independent Swift LTX A2V clip.
-Specialized IC-LoRA/MSR/Ingredients/DFR paths and H3 timeline audio/extension controls
-have not yet been ported or qualified in Swift.
+Specialized IC-LoRA/MSR/Ingredients/DFR paths and H3 extension controls
+have not yet been ported or qualified in Swift. H3 A2V is described above.
 
 Swift LTX 2.5 continuous scenes 2026-09-29 (experimental): the shared Swift worker
 now plans two to six shots as aligned overlapping audiovisual windows, retains

@@ -59,16 +59,19 @@ public struct H3Ref2VAStillRequest: Sendable {
       durationSeconds: durationSeconds)
     let conditionRows = mediaReferences.reduce(0) { rows, reference in
       switch reference {
-      case .image(let image): rows + image.width * image.height / 1024
+      case .image(let image), .timedImage(let image, _):
+        rows + image.width * image.height / 1024
       case .video(let video):
         rows + ((video.frameCount - 5) / 17 * 5 + 2) *
           video.width * video.height / 1024
-      case .audio: rows
+      case .audio, .timedAudio: rows
       }
     }
     let conditionAudioRows = mediaReferences.reduce(0) { rows, reference in
-      if case .audio(let audio) = reference {
+      switch reference {
+      case .audio(let audio), .timedAudio(let audio, _):
         return rows + 2 * ((audio.frames + 799) / 800)
+      default: break
       }
       if case .video(let video) = reference, let audio = video.audio {
         return rows + 2 * ((audio.frames + 799) / 800)
@@ -129,9 +132,11 @@ public enum H3Ref2VAStillRunner {
       throw H3CheckpointError.invalid("H3 reference packed rows exceed engine admission.")
     }
     _ = try H3QwenCheckpointLayout.inspect(root: request.qwenPages)
-    let vision = try H3QwenCheckpointLayout.inspect(root: request.qwenVision)
-    guard vision.visionFile != nil else {
-      throw H3CheckpointError.invalid("The H3 reference conditioner needs a vision tower.")
+    if !prepared.qwenRequest.visualRanges.isEmpty {
+      let vision = try H3QwenCheckpointLayout.inspect(root: request.qwenVision)
+      guard vision.visionFile != nil else {
+        throw H3CheckpointError.invalid("The H3 visual conditioner needs a vision tower.")
+      }
     }
     _ = try H3CheckpointLayout(url: request.transformer)
     _ = try H3VideoVAELayout(url: request.videoVAE)
@@ -179,6 +184,7 @@ public enum H3Ref2VAStillRunner {
     try Task.checkCancellation()
 
     let conditionVideoRows = try autoreleasepool { () throws -> [Float] in
+      guard !admission.layout.conditionVideoIndices.isEmpty else { return [] }
       let rows = try H3VideoReferencePreparation.encodeVideoRows(
         references: request.references, layout: admission.layout,
         videoVAEURL: request.videoVAE)

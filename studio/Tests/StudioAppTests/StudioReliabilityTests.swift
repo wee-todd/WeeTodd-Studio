@@ -181,6 +181,101 @@ final class StudioReliabilityTests: XCTestCase {
       .write(to: directory.appendingPathComponent("studio-qualification.json"), options: .atomic)
   }
 
+  @MainActor func testInstalledNativeH3A2VStudioLifecycle() async throws {
+    guard let manifest = ProcessInfo.processInfo.environment["WEETODD_NATIVE_H3_A2V_LIFECYCLE"] else {
+      throw XCTSkip("Opt-in installed H3 A2V Studio lifecycle")
+    }
+    let options = try JSONSerialization.jsonObject(
+      with: Data(contentsOf: URL(fileURLWithPath: manifest))) as! [String: String]
+    let source = URL(fileURLWithPath: try XCTUnwrap(options["recipe"]))
+    var model = try JSONSerialization.jsonObject(with: Data(contentsOf: source)) as! [String: Any]
+    let generation = model["config"] as! [String: Any]
+    let inputs = try XCTUnwrap((model["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]])
+    let driver = try XCTUnwrap(inputs.first { $0["role"] as? String == "audio_driver" })
+    let opening = inputs.first { $0["role"] as? String == "first" }
+    let root = URL(fileURLWithPath: try XCTUnwrap(options["output"]))
+    let profiles = root.appendingPathComponent("Profiles")
+    try FileManager.default.createDirectory(at: profiles, withIntermediateDirectories: true)
+    var conditioning = model["conditioning"] as! [String: Any]
+    conditioning["task"] = "ref2va"
+    conditioning["inputs"] = []
+    model["conditioning"] = conditioning
+    let profile = profiles.appendingPathComponent("a2v.json")
+    try JSONSerialization.data(withJSONObject: model, options: [.prettyPrinted, .sortedKeys])
+      .write(to: profile, options: .atomic)
+    let store = StudioStore(dataDirectory: root, restoreSession: false)
+    store.runtime = RuntimeSettings(root: "/unavailable", pythonPath: "/unavailable/python",
+      profilesDirectory: profiles.path)
+    store.runtime.nativeH3Enabled = true
+    store.runtime.h3WorkerPath = try XCTUnwrap(options["worker"])
+    store.runtime.ffmpegPath = try XCTUnwrap(model["ffmpeg"] as? String)
+    var clip = Clip(engine: .h3)
+    clip.profileID = profile.path
+    clip.prompt = try XCTUnwrap(model["prompt"] as? String)
+    clip.duration = try XCTUnwrap(generation["duration_seconds"] as? Double)
+    clip.generationWidth = try XCTUnwrap(generation["width"] as? Int)
+    clip.generationHeight = try XCTUnwrap(generation["height"] as? Int)
+    clip.seed = try XCTUnwrap(generation["seed"] as? Int)
+    clip.generationSelection = GenerationSelection(task: "a2v")
+    var audio = MediaAsset(name: "Speech driver", kind: .audio,
+      path: try XCTUnwrap(driver["path"] as? String))
+    let sourceStart = try XCTUnwrap(driver["source_start_seconds"] as? Double)
+    let sourceDuration = try XCTUnwrap(driver["source_duration_seconds"] as? Double)
+    audio.duration = sourceStart + sourceDuration
+    var attachment = Attachment(assetID: audio.id, role: .audioDriver)
+    attachment.audioSourceStart = sourceStart
+    attachment.audioSourceDuration = sourceDuration
+    clip.attachments = [attachment]
+    var assets = [audio]
+    if let opening {
+      let image = MediaAsset(name: "Opening image", kind: .image,
+        path: try XCTUnwrap(opening["path"] as? String))
+      assets.append(image)
+      clip.attachments.append(Attachment(assetID: image.id, role: .first))
+    }
+    store.project.clips = [clip]
+    store.project.assets = assets
+    store.selectedClipID = clip.id
+    await store.reloadProfiles()
+    XCTAssertEqual(store.profiles.count, 1)
+    await store.describeGeneration()
+    XCTAssertNil(store.validationErrors[clip.id])
+    await store.prepareSelected()
+    XCTAssertNil(store.error)
+    let prepared = URL(fileURLWithPath: try XCTUnwrap(store.preparedRecipe))
+    let preparedModel = try JSONSerialization.jsonObject(with: Data(contentsOf: prepared)) as! [String: Any]
+    let preparedConditioning = preparedModel["conditioning"] as! [String: Any]
+    XCTAssertEqual(preparedConditioning["task"] as? String, "a2v")
+    let preparedInputs = preparedConditioning["inputs"] as! [[String: Any]]
+    XCTAssertEqual(preparedInputs.count, inputs.count)
+    let preparedDriver = try XCTUnwrap(preparedInputs.first { $0["role"] as? String == "audio_driver" })
+    XCTAssertEqual(preparedDriver["path"] as? String, audio.path)
+    XCTAssertEqual(preparedDriver["source_start_seconds"] as? Double, sourceStart)
+    XCTAssertEqual(preparedDriver["source_duration_seconds"] as? Double, sourceDuration)
+    var previews = Set<Int>()
+    let observer = store.bridge.$livePreview.sink { if let revision = $0?.previewRevision { previews.insert(revision) } }
+    defer { observer.cancel() }
+    await store.renderPrepared()
+    XCTAssertNil(store.error, store.bridge.log)
+    XCTAssertGreaterThan(previews.count, 0)
+    let version = try XCTUnwrap(store.selectedClip?.versions.last)
+    XCTAssertEqual(store.selectedClip?.sourcePath, version.path)
+    let movie = try await StudioStore.inspectNativeMovie(version.path)
+    XCTAssertEqual(movie["width"] as? Int, clip.generationWidth)
+    XCTAssertEqual(movie["height"] as? Int, clip.generationHeight)
+    let saved = root.appendingPathComponent("accepted.weetodd")
+    try ProjectStorage.write(store.project, to: saved)
+    let reopened = StudioStore(dataDirectory: root, restoreSession: false)
+    reopened.load(saved)
+    XCTAssertEqual(reopened.selectedClip?.sourcePath, version.path)
+    XCTAssertEqual(reopened.selectedClip?.versions.last?.path, version.path)
+    let evidence: [String: Any] = ["video": version.path, "preparedRecipe": prepared.path,
+      "decodedPreviewCount": previews.count, "pythonPath": store.runtime.pythonPath,
+      "duration": movie["duration"] as? Double ?? 0]
+    try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
+      .write(to: root.appendingPathComponent("a2v-studio-qualification.json"), options: .atomic)
+  }
+
   @MainActor func testInstalledNativeH3FL2VAStudioLifecycle() async throws {
     guard let manifest = ProcessInfo.processInfo.environment["WEETODD_NATIVE_H3_FL2VA_LIFECYCLE"] else {
       throw XCTSkip("Opt-in installed H3 FL2VA generation")

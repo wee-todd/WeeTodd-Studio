@@ -136,6 +136,8 @@ import UniformTypeIdentifiers
     try envelope.validateRecipe(recipeData)
     let recipe = try JSONSerialization.jsonObject(with: recipeData) as! [String: Any]
     let selectedTask = (recipe["components"] as? [String: Any])?["task"] as? String ?? "t2va"
+    let conditioningTask = (recipe["conditioning"] as? [String: Any])?["task"] as? String ?? "t2v"
+    let reportedTask = conditioningTask == "a2v" ? "a2v" : selectedTask
     let configuredFFmpeg = envelope.ffmpegPath ?? recipe["ffmpeg"] as? String ?? ""
     guard configuredFFmpeg.hasPrefix("/"),
       FileManager.default.isExecutableFile(atPath: configuredFFmpeg) else {
@@ -145,7 +147,39 @@ import UniformTypeIdentifiers
     let stillRequest: H3Ref2VAStillRequest?
     let endpointRequest: H3FL2VARequest?
     let textRequest: H3T2VARequest?
-    if selectedTask == "ref2va" {
+    if selectedTask == "ref2va" && conditioningTask == "a2v" {
+      stillRequest = try H3StudioRecipe.compileA2V(data: recipeData) {
+        path, expectedSHA256, start, duration in
+        let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
+        try source.verify()
+        if duration == 0 {
+          let loaded = try H3StillReferenceMedia.load(path: path)
+          guard loaded.sourceSHA256 == expectedSHA256 else {
+            throw invalid("An H3 A2V opening image changed after preparation.")
+          }
+          sourceImages.append(["path": path, "sha256": expectedSHA256,
+            "kind": "image", "anchor": 0])
+          return .image(loaded.reference)
+        }
+        let audio = try H3AudioReferenceMedia.load(path: path,
+          ffmpeg: URL(fileURLWithPath: configuredFFmpeg),
+          startSeconds: start, durationSeconds: duration)
+        try source.verify()
+        sourceImages.append(["path": path, "sha256": expectedSHA256,
+          "kind": "audio_driver", "sourceStartSeconds": start,
+          "sourceDurationSeconds": duration, "preparedSamples": audio.frames,
+          "sampleRate": 32_000])
+        return .audio(audio)
+      }
+      let inputs = ((recipe["conditioning"] as? [String: Any])?["inputs"]
+        as? [[String: Any]]) ?? []
+      guard inputs.map({ $0["sha256"] as? String }) ==
+        sourceImages.map({ $0["sha256"] as? String }) else {
+        throw invalid("An H3 A2V source changed after preparation.")
+      }
+      endpointRequest = nil
+      textRequest = nil
+    } else if selectedTask == "ref2va" {
       stillRequest = try H3StudioRecipe.compileMediaReferences(data: recipeData) {
         path, kind, expectedSHA256 in
         let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
@@ -227,7 +261,7 @@ import UniformTypeIdentifiers
     if arguments[0] == "preflight" {
       try emit(["status": "success", "result": [
         "nativeRuntime": "swift-mlx", "jobID": envelope.jobID.uuidString,
-        "task": selectedTask, "frames": admission.geometry.frames, "fps": 24,
+        "task": reportedTask, "frames": admission.geometry.frames, "fps": 24,
         "packedRows": admission.packedRows,
         "evaluations": admission.evaluations,
         "referenceImages": sourceImages,
@@ -358,7 +392,7 @@ import UniformTypeIdentifiers
     let metadata: [String: Any] = ["status": "complete",
       "nativeRuntime": "swift-mlx", "productionQualified": false,
       "jobID": envelope.jobID.uuidString,
-      "task": selectedTask, "referenceImages": sourceImages,
+      "task": reportedTask, "referenceImages": sourceImages,
       "stageTimings": stageTimings,
       "frames": result.videoFrames, "fps": 24,
       "audioSamplesPerChannel": result.audioSamplesPerChannel,

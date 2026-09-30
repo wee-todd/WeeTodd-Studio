@@ -21,6 +21,27 @@ final class H3VideoReferencePreparationTests: XCTestCase {
       "Untimed sound needs a visual reference")
   }
 
+  func testTimedAudioDriverCanBeTheOnlyReference() throws {
+    let sound = H3AudioReference(samples: [Float](repeating: 0,
+      count: 2 * 80_000), frames: 80_000)
+    let references: [H3Ref2VAReference] = [.timedAudio(sound, frame: 0)]
+    try H3VideoReferencePreparation.validate(references)
+    let tokenizer = ProcessInfo.processInfo.environment["WEETODD_H3_QWEN_TOKENIZER"]
+    guard let tokenizer else { throw XCTSkip("Set an installed H3 tokenizer.") }
+    let geometry = try H3Geometry(width: 64, height: 64,
+      durationSeconds: 2.5)
+    let prepared = try H3VideoReferencePreparation.prepare(prompt: "A person speaks.",
+      geometry: geometry, references: references,
+      tokenizerURL: URL(fileURLWithPath: tokenizer))
+    XCTAssertTrue(prepared.qwenRequest.visualRanges.isEmpty)
+    XCTAssertEqual(prepared.layout.conditionVideoIndices.count, 0)
+    XCTAssertEqual(prepared.layout.conditionAudioIndices.count, 200)
+    let rows = try H3VideoReferencePreparation.encodeVideoRows(
+      references: references, layout: prepared.layout,
+      videoVAEURL: URL(fileURLWithPath: "/not-loaded-for-audio-only"))
+    XCTAssertEqual(rows.shape, [1, 0, 96])
+  }
+
   func testInstalledImageAndAudioReferencePreservesOrderedRows() throws {
     let environment = ProcessInfo.processInfo.environment
     guard let tokenizer = environment["WEETODD_H3_QWEN_TOKENIZER"],

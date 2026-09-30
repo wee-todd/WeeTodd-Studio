@@ -154,6 +154,67 @@ final class H3StudioRecipeTests: XCTestCase {
     XCTAssertEqual(seen.count, 3, "Audio-only must fail before media loading")
   }
 
+  func testA2VRecipePlacesDriverAtTargetStartAndRetainsSourceInterval() throws {
+    var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
+    var components = root["components"] as! [String: Any]
+    components["task"] = "ref2va"
+    components["vision_encoder"] = "/tmp/qwen-vision.safetensors"
+    root["components"] = components
+    let digest = String(repeating: "a", count: 64)
+    let driver: [String: Any] = ["id": "voice", "kind": "audio",
+      "role": "audio_driver", "path": "/tmp/voice.wav", "sha256": digest,
+      "strength": 1.0, "source_start_seconds": 2.0,
+      "source_duration_seconds": 2.5]
+    root["conditioning"] = ["version": 1, "task": "a2v",
+      "audio_policy": "generated", "inputs": [driver]]
+    var loaded: [(String, Double, Double)] = []
+    func compile(_ object: [String: Any]) throws -> H3Ref2VAStillRequest {
+      try H3StudioRecipe.compileA2V(data: JSONSerialization.data(withJSONObject: object)) {
+        path, _, start, duration in
+        loaded.append((path, start, duration))
+        return .audio(H3AudioReference(samples: [Float](repeating: 0,
+          count: 2 * 80_000), frames: 80_000))
+      }
+    }
+    let audioOnly = try compile(root)
+    XCTAssertEqual(loaded.map(\.0), ["/tmp/voice.wav"])
+    XCTAssertEqual(loaded[0].1, 2)
+    XCTAssertEqual(loaded[0].2, 2.5)
+    if case .timedAudio(_, let frame) = audioOnly.references[0] {
+      XCTAssertEqual(frame, 0)
+    } else { XCTFail("Expected timed audio") }
+    var withImage = root
+    var withImageConditioning = withImage["conditioning"] as! [String: Any]
+    var withImageInputs = withImageConditioning["inputs"] as! [[String: Any]]
+    withImageInputs.insert(["id": "first", "kind": "image", "role": "keyframe",
+      "path": "/tmp/first.png", "sha256": digest, "strength": 1.0,
+      "frame_index": 0], at: 0)
+    withImageConditioning["inputs"] = withImageInputs
+    withImage["conditioning"] = withImageConditioning
+    let imageAndSound = try H3StudioRecipe.compileA2V(
+      data: JSONSerialization.data(withJSONObject: withImage)) {
+        path, _, _, _ in
+        if path.hasSuffix(".png") {
+          return .image(H3StillReference(rgb8: Data(count: 64 * 64 * 3),
+            width: 64, height: 64))
+        }
+        return .audio(H3AudioReference(samples: [Float](repeating: 0,
+          count: 2 * 80_000), frames: 80_000))
+      }
+    XCTAssertEqual(imageAndSound.references.count, 2)
+    if case .timedImage(_, let frame) = imageAndSound.references[0] {
+      XCTAssertEqual(frame, 0)
+    } else { XCTFail("Expected timed opening image first") }
+    var invalid = root
+    var conditioning = invalid["conditioning"] as! [String: Any]
+    var inputs = conditioning["inputs"] as! [[String: Any]]
+    inputs[0]["strength"] = 0.5
+    conditioning["inputs"] = inputs
+    invalid["conditioning"] = conditioning
+    XCTAssertThrowsError(try compile(invalid))
+    XCTAssertEqual(loaded.count, 1, "Malformed drivers fail before media loading")
+  }
+
   func testFL2VARecipeKeepsOrderedEndpointRolesAndRejectsUnportedInputs() throws {
     var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
     var components = try XCTUnwrap(root["components"] as? [String: Any])

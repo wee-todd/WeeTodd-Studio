@@ -35,6 +35,8 @@ public enum H3Ref2VAReference: Sendable {
   case image(H3StillReference)
   case video(H3VideoReference)
   case audio(H3AudioReference)
+  case timedImage(H3StillReference, frame: Int)
+  case timedAudio(H3AudioReference, frame: Int)
 }
 
 /// Stages ordered visual and sound references without co-resident Qwen,
@@ -59,21 +61,26 @@ public enum H3VideoReferencePreparation {
     guard (1...12).contains(references.count) else {
       throw H3CheckpointError.invalid("H3 Ref2VA needs one to twelve ordered references.")
     }
-    let images = references.filter { if case .image = $0 { true } else { false } }.count
+    let images = references.filter {
+      switch $0 { case .image, .timedImage: true; default: false }
+    }.count
     let videos = references.filter { if case .video = $0 { true } else { false } }.count
     let audios = references.filter {
       switch $0 {
-      case .audio: true
+      case .audio, .timedAudio: true
       case .video(let video): video.audio != nil
-      case .image: false
+      case .image, .timedImage: false
       }
     }.count
-    guard images + videos > 0, images <= 9, videos <= 3, audios <= 3 else {
-      throw H3CheckpointError.invalid("H3 Ref2VA needs a visual reference and allows at most nine images, three videos and three audio sources.")
+    guard (images + videos > 0 || references.allSatisfy({
+      if case .timedAudio = $0 { return true }
+      return false
+    })), images <= 9, videos <= 3, audios <= 3 else {
+      throw H3CheckpointError.invalid("H3 Ref2VA needs a visual reference or timed audio, with at most nine images, three videos and three audio sources.")
     }
     for reference in references {
       switch reference {
-      case .image(let image):
+      case .image(let image), .timedImage(let image, _):
         guard (64...256).contains(image.width), (64...256).contains(image.height),
           image.width.isMultiple(of: 32), image.height.isMultiple(of: 32),
           image.rgb8.count == image.width * image.height * 3 else {
@@ -92,7 +99,7 @@ public enum H3VideoReferencePreparation {
             throw H3CheckpointError.invalid("H3 movie soundtrack needs at most 15 seconds of finite 32 kHz stereo PCM.")
           }
         }
-      case .audio(let audio):
+      case .audio(let audio), .timedAudio(let audio, _):
         guard validAudio(audio) else {
           throw H3CheckpointError.invalid("H3 reference audio needs at most 15 seconds of finite 32 kHz stereo PCM.")
         }
@@ -110,14 +117,17 @@ public enum H3VideoReferencePreparation {
     for reference in references {
       try Task.checkCancellation()
       switch reference {
-      case .image(let image):
+      case .image(let image), .timedImage(let image, _):
         let packed = try H3QwenImageProcessor.packRGB8(image: image.rgb8,
           width: image.width, height: image.height)
         pixels.append(packed.pixels)
         grids.append(packed.grid)
         qwenReferences.append(.image(grid: packed.grid))
+        let frame: Int?
+        if case .timedImage(_, let target) = reference { frame = target }
+        else { frame = nil }
         specs.append(.image(latentHeight: image.height / 16,
-          latentWidth: image.width / 16))
+          latentWidth: image.width / 16, targetFrame: frame))
       case .video(let video):
         let frameBytes = video.width * video.height * 3
         let indices = Array(stride(from: 0, to: video.frameCount, by: 12))
@@ -142,9 +152,13 @@ public enum H3VideoReferencePreparation {
           latentWidth: video.width / 16,
           audioLatents: video.audio.map { ($0.frames + 799) / 800 } ?? 0,
           sourceLatentFrames: latentFrames))
-      case .audio(let audio):
+      case .audio(let audio), .timedAudio(let audio, _):
         qwenReferences.append(.audio)
-        specs.append(.audio(latents: (audio.frames + 799) / 800))
+        let frame: Int?
+        if case .timedAudio(_, let target) = reference { frame = target }
+        else { frame = nil }
+        specs.append(.audio(latents: (audio.frames + 799) / 800,
+          targetFrame: frame))
       }
     }
     let tokenizer = try H3QwenTokenizer(url: tokenizerURL)
@@ -152,7 +166,8 @@ public enum H3VideoReferencePreparation {
       references: qwenReferences, tokenizer: tokenizer)
     let layout = try H3ReferenceLayout(geometry: geometry,
       textTags: request.tags, references: specs)
-    let joined = concatenated(pixels, axis: 0).asType(.bfloat16)
+    let joined = pixels.isEmpty ? MLXArray([Float](), [0, 1536]).asType(.bfloat16)
+      : concatenated(pixels, axis: 0).asType(.bfloat16)
     eval(joined)
     return Prepared(qwenRequest: request, qwenGrids: grids,
       qwenReferences: qwenReferences, qwenPixels: joined, layout: layout)
@@ -160,13 +175,21 @@ public enum H3VideoReferencePreparation {
 
   public static func encodeVideoRows(references: [H3Ref2VAReference],
     layout: H3ReferenceLayout, videoVAEURL: URL) throws -> MLXArray {
+    if layout.conditionVideoIndices.isEmpty {
+      guard references.allSatisfy({
+        switch $0 { case .audio, .timedAudio: true; default: false }
+      }) else {
+        throw H3CheckpointError.invalid("H3 visual references need video condition rows.")
+      }
+      return MLXArray([Float](), [1, 0, 96])
+    }
     let metadata = try H3VideoVAELayout(url: videoVAEURL)
     var pieces: [MLXArray] = []
     for reference in references {
       try Task.checkCancellation()
       let latent: MLXArray
       switch reference {
-      case .image(let image):
+      case .image(let image), .timedImage(let image, _):
         latent = try H3VideoVAEEncoder.encodeStill(
           checkpointURL: videoVAEURL, rgb8: Array(image.rgb8),
           width: image.width, height: image.height)
@@ -174,7 +197,7 @@ public enum H3VideoReferencePreparation {
         latent = try H3VideoVAEEncoder.encodeVideo(
           checkpointURL: videoVAEURL, rgb8: Array(video.rgb8),
           frameCount: video.frameCount, width: video.width, height: video.height)
-      case .audio:
+      case .audio, .timedAudio:
         continue
       }
       let rows = try H3LatentCodec.videoEncoderRows(latents: latent,
@@ -184,7 +207,8 @@ public enum H3VideoReferencePreparation {
       eval(rows)
       Memory.clearCache()
     }
-    let joined = concatenated(pieces, axis: 1)
+    let joined = pieces.isEmpty ? MLXArray([Float](), [1, 0, 96])
+      : concatenated(pieces, axis: 1)
     guard joined.shape == [1, layout.conditionVideoIndices.count, 96] else {
       throw H3CheckpointError.invalid("H3 reference video rows changed admitted geometry.")
     }
@@ -200,11 +224,11 @@ public enum H3VideoReferencePreparation {
       try Task.checkCancellation()
       let audio: H3AudioReference
       switch reference {
-      case .audio(let value): audio = value
+      case .audio(let value), .timedAudio(let value, _): audio = value
       case .video(let video):
         guard let value = video.audio else { continue }
         audio = value
-      case .image: continue
+      case .image, .timedImage: continue
       }
       let waveform = MLXArray(audio.samples, [2, audio.frames, 1])
       let latent = try H3AudioVAEEncoder.encode(checkpointURL: audioVAEURL,
