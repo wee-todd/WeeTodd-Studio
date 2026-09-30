@@ -1134,12 +1134,15 @@ small synthetic header fixtures; these checks do not qualify LoRA visual quality
 AdaLN targets need that grid; the validator reports missing or incompatible auxiliary data before
 weighted work. The experimental Swift H3 route accepts up to four distinct ordered compatible
 ComfyUI-format adapters with independent strengths, including sparse projection sets and variable
-ranks. Other LoRA layouts, including AdaLN, remain on the existing route. Unsupported reference/control tasks,
+ranks. Installed converted Lightx FL2V four-step adapters with baked scaling pass
+header and projection checks. The full-rank adapter completed one signed-app audiovisual
+render; resized-rank output and broader quality remain unqualified. Other LoRA layouts,
+including AdaLN, remain on the existing route. Unsupported reference/control tasks,
 conflicting acceleration recipes, explicitly incompatible step metadata and invalid layouts are
 rejected. Existing custom recipes containing their own Turbo stack retain their saved schedule.
 
-Header checks and regression tests verify parameter transport and compatibility checks. Only the
-single installed Turbo adapter has a real Swift render check; multi-adapter visual quality, timing,
+Header checks and regression tests verify parameter transport and compatibility checks. Installed
+explicit-alpha and baked-scale Turbo adapters each have a real Swift render check; multi-adapter visual quality, timing,
 memory fit, and motion-continuation quality remain unqualified.
 
 ### Clip continuity in Studio
@@ -1198,7 +1201,8 @@ with compatible ordinary LoRAs and one opening image on the first shot. Select
 text-to-video. It preflights the whole group and produces the same grouped review ranges.
 Studio currently uses one full video decode for that scene. The separate experimental
 bounded-window decoder is available only through an explicit headless scene recipe;
-long-scene visual quality and Studio acceptance of that output are not yet qualified.
+one signed-worker 30-second scene rendered with no visible cut in inspected decoder-join
+contact frames. Broader long-scene quality and Studio acceptance remain unqualified.
 Select the Python renderer for later scene image anchors, audio drivers, specialized
 controls or checkpoint-resume behavior. Those options remain available in Studio.
 

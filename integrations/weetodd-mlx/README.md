@@ -71,7 +71,7 @@ routes while native coverage qualifies.
   scene decoder before loading weights; Studio reviews and accepts one movie with per-shot ranges.
   A 384 × 256, four-second recipe passed direct Swift and saved ComfyUI recipe-node runs with
   96 published frames and four seconds of stereo audio. A six-shot, 30-second, 768 × 448
-  recipe passed installed-checkpoint preflight only. A separate four-second first-image
+  recipe passed installed-checkpoint preflight. A separate four-second first-image
   scene passed a signed-worker render with 96 frames and four seconds of stereo audio;
   its first frame measured 33.34 dB PSNR against the supplied image. Later scene images,
   audio drivers, checkpoint resume and specialized controls are not yet supported by this
@@ -84,9 +84,13 @@ routes while native coverage qualifies.
   four-second 384 × 256 first-image recipe, the same debug worker took 68.57/71.36 seconds
   for single/windowed total execution, with 3.78/3.46 GB peak Swift-process footprint
   and 1.66/4.15 seconds of video decode. Audio WAVs matched byte for byte; the videos
-  measured 40.60 dB median frame PSNR. A 30-second 768 × 448 recipe passed preflight
-  only: estimated decoder activation fell from 18.25 to 10.28 GB using three windows.
-  Neither number is a measured long-scene peak, and long-scene quality is unqualified.
+  measured 40.60 dB median frame PSNR. A signed-worker six-shot, 30-second 768 × 448
+  render published 720 frames and 30 seconds of stereo audio in 552.72 seconds. Its
+  Swift process peaked at 10.84 GB (external FFmpeg excluded), and video decoding took
+  27.46 seconds. Preflight estimated 18.25 GB of decoder activation for one decode
+  versus 10.28 GB across three windows; those estimates are not process peaks.
+  Inspected contact frames showed no visible cut at either decode-window join. Broader
+  long-scene quality and low-memory-hardware behavior remain unqualified.
 - A 128 MiB cache target during stack execution, with explicit trimming at block boundaries
   if MLX overshoots its advisory limit. This is not a hard peak-process-memory limit.
 - Header/shape/packed-storage admission and conservative activation admission, including

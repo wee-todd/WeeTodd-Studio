@@ -72,6 +72,10 @@ enum H3LoRAProjection {
 /// headers. Declared projections are mapped only while their block executes,
 /// preserving H3's staged weight residency.
 final class H3LoRAFile: H3LoRAApplying {
+  private enum ScaleLayout {
+    case perTargetAlpha
+    case bakedIntoB
+  }
   let url: URL
   let strength: Float
   let targetCount: Int
@@ -83,10 +87,20 @@ final class H3LoRAFile: H3LoRAApplying {
       throw H3CheckpointError.invalid("Invalid H3 LoRA path or strength.")
     }
     let file = try SafeTensorFile(url: url)
-    guard file.metadata["target_format"] == "ComfyUI generic LoRA",
-      file.metadata["qkv_fusion"]?.contains("block diagonal B") == true else {
+    let explicitAlpha = file.metadata["target_format"] == "ComfyUI generic LoRA"
+      && file.metadata["qkv_fusion"]?.contains("block diagonal B") == true
+    let conversion = file.metadata["conversion"] ?? ""
+    let bakedScale = file.metadata["converted_layout"] == "comfyui_minimax_h3"
+      && file.metadata["format"] == "pt"
+      && file.metadata["floating_dtype"] == "bfloat16"
+      && file.metadata["baked_scale"] == "0.125"
+      && conversion.contains("mlp.fc1 swiglu halves swapped")
+      && (conversion.contains("qkv fused contiguous q|k|v (block-diagonal")
+        || conversion.contains("qkv block-diag fused (per-projection ranks)"))
+    guard explicitAlpha != bakedScale else {
       throw H3CheckpointError.invalid("H3 LoRA metadata or QKV layout is unsupported.")
     }
+    let layout: ScaleLayout = explicitAlpha ? .perTargetAlpha : .bakedIntoB
     var supported: [String: (rows: Int, columns: Int)] = [:]
     for group in 0..<52 {
       let prefix = group < 50
@@ -114,20 +128,34 @@ final class H3LoRAFile: H3LoRAApplying {
         let bName = target + ".lora_B.weight"
         let alphaName = target + ".alpha"
         guard let b = file.tensors[bName], b.dtype == "BF16",
-          b.shape == [UInt64(dimensions.rows), rankValue],
-          let alphaDescriptor = file.tensors[alphaName],
-          alphaDescriptor.dtype == "F32", alphaDescriptor.shape.isEmpty else {
+          b.shape == [UInt64(dimensions.rows), rankValue] else {
           throw H3CheckpointError.invalid("Incomplete H3 LoRA target: \(target)")
         }
-        let alpha = try file.withTensorBytes(named: alphaName) {
-          $0.loadUnaligned(as: Float.self)
+        let alpha: Float
+        switch layout {
+        case .perTargetAlpha:
+          guard let descriptor = file.tensors[alphaName],
+            descriptor.dtype == "F32", descriptor.shape.isEmpty else {
+            throw H3CheckpointError.invalid("Incomplete H3 LoRA target: \(target)")
+          }
+          alpha = try file.withTensorBytes(named: alphaName) {
+            $0.loadUnaligned(as: Float.self)
+          }
+        case .bakedIntoB:
+          guard file.tensors[alphaName] == nil else {
+            throw H3CheckpointError.invalid("Baked-scale H3 LoRA must not add a second alpha: \(target)")
+          }
+          // The installed conversion already multiplied B by its training
+          // scale. alpha == rank makes activation-space application exactly B@A.
+          alpha = Float(rank)
         }
         guard alpha.isFinite, alpha >= 0 else {
           throw H3CheckpointError.invalid("Invalid H3 LoRA alpha: \(target)")
         }
         targets[target] = (rank, alpha)
     }
-    guard !targets.isEmpty, file.tensors.count == targets.count * 3 else {
+    let tensorsPerTarget = layout == .perTargetAlpha ? 3 : 2
+    guard !targets.isEmpty, file.tensors.count == targets.count * tensorsPerTarget else {
       throw H3CheckpointError.invalid("H3 LoRA contains unsupported extra targets.")
     }
     self.url = url

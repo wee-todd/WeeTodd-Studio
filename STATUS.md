@@ -22,7 +22,8 @@ publishing 96 frames and four seconds of stereo audio with matching scene ranges
 six-shot, 30-second recipe at 768 × 448 passed installed-checkpoint preflight: the
 full-scene video decode needs 18.25 GB of admitted activation space and the largest
 window transformer needs 5.47 GB, below this Mac's 34.36 GB ceiling. That longer
-scene was not generated and its peak process memory is unknown.
+scene had not yet been generated at that checkpoint. The later bounded-window
+render and its measured process peak are reported below.
 A signed-app worker render with an opening image completed the same four-second scene
 in 64.98 worker seconds with a 3.71 GB peak Swift process footprint. It published 96 frames
 and four seconds of stereo audio. The first delivered frame measured 33.34 dB PSNR
@@ -41,9 +42,15 @@ video decode 1.66/4.15 seconds, and peak Swift-process footprint 3.78/3.46 GB
 (external FFmpeg excluded). Both published 96 frames and four seconds of audio;
 their WAV files were byte-identical, and framewise video comparison measured
 40.60 dB median PSNR, with no obvious cut in inspected join frames. A 30-second,
-six-shot 768 × 448 recipe passed preflight only: one decode admitted 18.25 GB of
+six-shot 768 × 448 recipe passed preflight: one decode admitted 18.25 GB of
 estimated video activation versus 10.28 GB across three bounded windows. That
-estimate is not measured peak process memory. Long-scene output quality, runtime,
+estimate is not measured peak process memory. The signed worker then rendered that
+30-second, six-shot windowed recipe in 552.72 seconds, publishing 720 frames at
+24 fps and exactly 30 seconds of stereo audio. The Swift process peaked at 10.84 GB
+(external FFmpeg excluded); video decode took 27.46 seconds. Inspected frames retained
+the red robot and workshop across all five shot joins. Both decode-window joins had
+below-median downscaled frame-to-frame change and no visible cut in the contact frames.
+This is one recipe, not broad long-scene quality, memory or speed qualification;
 Studio review/acceptance of windowed results and low-memory hardware remain open.
 
 Swift native audiovisual qualification 2026-09-29: a Qwen3-TTS-driven LTX 2.5 A2V take
@@ -126,6 +133,21 @@ checkpoint-general quality remain experimental. LTX image/audio continuous scene
 conditioning, H3 audio/video-reference quality, broader video Ref2VA qualification,
 real multi-adapter H3 quality and unsupported LoRA layouts, and complete
 Python-free Studio distribution remain open.
+
+Swift H3 now also validates the installed projection-only Lightx FL2V four-step
+LoRA conversion whose 0.125 training scale is already baked into its B matrices.
+It requires the exact conversion metadata and complete A/B pairs, then applies
+the baked weights without a second alpha/rank scale. A synthetic numerical test,
+a mixed explicit-alpha/baked adapter-stack test, and real-header/projection checks
+passed for both installed full-rank and resized-rank FL2V files. The separately
+installed user-linked Ref2VA Turbo LoRA retains its existing explicit-alpha route
+and passed its installed-file check. A signed-app Swift-worker T2VA render with the
+full-rank Lightx FL2V adapter at strength 1 completed in 526.35 seconds at 768 × 448,
+124 frames and 32 kHz stereo audio. The Swift process peaked at 6.12 GB with external
+FFmpeg excluded, and model state unloaded afterward. Five inspected frames showed a
+coherent red robot and arm wave; measured audio mean was -36.8 dBFS. Sound quality,
+the resized-rank adapter's full output, multi-adapter output and matched speed/memory
+remain unqualified.
 
 H3 INT8 finetunes 2026-09-22 (experimental): standard H3 model setup and shared sampling now
 accept supported Comfy `int8_tensorwise` transformer files directly, including Singularity Ref2VA

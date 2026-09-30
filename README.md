@@ -92,7 +92,9 @@ Settings exposes the Swift/Python choice; unsupported native controls fail prefl
 silent fallback.
 Studio scenes use a single video decode by default. The shared worker also has an explicit
 experimental bounded-window decode setting for headless scenes; a matched short render
-reduced peak process memory at a small time cost, while long-scene output remains unqualified.
+reduced peak process memory at a small time cost. One signed-worker 30-second, six-shot
+render published 720 frames and stereo audio at a 10.84 GB Swift-process peak;
+broader quality and low-memory-hardware behavior remain experimental.
 See the [Swift MLX integration notes](integrations/weetodd-mlx/README.md).
 Sampling progress, bounded decoded-frame previews, cancellation and immutable take publication
 use the existing Studio job lifecycle. Previews start during video decoding, not denoising.
@@ -148,7 +150,10 @@ and ordered image/video/audio Ref2VA through the installed Qwen, H3 transformer 
 video/audio VAE components. Studio has a guarded, off-by-default Swift preparation and worker
 handoff for these tasks. It admits up to four distinct, ordered ComfyUI-format H3 LoRAs with
 independent strengths and supported projection/QKV layouts; sparse target sets and variable
-ranks are accepted. Only the installed Turbo adapter has a real Swift render qualification.
+ranks are accepted. Installed converted Lightx FL2V four-step LoRAs with baked scaling
+pass header and projection checks; the full-rank adapter also completed one signed-app
+Swift audiovisual render. Its resized-rank variant and multi-adapter visual quality
+remain unqualified.
 It admits up to nine images,
 three movies and three audio-bearing references for Ref2VA, and rejects unsupported media,
 unsupported adapter layouts, controls and profiles before model loading.

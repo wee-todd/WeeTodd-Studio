@@ -38,6 +38,86 @@ final class H3LoRATests: XCTestCase {
     return url
   }
 
+  private func makeBakedScaleAdapter() throws -> URL {
+    let target = "diffusion_model.blocks.0.mlp.fc2"
+    var down = [UInt16](repeating: 0, count: 14336)
+    var up = [UInt16](repeating: 0, count: 5376)
+    down[0] = 0x3f80
+    up[0] = 0x3e00 // 0.125 is already baked into the up projection.
+    let downBytes = down.withUnsafeBytes { Data($0) }
+    let upBytes = up.withUnsafeBytes { Data($0) }
+    var payload = downBytes
+    payload.append(upBytes)
+    let header: [String: Any] = [
+      "__metadata__": ["format": "pt", "floating_dtype": "bfloat16",
+        "converted_layout": "comfyui_minimax_h3", "baked_scale": "0.125",
+        "conversion": "qkv fused contiguous q|k|v (block-diagonal, rank 3x); mlp.fc1 swiglu halves swapped; peft alpha/r=0.125 baked into lora_B"],
+      target + ".lora_A.weight": ["dtype": "BF16", "shape": [1, 14336],
+        "data_offsets": [0, downBytes.count]],
+      target + ".lora_B.weight": ["dtype": "BF16", "shape": [5376, 1],
+        "data_offsets": [downBytes.count, payload.count]]]
+    let headerData = try JSONSerialization.data(withJSONObject: header)
+    var headerLength = UInt64(headerData.count).littleEndian
+    var data = withUnsafeBytes(of: &headerLength) { Data($0) }
+    data.append(headerData)
+    data.append(payload)
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString + ".safetensors")
+    try data.write(to: url)
+    return url
+  }
+
+  func testBakedScaleAdapterDoesNotApplyAlphaOverRankAgain() throws {
+    let target = "diffusion_model.blocks.0.mlp.fc2"
+    let url = try makeBakedScaleAdapter()
+    defer { try? FileManager.default.removeItem(at: url) }
+    let adapter = try H3LoRAFile(url: url, strength: 1)
+    XCTAssertEqual(adapter.targetCount, 1)
+    var source = [Float](repeating: 0, count: 14336)
+    source[0] = 2
+    let input = MLXArray(source, [1, 1, 14336])
+    let base = MLXArray.ones([1, 1, 5376], dtype: .float32)
+    let result = try adapter.apply(base: base, input: input, target: target)
+    XCTAssertEqual(result[0, 0, 0].item(Float.self), 1.25)
+    XCTAssertEqual(result[0, 0, 1].item(Float.self), 1)
+  }
+
+  func testMixedExplicitAndBakedScaleStackPreservesOrderAndStrength() throws {
+    let ordinary = try makeSparseAdapter()
+    let baked = try makeBakedScaleAdapter()
+    defer {
+      try? FileManager.default.removeItem(at: ordinary)
+      try? FileManager.default.removeItem(at: baked)
+    }
+    let stack = try H3LoRAStack(adapters: [
+      H3LoRAAdapter(url: ordinary, strength: 1),
+      H3LoRAAdapter(url: baked, strength: 0.5),
+    ])
+    var source = [Float](repeating: 0, count: 14336)
+    source[0] = 2
+    let input = MLXArray(source, [1, 1, 14336])
+    let base = MLXArray.ones([1, 1, 5376], dtype: .float32)
+    let result = try stack.apply(base: base, input: input,
+      target: "diffusion_model.blocks.0.mlp.fc2")
+    XCTAssertEqual(result[0, 0, 0].item(Float.self), 3.125)
+    XCTAssertEqual(result[0, 0, 1].item(Float.self), 1)
+  }
+
+  func testInstalledBakedLightxAdapterHasCompleteSupportedLayout() throws {
+    guard let path = ProcessInfo.processInfo.environment["WEETODD_H3_LIGHTX_BAKED_LORA"],
+      FileManager.default.isReadableFile(atPath: path) else {
+      throw XCTSkip("Set WEETODD_H3_LIGHTX_BAKED_LORA to the installed baked-scale adapter.")
+    }
+    let adapter = try H3LoRAFile(url: URL(fileURLWithPath: path), strength: 1)
+    XCTAssertEqual(adapter.targetCount, 208)
+    let input = MLXArray.ones([1, 4, 5376], dtype: .bfloat16)
+    let base = MLXArray.zeros([1, 4, 21504], dtype: .bfloat16)
+    let output = try adapter.apply(base: base, input: input,
+      target: "diffusion_model.blocks.0.attn.qkv_proj", reorderQKV: true)
+    XCTAssertEqual(output.shape, [1, 4, 21504])
+    XCTAssertTrue(output[0, 0, 0].item(Float.self).isFinite)
+  }
+
   func testSparseRankOneAdapterUpdatesOnlyItsDeclaredProjection() throws {
     let target = "diffusion_model.blocks.0.mlp.fc2"
     let url = try makeSparseAdapter()
