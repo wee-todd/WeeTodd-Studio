@@ -12,8 +12,11 @@ public final class MLXTwoStageTrajectory {
   public init() {}
 
   public func evaluate(recipe:DistilledTwoStageRecipe,noisePolicy:MLXNoisePolicy = .native,
-    frozenAudio:MLXArray?=nil,sample:Sample,upscale:Upscale) throws -> [String:MLXArray] {
+    frozenAudio:MLXArray?=nil,
+    stageOneVideoObserver:((MLXArray) throws -> Void)?=nil,
+    sample:Sample,upscale:Upscale) throws -> [String:MLXArray] {
     try evaluateInternal(recipe:recipe,noisePolicy:noisePolicy,frozenAudio:frozenAudio,guideTokens:nil,
+      stageOneVideoObserver:stageOneVideoObserver,
       sample:{ stage,g,state,_,schedule,noise in try sample(stage,g,state,schedule,noise) },upscale:upscale)
   }
 
@@ -21,14 +24,17 @@ public final class MLXTwoStageTrajectory {
   /// tensor. Threefry results are shape-dependent, so separate draws would
   /// silently change the target sequence for the same seed.
   public func evaluateWithGuides(recipe:DistilledTwoStageRecipe,videoGuideFrames:Int,
-    audioGuideTokens:Int,sample:GuideSample,upscale:Upscale) throws -> [String:MLXArray] {
+    audioGuideTokens:Int,stageOneVideoObserver:((MLXArray) throws -> Void)?=nil,
+    sample:GuideSample,upscale:Upscale) throws -> [String:MLXArray] {
     guard videoGuideFrames>0,audioGuideTokens>0 else { throw LTXError.invalid("LTX extension needs positive audiovisual guide lengths.") }
     return try evaluateInternal(recipe:recipe,noisePolicy:.releasedMLX,frozenAudio:nil,
-      guideTokens:(videoFrames:videoGuideFrames,audio:audioGuideTokens),sample:sample,upscale:upscale)
+      guideTokens:(videoFrames:videoGuideFrames,audio:audioGuideTokens),
+      stageOneVideoObserver:stageOneVideoObserver,sample:sample,upscale:upscale)
   }
 
   private func evaluateInternal(recipe:DistilledTwoStageRecipe,noisePolicy:MLXNoisePolicy,
     frozenAudio:MLXArray?,guideTokens:(videoFrames:Int,audio:Int)?,
+    stageOneVideoObserver:((MLXArray) throws -> Void)?,
     sample:GuideSample,upscale:Upscale) throws -> [String:MLXArray] {
     guard gate.try() else { throw LTXError.invalid("Two-stage MLX trajectory is already active.") }
     defer { Stream.gpu.synchronize(); Memory.clearCache(); gate.unlock() }
@@ -66,6 +72,7 @@ public final class MLXTwoStageTrajectory {
         return MLXArray(try ancestral.values(count:shape.reduce(1,*)),shape)
       }),geometry:recipe.low)
       try Task.checkCancellation()
+      try stageOneVideoObserver?(first["video"]!)
       let high=try upscale(first["video"]!.reshaped(first["video"]!.shape),
         [recipe.low.latentFrames,recipe.low.latentHeight,recipe.low.latentWidth,128])
       try Task.checkCancellation()

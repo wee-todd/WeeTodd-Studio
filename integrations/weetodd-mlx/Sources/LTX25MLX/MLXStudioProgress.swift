@@ -6,12 +6,36 @@ import LTX25Engine
 
 /// Fractions describe work phases, not an ETA. Completion is emitted only after publication.
 public struct MLXStudioProgress {
-  private var fraction=0.0,steps=0
-  public init() {}
+  private var fraction=0.0,steps=0,sceneSteps=0
+  private let sceneWindowCount:Int
+  public init(sceneWindowCount:Int=0) { self.sceneWindowCount=max(0,sceneWindowCount) }
   public mutating func event(stage:String,completed:Int,total:Int) -> [String:Any] {
     let part=total > 0 ? min(1,max(0,Double(completed)/Double(total))) : 0
     var next=fraction,message=stage.replacingOccurrences(of:"_",with:" ")
-    if stage == "audio_encode" { next=0.005+0.015*part;message="Encoding source audio · \(completed)/\(total)" }
+    func sceneIndex(_ prefix:String) -> Int? {
+      guard stage.hasPrefix(prefix),sceneWindowCount>0,
+        let value=Int(stage.dropFirst(prefix.count).split(separator:":").first ?? ""),
+        (1...sceneWindowCount).contains(value) else { return nil }
+      return value
+    }
+    if let index=sceneIndex("scene_text_") {
+      next=0.01+0.06*(Double(index-1)+part)/Double(sceneWindowCount)
+      message="Encoding scene prompt \(index)/\(sceneWindowCount)"
+    } else if stage == "scene_text_weights_released" {
+      next=0.08;message="Scene prompts ready"
+    } else if stage == "scene_window_released" && sceneWindowCount>0 {
+      next=0.08+0.74*min(1,Double(completed)/Double(sceneWindowCount))
+      message="Scene window \(completed)/\(sceneWindowCount) sampled"
+    } else if let index=sceneIndex("scene_window_") {
+      if stage.hasSuffix(":sampling") {
+        sceneSteps=completed
+        next=0.08+0.74*(Double(index-1)+min(1,Double(completed)/11))/Double(sceneWindowCount)
+      } else if stage.contains(":stage1:") || stage.contains(":stage2:") {
+        let progress=min(1,(Double(sceneSteps)+part)/11)
+        next=0.08+0.74*(Double(index-1)+progress)/Double(sceneWindowCount)
+      }
+      message="Sampling scene window \(index)/\(sceneWindowCount) · \(completed)/\(total)"
+    } else if stage == "audio_encode" { next=0.005+0.015*part;message="Encoding source audio · \(completed)/\(total)" }
     else if stage == "audio_encoder_weights_released" { next=0.02;message="Source audio ready" }
     else if stage.hasPrefix("text:") { next=0.02+0.04*part;message="Encoding prompt · \(completed)/\(total)" }
     else if stage.hasPrefix("reference_") { next=0.07;message="Preparing reference images · \(stage)" }

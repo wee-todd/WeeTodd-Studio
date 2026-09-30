@@ -4,6 +4,16 @@ import LTX25Engine
 @testable import LTX25MLX
 
 final class MLXExtensionGuideLayoutTests:XCTestCase {
+  func testSceneCanGuideInteriorVideoAndExactAudioOverlap() throws {
+    let geometry=try AVGeometry(width:64,height:64,frames:97,fps:24)
+    let layout=try MLXExtensionGuideLayout(geometry:geometry,contextFrames:25,
+      videoGuideLatentFrames:3,audioGuideTokens:27)
+    XCTAssertEqual(layout.videoGuideTokens,3*geometry.latentHeight*geometry.latentWidth)
+    XCTAssertEqual(layout.audioGuideTokens,27)
+    XCTAssertEqual(layout.videoPositions.count,layout.videoTokens*3)
+    XCTAssertThrowsError(try MLXExtensionGuideLayout(geometry:geometry,
+      contextFrames:25,videoGuideLatentFrames:5))
+  }
   func testAppendsAlignedVideoAndAudioGuidesAndPreservesTargetTimeline() throws {
     let geometry=try AVGeometry(width:64,height:64,frames:41,fps:24)
     let layout=try MLXExtensionGuideLayout(geometry:geometry,contextFrames:9)

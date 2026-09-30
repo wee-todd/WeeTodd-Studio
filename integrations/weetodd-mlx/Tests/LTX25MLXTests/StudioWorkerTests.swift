@@ -3,6 +3,30 @@ import ImageIO
 @testable import LTX25MLX
 
 final class StudioWorkerTests: XCTestCase {
+  func testSceneProgressAdvancesAcrossBothWindowsBeforeDecode() throws {
+    var progress=MLXStudioProgress(sceneWindowCount:2)
+    let stages:[(String,Int,Int)]=[
+      ("scene_text_1:gemma",48,48),("scene_text_2:gemma",48,48),
+      ("scene_text_weights_released",1,1),
+      ("scene_window_1:sampling",11,11),("scene_window_released",1,2),
+      ("scene_window_2:sampling",11,11),("scene_window_released",2,2),
+      ("video_decode",121,121),("audio:decode",1,1),
+      ("ready_to_publish",1,1)]
+    let fractions=stages.map {
+      progress.event(stage:$0.0,completed:$0.1,total:$0.2)["fraction"] as! Double
+    }
+    XCTAssertEqual(fractions,fractions.sorted())
+    XCTAssertGreaterThan(fractions[5],fractions[3])
+    XCTAssertLessThan(fractions.last!,1)
+  }
+  func testSceneProgressAdvancesWithinAnExpensiveTransformerStep() {
+    var progress=MLXStudioProgress(sceneWindowCount:2)
+    let start=progress.event(stage:"scene_window_1:sampling",completed:0,total:11)["fraction"] as! Double
+    let middle=progress.event(stage:"scene_window_1:stage1:transformer",completed:24,total:48)["fraction"] as! Double
+    let end=progress.event(stage:"scene_window_1:stage1:transformer",completed:48,total:48)["fraction"] as! Double
+    XCTAssertGreaterThan(middle,start)
+    XCTAssertGreaterThan(end,middle)
+  }
   func testA2VEncodingStartsBeforePromptAndSamplingProgress() throws {
     var progress=MLXStudioProgress()
     let stages:[(String,Int,Int)]=[("audio_encode",1,9),("audio_encode",9,9),

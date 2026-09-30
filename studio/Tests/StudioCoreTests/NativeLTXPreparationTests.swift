@@ -131,6 +131,41 @@ final class NativeLTXPreparationTests: XCTestCase {
     project.clips.append(follower)
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
   }
+  func testSwiftSceneCompositionUsesWholeGroupAndRejectsUnsupportedInputs() throws {
+    let (root, original, runtime) = try fixture()
+    var project = original
+    project.clips[0].duration = 2
+    var follower = project.clips[0]
+    follower.id = UUID(); follower.prompt = "The same warrior turns toward the fire."
+    follower.seed = 44
+    follower.soundscape = "Stale individual sound"
+    follower.continuity = ClipContinuity(mode: "scene", sourceClipID: project.clips[0].id)
+    project.clips.append(follower)
+    let body = try request(project, runtime)
+    let composed = try NativeLTXPreparation.compose(request: body)
+    let recipe = try XCTUnwrap(composed["recipe"] as? [String: Any])
+    let scene = try XCTUnwrap(recipe["scene"] as? [String: Any])
+    let segments = try XCTUnwrap(scene["segments"] as? [[String: Any]])
+    XCTAssertEqual(segments.map { $0["seed"] as? Int }, [43, 44])
+    XCTAssertFalse((segments[1]["prompt"] as! String).contains("Stale individual sound"))
+    XCTAssertTrue((segments[1]["prompt"] as! String).contains(project.clips[0].soundscape))
+    XCTAssertEqual((recipe["config"] as? [String: Any])?["duration_seconds"] as? Double, 4)
+    let report = try XCTUnwrap((composed["report"] as? [String: Any])?["scene"] as? [String: Any])
+    let ranges = try XCTUnwrap(report["members"] as? [[String: Any]])
+    XCTAssertEqual(ranges.map { $0["source_in"] as? Double }, [0, 2])
+    XCTAssertEqual(ranges.map { $0["duration"] as? Double }, [2, 2])
+    let prepared = try NativeLTXPreparation.prepare(request: body,
+      destination: root.appendingPathComponent("scene-job"))
+    XCTAssertNotNil((prepared["report"] as? [String: Any])?["scene"])
+    project.clips[1].attachments.append(Attachment(assetID: UUID(), role: .first))
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    project.clips[1].attachments = []
+    project.clips[1].generationWidth = 768
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    project.clips[1].generationWidth = project.clips[0].generationWidth
+    project.clips[0].duration = 0.5
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+  }
   func testRejectsNegativePromptThatDistilledSwiftCannotEvaluate() throws {
     let (_, original, runtime) = try fixture()
     var project = original

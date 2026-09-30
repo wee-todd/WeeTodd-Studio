@@ -103,6 +103,97 @@ public enum NativeLTXPreparation {
     let frameSource: NativeLTXFrameSource?
     let movieSource: NativeLTXMovieSource?
   }
+  private static func sceneRequest(_ request: [String: Any]) throws -> (StudioProject, [Clip])? {
+    guard let value = request["project"], let clipID = request["clipID"] as? String else { return nil }
+    let project = try JSONDecoder().decode(StudioProject.self, from: data(value))
+    guard let clip = project.clips.first(where: { $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }),
+      project.isContinuousSceneMember(clip) else { return nil }
+    return (project, try project.continuousSceneMembers(for: clip))
+  }
+  private static func composeScene(_ request: [String: Any], project: StudioProject,
+    members: [Clip]) throws -> [String: Any] {
+    guard (2...6).contains(members.count) else { throw unsupported("a scene needs two to six shots") }
+    var independent = project
+    let memberIDs = Set(members.map(\.id))
+    for index in independent.clips.indices where memberIDs.contains(independent.clips[index].id) {
+      independent.clips[index].continuity = ClipContinuity(mode: "independent")
+    }
+    var recipes: [[String: Any]] = [], reports: [[String: Any]] = []
+    for member in members {
+      guard member.extensionDirection.isEmpty, member.extensionSource.isEmpty,
+        member.audioDriverSelection == nil, member.musicSource == nil,
+        member.attachments.allSatisfy({ $0.role == .lora }) else {
+        throw unsupported("Swift continuous scenes currently support text and ordinary LoRAs; remove image, audio and extension inputs")
+      }
+      var one = request
+      one["project"] = try object(independent)
+      one["clipID"] = member.id.uuidString
+      let composed = try compose(resolve(one))
+      let recipe = composed["recipe"] as! [String: Any]
+      guard (recipe["conditioning"] as? [String: Any])?["task"] as? String == "t2v" else {
+        throw unsupported("each Swift scene shot must select text-to-video")
+      }
+      recipes.append(recipe); reports.append(composed["report"] as! [String: Any])
+    }
+    func effective(_ value: [String: Any]) throws -> Data {
+      var common = value
+      common.removeValue(forKey: "prompt")
+      common.removeValue(forKey: "conditioning")
+      var config = common["config"] as! [String: Any]
+      config.removeValue(forKey: "seed")
+      config.removeValue(forKey: "duration_seconds")
+      common["config"] = config
+      return try data(common)
+    }
+    let expected = try effective(recipes[0])
+    guard try recipes.dropFirst().allSatisfy({ try effective($0) == expected }) else {
+      throw unsupported("all scene shots need identical effective components, LoRAs and sampling settings")
+    }
+    let config = recipes[0]["config"] as! [String: Any]
+    let fps = config["frame_rate"] as! Double
+    var boundaries = [0], cumulative = 0.0
+    for member in members {
+      cumulative += member.duration
+      boundaries.append(Int((cumulative * fps / 8).rounded(.toNearestOrEven)) * 8)
+    }
+    let lengths = zip(boundaries.dropLast(), boundaries.dropFirst()).map { $1 - $0 }
+    guard cumulative <= 30, lengths.first! >= 32,
+      lengths.dropFirst().allSatisfy({ $0 > 0 }) else {
+      throw unsupported("scene durations must resolve to positive eight-frame shot ranges, with at least 32 frames in the first shot, within 30 seconds")
+    }
+    var content = recipes[0]
+    var sceneConfig = config
+    sceneConfig["duration_seconds"] = Double(boundaries.last!) / fps
+    content["config"] = sceneConfig
+    let sharedSound = members[0].soundscape.trimmingCharacters(in: .whitespacesAndNewlines)
+    let sharedMusic = members[0].music.trimmingCharacters(in: .whitespacesAndNewlines)
+    let segments: [[String: Any]] = zip(members, recipes).map { member, recipe in
+      var prompt = recipe["prompt"] as! String
+      if !sharedSound.isEmpty { prompt += "\nSound: " + sharedSound }
+      if !sharedMusic.isEmpty && sharedMusic != "N/A" { prompt += "\nMusic: " + sharedMusic }
+      return ["clip_id": member.id.uuidString, "prompt": prompt,
+        "duration_seconds": member.duration,
+        "seed": (recipe["config"] as! [String: Any])["seed"]!]
+    }
+    content["scene"] = ["version": 1, "segments": segments,
+      "overlap_frames": 25, "boundary_image_policy": "balanced",
+      "soundscape": "", "music": ""] as [String: Any]
+    content["prompt"] = segments.enumerated().map { "Shot \($0.offset + 1): \($0.element["prompt"]!)" }.joined(separator: "\n\n")
+    let ranges: [[String: Any]] = zip(members, zip(boundaries.dropLast(), lengths)).map { member, range in
+      ["clip_id": member.id.uuidString, "source_in": Double(range.0) / fps,
+        "duration": Double(range.1) / fps]
+    }
+    var report = reports[0]
+    report["scene"] = ["version": 1, "members": ranges,
+      "frame_rate": fps, "publication_mode": "single_decode_native_latent_chain"] as [String: Any]
+    report["scenePlan"] = ["requested_durations": members.map(\.duration),
+      "segment_frame_counts": lengths, "total_frames": boundaries.last! + 1]
+    report["task"] = "scene"
+    report["conditioning"] = ["frames": boundaries.last! + 1, "inputs": 0]
+    report["resolvedFingerprint"] = try fingerprint(content)
+    report["warnings"] = reports.flatMap { $0["warnings"] as? [String] ?? [] }
+    return ["recipe": content, "report": report]
+  }
   private static func resolve(_ request: [String: Any]) throws -> Context {
     guard let projectValue = request["project"], let runtime = request["runtime"] as? [String: Any],
       let clipID = request["clipID"] as? String else { throw StudioError.invalid("Missing Studio preparation request.") }
@@ -163,6 +254,23 @@ public enum NativeLTXPreparation {
       frameSource: frameSource, movieSource: movieSource)
   }
   public static func describe(request: [String: Any]) throws -> [String: Any] {
+    if let (project, members) = try sceneRequest(request) {
+      var independent = project
+      for index in independent.clips.indices where members.contains(where: { $0.id == independent.clips[index].id }) {
+        independent.clips[index].continuity = ClipContinuity(mode: "independent")
+      }
+      var leader = request
+      leader["project"] = try object(independent)
+      leader["clipID"] = members[0].id.uuidString
+      var result = try describe(request: leader)
+      do {
+        let composed = try composeScene(request, project: project, members: members)
+        result["fingerprint"] = (composed["report"] as? [String: Any])?["resolvedFingerprint"]
+      } catch {
+        result["readinessErrors"] = (result["readinessErrors"] as? [String] ?? []) + [error.localizedDescription]
+      }
+      return result
+    }
     let context = try resolve(request)
     var errors: [String] = [], resolved = ""
     var content = context.recipe
@@ -192,7 +300,12 @@ public enum NativeLTXPreparation {
       "selectionFingerprint": try fingerprint(context.recipe), "sourcePaths": Array(Set([context.profile] + dependencies)).sorted(),
       "warnings": context.warnings, "readinessErrors": errors]
   }
-  public static func compose(request: [String: Any]) throws -> [String: Any] { try compose(resolve(request)) }
+  public static func compose(request: [String: Any]) throws -> [String: Any] {
+    if let (project, members) = try sceneRequest(request) {
+      return try composeScene(request, project: project, members: members)
+    }
+    return try compose(resolve(request))
+  }
   private static func compose(_ context: Context, firstFramePath: String? = nil,
     moviePath: String? = nil, movieSHA256: String? = nil) throws -> [String: Any] {
     try Task.checkCancellation()
@@ -348,6 +461,7 @@ public enum NativeLTXPreparation {
   /// Native media extraction runs off the UI thread. Publish the image, recipe
   /// and original editor request together; never rewrite stored attachments.
   public static func prepareWithMedia(request: [String: Any], destination: URL) async throws -> [String: Any] {
+    if try sceneRequest(request) != nil { return try prepare(request: request, destination: destination) }
     let context = try resolve(request)
     if let source = context.movieSource {
       let provisional = try compose(context, moviePath: source.url.path,

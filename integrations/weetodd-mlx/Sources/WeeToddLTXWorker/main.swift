@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import LTX25MLX
+import LTX25Engine
 import InferenceContracts
 import MLX
 
@@ -52,6 +53,11 @@ import MLX
     let recipeData=try read(envelope.recipePath)
     try envelope.validateRecipe(recipeData)
     if let root=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any] {
+      if root["scene"] != nil {
+        try await executeScene(recipeData:recipeData,envelope:envelope,
+          outputDirectory:args[4],preflight:args[0] == "preflight",started:start)
+        return
+      }
       if root["task"] as? String == "ripple" {
         try await executeRipple(recipeData:recipeData,envelope:envelope,ffmpegOverride:envelope.ffmpegPath,
           outputDirectory:args[4],preflight:args[0] == "preflight",started:start)
@@ -116,6 +122,99 @@ import MLX
       try JSONSerialization.data(withJSONObject:result,options:[.prettyPrinted,.sortedKeys]).write(to:staging.appendingPathComponent("result.json"),options:.withoutOverwriting)
     },progress:{ stage,completed,total in try emit(progress.event(stage:stage,completed:completed,total:total)) })
     try Task.checkCancellation()
+    try emit(["status":"success","result":result])
+  }
+
+  static func executeScene(recipeData:Data,envelope:NativeVideoJobEnvelope,
+    outputDirectory:String,preflight:Bool,started:Date) async throws {
+    let compiled=try MLXStudioSceneRecipe.compile(data:recipeData,
+      outputDirectory:outputDirectory)
+    let recipe=try JSONSerialization.jsonObject(with:recipeData) as! [String:Any]
+    let configured=envelope.ffmpegPath ?? ""
+    let ffmpeg=configured.isEmpty ? recipe["ffmpeg"] as? String ?? "" : configured
+    guard ffmpeg.hasPrefix("/"),FileManager.default.isExecutableFile(atPath:ffmpeg) else {
+      throw invalid("Select an executable FFmpeg in Runtime Settings.")
+    }
+    let physical=ProcessInfo.processInfo.physicalMemory
+    let workingSet=UInt64(GPU.deviceInfo().maxRecommendedWorkingSetSize)
+    let plans=try compiled.requests.enumerated().map { index,request in
+      try MLXStudioMemoryPlan(request:request,
+        extensionContextFrames:index == 0 ? nil : compiled.plan.overlapFrames,
+        physicalMemory:physical,recommendedWorkingSet:workingSet)
+    }
+    let ceiling=plans.map(\.activationCeilingBytes).min()!
+    let transformer=plans.map(\.transformerActivationBytes).max()!
+    let first=compiled.requests[0]
+    let geometry=try AVGeometry(width:first.width,height:first.height,
+      frames:compiled.plan.totalFrames,fps:compiled.plan.fps)
+    let video=try MLXSceneMediaPublisher.requiredVideoActivationBytes(
+      geometry:geometry)
+    guard video <= ceiling else {
+      throw invalid("The complete LTX scene exceeds this Mac's admitted video decoder memory allowance.")
+    }
+    _=try MLXSceneSampler.preflight(compiled,
+      maximumActivationBytes:transformer,videoActivationBytes:video)
+    if preflight {
+      try emit(["status":"success","result":["nativeRuntime":"swift-mlx",
+        "task":"scene","jobID":envelope.jobID.uuidString,
+        "frames":geometry.frames,"fps":geometry.fps,
+        "windowFrames":compiled.plan.windowFrames,
+        "transformerActivationBytes":transformer,
+        "videoActivationBytes":video,"activationCeilingBytes":ceiling]])
+      return
+    }
+    let lease=try NativeInferenceLease.acquire {
+      try? emit(["event":"progress","stage":"waiting","fraction":0,
+        "message":"Waiting for another local inference job"])
+    }
+    defer { lease.release() }
+    Memory.peakMemory=0
+    var progress=MLXStudioProgress(sceneWindowCount:compiled.requests.count)
+    let sampled=try MLXSceneSampler.sample(compiled,
+      maximumActivationBytes:transformer) { stage,completed,total in
+      try emit(progress.event(stage:stage,completed:completed,total:total))
+    }
+    let output=URL(fileURLWithPath:outputDirectory)
+    let preview=output.appendingPathExtension("preview.png")
+    defer { try? FileManager.default.removeItem(at:preview) }
+    var lastPreview=Date.distantPast,revision=0
+    var result:[String:Any]=[:]
+    _=try MLXSceneMediaPublisher.publish(sampled,plan:compiled.plan,
+      videoCheckpoint:URL(fileURLWithPath:first.videoCheckpoint),
+      audioCheckpoint:URL(fileURLWithPath:first.audioCheckpoint),
+      ffmpeg:URL(fileURLWithPath:ffmpeg),output:output,
+      videoActivationBytes:video,preview:{ index,bytes in
+        guard index == 0 || index == geometry.frames-2 ||
+          Date().timeIntervalSince(lastPreview) >= 1 else { return }
+        try Task.checkCancellation()
+        try autoreleasepool { try MLXStudioPreview.write(rgb:bytes,width:geometry.width,
+          height:geometry.height,to:preview) }
+        revision += 1;lastPreview=Date()
+        var event=progress.event(stage:"video_decode",completed:index+1,total:geometry.frames)
+        event["previewPath"]=preview.path;event["previewRevision"]=revision
+        try emit(event)
+      },beforePublish:{ staging,report in
+        let members:[[String:Any]]=zip(compiled.clipIDs,zip(compiled.plan.segmentStarts,compiled.plan.segmentFrames)).map { id,range in
+          ["clip_id":id,"source_in":Double(range.0)/geometry.fps,
+            "duration":Double(range.1)/geometry.fps]
+        }
+        let scene:[String:Any]=["version":1,"members":members,
+          "frame_rate":geometry.fps,
+          "publication_mode":"single_decode_native_latent_chain"]
+        result=["video":output.appendingPathComponent("render.mp4").path,
+          "jobID":envelope.jobID.uuidString,"nativeRuntime":"swift-mlx",
+          "seconds":Date().timeIntervalSince(started),"metadata":report,
+          "scene":scene,
+          "elapsed_scope":"worker initialization through completed media, before atomic publication"]
+        try recipeData.write(to:staging.appendingPathComponent("studio-recipe.json"),
+          options:.withoutOverwriting)
+        try JSONSerialization.data(withJSONObject:result,
+          options:[.prettyPrinted,.sortedKeys]).write(
+            to:staging.appendingPathComponent("result.json"),
+            options:.withoutOverwriting)
+      },progress:{ stage,completed,total in
+        try emit(progress.event(stage:stage,completed:completed,total:total))
+      })
     try emit(["status":"success","result":result])
   }
 

@@ -29,18 +29,26 @@ public final class MLXDistilledSamplingRunner {
 
   public init(recipe:DistilledTwoStageRecipe,transformerRoot:URL,upscalerCheckpoint:URL,
     statisticsCheckpoint:URL,firstStrength:Float?=nil,lastStrength:Float?=nil,
-    extensionContextFrames:Int?=nil,stageOneLoras:[LoRAAdapter]=[],stageTwoLoras:[LoRAAdapter]=[],
+    extensionContextFrames:Int?=nil,
+    extensionVideoGuideLatentFrames:Int?=nil,extensionAudioGuideTokens:Int?=nil,
+    stageOneLoras:[LoRAAdapter]=[],stageTwoLoras:[LoRAAdapter]=[],
     noisePolicy:MLXNoisePolicy = .native,maximumActivationBytes:Int=2*1024*1024*1024) throws {
     self.recipe=recipe;self.noisePolicy=noisePolicy;self.maximumActivationBytes=maximumActivationBytes
     guard firstStrength != nil || lastStrength == nil else { throw LTXError.invalid("Last-frame reference requires a first frame.") }
     guard extensionContextFrames == nil || (firstStrength == nil && lastStrength == nil && noisePolicy == .releasedMLX) else {
       throw LTXError.invalid("LTX extension needs a separate audiovisual source and the released MLX noise policy.")
     }
+    guard extensionContextFrames != nil ||
+      (extensionVideoGuideLatentFrames == nil && extensionAudioGuideTokens == nil) else {
+      throw LTXError.invalid("LTX guide overrides require a causal source context.")
+    }
     layouts=try [recipe.low,recipe.high].map { g in
       try firstStrength.map { try MLXReferenceLayout(geometry:g,firstStrength:$0,lastStrength:lastStrength) }
     }
     guideLayouts=try [recipe.low,recipe.high].map { g in
-      try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:g,contextFrames:$0) }
+      try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:g,contextFrames:$0,
+        videoGuideLatentFrames:extensionVideoGuideLatentFrames,
+        audioGuideTokens:extensionAudioGuideTokens) }
     }
     // Reject impossible stage-two geometry before even opening stage-one files.
     for (index,g) in [recipe.low,recipe.high].enumerated() {
@@ -69,6 +77,16 @@ public final class MLXDistilledSamplingRunner {
   public func evaluate(videoContext:MLXArray,audioContext:MLXArray,
     references:[(first:MLXArray,last:MLXArray?)]=[],frozenAudio:MLXArray?=nil,
     extensionGuides:ExtensionGuides?=nil,
+    progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> [String:MLXArray] {
+    try evaluateWithStageOneCapture(videoContext:videoContext,audioContext:audioContext,
+      references:references,frozenAudio:frozenAudio,extensionGuides:extensionGuides,
+      stageOneVideoObserver:nil,progress:progress)
+  }
+
+  public func evaluateWithStageOneCapture(videoContext:MLXArray,audioContext:MLXArray,
+    references:[(first:MLXArray,last:MLXArray?)]=[],frozenAudio:MLXArray?=nil,
+    extensionGuides:ExtensionGuides?=nil,
+    stageOneVideoObserver:((MLXArray) throws -> Void)?=nil,
     progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> [String:MLXArray] {
     guard gate.try() else { throw LTXError.invalid("Two-stage MLX sampler is already active.") }
     defer { Stream.gpu.synchronize(); Memory.clearCache(); gate.unlock() }
@@ -164,10 +182,11 @@ public final class MLXDistilledSamplingRunner {
     let trajectory=MLXTwoStageTrajectory()
     if let guide=guideLayouts[0] {
       return try trajectory.evaluateWithGuides(recipe:recipe,
-        videoGuideFrames:(guide.contextFrames-1)/8+1,audioGuideTokens:guide.audioGuideTokens,
-        sample:sampleStage,upscale:upscale)
+        videoGuideFrames:guide.videoGuideLatentFrames,audioGuideTokens:guide.audioGuideTokens,
+        stageOneVideoObserver:stageOneVideoObserver,sample:sampleStage,upscale:upscale)
     }
     return try trajectory.evaluate(recipe:recipe,noisePolicy:noisePolicy,frozenAudio:frozenAudio,
+      stageOneVideoObserver:stageOneVideoObserver,
       sample:{ stage,g,state,schedule,noise in
         try sampleStage(stage,g,state,[:],schedule,noise)
       },upscale:upscale)

@@ -388,7 +388,7 @@ public final class MLXMediaPipeline {
     case .mlx: return try MLXAudioDecoder(checkpoint:checkpoint,maximumLatentFrames:latentFrames).decode(latent:latent,latentFrames:latentFrames,progress:progress)
     }
   }
-  private static func mux(ffmpeg:URL,directory:URL,fps:Double,rawVideo:Bool) throws {
+  static func mux(ffmpeg:URL,directory:URL,fps:Double,rawVideo:Bool) throws {
     let log=directory.appendingPathComponent("mux.log")
     guard FileManager.default.createFile(atPath:log.path,contents:nil) else { throw LTXError.invalid("Cannot create mux log.") }
     let handle=try FileHandle(forWritingTo:log); defer { try? handle.close() }

@@ -10,25 +10,33 @@ public struct MLXExtensionGuideLayout {
   public let contextFrames:Int
   public let videoGuideTokens:Int
   public let audioGuideTokens:Int
+  public let videoGuideLatentFrames:Int
   public let strength:Float
   public var videoTokens:Int { geometry.videoTokens+videoGuideTokens }
   public var audioTokens:Int { geometry.audioFrames+audioGuideTokens }
 
-  public init(geometry:AVGeometry,contextFrames:Int,strength:Float=0.5) throws {
+  public init(geometry:AVGeometry,contextFrames:Int,
+    videoGuideLatentFrames:Int?=nil,audioGuideTokens:Int?=nil,
+    strength:Float=0.5) throws {
     guard contextFrames>=9,(contextFrames-1)%8==0,contextFrames<geometry.frames,
       strength.isFinite,(0...1).contains(strength) else {
       throw LTXError.invalid("LTX extension guide needs aligned source context shorter than the sampled window.")
     }
     let latentFrames=(contextFrames-1)/8+1
-    let videoCount=latentFrames*geometry.latentHeight*geometry.latentWidth
-    let audioCount=Int(ceil(Double(contextFrames)/geometry.fps*25))
+    let selectedVideoFrames=videoGuideLatentFrames ?? latentFrames
+    let videoCount=selectedVideoFrames*geometry.latentHeight*geometry.latentWidth
+    let audioCount=audioGuideTokens ?? Int(ceil(Double(contextFrames)/geometry.fps*25))
+    guard (1...latentFrames).contains(selectedVideoFrames),audioCount>0 else {
+      throw LTXError.invalid("LTX scene guide lengths exceed their causal overlap.")
+    }
     guard videoCount<=geometry.videoTokens,audioCount<=geometry.audioFrames else {
       throw LTXError.invalid("LTX extension source guides exceed the sampled timeline.")
     }
     _ = try AVBlockConfiguration(videoTokens:geometry.videoTokens+videoCount,
       audioTokens:geometry.audioFrames+audioCount,textTokens:1024)
     self.geometry=geometry;self.contextFrames=contextFrames
-    videoGuideTokens=videoCount;audioGuideTokens=audioCount;self.strength=strength
+    videoGuideTokens=videoCount;self.audioGuideTokens=audioCount
+    self.videoGuideLatentFrames=selectedVideoFrames;self.strength=strength
   }
 
   public var videoPositions:[Float] {

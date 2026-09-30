@@ -1,5 +1,21 @@
 # WeeTodd Studio implementation status
 
+Swift LTX 2.5 continuous scenes 2026-09-29 (experimental): the shared Swift worker
+now plans two to six text-only shots as aligned overlapping audiovisual windows, retains
+compact latent guide tails between windows, then decodes the complete scene once. The
+publisher excludes the final causal video frame and trims audio to the exact editorial
+duration. Studio prepares compatible shots as one frozen recipe with ordered prompts,
+seeds and ordinary LoRAs, returns a scene range report, and uses the existing grouped
+review and acceptance flow. Image anchors, audio drivers and specialized adapters
+remain on the explicitly selected Python route; broader scene quality needs review.
+A first 384 × 256,
+four-second, two-shot native worker smoke completed in 84.23 seconds at a 3.76 GB peak
+Swift process footprint (FFmpeg excluded); the initial 97-frame output established a
+stable join and synchronized audio but included the decoder's causal frame. The corrected
+worker run took 74.62 seconds at a 3.77 GB peak Swift process footprint and published
+exactly 96 frames at 24 fps with four seconds of stereo AAC audio. The installed-app
+scene acceptance lifecycle and broader visual/audio quality still require qualification.
+
 Swift native audiovisual qualification 2026-09-29: a Qwen3-TTS-driven LTX 2.5 A2V take
 with an opening image completed at 1280 × 768, 169 frames/24 fps, two decoded previews,
 293.34 worker seconds and 13.67 GB peak Swift process footprint. The accepted Studio take
@@ -76,7 +92,7 @@ turn remained coherent after a stronger sound prompt, but generated audio averag
 the installed FL2VA checkpoint in text-only mode completed at 768 × 448/124 frames in
 579.94 seconds at a 5.23 GB peak process footprint; the visual arm motion was coherent,
 while generated sound was subdued (-57.5 dBFS mean). Both H3 sound quality and broader
-checkpoint-general quality remain experimental. LTX continuous scenes and specialized
+checkpoint-general quality remain experimental. LTX image/audio continuous scenes and specialized
 conditioning, H3 audio/video-reference quality, broader video Ref2VA qualification,
 real multi-adapter H3 quality and unsupported LoRA layouts, and complete
 Python-free Studio distribution remain open.

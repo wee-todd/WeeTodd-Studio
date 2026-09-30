@@ -4,6 +4,21 @@ import LTX25Engine
 @testable import LTX25MLX
 
 final class MLXTwoStageTests:XCTestCase {
+  func testStageOneObserverCapturesDenoisedTokensBeforeUpscale() throws {
+    let recipe=try DistilledTwoStageRecipe(width:64,height:64,frames:41,fps:24,seed:4)
+    var observed:MLXArray?
+    _=try MLXTwoStageTrajectory().evaluate(recipe:recipe,
+      stageOneVideoObserver:{ observed=$0.reshaped($0.shape) },
+      sample:{ stage,_,state,_,_ in
+        if stage == 1 { return ["video":MLXArray.ones(state["video"]!.shape)*3,
+          "audio":state["audio"]!] }
+        return state
+      },upscale:{ value,_ in
+        XCTAssertNotNil(observed)
+        XCTAssertEqual(observed![0,0].item(Float.self),3)
+        return .zeros([value.shape[0]*4,128])
+      })
+  }
   func testExtensionDrawsTargetAndGuideNoiseFromOneShapedSeedPerStage() throws {
     let recipe=try DistilledTwoStageRecipe(width:64,height:64,frames:41,fps:24,seed:41)
     var stages:[Int]=[]
