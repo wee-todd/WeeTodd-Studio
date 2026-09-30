@@ -147,20 +147,24 @@ import MLX
     let first=compiled.requests[0]
     let geometry=try AVGeometry(width:first.width,height:first.height,
       frames:compiled.plan.totalFrames,fps:compiled.plan.fps)
-    let video=try MLXSceneMediaPublisher.requiredVideoActivationBytes(
-      geometry:geometry)
-    guard video <= ceiling else {
+    let decodePlan=try MLXSceneDecodeWindowPlan(geometry:geometry,
+      maximumActivationBytes:ceiling,
+      maximumWindowFrames:compiled.decodeMode.maximumWindowFrames)
+    if case .single=compiled.decodeMode,decodePlan.latentRanges.count != 1 {
       throw invalid("The complete LTX scene exceeds this Mac's admitted video decoder memory allowance.")
     }
     _=try MLXSceneSampler.preflight(compiled,
-      maximumActivationBytes:transformer,videoActivationBytes:video)
+      maximumActivationBytes:transformer,decodePlan:decodePlan)
     if preflight {
       try emit(["status":"success","result":["nativeRuntime":"swift-mlx",
         "task":"scene","jobID":envelope.jobID.uuidString,
         "frames":geometry.frames,"fps":geometry.fps,
         "windowFrames":compiled.plan.windowFrames,
         "transformerActivationBytes":transformer,
-        "videoActivationBytes":video,"activationCeilingBytes":ceiling]])
+        "videoActivationBytes":decodePlan.admittedActivationBytes,
+        "videoDecodeWindows":decodePlan.latentRanges.count,
+        "videoDecodeMode":compiled.decodeMode.publicationMode,
+        "activationCeilingBytes":ceiling]])
       return
     }
     let lease=try NativeInferenceLease.acquire {
@@ -184,7 +188,8 @@ import MLX
       videoCheckpoint:URL(fileURLWithPath:first.videoCheckpoint),
       audioCheckpoint:URL(fileURLWithPath:first.audioCheckpoint),
       ffmpeg:URL(fileURLWithPath:ffmpeg),output:output,
-      videoActivationBytes:video,preview:{ index,bytes in
+      decodePlan:decodePlan,decodeMode:compiled.decodeMode,
+      preview:{ index,bytes in
         guard index == 0 || index == geometry.frames-2 ||
           Date().timeIntervalSince(lastPreview) >= 1 else { return }
         try Task.checkCancellation()
@@ -201,7 +206,7 @@ import MLX
         }
         let scene:[String:Any]=["version":1,"members":members,
           "frame_rate":geometry.fps,
-          "publication_mode":"single_decode_native_latent_chain"]
+          "publication_mode":compiled.decodeMode.publicationMode]
         result=["video":output.appendingPathComponent("render.mp4").path,
           "jobID":envelope.jobID.uuidString,"nativeRuntime":"swift-mlx",
           "seconds":Date().timeIntervalSince(started),"metadata":report,

@@ -76,6 +76,17 @@ routes while native coverage qualifies.
   its first frame measured 33.34 dB PSNR against the supplied image. Later scene images,
   audio drivers, checkpoint resume and specialized controls are not yet supported by this
   Swift scene route.
+- Scene video decoding has an explicit headless experimental `scene.decode_mode: "windowed"`
+  option. An optional `scene.decode_window_frames` cap must be `8n+1` and at least 33;
+  preflight rejects a cap below 57 when the scene needs an interior decode window.
+  The decoder overlaps adjacent RGB windows by 25 frames and blends them while retaining
+  one assembled audio decode. Studio scenes keep the single-decode default. On a matched
+  four-second 384 × 256 first-image recipe, the same debug worker took 68.57/71.36 seconds
+  for single/windowed total execution, with 3.78/3.46 GB peak Swift-process footprint
+  and 1.66/4.15 seconds of video decode. Audio WAVs matched byte for byte; the videos
+  measured 40.60 dB median frame PSNR. A 30-second 768 × 448 recipe passed preflight
+  only: estimated decoder activation fell from 18.25 to 10.28 GB using three windows.
+  Neither number is a measured long-scene peak, and long-scene quality is unqualified.
 - A 128 MiB cache target during stack execution, with explicit trimming at block boundaries
   if MLX overshoots its advisory limit. This is not a hard peak-process-memory limit.
 - Header/shape/packed-storage admission and conservative activation admission, including

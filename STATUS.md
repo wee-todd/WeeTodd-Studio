@@ -30,6 +30,22 @@ against the supplied PNG, and inspected contact frames retained the subject and 
 across the join. A first-image scene's Studio acceptance lifecycle and broader image
 quality remain unqualified.
 
+Experimental Swift LTX 2.5 scene video decoding can now use explicit bounded windows
+(`scene.decode_mode: "windowed"` and optional aligned `scene.decode_window_frames`).
+Each adjacent decode shares 25 RGB frames and blends them before publication; audio
+continues through the unchanged assembled-latent decoder. An undersized interior
+window is rejected during preflight. The default Studio scene still uses one complete
+video decode. A matched 384 × 256, four-second first-image scene completed in both
+modes through the same debug worker: single/windowed total time was 68.57/71.36 seconds,
+video decode 1.66/4.15 seconds, and peak Swift-process footprint 3.78/3.46 GB
+(external FFmpeg excluded). Both published 96 frames and four seconds of audio;
+their WAV files were byte-identical, and framewise video comparison measured
+40.60 dB median PSNR, with no obvious cut in inspected join frames. A 30-second,
+six-shot 768 × 448 recipe passed preflight only: one decode admitted 18.25 GB of
+estimated video activation versus 10.28 GB across three bounded windows. That
+estimate is not measured peak process memory. Long-scene output quality, runtime,
+Studio review/acceptance of windowed results and low-memory hardware remain open.
+
 Swift native audiovisual qualification 2026-09-29: a Qwen3-TTS-driven LTX 2.5 A2V take
 with an opening image completed at 1280 × 768, 169 frames/24 fps, two decoded previews,
 293.34 worker seconds and 13.67 GB peak Swift process footprint. The accepted Studio take

@@ -42,6 +42,29 @@ final class StudioSceneRecipeTests: XCTestCase {
     XCTAssertTrue(compiled.requests[1].referenceImages.isEmpty)
   }
 
+  func testExplicitWindowedDecodeKeepsOrdinarySceneSampling() throws {
+    var object=fixture()
+    var scene=object["scene"] as! [String:Any]
+    scene["decode_mode"]="windowed"
+    scene["decode_window_frames"]=49
+    object["scene"]=scene
+    let compiled=try MLXStudioSceneRecipe.compile(
+      data:JSONSerialization.data(withJSONObject:object),outputDirectory:"/output")
+    XCTAssertEqual(compiled.decodeMode.publicationMode,
+      "windowed_decode_native_latent_chain")
+    XCTAssertEqual(compiled.decodeMode.maximumWindowFrames,49)
+    XCTAssertEqual(compiled.requests.map(\.frames),[49,97])
+  }
+
+  func testRejectsNonStringSceneDecodeMode() throws {
+    var object=fixture()
+    var scene=object["scene"] as! [String:Any]
+    scene["decode_mode"]=1
+    object["scene"]=scene
+    XCTAssertThrowsError(try MLXStudioSceneRecipe.compile(
+      data:JSONSerialization.data(withJSONObject:object),outputDirectory:"/output"))
+  }
+
   func testRejectsLaterOrAdditionalSceneImagesBeforeWeightedWork() throws {
     var object=fixture()
     var conditioning=object["conditioning"] as! [String:Any]

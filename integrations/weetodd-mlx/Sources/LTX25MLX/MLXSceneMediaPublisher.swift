@@ -22,17 +22,24 @@ public enum MLXSceneMediaPublisher {
   }
 
   public static func admit(geometry: AVGeometry,
-    videoActivationBytes: Int) throws {
+    decodePlan: MLXSceneDecodeWindowPlan) throws {
     let config = MLXMediaPipeline.videoConfiguration(for: geometry,
-      activationBytes: videoActivationBytes)
-    _ = try MLXVideoDecodePlan(shape: geometry.videoShape,
-      configuration: config)
+      activationBytes: decodePlan.admittedActivationBytes)
+    guard decodePlan.latentRanges.first?.lowerBound == 0,
+      decodePlan.latentRanges.last?.upperBound == geometry.latentFrames else {
+      throw LTXError.invalid("Scene video decode windows do not cover the admitted latent.")
+    }
+    for range in decodePlan.latentRanges {
+      _ = try MLXVideoDecodePlan(shape: [1, 128, range.count,
+        geometry.latentHeight, geometry.latentWidth], configuration: config)
+    }
     _ = try MLXAudioDecoder.estimatedPeakBytes(latentFrames: geometry.audioFrames)
   }
 
   public static func publish(_ sampled: MLXSceneSampler.Result,
     plan: LTX25ScenePlan, videoCheckpoint: URL, audioCheckpoint: URL,
-    ffmpeg: URL, output: URL, videoActivationBytes: Int,
+    ffmpeg: URL, output: URL, decodePlan: MLXSceneDecodeWindowPlan,
+    decodeMode: MLXSceneDecodeMode,
     preview: ((Int, Data) throws -> Void)? = nil,
     beforePublish: ((URL, [String: Any]) throws -> Void)? = nil,
     progress: @escaping (String, Int, Int) throws -> Void = { _, _, _ in }) throws -> URL {
@@ -46,7 +53,10 @@ public enum MLXSceneMediaPublisher {
       output.isFileURL, !FileManager.default.fileExists(atPath: output.path) else {
       throw LTXError.invalid("Swift LTX scene publication does not match its admitted audiovisual timeline.")
     }
-    try admit(geometry: g, videoActivationBytes: videoActivationBytes)
+    try admit(geometry: g, decodePlan: decodePlan)
+    if case .single = decodeMode, decodePlan.latentRanges.count != 1 {
+      throw LTXError.invalid("Single-decode LTX scenes require one admitted video window.")
+    }
     let fm = FileManager.default
     try fm.createDirectory(at: output.deletingLastPathComponent(),
       withIntermediateDirectories: true)
@@ -65,7 +75,7 @@ public enum MLXSceneMediaPublisher {
     }
     let videoStart = Date()
     let videoConfig = MLXMediaPipeline.videoConfiguration(for: g,
-      activationBytes: videoActivationBytes)
+      activationBytes: decodePlan.admittedActivationBytes)
     let unpacked = try g.unpackVideo(sampled.video.asArray(Float.self))
     let writer = try RawVideoWriter(ffmpeg: ffmpeg,
       output: staging.appendingPathComponent("video.mp4"),
@@ -73,15 +83,41 @@ public enum MLXSceneMediaPublisher {
     defer { writer.cancel() }
     try autoreleasepool {
       let decoder = try MLXVideoDecoder(checkpoint: videoCheckpoint)
-      try decoder.decodeRGB8(latent: MLXArray(unpacked, g.videoShape),
-        configuration: videoConfig,
-        progress: { try report("video_layers", $0, $1) }) { index, bytes in
-          if index < deliveredFrames(plan: plan) {
-            try writer.append(bytes, frame: index)
-            try preview?(index, bytes)
+      let latent = MLXArray(unpacked, g.videoShape)
+      let ranges = decodePlan.latentRanges
+      if case .single = decodeMode {
+        try decoder.decodeRGB8(latent: latent, configuration: videoConfig,
+          progress: { try report("video_layers", $0, $1) }) { index, bytes in
+            if index < deliveredFrames(plan: plan) {
+              try writer.append(bytes, frame: index)
+              try preview?(index, bytes)
+            }
+            try report("video_decode", index + 1, g.frames)
           }
-          try report("video_decode", index + 1, g.frames)
+      } else {
+        var joiner = try MLXSceneRGBJoiner(windowCount: ranges.count,
+          frameBytes: g.width * g.height * 3)
+        for (window, range) in ranges.enumerated() {
+          try Task.checkCancellation()
+          let part = latent[0..., 0..., range, 0..., 0...]
+          let frameCount = (range.count - 1) * 8 + 1
+          try decoder.decodeRGB8(latent: part, configuration: videoConfig,
+            progress: { completed, total in
+              try report("video_layers", window * total + completed,
+                ranges.count * total)
+            }) { index, bytes in
+              try joiner.receive(window: window, frame: index, count: frameCount,
+                rgb: bytes) { outputIndex, outputBytes in
+                  try writer.append(outputBytes, frame: outputIndex)
+                  try preview?(outputIndex, outputBytes)
+                  try report("video_decode", outputIndex + 1,
+                    deliveredFrames(plan: plan))
+                }
+            }
+          try joiner.finishWindow(window: window)
         }
+        try joiner.finish(expectedFrames: deliveredFrames(plan: plan))
+      }
     }
     try writer.finish()
     let videoSeconds = Date().timeIntervalSince(videoStart)
@@ -117,7 +153,9 @@ public enum MLXSceneMediaPublisher {
     }
     let metadata: [String: Any] = [
       "status":"complete","task":"scene","nativeRuntime":"swift-mlx",
-      "publication_mode":"single_decode_native_latent_chain",
+      "publication_mode":decodeMode.publicationMode,
+      "decode_window_latent_ranges":decodePlan.latentRanges.map { [$0.lowerBound,$0.upperBound] },
+      "decode_admitted_activation_bytes":decodePlan.admittedActivationBytes,
       "frames":deliveredFrames(plan:plan),"latent_frames":g.frames,"fps":g.fps,"width":g.width,"height":g.height,
       "window_frames":plan.windowFrames,"window_starts":plan.windowStarts,
       "segment_frames":plan.segmentFrames,"segment_starts":plan.segmentStarts,

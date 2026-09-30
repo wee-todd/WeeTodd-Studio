@@ -90,6 +90,10 @@ with compatible per-shot settings and an optional opening image on the first sho
 directly in Swift. Runtime
 Settings exposes the Swift/Python choice; unsupported native controls fail preflight without
 silent fallback.
+Studio scenes use a single video decode by default. The shared worker also has an explicit
+experimental bounded-window decode setting for headless scenes; a matched short render
+reduced peak process memory at a small time cost, while long-scene output remains unqualified.
+See the [Swift MLX integration notes](integrations/weetodd-mlx/README.md).
 Sampling progress, bounded decoded-frame previews, cancellation and immutable take publication
 use the existing Studio job lifecycle. Previews start during video decoding, not denoising.
 Supported LTX profile discovery, recipe composition, preflight, rendering and take inspection

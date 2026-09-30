@@ -1196,6 +1196,9 @@ With **Use Swift MLX for LTX 2.5** enabled, the current Swift route accepts text
 with compatible ordinary LoRAs and one opening image on the first shot. Select
 **Image to video** and attach a **First frame** image to that shot; later shots must use
 text-to-video. It preflights the whole group and produces the same grouped review ranges.
+Studio currently uses one full video decode for that scene. The separate experimental
+bounded-window decoder is available only through an explicit headless scene recipe;
+long-scene visual quality and Studio acceptance of that output are not yet qualified.
 Select the Python renderer for later scene image anchors, audio drivers, specialized
 controls or checkpoint-resume behavior. Those options remain available in Studio.
 

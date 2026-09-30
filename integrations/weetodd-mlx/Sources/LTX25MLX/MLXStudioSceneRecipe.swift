@@ -11,6 +11,7 @@ public enum MLXStudioSceneRecipe {
     public let plan: LTX25ScenePlan
     public let requests: [MLXDistilledRequest]
     public let clipIDs: [String]
+    public let decodeMode: MLXSceneDecodeMode
   }
 
   public static func compile(data: Data, outputDirectory: String) throws -> Compiled {
@@ -20,7 +21,7 @@ public enum MLXStudioSceneRecipe {
         "conditioning","scene","ffmpeg","ffprobe","candidate"]),
       let scene = root["scene"] as? [String: Any],
       Set(scene.keys).isSubset(of: ["version","segments","overlap_frames",
-        "boundary_image_policy","soundscape","music"]),
+        "boundary_image_policy","soundscape","music","decode_mode","decode_window_frames"]),
       let version = scene["version"] as? NSNumber,
       CFGetTypeID(version) != CFBooleanGetTypeID(), version.doubleValue == 1,
       let overlap = scene["overlap_frames"] as? NSNumber,
@@ -48,6 +49,35 @@ public enum MLXStudioSceneRecipe {
         sceneInputs[0]["role"] as? String == "keyframe" &&
         sceneInputs[0]["frame_index"] as? Int == 0) else {
       throw LTXError.invalid("Swift LTX scenes accept text or one opening image on the first shot; later images and audio drivers are unsupported.")
+    }
+    guard scene["decode_mode"] == nil || scene["decode_mode"] is String else {
+      throw LTXError.invalid("Scene decode mode must be single or windowed.")
+    }
+    let decodeMode: MLXSceneDecodeMode
+    switch scene["decode_mode"] as? String ?? "single" {
+    case "single":
+      guard scene["decode_window_frames"] == nil else {
+        throw LTXError.invalid("A single-decode scene cannot set a decode window size.")
+      }
+      decodeMode = .single
+    case "windowed":
+      if let number = scene["decode_window_frames"] as? NSNumber {
+        guard CFGetTypeID(number) != CFBooleanGetTypeID(),
+          number.doubleValue.isFinite,
+          number.doubleValue.rounded() == number.doubleValue,
+          (33...4097).contains(number.intValue),
+          (number.intValue - 1) % 8 == 0 else {
+          throw LTXError.invalid("Scene decode windows must have an aligned 8n+1 frame count of at least 33.")
+        }
+        decodeMode = .windowed(maximumFrames: number.intValue)
+      } else {
+        guard scene["decode_window_frames"] == nil else {
+          throw LTXError.invalid("Scene decode window size must be an integer.")
+        }
+        decodeMode = .windowed(maximumFrames: nil)
+      }
+    default:
+      throw LTXError.invalid("Unsupported LTX scene video decode mode.")
     }
     var ids: [String] = [], prompts: [String] = [], durations: [Double] = []
     var seeds: [Int] = []
@@ -106,6 +136,7 @@ public enum MLXStudioSceneRecipe {
       }
       requests.append(request)
     }
-    return Compiled(plan: plan, requests: requests, clipIDs: ids)
+    return Compiled(plan: plan, requests: requests, clipIDs: ids,
+      decodeMode: decodeMode)
   }
 }

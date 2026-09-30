@@ -42,7 +42,8 @@ public enum MLXSceneSampler {
   }
 
   public static func preflight(_ compiled: MLXStudioSceneRecipe.Compiled,
-    maximumActivationBytes: Int, videoActivationBytes: Int) throws -> AVGeometry {
+    maximumActivationBytes: Int,
+    decodePlan: MLXSceneDecodeWindowPlan) throws -> AVGeometry {
     let plan = compiled.plan, requests = compiled.requests
     guard requests.count == plan.windowFrames.count, let first = requests.first else {
       throw LTXError.invalid("Swift LTX scene requests do not match their frame plan.")
@@ -50,7 +51,7 @@ public enum MLXSceneSampler {
     let geometry = try AVGeometry(width: first.width, height: first.height,
       frames: plan.totalFrames, fps: plan.fps)
     try MLXSceneMediaPublisher.admit(geometry: geometry,
-      videoActivationBytes: videoActivationBytes)
+      decodePlan: decodePlan)
     let text = try MLXTextEncoder(gemmaRoot: URL(fileURLWithPath: first.gemmaRoot),
       connectorURL: URL(fileURLWithPath: first.connectorCheckpoint))
     _ = try VideoDecoder(checkpoint: URL(fileURLWithPath: first.videoCheckpoint))
