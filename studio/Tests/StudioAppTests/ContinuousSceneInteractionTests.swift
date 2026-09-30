@@ -68,6 +68,26 @@ final class ContinuousSceneInteractionTests: XCTestCase {
     XCTAssertEqual(summary.sceneReport?.members.count, 2)
     XCTAssertEqual(RenderSettingsSummary(clip: clip, report: "{}").requestedDuration, clip.duration)
   }
+  @MainActor func testReviewSummaryAcceptsBoundedScenePublication() throws {
+    let clip = Clip(name: "Second shot", engine: .ltx25)
+    let scene: [String: Any] = ["version": 1, "frame_rate": 24.0,
+      "publication_mode": "windowed_decode_native_latent_chain", "members": [
+        ["clip_id": UUID().uuidString, "source_in": 0.0, "duration": 5.0],
+        ["clip_id": clip.id.uuidString, "source_in": 5.0, "duration": 5.0]]]
+    let json = try JSONSerialization.data(withJSONObject: ["scene": scene])
+    let summary = RenderSettingsSummary(clip: clip, report: String(decoding: json, as: UTF8.self))
+    XCTAssertEqual(summary.sceneReport?.publicationMode, "windowed_decode_native_latent_chain")
+    XCTAssertEqual(summary.sceneReport?.duration, 10)
+  }
+  @MainActor func testPythonSceneCannotSilentlyIgnoreSavedBoundedDecodeChoice() async throws {
+    let (store, bridge) = try fixture()
+    store.runtime.nativeLTX25Enabled = false
+    store.change { $0.clips[0].continuity = ClipContinuity(sceneDecodeMode: "windowed") }
+    await store.prepareSelected()
+    XCTAssertTrue(store.error?.contains("Swift LTX") == true)
+    XCTAssertTrue(bridge.calls.isEmpty)
+    XCTAssertNil(store.preparedRecipe)
+  }
 
   @MainActor private func fixture() throws -> (StudioStore, SceneBridgeFixture) {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

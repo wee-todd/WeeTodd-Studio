@@ -50,6 +50,7 @@ extension StudioProject {
         clips[following].soundscape = leader.soundscape
         clips[following].music = leader.music
         clips[following].continuity?.boundaryImagePolicy = leader.continuity?.boundaryImagePolicy ?? "balanced"
+        clips[following].continuity?.sceneDecodeMode = leader.continuity?.sceneDecodeMode ?? "single"
       }
     }
     return true

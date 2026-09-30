@@ -17,7 +17,8 @@ struct ContinuousSceneRenderReport: Codable, Equatable {
   static func decode(_ value: Any) throws -> Self {
     let report = try JSONDecoder().decode(Self.self, from: JSONSerialization.data(withJSONObject: value))
     guard report.version == 1, report.frameRate.isFinite, report.frameRate > 0,
-      report.publicationMode == "single_decode_native_latent_chain" else {
+      ["single_decode_native_latent_chain", "windowed_decode_native_latent_chain"]
+        .contains(report.publicationMode) else {
       throw StudioError.invalid("The result is not a supported native continuous scene.")
     }
     return report
@@ -255,6 +256,10 @@ struct ContinuousSceneReviewView: View {
           Spacer()
           Text("\(take.clips.count) shots · \(take.report.duration, specifier: "%.2f") seconds").foregroundStyle(.secondary)
         }
+        Text(take.report.publicationMode == "windowed_decode_native_latent_chain"
+          ? "Video decode: bounded windows · inspect each join before accepting"
+          : "Video decode: full scene")
+          .font(.caption).foregroundStyle(.secondary)
         VideoPlayer(player: player).frame(minWidth: 700, minHeight: 390)
         Text("Check motion and sound across every join. Accepting replaces all member shots together and preserves their previous takes.")
           .font(.callout).foregroundStyle(.secondary)

@@ -1188,6 +1188,11 @@ extension Encodable {
     }
     preparedRecipe = nil; preparedFingerprint = nil
     do {
+      if clip.engine == .ltx25, !settings.usesNativeLTX25,
+        let leader = try project.continuousSceneMembers(for: clip).first,
+        (leader.continuity?.sceneDecodeMode ?? "single") != "single" {
+        throw StudioError.invalid("Bounded scene decoding requires Swift LTX 2.5. Enable it or choose Full decode.")
+      }
       let body = try payload()
       let nativeLTX = clip.engine == .ltx25 && settings.usesNativeLTX25
       let nativeH3 = clip.engine == .h3 && settings.usesNativeH3

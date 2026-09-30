@@ -7,18 +7,23 @@ public struct ClipContinuity: Codable, Equatable {
   public var sourceClipID: UUID?
   public var saveContext: Bool
   public var boundaryImagePolicy: String
+  public var sceneDecodeMode: String
   public init(mode: String = "independent", sourceClipID: UUID? = nil, saveContext: Bool = false,
-    boundaryImagePolicy: String = "balanced") {
+    boundaryImagePolicy: String = "balanced", sceneDecodeMode: String = "single") {
     self.mode = mode; self.sourceClipID = sourceClipID; self.saveContext = saveContext
     self.boundaryImagePolicy = boundaryImagePolicy
+    self.sceneDecodeMode = sceneDecodeMode
   }
-  private enum CodingKeys: String, CodingKey { case mode, sourceClipID, saveContext, boundaryImagePolicy }
+  private enum CodingKeys: String, CodingKey {
+    case mode, sourceClipID, saveContext, boundaryImagePolicy, sceneDecodeMode
+  }
   public init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     mode = try values.decodeIfPresent(String.self, forKey: .mode) ?? "independent"
     sourceClipID = try values.decodeIfPresent(UUID.self, forKey: .sourceClipID)
     saveContext = try values.decodeIfPresent(Bool.self, forKey: .saveContext) ?? false
     boundaryImagePolicy = try values.decodeIfPresent(String.self, forKey: .boundaryImagePolicy) ?? "balanced"
+    sceneDecodeMode = try values.decodeIfPresent(String.self, forKey: .sceneDecodeMode) ?? "single"
   }
   public func encode(to encoder: Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
@@ -28,6 +33,9 @@ public struct ClipContinuity: Codable, Equatable {
     // Preserve legacy clip fingerprints when this scene-only setting is unused/defaulted.
     if boundaryImagePolicy != "balanced" {
       try values.encode(boundaryImagePolicy, forKey: .boundaryImagePolicy)
+    }
+    if sceneDecodeMode != "single" {
+      try values.encode(sceneDecodeMode, forKey: .sceneDecodeMode)
     }
   }
 }

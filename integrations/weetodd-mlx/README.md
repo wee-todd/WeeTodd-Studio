@@ -80,8 +80,9 @@ routes while native coverage qualifies.
   option. An optional `scene.decode_window_frames` cap must be `8n+1` and at least 33;
   preflight rejects a cap below 57 when the scene needs an interior decode window.
   The decoder overlaps adjacent RGB windows by 25 frames and blends them while retaining
-  one assembled audio decode. Studio scenes keep the single-decode default. On a matched
-  four-second 384 × 256 first-image recipe, the same debug worker took 68.57/71.36 seconds
+  one assembled audio decode. Studio scenes keep the single-decode default and expose bounded
+  decoding as an experimental scene-inspector choice. On a matched four-second 384 × 256
+  first-image recipe, the same debug worker took 68.57/71.36 seconds
   for single/windowed total execution, with 3.78/3.46 GB peak Swift-process footprint
   and 1.66/4.15 seconds of video decode. Audio WAVs matched byte for byte; the videos
   measured 40.60 dB median frame PSNR. A signed-worker six-shot, 30-second 768 × 448

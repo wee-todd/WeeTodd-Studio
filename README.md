@@ -90,9 +90,9 @@ with compatible per-shot settings and an optional opening image on the first sho
 directly in Swift. Runtime
 Settings exposes the Swift/Python choice; unsupported native controls fail preflight without
 silent fallback.
-Studio scenes use a single video decode by default. The shared worker also has an explicit
-experimental bounded-window decode setting for headless scenes; a matched short render
-reduced peak process memory at a small time cost. One signed-worker 30-second, six-shot
+Studio scenes use a single video decode by default. With Swift LTX selected, the scene
+inspector offers an experimental bounded-window option; headless recipes can set it explicitly.
+A matched short render reduced peak process memory at a small time cost. One signed-worker 30-second, six-shot
 render published 720 frames and stereo audio at a 10.84 GB Swift-process peak;
 broader quality and low-memory-hardware behavior remain experimental.
 See the [Swift MLX integration notes](integrations/weetodd-mlx/README.md).

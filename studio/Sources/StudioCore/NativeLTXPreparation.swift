@@ -176,9 +176,18 @@ public enum NativeLTXPreparation {
         "duration_seconds": member.duration,
         "seed": (recipe["config"] as! [String: Any])["seed"]!]
     }
-    content["scene"] = ["version": 1, "segments": segments,
+    let decodeMode = members[0].continuity?.sceneDecodeMode ?? "single"
+    guard ["single", "windowed"].contains(decodeMode) else {
+      throw unsupported("choose Full decode or Bounded decode for the Swift scene")
+    }
+    var scene: [String: Any] = ["version": 1, "segments": segments,
       "overlap_frames": 25, "boundary_image_policy": "balanced",
-      "soundscape": "", "music": ""] as [String: Any]
+      "soundscape": "", "music": ""]
+    if decodeMode == "windowed" {
+      scene["decode_mode"] = "windowed"
+      scene["decode_window_frames"] = 361
+    }
+    content["scene"] = scene
     content["prompt"] = segments.enumerated().map { "Shot \($0.offset + 1): \($0.element["prompt"]!)" }.joined(separator: "\n\n")
     let ranges: [[String: Any]] = zip(members, zip(boundaries.dropLast(), lengths)).map { member, range in
       ["clip_id": member.id.uuidString, "source_in": Double(range.0) / fps,
@@ -186,7 +195,8 @@ public enum NativeLTXPreparation {
     }
     var report = reports[0]
     report["scene"] = ["version": 1, "members": ranges,
-      "frame_rate": fps, "publication_mode": "single_decode_native_latent_chain"] as [String: Any]
+      "frame_rate": fps, "publication_mode": decodeMode == "windowed"
+        ? "windowed_decode_native_latent_chain" : "single_decode_native_latent_chain"] as [String: Any]
     report["scenePlan"] = ["requested_durations": members.map(\.duration),
       "segment_frame_counts": lengths, "total_frames": boundaries.last! + 1]
     report["task"] = "scene"

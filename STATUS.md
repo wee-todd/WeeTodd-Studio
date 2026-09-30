@@ -35,9 +35,12 @@ Experimental Swift LTX 2.5 scene video decoding can now use explicit bounded win
 (`scene.decode_mode: "windowed"` and optional aligned `scene.decode_window_frames`).
 Each adjacent decode shares 25 RGB frames and blends them before publication; audio
 continues through the unchanged assembled-latent decoder. An undersized interior
-window is rejected during preflight. The default Studio scene still uses one complete
-video decode. A matched 384 × 256, four-second first-image scene completed in both
-modes through the same debug worker: single/windowed total time was 68.57/71.36 seconds,
+window is rejected during preflight. Studio still defaults to one complete video decode;
+an experimental scene-inspector control now saves a bounded choice on the scene leader,
+freezes a 361-frame cap into the Swift recipe, and shows its mode during take review.
+Python preparation rejects that choice rather than ignoring it. A matched 384 × 256,
+four-second first-image scene completed in both modes through the same debug worker:
+single/windowed total time was 68.57/71.36 seconds,
 video decode 1.66/4.15 seconds, and peak Swift-process footprint 3.78/3.46 GB
 (external FFmpeg excluded). Both published 96 frames and four seconds of audio;
 their WAV files were byte-identical, and framewise video comparison measured

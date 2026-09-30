@@ -76,6 +76,25 @@ struct ContinuityInspector: View {
         Text("Continuous scene · \(members.count) shots · \(members.reduce(0) { $0 + $1.duration }, specifier: "%.2f") s")
           .fontWeight(.semibold)
         Text(members.map(\.name).joined(separator: " → ")).foregroundStyle(.secondary)
+        Picker("Video decode", selection: Binding(
+          get: { leader.continuity?.sceneDecodeMode ?? "single" },
+          set: { value in
+            store.change { project in
+              if let index = project.clips.firstIndex(where: { $0.id == leader.id }) {
+                var settings = project.clips[index].continuity ?? ClipContinuity()
+                settings.sceneDecodeMode = value
+                project.clips[index].continuity = settings
+              }
+            }
+          }
+        )) {
+          Text("Full decode").tag("single")
+          Text("Bounded decode · experimental").tag("windowed")
+        }
+        Text(store.runtime.usesNativeLTX25
+          ? "Bounded mode limits each video decode to 361 frames; the worker may use smaller windows when memory requires it. Review joined frames before accepting."
+          : "Bounded decode requires Swift LTX 2.5. Choose Full decode or enable Swift in Settings before preparing this scene.")
+          .foregroundStyle(.secondary)
         Picker("Boundary image guidance", selection: Binding(
           get: { leader.continuity?.boundaryImagePolicy ?? "balanced" },
           set: { value in

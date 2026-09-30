@@ -35,6 +35,15 @@ final class ContinuousSceneTests: XCTestCase {
       XCTAssertTrue(project.continuityIssues(for: clip).isEmpty)
     }
   }
+  func testSplittingSceneKeepsBoundedDecodeChoiceOnNewLeader() {
+    var project = scene(count: 4)
+    project.clips[0].continuity = ClipContinuity(sceneDecodeMode: "windowed")
+    let separated = project.clips[1].id
+    XCTAssertTrue(project.separateContinuousSceneMember(clipID: separated))
+    XCTAssertEqual(project.clips[2].continuity?.sceneDecodeMode, "windowed")
+    XCTAssertEqual(project.clips[2].continuityMode, "independent")
+    XCTAssertEqual(project.clips[3].continuityMode, "scene")
+  }
 
   func testEveryMemberResolvesTheCompleteMaximalGroup() throws {
     var project = scene(count: 6)

@@ -191,6 +191,38 @@ final class NativeLTXPreparationTests: XCTestCase {
     project.clips[1].attachments=[Attachment(assetID:image.id,role:.first)]
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
   }
+  func testSwiftSceneFrozenRecipeUsesSavedBoundedDecodeChoice() throws {
+    let (_, original, runtime) = try fixture()
+    var project = original
+    project.clips[0].duration = 2
+    project.clips[0].continuity = try JSONDecoder().decode(ClipContinuity.self,
+      from: Data(#"{"mode":"independent","sceneDecodeMode":"windowed"}"#.utf8))
+    var follower = project.clips[0]
+    follower.id = UUID()
+    follower.prompt = "The same warrior turns toward the fire."
+    follower.continuity = ClipContinuity(mode: "scene", sourceClipID: project.clips[0].id)
+    project.clips.append(follower)
+    let composed = try NativeLTXPreparation.compose(request: request(project, runtime))
+    let recipe = try XCTUnwrap(composed["recipe"] as? [String: Any])
+    let scene = try XCTUnwrap(recipe["scene"] as? [String: Any])
+    XCTAssertEqual(scene["decode_mode"] as? String, "windowed")
+    XCTAssertEqual(scene["decode_window_frames"] as? Int, 361)
+    let report = try XCTUnwrap((composed["report"] as? [String: Any])?["scene"] as? [String: Any])
+    XCTAssertEqual(report["publication_mode"] as? String, "windowed_decode_native_latent_chain")
+  }
+  func testSwiftSceneRejectsUnknownSavedDecodeChoiceBeforeRender() throws {
+    let (_, original, runtime) = try fixture()
+    var project = original
+    project.clips[0].duration = 2
+    project.clips[0].continuity = try JSONDecoder().decode(ClipContinuity.self,
+      from: Data(#"{"mode":"independent","sceneDecodeMode":"unbounded-fast"}"#.utf8))
+    var follower = project.clips[0]
+    follower.id = UUID()
+    follower.prompt = "The same warrior turns toward the fire."
+    follower.continuity = ClipContinuity(mode: "scene", sourceClipID: project.clips[0].id)
+    project.clips.append(follower)
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+  }
   func testRejectsNegativePromptThatDistilledSwiftCannotEvaluate() throws {
     let (_, original, runtime) = try fixture()
     var project = original
