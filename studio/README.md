@@ -81,8 +81,10 @@ process peak, excluding FFmpeg; its exact cut began at frame 48. A Studio run pr
 rendered, accepted both shot ranges as one take, saved and reopened the project with
 Python unavailable. Specialized controls still require the explicitly selected Python
 route.
-Model setup, asset/library tools and other engines remain
-separate migration work; this is not yet a fully Python-free Studio release.
+Ordinary H3 and LTX 2.5 model setup now links existing components and creates native
+profiles without Python. Folder scanning, managed downloads, specialized adapter setup,
+asset/library tools and other engines remain separate migration work; this is not yet a
+fully Python-free Studio release.
 The experimental Swift H3 worker has completed text-to-audiovisual, reference-conditioned
 and independent audio-driven takes.
 Direct worker tests now also cover a Swift-only version-2 latent continuation
@@ -651,7 +653,8 @@ For remote generation, see [Draw Things](#draw-things--experimental). Local mode
 configure the native MLX engines.
 
 1. Open **Studio Settings → Model setup**. Built-in presets appear independently of installed recipe
-   count once the renderer is configured. Choose H3 text/image/reference or LTX 2.3/2.5 text/image.
+   count once a native worker or the optional renderer is configured. Choose H3 text/image/reference
+   or LTX 2.3/2.5 text/image. Swift H3 and LTX 2.5 presets appear when their worker is enabled.
 2. Choose **Set Up… → Use Existing Models**, select model folders (including an existing ComfyUI
    `models` folder), then scan. Inspection reads bounded headers and manifests, never model tensors.
    A single candidate is selected automatically; multiple candidates require your choice. Missing
@@ -660,12 +663,17 @@ configure the native MLX engines.
    source terms and destination for review; it does not immediately start the transfer. Components
    without a catalog download can still be imported. Validation explains incompatible architecture
    or task support.
+   Swift H3/LTX 2.5 presets instead use **Import…** for each installed component, with no
+   Python process or weight copy. Folder scanning and managed downloads remain on the optional
+   Python setup route.
 3. Use **Automatic** to select a lower-memory policy on Macs with 64 GB or less, **Lower Memory** to
    request supported memory-saving settings, or **Custom** to retain the preset policy for later
    advanced adjustment. Memory information is advisory and does not promise fit, allocate RAM, or
    enforce a hard limit. Clip size/duration and other resident applications still matter.
 4. **Create Recipe** runs the shared component/configuration preflight and writes a new recipe.
    Image/reference presets still need media attached to a clip before full render preflight can pass.
+   For a Swift text-to-video preset, the selected worker runs preflight before the profile is kept;
+   for a Swift image/reference preset, attach media and prepare a clip for worker preflight.
    Existing recipes and model files are preserved. Automatic selection can use the new compatible
    components; a specific recipe can be pinned under **Advanced generation**. **Set Up Models…**
    is also available from missing-model actions.

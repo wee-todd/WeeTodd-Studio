@@ -20,28 +20,46 @@ import StudioCore
   private let catalogBridge = Bridge()
 
   static func rendererAvailable(_ runtime: RuntimeSettings) -> Bool {
+    nativeH3Available(runtime) || nativeLTXAvailable(runtime) || pythonAvailable(runtime)
+  }
+
+  private static func nativeH3Available(_ runtime: RuntimeSettings) -> Bool {
+    runtime.usesNativeH3 && FileManager.default.isExecutableFile(atPath: runtime.h3WorkerPath ?? "")
+  }
+
+  private static func nativeLTXAvailable(_ runtime: RuntimeSettings) -> Bool {
+    runtime.usesNativeLTX25 && FileManager.default.isExecutableFile(atPath: runtime.ltx25WorkerPath ?? "")
+  }
+
+  private static func pythonAvailable(_ runtime: RuntimeSettings) -> Bool {
     FileManager.default.isExecutableFile(atPath: runtime.pythonPath)
       && FileManager.default.fileExists(atPath: runtime.root + "/scripts/studio_bridge.py")
   }
 
   func loadCatalog(runtime: RuntimeSettings) async {
-    guard Self.rendererAvailable(runtime) else {
-      presets = []
-      downloads = []
-      return
-    }
     guard !loadingCatalog else { return }
     loadingCatalog = true
     catalogError = ""
     defer { loadingCatalog = false }
     do {
-      let catalog = try await catalogBridge.invoke("setup-catalog", runtime: runtime, payload: [:])
-      presets = try decode([ModelSetupPreset].self, from: catalog["presets"] ?? [])
-      let downloadCatalog = try await catalogBridge.invoke(
-        "setup-downloads", runtime: runtime, payload: [:])
-      downloads = try decode([ModelSetupDownload].self, from: downloadCatalog["downloads"] ?? [])
+      presets = NativeModelSetup.catalog().filter {
+        ($0.engine == "h3" && Self.nativeH3Available(runtime)) ||
+          ($0.engine == "ltx25" && Self.nativeLTXAvailable(runtime))
+      }
+      downloads = []
+      if Self.pythonAvailable(runtime) {
+        let catalog = try await catalogBridge.invoke("setup-catalog", runtime: runtime, payload: [:])
+        let legacy = try decode([ModelSetupPreset].self, from: catalog["presets"] ?? [])
+        presets += legacy.filter {
+          !($0.engine == "h3" && Self.nativeH3Available(runtime)) &&
+            !($0.engine == "ltx25" && Self.nativeLTXAvailable(runtime))
+        }
+        let downloadCatalog = try await catalogBridge.invoke(
+          "setup-downloads", runtime: runtime, payload: [:])
+        downloads = try decode([ModelSetupDownload].self, from: downloadCatalog["downloads"] ?? [])
+      }
     } catch {
-      catalogError = "Model setup requires the current renderer. Use Set Up Managed Renderer above or update the connected repository. " + error.localizedDescription
+      catalogError = "Optional legacy model setup is unavailable: " + error.localizedDescription
     }
   }
 
@@ -64,6 +82,10 @@ import StudioCore
     resultPath = ""
     defer { captureLog(store.bridge) }
     do {
+      if preset.id.hasPrefix("swift-") {
+        warnings = ["Import components directly below. Text-to-video setup runs worker preflight now; media tasks run it after clip media is attached."]
+        return
+      }
       let response = try await store.bridge.invoke(
         "setup-scan", runtime: store.runtime, payload: ["presetID": preset.id, "roots": roots])
       selection.applyScan(response["candidates"] as? [String: [String]] ?? [:])
@@ -77,6 +99,31 @@ import StudioCore
     }
     error = ""
     do {
+      if preset.id.hasPrefix("swift-") {
+        let recipe = try NativeModelSetup.recipe(preset: preset,
+          selected: selection.components, memoryMode: memoryMode)
+        let staged = try NativeModelSetup.stage(recipe, directory: store.runtime.profilesDirectory)
+        if preset.task == "t2v" {
+          let probe = StudioStore.supportDirectory.appendingPathComponent("SetupPreflight/\(UUID().uuidString)")
+          defer { try? FileManager.default.removeItem(at: probe) }
+          do {
+            _ = try await store.bridge.invoke(preset.engine == "h3" ? "h3-native-preflight" : "ltx-native-preflight",
+              runtime: store.runtime, payload: ["recipePath": staged], output: probe)
+          } catch {
+            try? FileManager.default.removeItem(atPath: staged)
+            throw error
+          }
+        }
+        resultPath = staged
+        warnings = preset.task == "t2v"
+          ? ["Swift worker preflight passed. Clip settings are validated again when preparing it."]
+          : ["Component paths are linked. Import clip media and prepare the clip to run Swift worker preflight."]
+        captureLog(store.bridge)
+        await store.reloadProfiles()
+        store.notice = preset.task == "t2v" ? "Native model recipe created and preflighted."
+          : "Native model recipe created. Prepare a clip with media to validate it."
+        return
+      }
       let response = try await store.bridge.invoke(
         "setup-create", runtime: store.runtime,
         payload: [

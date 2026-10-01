@@ -1,5 +1,16 @@
 # WeeTodd Studio implementation status
 
+Swift native model setup 2026-10-01 (ordinary profiles): when a bundled worker is
+enabled, Studio lists H3 text/image/reference and LTX 2.5 text/image Swift presets
+without invoking Python. Users link existing components in place; the Swift
+profile builder writes bounded headless-v2 recipes and invokes the selected
+worker's preflight for text-to-video before retaining a profile. Image and
+reference profiles require clip media and run preflight at clip preparation.
+Focused tests passed with Python unavailable, and installed H3 and LTX 2.5
+component sets each passed the generated profile's worker preflight. Folder
+scanning, managed downloads, specialized adapter setup and full distribution
+qualification remain open.
+
 Swift H3 continuation and external extension 2026-10-01 (experimental direct-worker
 routes): a version-2 text-to-AV continuation request can save a bounded,
 hash-checked normalized video/audio latent tail and feed it into the shared

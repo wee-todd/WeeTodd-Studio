@@ -23,7 +23,7 @@ struct ModelSetupCatalogView: View {
       .font(.caption).foregroundStyle(.secondary)
       if !ModelSetupState.rendererAvailable(store.runtime) {
         Label(
-          "Set up or connect the renderer above to load H3, LTX 2.3 and LTX 2.5 presets.",
+          "Install the native H3 or LTX worker, or connect the optional Python renderer for legacy presets.",
           systemImage: "arrow.up.circle"
         )
         .font(.caption).foregroundStyle(.secondary)
@@ -39,13 +39,12 @@ struct ModelSetupCatalogView: View {
           }
           Spacer()
           Button("Set Up…") { state.begin(preset) }
-            .disabled(
-              bridge.busy || rendererInstalling || !ModelSetupState.rendererAvailable(store.runtime)
-            )
+            .disabled(bridge.busy || rendererInstalling || !ModelSetupState.rendererAvailable(store.runtime))
         }.padding(12).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
       }
     }
-    .task(id: store.runtime.root + "|" + store.runtime.pythonPath) {
+    .task(id: store.runtime.root + "|" + store.runtime.pythonPath + "|"
+      + String(store.runtime.usesNativeH3) + "|" + String(store.runtime.usesNativeLTX25)) {
       await state.loadCatalog(runtime: store.runtime)
     }
     .sheet(item: $state.selectedPreset) { preset in
@@ -79,7 +78,11 @@ struct ModelSetupView: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 18) {
             Text(preset.description).font(.callout).foregroundStyle(.secondary)
-            existingModels
+            if !preset.id.hasPrefix("swift-") { existingModels }
+            else {
+              Text("Import each installed component below. Files stay in place; model weights are not copied.")
+                .font(.caption).foregroundStyle(.secondary)
+            }
             componentChoices
             memoryPolicy
             if !compatibleDownloads.isEmpty { downloads.id("modelDownloads") }

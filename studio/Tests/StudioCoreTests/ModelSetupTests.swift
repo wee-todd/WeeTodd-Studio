@@ -100,4 +100,33 @@ final class ModelSetupTests: XCTestCase {
     XCTAssertEqual(
       ModelSetupMemoryMode.allCases.map(\.rawValue), ["automatic", "lower_memory", "custom"])
   }
+
+  func testNativeSetupCatalogAndRecipeWithoutPython() throws {
+    let presets = NativeModelSetup.catalog()
+    XCTAssertEqual(Set(presets.map(\.id)), Set(["swift-h3-text", "swift-h3-image",
+      "swift-h3-reference", "swift-ltx25-text", "swift-ltx25-image"]))
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let preset = try XCTUnwrap(presets.first { $0.id == "swift-ltx25-text" })
+    var selected: [String: String] = [:]
+    for component in preset.components {
+      let url = root.appendingPathComponent(component.key)
+      if component.kind == "directory" {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+      } else {
+        try Data("test".utf8).write(to: url)
+      }
+      selected[component.key] = url.path
+    }
+    let recipe = try NativeModelSetup.recipe(preset: preset, selected: selected,
+      memoryMode: .lowerMemory)
+    XCTAssertEqual(recipe["engine"] as? String, "ltx25")
+    XCTAssertEqual((recipe["config"] as? [String: Any])?["stage2_steps"] as? Int, 3)
+    let staged = try NativeModelSetup.stage(recipe, directory: root.appendingPathComponent("profiles").path)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: staged))
+    selected["audio_vae_path"] = root.appendingPathComponent("missing").path
+    XCTAssertThrowsError(try NativeModelSetup.recipe(preset: preset, selected: selected,
+      memoryMode: .automatic))
+  }
 }

@@ -407,6 +407,10 @@ before distributing a bundled app. Local model reuse does not require a Draw Thi
 Open **Studio Settings → Model setup**, choose a model/task preset, and use **Use Existing Models**
 or the model download controls. **Create Recipe** validates the component set. On a clip, choose
 **WeeTodd (local)** and its **Model**; compatible installed components are selected automatically.
+With the Swift worker enabled, ordinary H3 and LTX 2.5 presets can link installed components and
+create profiles without Python. Text-to-video setup runs worker preflight immediately; image and
+reference profiles run it after clip media is attached. Folder scanning and managed downloads remain
+on the optional Python setup route.
 Native H3, LTX 2.3 and LTX 2.5 offer different conditioning and sampling controls.
 Use the [model setup guide](studio/README.md#guided-model-setup) and
 [clip generation controls](studio/README.md#clip-generation-controls) for the supported combinations.
@@ -834,6 +838,8 @@ Studio users can open **Studio Settings → Model setup**, choose an H3/LTX pres
 **Use Existing Models**. Scan an existing ComfyUI model folder or another shared library, resolve
 any ambiguous components, then create a validated recipe. Weights remain in their existing locations.
 Image/reference presets prepare the components first; required clip media is validated after attachment.
+The Swift H3/LTX 2.5 presets use direct component import rather than folder scanning; their
+text-to-video profiles pass the selected Swift worker's preflight before appearing in Studio.
 See [guided setup](studio/README.md#guided-model-setup) and the
 [portable LTX 2.5 recipe example](examples/headless/ltx25_distilled_q8_t2v.json).
 
