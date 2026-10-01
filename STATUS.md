@@ -1,5 +1,22 @@
 # WeeTodd Studio implementation status
 
+Swift LTX 2.5 Ingredients 2026-09-30 (experimental headless route): a strict
+version-6 request freezes one source sheet by SHA-256, validates an installed
+full-resolution LTX 2.3 rank-128 Ingredients adapter, repeats the image across
+the complete causal guide, and samples video and generated audio in one
+full-resolution eight-evaluation stage. A direct Swift worker render published
+121 frames at 512 × 256/24 fps with 48 kHz stereo audio. The worker took
+129.74 seconds; guide encoding took 26.55 seconds, sampling 81.32 seconds, and
+peak Swift-process footprint was 3.98 GB (external FFmpeg excluded). Four
+inspected frames retained both alien designs and the diner, but duplicated the
+pale character. The generated audio track measured -90.3 dBFS mean and -78.3
+dBFS peak, effectively silent, whereas an earlier Python Ingredients sample
+with dialogue measured -25.7 dBFS mean and -3.9 dBFS peak. Those prompts differ,
+so this is not a matched engine comparison. Identity, audio and visual quality
+are not accepted from this sample. Studio's Ingredients controls and ComfyUI export still use Python;
+larger geometry, layout variations, preview/cancellation lifecycle, route parity
+and matched performance remain open.
+
 Swift LTX 2.5 Union Control 2026-09-30 (experimental headless route): a strict
 version-5 request now accepts one hash-frozen, full-timeline RGB24 guide at half
 the stage-one canvas resolution. The Swift worker validates the installed LTX 2.3

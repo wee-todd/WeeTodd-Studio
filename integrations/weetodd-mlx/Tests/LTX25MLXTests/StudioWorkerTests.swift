@@ -93,6 +93,19 @@ final class StudioWorkerTests: XCTestCase {
       previous=fraction
     }
   }
+  func testIngredientsProgressCoversSheetEncodingAndEightSamplingSteps() throws {
+    var progress=MLXStudioProgress()
+    let stages:[(String,Int,Int)]=[("text:gemma",48,48),
+      ("ingredients_guide_encode",1,4),("ingredients_guide_encode",4,4),
+      ("ingredients:block",24,48),("sampling",1,8),
+      ("sampling",8,8),("video_decode",121,121),("ready_to_publish",1,1)]
+    let events=stages.map { progress.event(stage:$0.0,completed:$0.1,total:$0.2) }
+    let fractions=events.map { $0["fraction"] as! Double }
+    XCTAssertEqual(fractions,fractions.sorted())
+    XCTAssertTrue((events[2]["message"] as! String).contains("Ingredients sheet"))
+    XCTAssertTrue((events[3]["message"] as! String).contains("Ingredients"))
+    XCTAssertLessThan(fractions.last!,1)
+  }
   func testDecodedPreviewIsBoundedAndAtomicallyReplaced() throws {
     let file=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".png")
     defer { try? FileManager.default.removeItem(at:file) }

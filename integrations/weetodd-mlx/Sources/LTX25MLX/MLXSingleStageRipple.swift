@@ -3,9 +3,10 @@ import MLX
 import LTX25Engine
 import AdapterRuntime
 
-/// The single-stage, deterministic LTX 2.5 schedule used by Ripple. The
-/// source movie is encoded by the video VAE before entering this sampler.
+/// The single-stage, deterministic LTX 2.5 reference schedule used by Ripple
+/// and static Ingredients sheets. Both enter as a full-length VAE guide.
 public final class MLXSingleStageRipple {
+  public enum AdapterTask:Sendable,Equatable { case ripple, ingredients }
   public struct Plan: Sendable {
     public let layout: MLXReferenceVideoLayout
     public let configuration: AVBlockConfiguration
@@ -34,18 +35,24 @@ public final class MLXSingleStageRipple {
   private let weights: MLXDenoiserWeights
   private let maximumActivationBytes: Int
   private let gate = NSLock()
+  private let task:AdapterTask
 
   public init(geometry: AVGeometry, referenceStrength: Float,
     imageAnchors: [RippleImageAnchor] = [], transformerRoot: URL,
-    adapters: [LoRAAdapter], maximumActivationBytes: Int = 2 * 1024 * 1024 * 1024) throws {
+    adapters: [LoRAAdapter], task:AdapterTask = .ripple,
+    maximumActivationBytes: Int = 2 * 1024 * 1024 * 1024) throws {
     guard adapters.count == 1, adapters[0].enabled,
       adapters[0].strength.isFinite, adapters[0].strength > 0 else {
-      throw LTXError.invalid("Ripple requires exactly one enabled author IC-LoRA.")
+      throw LTXError.invalid("Single-stage reference sampling requires exactly one enabled task IC-LoRA.")
+    }
+    guard task == .ripple || imageAnchors.isEmpty else {
+      throw LTXError.invalid("Ingredients cannot combine with timed Ripple image anchors.")
     }
     let adapterURL = URL(fileURLWithPath: adapters[0].path)
       .resolvingSymlinksInPath().standardizedFileURL
-    try MLXRippleAdapterIdentity.verify(adapterURL)
+    if task == .ripple { try MLXRippleAdapterIdentity.verify(adapterURL) }
     self.geometry = geometry
+    self.task = task
     self.maximumActivationBytes = maximumActivationBytes
     plan = try Self.plan(geometry: geometry, strength: referenceStrength,
       anchors: imageAnchors,
@@ -53,9 +60,10 @@ public final class MLXSingleStageRipple {
     weights = try MLXDenoiserWeights(root: transformerRoot,
       configuration: plan.configuration,
       adapters: [LoRAAdapter(path: adapterURL.path, strength: adapters[0].strength)],
+      ingredientsAdapterPath:task == .ingredients ? adapterURL.path : nil,
       maximumActivationBytes: maximumActivationBytes)
     guard weights.sourceCheckpoint == "ltx-2.5-22b-distilled-transformer-bf16.safetensors" else {
-      throw LTXError.invalid("Ripple requires the released distilled LTX 2.5 transformer.")
+      throw LTXError.invalid("Single-stage reference sampling requires the released distilled LTX 2.5 transformer.")
     }
   }
 
@@ -86,7 +94,7 @@ public final class MLXSingleStageRipple {
       fixedWeights: weights.readFixed, blockWeights: weights.readBlock,
       fixedAdapters: weights.fixedAdapters, blockAdapters: weights.blockAdapters,
       stageProgress: { _, event in
-        try progress("ripple:" + event.stage, event.completedBlocks, 48)
+        try progress((task == .ripple ? "ripple:" : "ingredients:") + event.stage, event.completedBlocks, 48)
       }, progress: { event in
         try progress("sampling", event.completedSteps, event.totalSteps)
       })

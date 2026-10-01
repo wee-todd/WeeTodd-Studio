@@ -9,6 +9,7 @@ public final class MLXLoRAStack {
   private struct Entry { let file:SafeTensorFile; let pair:LoRAPlan.Pair }
   private let entries:[Entry]
   public init(adapters:[LoRAAdapter],unionControlAdapterPath:String?=nil,
+    ingredientsAdapterPath:String?=nil,
     maximumFactorBytes:Int=512*1024*1024) throws {
     guard adapters.count <= 16, maximumFactorBytes > 0 else { throw LTXError.invalid("Invalid adapter count or factor budget.") }
     var result:[Entry]=[], bytes:[String:UInt64]=[:]
@@ -16,7 +17,9 @@ public final class MLXLoRAStack {
       try Task.checkCancellation(); try adapter.validate()
       guard adapter.enabled else { continue }
       let file=try SafeTensorFile(url:URL(fileURLWithPath:adapter.path),maximumHeaderBytes:4*1024*1024)
-      let plan=try adapter.path == unionControlAdapterPath
+      let plan=try adapter.path == ingredientsAdapterPath
+        ? LTXAdapterCompatibility.ingredientsPlan(file:file,strength:adapter.strength)
+        : adapter.path == unionControlAdapterPath
         ? LTXAdapterCompatibility.unionControlPlan(file:file,strength:adapter.strength)
         : LTXAdapterCompatibility.standardPlan(file:file,strength:adapter.strength)
       for pair in plan.pairs {

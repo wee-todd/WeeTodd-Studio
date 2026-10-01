@@ -4,6 +4,24 @@ import Darwin
 import LTX25MLX
 
 final class MLXDistilledRequestTests:XCTestCase {
+  func testIngredientsRequestRequiresFullLengthFrozenSheetAndSingleStage() throws {
+    var value=base();value["version"]=6;value["task"]="ingredients"
+    value["frames"]=121;value["noise_policy"]="mlx_threefry_bf16_v1"
+    value["reference_images"]=[];value["audio_reference"]=NSNull()
+    value["union_control_guide"]=NSNull()
+    value["ingredients_sheet"]=["path":"/sheet.png","source_sha256":String(repeating:"b",count:64),
+      "adapter_path":"/ingredients.safetensors","adapter_strength":1.2,"reference_strength":1.0]
+    let request=try decode(value)
+    XCTAssertEqual(request.ingredientsSheet?.path,"/sheet.png")
+    XCTAssertEqual(try decode(JSONSerialization.jsonObject(with:JSONEncoder().encode(request)) as! [String:Any]).task,
+      "ingredients")
+    value["frames"]=113;XCTAssertThrowsError(try decode(value))
+    value["frames"]=121;value["stage_two_loras"]=[["path":"/ordinary.safetensors","strength":1]]
+    XCTAssertThrowsError(try decode(value))
+    value["stage_two_loras"]=[];value["stage_one_loras"]=[["path":"/ingredients.safetensors","strength":1]]
+    XCTAssertThrowsError(try decode(value))
+    value["stage_one_loras"]=[];value["task"]="t2v";XCTAssertThrowsError(try decode(value))
+  }
   func testUnionControlRequestHasDedicatedGuideAndCleanSecondStage() throws {
     var value=base();value["version"]=5;value["task"]="union_control"
     value["noise_policy"]="mlx_threefry_bf16_v1"

@@ -45,13 +45,16 @@ public struct MLXStudioProgress {
     else if stage == "audio_encoder_weights_released" { next=0.02;message="Source audio ready" }
     else if stage.hasPrefix("text:") { next=0.02+0.04*part;message="Encoding prompt · \(completed)/\(total)" }
     else if stage.hasPrefix("reference_") { next=0.07;message="Preparing reference images · \(stage)" }
-    else if stage == "guide_encode" || stage == "anchor_encode" {
-      next=0.07+0.02*part;message="Encoding Ripple references · \(completed)/\(total)"
+    else if stage == "guide_encode" || stage == "anchor_encode" || stage == "ingredients_guide_encode" {
+      next=0.07+0.02*part
+      message=stage == "ingredients_guide_encode"
+        ? "Encoding Ingredients sheet · \(completed)/\(total)"
+        : "Encoding Ripple references · \(completed)/\(total)"
     }
     else if stage == "sampling" { steps=completed;next=0.1+0.72*part;message="Sampling · \(completed)/\(total) steps" }
-    else if stage.hasPrefix("ripple:") {
+    else if stage.hasPrefix("ripple:") || stage.hasPrefix("ingredients:") {
       next=0.1+0.72*min(1,(Double(steps)+part)/8)
-      message="Sampling Ripple · step \(min(steps+1,8))/8 · block \(completed)/\(total)"
+      message="Sampling \(stage.hasPrefix("ingredients:") ? "Ingredients" : "Ripple") · step \(min(steps+1,8))/8 · block \(completed)/\(total)"
     }
     else if stage.hasPrefix("stage1:") || stage.hasPrefix("stage2:") {
       next=0.1+0.72*min(1,(Double(steps)+part)/11)

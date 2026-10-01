@@ -152,8 +152,11 @@ with Python unavailable. Planned music-video A2V clips can retain their source i
 and a prepared timeline audio mix can feed an independent Swift LTX A2V clip. A developer
 Swift Union Control route now accepts a frozen half-resolution RGB24 guide and the installed
 LTX 2.3 Union IC-LoRA, with the task adapter active only in stage one. Studio's ordinary
-control-attachment UI, MSR, Ingredients, DFR and H3 extension controls remain outside the
-qualified Swift paths.
+control-attachment UI, MSR, DFR and H3 extension controls remain outside the qualified
+Swift paths. A separate experimental headless Ingredients route accepts a frozen static
+reference sheet, repeats it across at least 121 frames, and samples with the compatible
+rank-128 task adapter in one full-resolution stage. Studio's Ingredients controls still use
+the Python route.
 Independent H3 A2V with a bounded timeline audio driver and optional opening image is
 experimental; its source conditions generated sound and motion rather than being copied.
 
@@ -1520,6 +1523,18 @@ Union adapter during stage one, then refines with a clean stage-two transformer.
 route has one short real Swift result and worker preflight; Studio's control attachment
 and ComfyUI export still use their existing Python route. Visual control quality and
 production-size speed and memory are not qualified.
+
+The experimental Swift headless Ingredients route uses a strict version-6 request with
+`task="ingredients"` and an `ingredients_sheet` containing `path`, `source_sha256`,
+`adapter_path`, `adapter_strength`, and `reference_strength`. The worker checks the
+frozen source and complete rank-128 adapter before loading weights, fits the one sheet
+to the output canvas, repeats it across at least 121 frames, then VAE-encodes and
+appends the full-resolution reference group during one eight-evaluation distilled
+stage. It publishes a synchronized audio stream and video. One 512 × 256 result
+completed; the sheet's subject designs appeared, but the output duplicated one
+subject and its generated audio was nearly silent. Identity and audio fidelity,
+other sheet layouts, production-scale speed, Studio controls and ComfyUI export
+remain unqualified. Do not present the headless route as Studio UI support.
 
 Use **LTX 2.5 IC-LoRA Control Guide** for Canny edges, depth maps, pose skeletons, Motion Track, or
 another preprocessed control video. Connect the IMAGE batch from the matching preprocessor.

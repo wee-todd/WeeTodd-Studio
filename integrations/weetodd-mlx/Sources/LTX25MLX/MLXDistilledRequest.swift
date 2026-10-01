@@ -15,12 +15,14 @@ public struct MLXDistilledRequest:Codable,Sendable {
   public let referenceImages:[MLXImageReference]
   public let audioReference:MLXAudioReference?
   public let unionControlGuide:MLXUnionControlGuide?
+  public let ingredientsSheet:MLXIngredientsSheet?
   public let noisePolicy:MLXNoisePolicy
   enum CodingKeys:String,CodingKey,CaseIterable {
     case version,engine,task,prompt,width,height,frames,fps,seed
     case referenceImages="reference_images",noisePolicy="noise_policy"
     case audioReference="audio_reference"
     case unionControlGuide="union_control_guide"
+    case ingredientsSheet="ingredients_sheet"
     case gemmaRoot="gemma_root",transformerRoot="transformer_root",connectorCheckpoint="connector_checkpoint"
     case videoCheckpoint="video_checkpoint",audioCheckpoint="audio_checkpoint",spatialUpscalerCheckpoint="spatial_upscaler_checkpoint"
     case outputDirectory="output_directory",stageOneLoras="stage_one_loras",stageTwoLoras="stage_two_loras"
@@ -39,6 +41,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if requestVersion < 3 { expected.remove("noise_policy") }
     if requestVersion < 4 { expected.remove("audio_reference") }
     if requestVersion < 5 { expected.remove("union_control_guide") }
+    if requestVersion < 6 { expected.remove("ingredients_sheet") }
     guard Set(all.allKeys.map(\.stringValue)) == expected else {
       throw LTXError.invalid("Two-stage request has missing or unsupported fields.")
     }
@@ -59,12 +62,17 @@ public struct MLXDistilledRequest:Codable,Sendable {
     stageTwoLoras=try c.decode([LoRAAdapter].self,forKey:.stageTwoLoras)
     referenceImages=version == 1 ? [] : try c.decode([MLXImageReference].self,forKey:.referenceImages)
     audioReference=version < 4 ? nil : try c.decodeIfPresent(MLXAudioReference.self,forKey:.audioReference)
-    unionControlGuide=version < 5 ? nil : try c.decode(MLXUnionControlGuide.self,forKey:.unionControlGuide)
+    unionControlGuide=version < 5 ? nil : try c.decodeIfPresent(MLXUnionControlGuide.self,forKey:.unionControlGuide)
+    ingredientsSheet=version < 6 ? nil : try c.decode(MLXIngredientsSheet.self,forKey:.ingredientsSheet)
     noisePolicy=version < 3 ? .native : try c.decode(MLXNoisePolicy.self,forKey:.noisePolicy)
     let roles=referenceImages.map(\.role)
     guard (version == 4 && task == "a2v" && (roles.isEmpty || roles == ["first"]) && audioReference != nil) ||
       (version == 5 && task == "union_control" && roles.isEmpty &&
         audioReference == nil && unionControlGuide != nil) ||
+      (version == 6 && task == "ingredients" && roles.isEmpty &&
+        audioReference == nil && unionControlGuide == nil && ingredientsSheet != nil &&
+        frames >= 121 && stageOneLoras.isEmpty && stageTwoLoras.isEmpty &&
+        noisePolicy == .releasedMLX) ||
       (version == 1 && task == "t2v") || ((version == 2 || version == 3) &&
       ((task == "t2v" && roles.isEmpty) || (task == "i2v" && roles == ["first"]) || (task == "fflf" && roles == ["first","last"] && frames>1))) else {
       throw LTXError.invalid("Request version/task must match its explicit ordered endpoint references.")
@@ -77,6 +85,11 @@ public struct MLXDistilledRequest:Codable,Sendable {
       guard stageOneLoras.count < 16,
         !(stageOneLoras + stageTwoLoras).contains(where: { $0.path == unionControlGuide.adapterPath }) else {
         throw LTXError.invalid("The Union task adapter must appear exactly once in its dedicated stage-one slot.")
+      }
+    }
+    if let ingredientsSheet {
+      guard !(stageOneLoras + stageTwoLoras).contains(where: { $0.path == ingredientsSheet.adapterPath }) else {
+        throw LTXError.invalid("The Ingredients task adapter must appear only in its dedicated single-stage slot.")
       }
     }
     for path in [gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,spatialUpscalerCheckpoint,outputDirectory] {
@@ -99,6 +112,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if version >= 3 { try c.encode(noisePolicy,forKey:.noisePolicy) }
     if version >= 4 { try c.encode(audioReference,forKey:.audioReference) }
     if version >= 5 { try c.encode(unionControlGuide,forKey:.unionControlGuide) }
+    if version >= 6 { try c.encode(ingredientsSheet,forKey:.ingredientsSheet) }
   }
   public func recipe() throws -> DistilledTwoStageRecipe {
     try DistilledTwoStageRecipe(width:width,height:height,frames:frames,fps:fps,seed:seed)
@@ -117,6 +131,34 @@ public struct MLXDistilledRequest:Codable,Sendable {
     let data=try handle.read(upToCount:1024*1024+1) ?? Data()
     guard data.count <= 1024*1024 else { throw LTXError.invalid("Request exceeds1MiB.") }
     return try JSONDecoder().decode(Self.self,from:data)
+  }
+}
+
+/// One source image repeated through the full causal clip before VAE encoding.
+public struct MLXIngredientsSheet:Codable,Sendable {
+  public let path:String,sourceSHA256:String,adapterPath:String
+  public let adapterStrength:Float,referenceStrength:Float
+  enum CodingKeys:String,CodingKey,CaseIterable {
+    case path,sourceSHA256="source_sha256",adapterPath="adapter_path",adapterStrength="adapter_strength",
+      referenceStrength="reference_strength"
+  }
+  public init(from decoder:Decoder) throws {
+    let c=try decoder.container(keyedBy:CodingKeys.self)
+    guard Set(c.allKeys.map(\.stringValue)) == Set(CodingKeys.allCases.map(\.rawValue)) else {
+      throw LTXError.invalid("Ingredients needs its exact sheet and adapter fields.")
+    }
+    path=try c.decode(String.self,forKey:.path)
+    sourceSHA256=try c.decode(String.self,forKey:.sourceSHA256)
+    adapterPath=try c.decode(String.self,forKey:.adapterPath)
+    adapterStrength=try c.decode(Float.self,forKey:.adapterStrength)
+    referenceStrength=try c.decode(Float.self,forKey:.referenceStrength)
+    guard [path,adapterPath].allSatisfy({ $0.hasPrefix("/") && $0.utf8.count <= 4096 && !$0.utf8.contains(0) }),
+      sourceSHA256.utf8.count == 64,
+      sourceSHA256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+      adapterStrength.isFinite,adapterStrength > 0,adapterStrength <= 3,
+      referenceStrength.isFinite,(0...1).contains(referenceStrength) else {
+      throw LTXError.invalid("Ingredients sheet path, digest or strength is invalid.")
+    }
   }
 }
 

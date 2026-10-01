@@ -71,11 +71,12 @@ import MLX
     }
     let request:MLXDistilledRequest
     if let direct=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any],
-      direct["version"] as? Int == 5,direct["task"] as? String == "union_control" {
+      ((direct["version"] as? Int == 5 && direct["task"] as? String == "union_control") ||
+        (direct["version"] as? Int == 6 && direct["task"] as? String == "ingredients")) {
       request=try JSONDecoder().decode(MLXDistilledRequest.self,from:recipeData)
       guard URL(fileURLWithPath:request.outputDirectory).standardizedFileURL.path ==
         URL(fileURLWithPath:args[4]).standardizedFileURL.path else {
-        throw invalid("Union Control request output must match the authenticated job envelope.")
+        throw invalid("Direct LTX task output must match the authenticated job envelope.")
       }
     } else {
       request=try MLXStudioRecipe.compile(data:recipeData,outputDirectory:args[4])
@@ -126,7 +127,8 @@ import MLX
       let stages=report["stage_seconds"] as? [String:Double] ?? [:]
       result=["video":output.appendingPathComponent("render.mp4").path,"jobID":envelope.jobID.uuidString,
         "seconds":Date().timeIntervalSince(start),
-        "sampling_seconds":(stages["stage1"] ?? 0)+(stages["stage2"] ?? 0),"metadata":report,"nativeRuntime":"swift-mlx",
+        "sampling_seconds":stages["sampling"] ?? (stages["stage1"] ?? 0)+(stages["stage2"] ?? 0),
+        "metadata":report,"nativeRuntime":"swift-mlx",
         "elapsed_scope":"worker initialization through completed media, before atomic publication"]
       try recipeData.write(to:staging.appendingPathComponent("studio-recipe.json"),options:.withoutOverwriting)
       try JSONSerialization.data(withJSONObject:result,options:[.prettyPrinted,.sortedKeys]).write(to:staging.appendingPathComponent("result.json"),options:.withoutOverwriting)
