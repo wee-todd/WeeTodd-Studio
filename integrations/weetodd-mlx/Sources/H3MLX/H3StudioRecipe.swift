@@ -4,6 +4,70 @@ import InferenceContracts
 /// Strict bridge from the saved headless H3 recipe to the first Swift T2VA
 /// slice. Every setting this slice cannot execute fails before weights load.
 public enum H3StudioRecipe {
+  /// The released external extension is Ref2VA: complete source movie/audio
+  /// followed by its last frame as a target-frame-zero seam guide.
+  public static func compileExtension(data: Data,
+    resolveVideo: (String, String) throws -> (H3VideoReference, H3StillReference)) throws
+    -> H3Ref2VAStillRequest {
+    guard data.count <= 1024 * 1024,
+      var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+      var components = root["components"] as? [String: Any],
+      components["task"] as? String == "ref2va",
+      components["allow_fl2va_weights_for_ref2va"] == nil ||
+        components["allow_fl2va_weights_for_ref2va"] as? Bool == false,
+      let vision = (components["vision_encoder"] as? String) ??
+        (components["text_encoder"] as? String), vision.hasPrefix("/"),
+      let conditioning = root["conditioning"] as? [String: Any],
+      Set(conditioning.keys).isSubset(of: ["version", "task", "inputs", "audio_policy"]),
+      conditioning["version"] as? Int == 1,
+      conditioning["task"] as? String == "extension",
+      (conditioning["audio_policy"] as? String ?? "generated") == "generated",
+      let inputs = conditioning["inputs"] as? [[String: Any]], inputs.count == 1,
+      let input = inputs.first,
+      Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "strength", "sha256"]),
+      let sourceID = input["id"] as? String, !sourceID.isEmpty,
+      input["kind"] as? String == "video", input["role"] as? String == "reference",
+      let path = input["path"] as? String, path.hasPrefix("/"),
+      !path.utf8.contains(0),
+      let digest = input["sha256"] as? String, digest.count == 64,
+      digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+      (input["strength"] as? NSNumber).map({
+        CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue == 1
+      }) == true,
+      let prompt = root["prompt"] as? String,
+      ["subject_definitions:", "summary:", "[video continuation",
+        "retention_analysis:", "detailed_description:", "overall_soundscape:",
+        "non_diegetic_music:", "<Video 1>", "<Picture 1>"].allSatisfy(prompt.contains),
+      let config = root["config"] as? [String: Any],
+      let duration = config["duration_seconds"] as? Double,
+      (4...15).contains(duration) else {
+      throw H3CheckpointError.invalid("Swift H3 external extension needs one full-strength audiovisual source, a 4–15 second Ref2VA window and the continuation prompt structure.")
+    }
+    components.removeValue(forKey: "vision_encoder")
+    components.removeValue(forKey: "allow_fl2va_weights_for_ref2va")
+    components["task"] = "t2va"
+    root["components"] = components
+    root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [],
+      "audio_policy": "generated"]
+    let base = try compile(data: JSONSerialization.data(withJSONObject: root))
+    let (source, last) = try resolveVideo(path, digest)
+    guard source.audio != nil, source.frameCount >= 5,
+      last.width == source.width, last.height == source.height,
+      last.rgb8.count == source.width * source.height * 3 else {
+      throw H3CheckpointError.invalid("H3 external extension requires a movie with soundtrack.")
+    }
+    return try H3Ref2VAStillRequest(prompt: base.prompt,
+      mediaReferences: [.video(source), .timedImage(last, frame: 0)],
+      width: base.geometry.width, height: base.geometry.height,
+      durationSeconds: base.durationSeconds, seed: base.seed,
+      requestedSteps: base.requestedSteps, transformer: base.transformer,
+      qwenPages: base.qwenPages, qwenVision: URL(fileURLWithPath: vision),
+      tokenizer: base.tokenizer, videoVAE: base.videoVAE,
+      audioVAE: base.audioVAE, turboLoRA: base.turboLoRA,
+      turboLoRAStrength: base.turboLoRAStrength,
+      additionalLoRAs: base.additionalLoRAs)
+  }
+
   /// Admit FL2VA's timed keyframe contract before reading any image.
   /// The text recipe validator still owns every shared execution control.
   public static func compileFL2VA(data: Data,

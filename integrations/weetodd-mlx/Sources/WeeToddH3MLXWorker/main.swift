@@ -134,10 +134,45 @@ import UniformTypeIdentifiers
       expectedOutputDirectory: arguments[4])
     let recipeData = try readRequest(envelope.recipePath)
     try envelope.validateRecipe(recipeData)
-    let recipe = try JSONSerialization.jsonObject(with: recipeData) as! [String: Any]
+    var recipe = try JSONSerialization.jsonObject(with: recipeData) as! [String: Any]
     let selectedTask = (recipe["components"] as? [String: Any])?["task"] as? String ?? "t2va"
     let conditioningTask = (recipe["conditioning"] as? [String: Any])?["task"] as? String ?? "t2v"
-    let reportedTask = conditioningTask == "a2v" ? "a2v" : selectedTask
+    let continuation: H3Continuation.Plan?
+    if let fields = recipe.removeValue(forKey: "continuation") {
+      let object = fields as? [String: Any]
+      let saveNumber = object?["save_context"] as? NSNumber
+      guard selectedTask == "t2va", conditioningTask == "t2v",
+        let object,
+        Set(object.keys).isSubset(of: ["version", "context_frames",
+          "source_context", "source_manifest_sha256", "save_context"]),
+        object["version"] as? Int == 2,
+        let context = object["context_frames"] as? Int,
+        (object["source_context"] == nil || object["source_context"] is String),
+        (object["source_context"] as? String).map({
+          $0.hasPrefix("/") && !$0.utf8.contains(0) && !$0.contains("://")
+        }) ?? true,
+        (object["source_manifest_sha256"] == nil ||
+          object["source_manifest_sha256"] is String),
+        (object["save_context"] == nil ||
+          (saveNumber != nil && CFGetTypeID(saveNumber!) == CFBooleanGetTypeID())),
+        let config = recipe["config"] as? [String: Any],
+        let duration = config["duration_seconds"] as? Double else {
+        throw invalid("Swift H3 continuation v2 requires a text-to-AV recipe and supported fields.")
+      }
+      let source = (object["source_context"] as? String).map { URL(fileURLWithPath: $0) }
+      continuation = try H3Continuation.Plan(contextFrames: context,
+        requestedDuration: duration, sourceManifest: source,
+        sourceSHA256: object["source_manifest_sha256"] as? String,
+        saveContext: object["save_context"] as? Bool ?? false)
+      if continuation!.sourceManifest != nil {
+        var sampleConfig = config
+        sampleConfig["duration_seconds"] = min(Double(continuation!.generatedFrames) / 24, 15)
+        recipe["config"] = sampleConfig
+      }
+    } else { continuation = nil }
+    let reportedTask = continuation != nil ? "continuation" :
+      conditioningTask == "extension" ? "extension" :
+      conditioningTask == "a2v" ? "a2v" : selectedTask
     let configuredFFmpeg = envelope.ffmpegPath ?? recipe["ffmpeg"] as? String ?? ""
     guard configuredFFmpeg.hasPrefix("/"),
       FileManager.default.isExecutableFile(atPath: configuredFFmpeg) else {
@@ -147,7 +182,27 @@ import UniformTypeIdentifiers
     let stillRequest: H3Ref2VAStillRequest?
     let endpointRequest: H3FL2VARequest?
     let textRequest: H3T2VARequest?
-    if selectedTask == "ref2va" && conditioningTask == "a2v" {
+    if selectedTask == "ref2va" && conditioningTask == "extension" {
+      stillRequest = try H3StudioRecipe.compileExtension(data: recipeData) {
+        path, expectedSHA256 in
+        let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
+        try source.verify()
+        let loaded = try H3VideoReferenceMedia.load(path: path,
+          ffmpeg: URL(fileURLWithPath: configuredFFmpeg),
+          retainCompleteAudio: true, preserveTail: true)
+        try source.verify()
+        guard loaded.decodedFrames < 361 else {
+          throw invalid("Swift H3 external extension needs a source of at most 15 seconds.")
+        }
+        sourceImages.append(["path": path, "sha256": expectedSHA256,
+          "kind": "extension_source", "decodedFrames": loaded.decodedFrames,
+          "conditionFrames": loaded.reference.frameCount,
+          "soundtrackSamples": loaded.reference.audio?.frames ?? 0])
+        return (loaded.reference, loaded.lastFrame)
+      }
+      endpointRequest = nil
+      textRequest = nil
+    } else if selectedTask == "ref2va" && conditioningTask == "a2v" {
       stillRequest = try H3StudioRecipe.compileA2V(data: recipeData) {
         path, expectedSHA256, start, duration in
         let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
@@ -240,11 +295,25 @@ import UniformTypeIdentifiers
       stillRequest = nil
       textRequest = nil
     } else {
-      textRequest = try H3StudioRecipe.compile(data: recipeData)
+      textRequest = try H3StudioRecipe.compile(
+        data: JSONSerialization.data(withJSONObject: recipe))
       stillRequest = nil
       endpointRequest = nil
     }
     let admission: (geometry: H3Geometry, packedRows: Int, evaluations: Int)
+    let continuationIdentity: String?
+    var continuationRows: H3Continuation.Rows?
+    if let continuation, let textRequest {
+      let identity = try H3Continuation.fingerprint(textRequest)
+      continuationIdentity = identity
+      if let source = continuation.sourceManifest,
+        let sourceHash = continuation.sourceSHA256 {
+        continuationRows = try H3Continuation.load(manifestURL: source,
+          expectedSHA256: sourceHash, contextFrames: continuation.contextFrames,
+          width: textRequest.geometry.width, height: textRequest.geometry.height,
+          identity: identity, loadRows: arguments[0] == "render")
+      }
+    } else { continuationIdentity = nil }
     if let stillRequest {
       let checked = try H3Ref2VAStillRunner.preflight(stillRequest)
       admission = (checked.geometry, checked.packedRows, checked.evaluations)
@@ -252,8 +321,14 @@ import UniformTypeIdentifiers
       let checked = try H3FL2VARunner.preflight(endpointRequest)
       admission = (checked.geometry, checked.packedRows, checked.evaluations)
     } else if let textRequest {
-      let checked = try H3T2VARunner.preflight(textRequest)
-      admission = (checked.geometry, checked.packedRows, checked.evaluations)
+      if let continuation, continuation.sourceManifest != nil {
+        let checked = try H3ContinuationRunner.preflight(textRequest,
+          contextFrames: continuation.contextFrames)
+        admission = (checked.geometry, checked.packedRows, checked.evaluations)
+      } else {
+        let checked = try H3T2VARunner.preflight(textRequest)
+        admission = (checked.geometry, checked.packedRows, checked.evaluations)
+      }
     } else {
       throw invalid("The H3 task was not admitted.")
     }
@@ -262,6 +337,8 @@ import UniformTypeIdentifiers
       try emit(["status": "success", "result": [
         "nativeRuntime": "swift-mlx", "jobID": envelope.jobID.uuidString,
         "task": reportedTask, "frames": admission.geometry.frames, "fps": 24,
+        "publishedFrames": continuation?.publishedFrames ?? admission.geometry.frames,
+        "overlapFrames": continuation?.overlapFrames ?? 0,
         "packedRows": admission.packedRows,
         "evaluations": admission.evaluations,
         "referenceImages": sourceImages,
@@ -308,31 +385,53 @@ import UniformTypeIdentifiers
     }
     Memory.clearCache()
     Memory.peakMemory = Memory.activeMemory
+    let publishedFrames = continuation?.publishedFrames ?? admission.geometry.frames
+    let overlapFrames = continuation?.overlapFrames ?? 0
     let onFrame: (Int, Data) throws -> Void = { index, rgb in
       try Task.checkCancellation()
+      guard (overlapFrames..<(overlapFrames + publishedFrames)).contains(index) else { return }
+      let outputIndex = index - overlapFrames
       if writer == nil {
         writer = try RawVideoWriter(ffmpeg: URL(fileURLWithPath: configuredFFmpeg),
           output: staging.appendingPathComponent("video.mp4"),
           width: admission.geometry.width, height: admission.geometry.height,
-          frames: admission.geometry.frames, fps: 24)
+          frames: publishedFrames, fps: 24)
       }
-      try writer!.append(rgb, frame: index)
-      if index == 0 || index == admission.geometry.frames - 1 ||
+      try writer!.append(rgb, frame: outputIndex)
+      if outputIndex == 0 || outputIndex == publishedFrames - 1 ||
         Date().timeIntervalSince(lastPreview) >= 1 {
         try preview(rgb, width: admission.geometry.width,
           height: admission.geometry.height, output: previewURL)
         lastPreview = Date()
         revision += 1
         try emit(["event": "progress", "stage": "video_decode",
-          "completed": index + 1, "total": admission.geometry.frames,
-          "fraction": min(0.97, 0.84 + 0.13 * Double(index + 1) /
-            Double(admission.geometry.frames)),
-          "message": "Decoding H3 video · frame \(index + 1)/\(admission.geometry.frames)",
+          "completed": outputIndex + 1, "total": publishedFrames,
+          "fraction": min(0.97, 0.84 + 0.13 * Double(outputIndex + 1) /
+            Double(publishedFrames)),
+          "message": "Decoding H3 video · frame \(outputIndex + 1)/\(publishedFrames)",
           "previewPath": previewURL.path, "previewRevision": revision])
       }
     }
     let onAudio: ([Float], Int) throws -> Void = { samples, sampleRate in
-      try MediaOutput.writeWAV(samples: samples, sampleRate: sampleRate,
+      if continuation == nil {
+        try MediaOutput.writeWAV(samples: samples, sampleRate: sampleRate,
+          channels: 2, to: staging.appendingPathComponent("audio.wav"))
+        return
+      }
+      guard sampleRate == 32_000, samples.count.isMultiple(of: 2) else {
+        throw invalid("H3 continuation needs 32 kHz stereo audio.")
+      }
+      let channelSamples = samples.count / 2
+      let start = Int((Double(overlapFrames) / 24 * 32_000).rounded(.toNearestOrEven))
+      let count = Int((Double(publishedFrames) / 24 * 32_000).rounded(.toNearestOrEven))
+      guard start <= channelSamples, start + count - channelSamples <= 800 else {
+        throw invalid("H3 continuation audio crop exceeds decoded samples.")
+      }
+      let available = min(count, channelSamples - start)
+      let padding = [Float](repeating: 0, count: count - available)
+      let published = Array(samples[start..<(start + available)]) + padding +
+        Array(samples[(channelSamples + start)..<(channelSamples + start + available)]) + padding
+      try MediaOutput.writeWAV(samples: published, sampleRate: sampleRate,
         channels: 2, to: staging.appendingPathComponent("audio.wav"))
     }
     let onProgress: (String, Int, Int) -> Void = { stage, completed, total in
@@ -365,6 +464,17 @@ import UniformTypeIdentifiers
         "message": message])
     }
     let result: (videoFrames: Int, audioSamplesPerChannel: Int, audioSampleRate: Int)
+    var savedContextSHA256: String?
+    let onLatents: ([Float], [Float]) throws -> Void = { video, audio in
+      guard let continuation, continuation.saveContext,
+        let identity = continuationIdentity else { return }
+      let tail = try H3Continuation.tail(video: video, audio: audio,
+        geometry: admission.geometry, contextFrames: continuation.contextFrames)
+      let saved = try H3Continuation.save(tail, plan: continuation,
+        width: admission.geometry.width, height: admission.geometry.height,
+        identity: identity, directory: staging.appendingPathComponent("continuation"))
+      savedContextSHA256 = saved.sha256
+    }
     if let stillRequest {
       let rendered = try H3Ref2VAStillRunner.run(stillRequest,
         onFrame: onFrame, onAudio: onAudio, progress: onProgress)
@@ -376,10 +486,20 @@ import UniformTypeIdentifiers
       result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
         rendered.audioSampleRate)
     } else if let textRequest {
-      let rendered = try H3T2VARunner.run(textRequest,
-        onFrame: onFrame, onAudio: onAudio, progress: onProgress)
-      result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
-        rendered.audioSampleRate)
+      if let continuation, let rows = continuationRows {
+        let rendered = try H3ContinuationRunner.run(textRequest,
+          contextFrames: continuation.contextFrames, context: rows,
+          onFrame: onFrame, onAudio: onAudio,
+          onLatents: onLatents, progress: onProgress)
+        result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
+          rendered.audioSampleRate)
+      } else {
+        let rendered = try H3T2VARunner.run(textRequest,
+          onFrame: onFrame, onAudio: onAudio,
+          onLatents: onLatents, progress: onProgress)
+        result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
+          rendered.audioSampleRate)
+      }
     } else {
       throw invalid("The H3 task was not admitted.")
     }
@@ -394,8 +514,14 @@ import UniformTypeIdentifiers
       "jobID": envelope.jobID.uuidString,
       "task": reportedTask, "referenceImages": sourceImages,
       "stageTimings": stageTimings,
-      "frames": result.videoFrames, "fps": 24,
-      "audioSamplesPerChannel": result.audioSamplesPerChannel,
+      "frames": publishedFrames, "fps": 24,
+      "sampledFrames": result.videoFrames,
+      "overlapFrames": overlapFrames,
+      "audioSamplesPerChannel": continuation == nil
+        ? result.audioSamplesPerChannel
+        : Int((Double(publishedFrames) / 24 * 32_000)
+          .rounded(.toNearestOrEven)),
+      "sampledAudioSamplesPerChannel": result.audioSamplesPerChannel,
       "audioSampleRate": result.audioSampleRate,
       "peakMLXBytes": usage.peakMLXBytes,
       "peakProcessFootprintBytes": usage.peakPhysicalBytes,
@@ -403,9 +529,16 @@ import UniformTypeIdentifiers
       "processMemoryScope": "Swift H3 worker; external FFmpeg excluded",
       "preflightSeconds": preflightSeconds,
       "seconds": Date().timeIntervalSince(started)]
+    var completeMetadata = metadata
+    if let savedContextSHA256 {
+      completeMetadata["continuationManifest"] = output
+        .appendingPathComponent("continuation")
+        .appendingPathComponent("manifest.json").path
+      completeMetadata["continuationManifestSHA256"] = savedContextSHA256
+    }
     try recipeData.write(to: staging.appendingPathComponent("studio-recipe.json"),
       options: .withoutOverwriting)
-    try JSONSerialization.data(withJSONObject: metadata,
+    try JSONSerialization.data(withJSONObject: completeMetadata,
       options: [.prettyPrinted, .sortedKeys]).write(
         to: staging.appendingPathComponent("result.json"),
         options: .withoutOverwriting)
@@ -414,7 +547,7 @@ import UniformTypeIdentifiers
     published = true
     try emit(["status": "success", "result": H3WorkerReceipt.renderResult(
       video: output.appendingPathComponent("render.mp4"),
-      metadata: metadata, jobID: envelope.jobID)])
+      metadata: completeMetadata, jobID: envelope.jobID)])
   }
 
   static func main() async {

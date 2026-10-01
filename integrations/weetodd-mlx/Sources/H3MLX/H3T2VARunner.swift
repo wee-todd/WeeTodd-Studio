@@ -119,6 +119,7 @@ public enum H3T2VARunner {
   public static func run(_ request: H3T2VARequest,
     onFrame: (Int, Data) throws -> Void,
     onAudio: ([Float], Int) throws -> Void,
+    onLatents: (([Float], [Float]) throws -> Void)? = nil,
     progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
     let admission = try preflight(request)
     let geometry = admission.geometry
@@ -166,6 +167,7 @@ public enum H3T2VARunner {
     Memory.clearCache()
     progress("transformer_weights_released", 1, 1)
     try Task.checkCancellation()
+    try onLatents?(rawRows.0, rawRows.1)
 
     let result = try H3AVOutputDecoder.decode(videoRows: rawRows.0,
       audioRows: rawRows.1, geometry: geometry, videoVAE: request.videoVAE,

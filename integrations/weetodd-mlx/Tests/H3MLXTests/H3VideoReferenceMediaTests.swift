@@ -60,5 +60,12 @@ final class H3VideoReferenceMediaTests: XCTestCase {
     XCTAssertGreaterThan(soundtrack.frames, 29_000)
     XCTAssertLessThanOrEqual(soundtrack.frames, 29_334)
     XCTAssertEqual(soundtrack.samples.count, 2 * soundtrack.frames)
+    let extensionSource = try H3VideoReferenceMedia.load(path: movie.path,
+      ffmpeg: executable, retainCompleteAudio: true, preserveTail: true)
+    XCTAssertEqual(extensionSource.decodedFrames, 24)
+    XCTAssertEqual(extensionSource.reference.frameCount, 39)
+    XCTAssertEqual(extensionSource.reference.rgb8.suffix(256 * 256 * 3),
+      extensionSource.lastFrame.rgb8)
+    XCTAssertGreaterThan(extensionSource.reference.audio?.frames ?? 0, 31_000)
   }
 }

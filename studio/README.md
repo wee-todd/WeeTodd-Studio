@@ -85,6 +85,11 @@ Model setup, asset/library tools and other engines remain
 separate migration work; this is not yet a fully Python-free Studio release.
 The experimental Swift H3 worker has completed text-to-audiovisual, reference-conditioned
 and independent audio-driven takes.
+Direct worker tests now also cover a Swift-only version-2 latent continuation
+pair and a Ref2VA external movie extension with a final-frame seam anchor.
+Studio's **Clip Continuity** controls still use their existing route; they do
+not produce or consume the new Swift context artifact. Both Swift test joins
+remain visible, and the external route has a substantial speed/memory cost.
 The off-by-default Swift preparation path validates clip inputs, ordered references and profile
 settings, then requires worker preflight before a take can render. Enable **Use Swift MLX for H3
 (experimental)** in Runtime Settings to try text-to-AV, timed keyframes, or ordered Ref2VA with

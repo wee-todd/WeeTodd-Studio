@@ -1127,6 +1127,16 @@ FL2VA/T2VA latent-overlap route is rejected for external extension because its f
 visually unusable. Latent-overlap continuation remains experimental and is available through
 the internal node, native headless contract, and Studio's opt-in **Clip Continuity** controls.
 Studio also supports visible-frame matching and compatible LTX source-tail continuation.
+An experimental **direct Swift H3 worker** can save and load its own version-2
+normalized audiovisual latent context for text-to-AV chaining. It is not
+interchangeable with Python's version-1 SafeTensors context and is not yet
+selected by Studio's continuity controls or ComfyUI export. A separate direct
+Swift Ref2VA extension route prepares an audio-bearing source movie and its
+true last frame as a frame-zero seam anchor. Both routes published installed-
+weight clips at 384 × 256, but the first-frame joins remained visible and the
+Ref2VA extension took 690.70 seconds with an 8.13 GB peak Swift-process
+footprint (external FFmpeg excluded). These routes are execution proofs, not
+quality or performance approval; see [current status](STATUS.md).
 For a continuous local LTX 2.5 scene, connect following shots with **Continue scene** in
 Studio. This uses the native video/audio latent chain, renders the group as one movie, and
 decodes the assembled timeline once. It supports two to six shots up to 30 seconds, with

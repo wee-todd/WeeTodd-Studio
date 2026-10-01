@@ -3,6 +3,51 @@ import XCTest
 @testable import H3MLX
 
 final class H3StudioRecipeTests: XCTestCase {
+  func testExternalExtensionRequiresPromptAndAnchorsTheTrueLastFrame() throws {
+    var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
+    var components = try XCTUnwrap(root["components"] as? [String: Any])
+    components["task"] = "ref2va"
+    components["vision_encoder"] = "/tmp/vision.safetensors"
+    root["components"] = components
+    var config = try XCTUnwrap(root["config"] as? [String: Any])
+    config["width"] = 64; config["height"] = 64
+    config["duration_seconds"] = 4.0
+    root["config"] = config
+    let digest = String(repeating: "a", count: 64)
+    root["conditioning"] = ["version": 1, "task": "extension",
+      "audio_policy": "generated", "inputs": [["id": "source", "kind": "video",
+        "role": "reference", "path": "/tmp/source.mp4", "sha256": digest,
+        "strength": 1.0]]]
+    var resolved = false
+    func compile() throws -> H3Ref2VAStillRequest {
+      try H3StudioRecipe.compileExtension(
+        data: JSONSerialization.data(withJSONObject: root)) { path, hash in
+          resolved = true
+          XCTAssertEqual(path, "/tmp/source.mp4")
+          XCTAssertEqual(hash, digest)
+          let movie = H3VideoReference(rgb8: Data(count: 22 * 64 * 64 * 3),
+            frameCount: 22, width: 64, height: 64,
+            audio: H3AudioReference(samples: [Float](repeating: 0,
+              count: 2 * 32_000), frames: 32_000))
+          let last = H3StillReference(rgb8: Data(repeating: 17,
+            count: 64 * 64 * 3), width: 64, height: 64)
+          return (movie, last)
+        }
+    }
+    XCTAssertThrowsError(try compile())
+    XCTAssertFalse(resolved, "Unsupported prompt must fail before media decoding")
+    root["prompt"] = "subject_definitions: robot <Video 1> <Picture 1> " +
+      "summary: [video continuation] retention_analysis: detailed_description: " +
+      "overall_soundscape: non_diegetic_music:"
+    let request = try compile()
+    XCTAssertTrue(resolved)
+    XCTAssertEqual(request.references.count, 2)
+    if case .timedImage(let anchor, let frame) = request.references[1] {
+      XCTAssertEqual(frame, 0)
+      XCTAssertEqual(anchor.rgb8.first, 17)
+    } else { XCTFail("External extension did not preserve the seam anchor") }
+  }
+
   private func recipe(controls: [String: Any] = [:],
     conditioning: [String: Any] = ["version": 1, "task": "t2v",
       "inputs": [], "audio_policy": "generated"],

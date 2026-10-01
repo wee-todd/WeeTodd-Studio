@@ -1,5 +1,27 @@
 # WeeTodd Studio implementation status
 
+Swift H3 continuation and external extension 2026-10-01 (experimental direct-worker
+routes): a version-2 text-to-AV continuation request can save a bounded,
+hash-checked normalized video/audio latent tail and feed it into the shared
+reference sampler for a following clip. It publishes only new frames and crops
+the synchronized 32 kHz stereo output. Installed-weight 384 × 256/24 fps jobs
+published a 90-frame source and an 85-frame continuation from its 22-frame
+context, with no Python inference. They took 286.30 and 313.18 seconds and
+peaked at 2.11 and 2.63 GB Swift-process footprint, respectively (external
+FFmpeg excluded). The join preserved the robot/camera but measured 30.54 dB
+PSNR versus 42.49 dB between the preceding clip's adjacent frames; a visible
+seam remains. The Swift artifact format is separate from Python continuation
+v1 and fingerprints installed component metadata rather than hashing all model
+weights. A separate Ref2VA external-extension request uses an audio-bearing
+source movie plus its true final frame as a target-frame-zero guide. Its
+384 × 256/107-frame installed-weight result took 690.70 seconds, including
+590.20 seconds sampling, and peaked at 8.13 GB; the first-frame seam measured
+28.45 dB PSNR against the source final frame. Longer source preparation now
+preserves the complete source tail on the aligned video grid and sparsifies
+only Qwen visual samples, but a long-source render has not been qualified.
+Both routes still need Studio/ComfyUI routing, lifecycle checks, matched speed
+work and visual/audio quality acceptance.
+
 Swift LTX 2.5 MSR 2026-10-01 (experimental direct-worker route): a strict
 version-7 request freezes one to five ordered image references by SHA-256,
 validates the installed rank-128 MSR adapter and its five learned slot tensors,

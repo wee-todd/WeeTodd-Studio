@@ -87,7 +87,7 @@ public enum H3VideoReferencePreparation {
           throw H3CheckpointError.invalid("H3 reference image needs bounded RGB8 pixels on the 32-pixel grid.")
         }
       case .video(let video):
-        guard (5...175).contains(video.frameCount),
+        guard (5...362).contains(video.frameCount),
           (video.frameCount - 5).isMultiple(of: 17),
           (64...256).contains(video.width), (64...256).contains(video.height),
           video.width.isMultiple(of: 32), video.height.isMultiple(of: 32),
@@ -130,7 +130,11 @@ public enum H3VideoReferencePreparation {
           latentWidth: image.width / 16, targetFrame: frame))
       case .video(let video):
         let frameBytes = video.width * video.height * 3
-        let indices = Array(stride(from: 0, to: video.frameCount, by: 12))
+        // Keep at most six paired visual blocks for one movie, reserving
+        // Qwen rows for the explicit seam image and prompt. Full-rate VAE
+        // latents still carry the source motion and soundtrack.
+        let visualStride = max(12, (video.frameCount + 11) / 12)
+        let indices = Array(stride(from: 0, to: video.frameCount, by: visualStride))
         var blocks: [H3QwenRequest.VideoBlock] = []
         for pairStart in stride(from: 0, to: indices.count, by: 2) {
           let first = indices[pairStart]
@@ -141,7 +145,7 @@ public enum H3VideoReferencePreparation {
             frameCount: 2, width: video.width, height: video.height)
           pixels.append(packed.pixels)
           grids.append(packed.grid)
-          let timestamp = Double(pairStart + min(pairStart + 1, indices.count - 1)) / 4
+          let timestamp = (Double(first) + Double(second)) / 48
           blocks.append(.init(timestampSeconds: timestamp, grid: packed.grid))
         }
         qwenReferences.append(.video(blocks: blocks,

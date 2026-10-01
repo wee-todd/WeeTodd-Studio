@@ -8,9 +8,12 @@ public enum H3VideoReferenceMedia {
   public struct Loaded {
     public let reference: H3VideoReference
     public let decodedFrames: Int
+    public let lastFrame: H3StillReference
   }
 
-  public static func load(path: String, ffmpeg: URL) throws -> Loaded {
+  public static func load(path: String, ffmpeg: URL,
+    retainCompleteAudio: Bool = false,
+    preserveTail: Bool = false) throws -> Loaded {
     guard path.hasPrefix("/"), !path.utf8.contains(0),
       ffmpeg.isFileURL,
       FileManager.default.isExecutableFile(atPath: ffmpeg.path) else {
@@ -20,7 +23,7 @@ public enum H3VideoReferenceMedia {
     let hasAudio = !asset.tracks(withMediaType: .audio).isEmpty
     let side = 256
     let frameBytes = side * side * 3
-    let maximumFrames = 175
+    let maximumFrames = preserveTail ? 361 : 175
     let maximumBytes = maximumFrames * frameBytes
     let process = Process()
     process.executableURL = ffmpeg
@@ -59,16 +62,24 @@ public enum H3VideoReferenceMedia {
       throw H3CheckpointError.invalid("H3 reference movie could not be decoded on the 24 fps grid.")
     }
     let decodedFrames = bytes.count / frameBytes
-    guard decodedFrames >= 5 else {
-      throw H3CheckpointError.invalid("H3 reference movie needs at least five decoded frames.")
+    guard decodedFrames >= 5, !preserveTail || decodedFrames <= 360 else {
+      throw H3CheckpointError.invalid("H3 extension source needs 5–360 decoded frames.")
     }
-    let selected = (decodedFrames - 5) / 17 * 17 + 5
-    bytes.count = selected * frameBytes
+    let lastFrame = H3StillReference(rgb8: bytes.subdata(in:
+      ((decodedFrames - 1) * frameBytes)..<(decodedFrames * frameBytes)),
+      width: side, height: side)
+    let selected = preserveTail
+      ? decodedFrames + (5 - decodedFrames % 17 + 17) % 17
+      : (decodedFrames - 5) / 17 * 17 + 5
+    if preserveTail {
+      for _ in decodedFrames..<selected { bytes.append(lastFrame.rgb8) }
+    } else { bytes.count = selected * frameBytes }
     let soundtrack = try hasAudio ? H3AudioReferenceMedia.load(path: path,
-      ffmpeg: ffmpeg, maximumSeconds: Double(selected) / 24) : nil
+      ffmpeg: ffmpeg,
+      maximumSeconds: Double(retainCompleteAudio ? decodedFrames : selected) / 24) : nil
     return Loaded(reference: H3VideoReference(rgb8: bytes,
       frameCount: selected, width: side, height: side,
       audio: soundtrack),
-      decodedFrames: decodedFrames)
+      decodedFrames: decodedFrames, lastFrame: lastFrame)
   }
 }
