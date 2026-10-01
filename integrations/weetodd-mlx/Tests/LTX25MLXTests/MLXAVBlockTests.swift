@@ -9,6 +9,35 @@ final class MLXAVBlockTests: XCTestCase {
     let inputs: [String:[Float]]
     let expected: [String:[Float]]
   }
+  func testMSRCompactGroupsKeepUnmaskedParityAndChangeCrossReferenceWeight() throws {
+    let url=Bundle.module.url(forResource:"block-reference",withExtension:"json",subdirectory:"Fixtures")!
+    let f=try JSONDecoder().decode(Fixture.self,from:Data(contentsOf:url))
+    let ordinary=try MLXAVBlock(configuration:f.configuration,compileGraph:false)
+    let grouped=try MLXAVBlock(configuration:f.configuration,compileGraph:false,
+      videoAttentionGroups:[2,f.configuration.videoTokens-2])
+    for block in [ordinary,grouped] {
+      try block.load { name,shape in
+        let seed=name.utf8.reduce(0) { $0+Int($1) }
+        let norm:Float=name.hasSuffix("q_norm.weight") || name.hasSuffix("k_norm.weight") ? 1 : 0
+        return try MLXWeight(dense:MLXArray((0..<shape.reduce(1,*)).map {
+          Float(($0*17+seed)%31-15)/128+norm },shape))
+      }
+    }
+    let original=f.inputs.mapValues { MLXArray($0) }
+    var conditioned=original
+    let rows=f.configuration.videoTokens
+    conditioned["video_attention_templates"] = .ones([2,rows])
+    let baseline=try ordinary.evaluate(original)["video"]!
+    let same=try grouped.evaluate(conditioned)["video"]!
+    XCTAssertLessThan((baseline-same).abs().max().item(Float.self),0.00003)
+    conditioned["video_attention_templates"] = MLXArray(
+      [Float](repeating:1,count:2)+[Float](repeating:0.1,count:rows-2)
+      + [Float](repeating:0.1,count:2)+[Float](repeating:1,count:rows-2),[2,rows])
+    let weighted=try grouped.evaluate(conditioned)["video"]!
+    XCTAssertGreaterThan((baseline-weighted).abs().max().item(Float.self),0.000001)
+    conditioned["video_attention_templates"] = .ones([2,rows])+Float(0.1)
+    XCTAssertThrowsError(try grouped.validateInputs(conditioned))
+  }
   func testCompactAudioModulationsMatchExpandedRowsAlongsideVideo() throws {
     let url=Bundle.module.url(forResource:"block-reference",withExtension:"json",subdirectory:"Fixtures")!
     let f=try JSONDecoder().decode(Fixture.self,from:Data(contentsOf:url))

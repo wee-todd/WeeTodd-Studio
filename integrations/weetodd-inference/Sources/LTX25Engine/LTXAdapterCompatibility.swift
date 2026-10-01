@@ -74,6 +74,43 @@ public enum LTXAdapterCompatibility {
     return plan
   }
 
+  /// Licon MSR uses the same 48-block rank-128 projection family as Ingredients,
+  /// plus five learned Fourier-slot tensors. The slot tensors are loaded only
+  /// while preparing references; ordinary LoRA application cannot use them.
+  public static func msrPlan(file: SafeTensorFile, strength: Float) throws -> LoRAPlan {
+    guard file.metadata["reference_slot_embedding_type"] == "fourier_mlp",
+      file.metadata["reference_token_order"] == "prepend",
+      file.metadata["reference_slot_time_offsets"] == "pic1_based_negative_time",
+      file.metadata["reference_slot_embedding_num_frequencies"] == "16",
+      file.metadata["reference_slot_embedding_hidden_dim"] == "256",
+      file.metadata["reference_slot_embedding_dim"] == "128" else {
+      throw LTXError.invalid("MSR needs its learned Fourier slots and prepended negative-time reference layout.")
+    }
+    let slotShapes:[String:[UInt64]]=[
+      "frequencies":[16], "net.0.weight":[256,33], "net.0.bias":[256],
+      "net.2.weight":[128,256], "net.2.bias":[128]]
+    let prefixes=["diffusion_model.reference_slot_embedding.","reference_slot_embedding."]
+    guard let prefix=prefixes.first(where: { prefix in
+      slotShapes.allSatisfy { name,shape in
+        guard let tensor=file.tensors[prefix+name] else { return false }
+        return tensor.shape == shape && ["BF16","F16","F32"].contains(tensor.dtype)
+      }
+    }) else { throw LTXError.invalid("MSR learned-slot tensors are incomplete or incompatible.") }
+    let auxiliaries=Set(slotShapes.keys.map { prefix+$0 })
+    let plan=try LoRAPlan(file:file,strength:strength,targetShapes:targetShapes,
+      normalize:normalize,auxiliaryTensors:auxiliaries)
+    let expected=Set((0..<48).flatMap { block in
+      ["attn1.to_k","attn1.to_out","attn1.to_q","attn1.to_v",
+       "attn2.to_k","attn2.to_out","attn2.to_q","attn2.to_v",
+       "ff.proj_in","ff.proj_out"].map { "transformer_blocks.\(block).\($0)" }
+    })
+    guard plan.pairs.count == 480,Set(plan.pairs.map(\.target)) == expected,
+      plan.pairs.allSatisfy({ $0.rank == 128 }) else {
+      throw LTXError.invalid("MSR needs the complete 48-block rank-128 task adapter.")
+    }
+    return plan
+  }
+
   public static func normalize(_ source: String) -> String? {
     var key = source
     let prefixes = ["base_model.model.model.diffusion_model.", "base_model.model.diffusion_model.",

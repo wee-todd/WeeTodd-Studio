@@ -19,7 +19,7 @@ public struct MLXStudioMemoryPlan:Sendable {
       UInt64(min(MLXMediaPipeline.maximumVideoActivationMiB,MLXMediaPipeline.maximumTransformerActivationMiB))*1024*1024)
     let recipe=try request.recipe()
     var transformer=0
-    let geometries=request.ingredientsSheet == nil ? [recipe.low,recipe.high] : [recipe.high]
+    let geometries=request.ingredientsSheet == nil && request.msr == nil ? [recipe.low,recipe.high] : [recipe.high]
     for (index,geometry) in geometries.enumerated() {
       let layout=try request.referenceImages.first.map { try MLXReferenceLayout(geometry:geometry,
         firstStrength:$0.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil) }
@@ -30,13 +30,14 @@ public struct MLXStudioMemoryPlan:Sendable {
       let ingredients=try request.ingredientsSheet.map {
         try MLXReferenceVideoLayout(geometry:geometry,strength:$0.referenceStrength)
       }
+      let msr=try MLXMSRReferencePlan.resolve(request,target:geometry)
       guard layout?.lastStrength == nil || guide == nil else {
         throw LTXError.invalid("A last-frame image cannot share an LTX history guide.")
       }
       transformer=max(transformer,try MLXAVBlock.estimatedActivationBytes(configuration:
-        AVBlockConfiguration(videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ingredients?.videoTokens ?? geometry.videoTokens,
+        AVBlockConfiguration(videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
           audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
-        perTokenVideo:layout != nil || guide != nil || union != nil || ingredients != nil,perTokenAudio:guide != nil))
+        perTokenVideo:layout != nil || guide != nil || union != nil || ingredients != nil || msr != nil,perTokenAudio:guide != nil))
     }
     // This plan validates geometry and calculates bytes without allocating a VAE.
     let decoder=try MLXVideoDecodePlan(shape:recipe.high.videoShape,configuration:
@@ -51,7 +52,12 @@ public struct MLXStudioMemoryPlan:Sendable {
         height:recipe.high.height,maximumOwnedBufferBytes:Int.max)
         .tiles.map(\.ownedBufferBytes).max() ?? 0
     } ?? 0
-    let video=max(decoder,unionGuideEncoder,ingredientsGuideEncoder)
+    let msrGuideEncoder=try MLXMSRReferencePlan.resolve(request,target:recipe.high)?.plans.map { plan in
+      try MLXVideoEncodeTilePlan(frames:plan.geometry.frames,width:plan.geometry.width,
+        height:plan.geometry.height,maximumOwnedBufferBytes:Int.max)
+        .tiles.map(\.ownedBufferBytes).max() ?? 0
+    }.max() ?? 0
+    let video=max(decoder,unionGuideEncoder,ingredientsGuideEncoder,msrGuideEncoder)
     for (stage,needed) in [("transformer",transformer),("video decoder",video)] {
       guard UInt64(needed) <= ceiling else {
         throw LTXError.invalid("LTX \(request.width)×\(request.height), \(request.frames) frames: \(stage) needs an estimated \(needed) activation bytes; this Mac's stage allowance is \(ceiling) bytes after memory reserves (engine maximum 32 GiB).")

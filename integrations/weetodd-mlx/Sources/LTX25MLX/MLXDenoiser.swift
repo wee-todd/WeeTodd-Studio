@@ -39,11 +39,17 @@ public final class MLXDenoiser {
     let frozenAudio:Bool
   }
 
-  public init(configuration:AVBlockConfiguration,blockCount:Int=48,cacheBytes:Int=128*1024*1024,maximumActivationBytes:Int=2*1024*1024*1024) throws {
+  public init(configuration:AVBlockConfiguration,blockCount:Int=48,cacheBytes:Int=128*1024*1024,
+    maximumActivationBytes:Int=2*1024*1024*1024,videoAttentionGroups:[Int]=[]) throws {
     maximumRotaryBytes=try Self.admitRotary(configuration:configuration,maximumActivationBytes:maximumActivationBytes)
-    stack=try MLXAVStack(configuration:configuration,blockCount:blockCount,cacheBytes:cacheBytes,maximumActivationBytes:maximumActivationBytes)
+    stack=try MLXAVStack(configuration:configuration,blockCount:blockCount,cacheBytes:cacheBytes,
+      maximumActivationBytes:maximumActivationBytes,videoAttentionGroups:videoAttentionGroups)
     self.configuration=configuration; self.blockCount=blockCount; self.cacheBytes=cacheBytes
-    inputShapes=DenoiserLayout.inputShapes(configuration); shapes=DenoiserLayout.weightShapes(configuration)
+    var admitted=DenoiserLayout.inputShapes(configuration)
+    if !videoAttentionGroups.isEmpty {
+      admitted["video_attention_templates"]=[videoAttentionGroups.count,configuration.videoTokens]
+    }
+    inputShapes=admitted;shapes=DenoiserLayout.weightShapes(configuration)
   }
 
   /// The four grids live together. Account for all of them within the already
@@ -158,6 +164,7 @@ public final class MLXDenoiser {
       prepared[name+"_text"]=current[name+"_text"]!.asType(.bfloat16).asType(.float32)
       try report(prefix+"patchify_proj")
     }
+    prepared["video_attention_templates"]=current["video_attention_templates"]
     let hidden=try stack.evaluate(prepared,weights:blockWeights,adapters:blockAdapters) {
       try report("transformer",$0.completedBlocks,$0)
     }

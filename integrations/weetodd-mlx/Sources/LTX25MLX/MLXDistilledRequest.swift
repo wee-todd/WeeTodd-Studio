@@ -16,6 +16,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
   public let audioReference:MLXAudioReference?
   public let unionControlGuide:MLXUnionControlGuide?
   public let ingredientsSheet:MLXIngredientsSheet?
+  public let msr:MLXMSRRequest?
   public let noisePolicy:MLXNoisePolicy
   enum CodingKeys:String,CodingKey,CaseIterable {
     case version,engine,task,prompt,width,height,frames,fps,seed
@@ -23,6 +24,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     case audioReference="audio_reference"
     case unionControlGuide="union_control_guide"
     case ingredientsSheet="ingredients_sheet"
+    case msr
     case gemmaRoot="gemma_root",transformerRoot="transformer_root",connectorCheckpoint="connector_checkpoint"
     case videoCheckpoint="video_checkpoint",audioCheckpoint="audio_checkpoint",spatialUpscalerCheckpoint="spatial_upscaler_checkpoint"
     case outputDirectory="output_directory",stageOneLoras="stage_one_loras",stageTwoLoras="stage_two_loras"
@@ -42,6 +44,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if requestVersion < 4 { expected.remove("audio_reference") }
     if requestVersion < 5 { expected.remove("union_control_guide") }
     if requestVersion < 6 { expected.remove("ingredients_sheet") }
+    if requestVersion < 7 { expected.remove("msr") }
     guard Set(all.allKeys.map(\.stringValue)) == expected else {
       throw LTXError.invalid("Two-stage request has missing or unsupported fields.")
     }
@@ -63,7 +66,8 @@ public struct MLXDistilledRequest:Codable,Sendable {
     referenceImages=version == 1 ? [] : try c.decode([MLXImageReference].self,forKey:.referenceImages)
     audioReference=version < 4 ? nil : try c.decodeIfPresent(MLXAudioReference.self,forKey:.audioReference)
     unionControlGuide=version < 5 ? nil : try c.decodeIfPresent(MLXUnionControlGuide.self,forKey:.unionControlGuide)
-    ingredientsSheet=version < 6 ? nil : try c.decode(MLXIngredientsSheet.self,forKey:.ingredientsSheet)
+    ingredientsSheet=version < 6 ? nil : try c.decodeIfPresent(MLXIngredientsSheet.self,forKey:.ingredientsSheet)
+    msr=version < 7 ? nil : try c.decode(MLXMSRRequest.self,forKey:.msr)
     noisePolicy=version < 3 ? .native : try c.decode(MLXNoisePolicy.self,forKey:.noisePolicy)
     let roles=referenceImages.map(\.role)
     guard (version == 4 && task == "a2v" && (roles.isEmpty || roles == ["first"]) && audioReference != nil) ||
@@ -73,6 +77,9 @@ public struct MLXDistilledRequest:Codable,Sendable {
         audioReference == nil && unionControlGuide == nil && ingredientsSheet != nil &&
         frames >= 121 && stageOneLoras.isEmpty && stageTwoLoras.isEmpty &&
         noisePolicy == .releasedMLX) ||
+      (version == 7 && task == "msr" && roles.isEmpty && audioReference == nil &&
+        unionControlGuide == nil && ingredientsSheet == nil && msr != nil &&
+        stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX) ||
       (version == 1 && task == "t2v") || ((version == 2 || version == 3) &&
       ((task == "t2v" && roles.isEmpty) || (task == "i2v" && roles == ["first"]) || (task == "fflf" && roles == ["first","last"] && frames>1))) else {
       throw LTXError.invalid("Request version/task must match its explicit ordered endpoint references.")
@@ -90,6 +97,11 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if let ingredientsSheet {
       guard !(stageOneLoras + stageTwoLoras).contains(where: { $0.path == ingredientsSheet.adapterPath }) else {
         throw LTXError.invalid("The Ingredients task adapter must appear only in its dedicated single-stage slot.")
+      }
+    }
+    if let msr {
+      guard !(stageOneLoras + stageTwoLoras).contains(where: { $0.path == msr.adapterPath }) else {
+        throw LTXError.invalid("MSR adapter must appear only in its dedicated single-stage slot.")
       }
     }
     for path in [gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,spatialUpscalerCheckpoint,outputDirectory] {
@@ -113,6 +125,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if version >= 4 { try c.encode(audioReference,forKey:.audioReference) }
     if version >= 5 { try c.encode(unionControlGuide,forKey:.unionControlGuide) }
     if version >= 6 { try c.encode(ingredientsSheet,forKey:.ingredientsSheet) }
+    if version >= 7 { try c.encode(msr,forKey:.msr) }
   }
   public func recipe() throws -> DistilledTwoStageRecipe {
     try DistilledTwoStageRecipe(width:width,height:height,frames:frames,fps:fps,seed:seed)
@@ -158,6 +171,65 @@ public struct MLXIngredientsSheet:Codable,Sendable {
       adapterStrength.isFinite,adapterStrength > 0,adapterStrength <= 3,
       referenceStrength.isFinite,(0...1).contains(referenceStrength) else {
       throw LTXError.invalid("Ingredients sheet path, digest or strength is invalid.")
+    }
+  }
+}
+
+/// One dedicated MSR adapter and one to five ordered still references.
+public struct MLXMSRRequest:Codable,Sendable {
+  public let adapterPath:String
+  public let adapterStrength:Float
+  public let references:[MLXMSRReference]
+  enum CodingKeys:String,CodingKey,CaseIterable {
+    case adapterPath="adapter_path",adapterStrength="adapter_strength",references
+  }
+  public init(from decoder:Decoder) throws {
+    let c=try decoder.container(keyedBy:CodingKeys.self)
+    guard Set(c.allKeys.map(\.stringValue)) == Set(CodingKeys.allCases.map(\.rawValue)) else {
+      throw LTXError.invalid("MSR requires exact adapter and reference fields.")
+    }
+    adapterPath=try c.decode(String.self,forKey:.adapterPath)
+    adapterStrength=try c.decode(Float.self,forKey:.adapterStrength)
+    references=try c.decode([MLXMSRReference].self,forKey:.references)
+    guard adapterPath.hasPrefix("/"),adapterPath.utf8.count <= 4096,!adapterPath.utf8.contains(0),
+      adapterStrength.isFinite,adapterStrength > 0,adapterStrength <= 3,
+      (1...5).contains(references.count),references.filter({ $0.role == "background" }).count <= 1 else {
+      throw LTXError.invalid("MSR adapter or one-to-five reference count is invalid.")
+    }
+  }
+}
+
+public struct MLXMSRReference:Codable,Sendable {
+  public let path:String,sourceSHA256:String,role:String,priority:String,sizePolicy:String,referenceFrames:String
+  public let strength:Float,attentionStrength:Float
+  enum CodingKeys:String,CodingKey,CaseIterable {
+    case path,sourceSHA256="source_sha256",role,priority
+    case sizePolicy="size_policy",referenceFrames="reference_frames"
+    case strength,attentionStrength="attention_strength"
+  }
+  public init(from decoder:Decoder) throws {
+    let c=try decoder.container(keyedBy:CodingKeys.self)
+    guard Set(c.allKeys.map(\.stringValue)) == Set(CodingKeys.allCases.map(\.rawValue)) else {
+      throw LTXError.invalid("MSR image reference fields are incomplete.")
+    }
+    path=try c.decode(String.self,forKey:.path)
+    sourceSHA256=try c.decode(String.self,forKey:.sourceSHA256)
+    role=try c.decode(String.self,forKey:.role)
+    priority=try c.decode(String.self,forKey:.priority)
+    sizePolicy=try c.decode(String.self,forKey:.sizePolicy)
+    referenceFrames=try c.decode(String.self,forKey:.referenceFrames)
+    strength=try c.decode(Float.self,forKey:.strength)
+    attentionStrength=try c.decode(Float.self,forKey:.attentionStrength)
+    guard path.hasPrefix("/"),path.utf8.count <= 4096,!path.utf8.contains(0),
+      sourceSHA256.utf8.count == 64,
+      sourceSHA256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+      ["subject","object","clothing","background"].contains(role),
+      ["auto","primary","supporting","background"].contains(priority),
+      ["sol_auto","quality","balanced","speed"].contains(sizePolicy),
+      ["auto","25","33"].contains(referenceFrames),
+      strength.isFinite,(0...1).contains(strength),
+      attentionStrength.isFinite,(0...1).contains(attentionStrength) else {
+      throw LTXError.invalid("MSR reference path, role, sizing or strength is invalid.")
     }
   }
 }

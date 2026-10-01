@@ -16,14 +16,21 @@ public final class MLXAVBlock {
   private let baseActivationBytes:Int
   private let maximumActivationBytes:Int
   private let compileGraph:Bool
+  private let videoAttentionGroups:[Int]
   private var compiledSignature:[Int]?
   private var compiledGraph:(@Sendable ([MLXArray]) -> [MLXArray])?
   private(set) var compiledGraphBuildCount=0
 
   public init(configuration c: AVBlockConfiguration,
     maximumWeightBytes: Int = 2*1024*1024*1024,
-    maximumActivationBytes: Int = 2*1024*1024*1024,compileGraph:Bool=true) throws {
+    maximumActivationBytes: Int = 2*1024*1024*1024,compileGraph:Bool=true,
+    videoAttentionGroups:[Int]=[]) throws {
     try c.validate()
+    guard videoAttentionGroups.isEmpty || ((2...6).contains(videoAttentionGroups.count) &&
+      videoAttentionGroups.allSatisfy({ $0 > 0 }) &&
+      videoAttentionGroups.reduce(0,+) == c.videoTokens) else {
+      throw LTXError.invalid("MSR attention groups must partition all video tokens.")
+    }
     guard (1...32*1024*1024*1024).contains(maximumActivationBytes) else {
       throw LTXError.invalid("Transformer workspace must be positive and at most 32 GiB.")
     }
@@ -37,6 +44,9 @@ public final class MLXAVBlock {
     for (name,n,h) in [("video",nv,c.videoHeadDimension),("audio",na,c.audioHeadDimension),
       ("video_cross",nv,c.audioHeadDimension),("audio_cross",na,c.audioHeadDimension)] {
       for suffix in ["cos","sin"] { inputs[name+"_rope_"+suffix] = [n*c.heads,h/2] }
+    }
+    if !videoAttentionGroups.isEmpty {
+      inputs["video_attention_templates"]=[videoAttentionGroups.count,nv]
     }
     let activationEstimate=try Self.estimatedActivationBytes(configuration:c)
     guard Device.defaultDevice().deviceType == .gpu, maximumWeightBytes > 0 else {
@@ -64,7 +74,7 @@ public final class MLXAVBlock {
     }
     baseActivationBytes=activationEstimate; self.maximumActivationBytes=maximumActivationBytes
     configuration=c; inputShapes=inputs; weightShapes=shapes; self.maximumWeightBytes=maximumWeightBytes
-    self.compileGraph=compileGraph
+    self.compileGraph=compileGraph;self.videoAttentionGroups=videoAttentionGroups
   }
 
   /// Pure admission estimate, shared by automatic Studio sizing and execution.
@@ -142,7 +152,8 @@ public final class MLXAVBlock {
       }
       x["video_modulation_indices"]=inputs["video_modulation_indices"]
       x["audio_modulation_indices"]=inputs["audio_modulation_indices"]
-      let (graph,arguments,signature)=MLXBlockGraph.bind(configuration:configuration,inputs:x,weights:weights,adapters:adapters)
+      let (graph,arguments,signature)=MLXBlockGraph.bind(configuration:configuration,inputs:x,weights:weights,
+        adapters:adapters,videoAttentionGroups:videoAttentionGroups)
       let outputs:[MLXArray]
       if compileGraph {
         if compiledSignature != signature {
@@ -213,10 +224,17 @@ public final class MLXAVBlock {
         throw LTXError.invalid("Invalid compact modulation indices.")
       }
     }
+    if let templates=inputs["video_attention_templates"] {
+      guard MLX.isFinite(templates).all().item(Bool.self),
+        templates.min().item(Float.self)>=0,templates.max().item(Float.self)<=1 else {
+        throw LTXError.invalid("MSR attention template values must be finite in [0,1].")
+      }
+    }
   }
 
   static func forward(configuration c:AVBlockConfiguration,_ x:[String:MLXArray],
-    parameter:(String) -> MLXArray,linear:(String,MLXArray) -> MLXArray) -> [String:MLXArray] {
+    parameter:(String) -> MLXArray,linear:(String,MLXArray) -> MLXArray,
+    videoAttentionGroups:[Int]=[]) -> [String:MLXArray] {
     let vd=c.videoDimension, ad=c.audioDimension, heads=c.heads
     func norm(_ value:MLXArray) -> MLXArray {
       // The reference normalizes across the complete projected width, before
@@ -259,8 +277,16 @@ public final class MLXAVBlock {
       var k=norm(kp) * (parameter(name+".k_norm.weight"))
       q=queryRoPE.map { rotary(q,$0,headWidth) } ?? q.reshaped([1,nq,heads,headWidth])
       k=keyRoPE.map { rotary(k,$0,headWidth) } ?? k.reshaped([1,nk,heads,headWidth])
-      let attended=MLXFast.scaledDotProductAttention(queries:q.transposed(0,2,1,3),
-        keys:k.transposed(0,2,1,3),values:value,scale:1/Float(headWidth).squareRoot(),mask:nil)
+      let queryHeads=q.transposed(0,2,1,3),keys=k.transposed(0,2,1,3)
+      let scale=1/Float(headWidth).squareRoot()
+      let attended:MLXArray
+      if name == "attn1",let templates=x["video_attention_templates"] {
+        attended=MLXGroupedVideoAttention.evaluateAdmitted(q:queryHeads,k:keys,v:value,
+          groups:videoAttentionGroups,templates:templates,scale:scale)
+      } else {
+        attended=MLXFast.scaledDotProductAttention(queries:queryHeads,keys:keys,
+          values:value,scale:scale,mask:nil)
+      }
       let gate=2*sigmoid(linear(name+".to_gate_logits",query))
       let gated=attended.transposed(0,2,1,3)*gate.reshaped([1,nq,heads,1])
       return linear(name+".to_out",gated.reshaped([nq,heads*headWidth]))

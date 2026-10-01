@@ -20,11 +20,15 @@ public final class MLXAVStack {
   private let count:Int
   private let cacheBytes:Int
   private var running=false
-  public init(configuration:AVBlockConfiguration,blockCount:Int=48,cacheBytes:Int=128*1024*1024,maximumActivationBytes:Int=2*1024*1024*1024,compileGraph:Bool=true) throws {
+  public init(configuration:AVBlockConfiguration,blockCount:Int=48,cacheBytes:Int=128*1024*1024,
+    maximumActivationBytes:Int=2*1024*1024*1024,compileGraph:Bool=true,
+    videoAttentionGroups:[Int]=[]) throws {
     guard (1...48).contains(blockCount), (0...1024*1024*1024).contains(cacheBytes) else {
       throw LTXError.invalid("Admit 1–48 blocks and at most 1 GiB cached allocations.")
     }
-    block=try MLXAVBlock(configuration:configuration,maximumActivationBytes:maximumActivationBytes,compileGraph:compileGraph); count=blockCount; self.cacheBytes=cacheBytes
+    block=try MLXAVBlock(configuration:configuration,maximumActivationBytes:maximumActivationBytes,
+      compileGraph:compileGraph,videoAttentionGroups:videoAttentionGroups)
+    count=blockCount;self.cacheBytes=cacheBytes
   }
   func admitPerTokenVideo() throws { try block.admitPerTokenVideo() }
   func admitPerTokenAudio() throws { try block.admitPerTokenAudio() }

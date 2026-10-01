@@ -93,6 +93,26 @@ final class LTXAdapterCompatibilityTests: XCTestCase {
     }
   }
 
+  func testMSRRejectsIncompleteSlotAndLoRASignatures() throws {
+    let tensors: [(String, [Int], String)] = [
+      ("diffusion_model.reference_slot_embedding.frequencies", [16], "BF16"),
+      ("diffusion_model.reference_slot_embedding.net.0.weight", [256, 33], "BF16"),
+      ("diffusion_model.reference_slot_embedding.net.0.bias", [256], "BF16"),
+      ("diffusion_model.reference_slot_embedding.net.2.weight", [128, 256], "BF16"),
+      ("diffusion_model.reference_slot_embedding.net.2.bias", [128], "BF16"),
+      ("diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.weight", [128, 4096], "BF16"),
+      ("diffusion_model.transformer_blocks.0.attn1.to_q.lora_B.weight", [4096, 128], "BF16")]
+    let metadata=["reference_slot_embedding_type":"fourier_mlp",
+      "reference_token_order":"prepend", "reference_slot_time_offsets":"pic1_based_negative_time"]
+    try withTensorFile(metadata:metadata,tensors:tensors) { url in
+      XCTAssertThrowsError(try LTXAdapterCompatibility.msrPlan(file:SafeTensorFile(url:url),strength:1))
+    }
+    var wrong=metadata;wrong["reference_token_order"]="append"
+    try withTensorFile(metadata:wrong,tensors:tensors) { url in
+      XCTAssertThrowsError(try LTXAdapterCompatibility.msrPlan(file:SafeTensorFile(url:url),strength:1))
+    }
+  }
+
   func testDifferentSourceAliasesCannotApplyTwiceToSameDestination() throws {
     var tensors: [(String, [Int], String)] = []
     for prefix in ["diffusion_model.", "model.diffusion_model."] {

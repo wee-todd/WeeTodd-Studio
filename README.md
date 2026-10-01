@@ -156,7 +156,10 @@ control-attachment UI, MSR, DFR and H3 extension controls remain outside the qua
 Swift paths. A separate experimental headless Ingredients route accepts a frozen static
 reference sheet, repeats it across at least 121 frames, and samples with the compatible
 rank-128 task adapter in one full-resolution stage. Studio's Ingredients controls still use
-the Python route.
+the Python route. An experimental direct Swift worker MSR route also accepts one to five
+hash-frozen ordered stills, separately VAE-encodes bounded references, and applies its
+learned-slot LoRA with compact grouped attention. One- and two-image clips completed;
+five images passed memory preflight. Studio's MSR controls remain on their Python route.
 Independent H3 A2V with a bounded timeline audio driver and optional opening image is
 experimental; its source conditions generated sound and motion rather than being copied.
 

@@ -23,6 +23,18 @@ final class MLXReferenceImageTests:XCTestCase {
     XCTAssertThrowsError(try MLXReferenceImage.prepare(image,width:31,height:32,crf:0,ffmpeg:URL(fileURLWithPath:"/unused"),temporaryParent:root))
     XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath:root.path),["source.png"])
   }
+  func testMSRFitPreservesWholeWideSubjectOnWhite() throws {
+    let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at:root,withIntermediateDirectories:false)
+    defer { try? FileManager.default.removeItem(at:root) }
+    let image=root.appendingPathComponent("wide.png")
+    try MediaOutput.writePNG([Float](repeating:-1,count:96*32*3),width:96,height:32,to:image)
+    let output=try MLXReferenceImage.prepareFitWhite(image,width:64,height:64)
+    let top=(4*64+32)*3,center=(32*64+32)*3
+    XCTAssertGreaterThan(output[top],0.95)
+    XCTAssertLessThan(output[center],-0.95)
+    XCTAssertEqual(output.count,64*64*3)
+  }
   func testPreparedStagesRetainPixelsAndDeduplicateBeforeWeightedWork() throws {
     let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at:root,withIntermediateDirectories:false)

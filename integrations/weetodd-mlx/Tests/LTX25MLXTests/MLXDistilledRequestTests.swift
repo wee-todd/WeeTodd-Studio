@@ -4,6 +4,30 @@ import Darwin
 import LTX25MLX
 
 final class MLXDistilledRequestTests:XCTestCase {
+  func testMSRRequestKeepsOrderedOneToFiveReferencesAndRejectsOtherTasks() throws {
+    var value=base();value["version"]=7;value["task"]="msr"
+    value["noise_policy"]="mlx_threefry_bf16_v1"
+    value["reference_images"]=[];value["audio_reference"]=NSNull()
+    value["union_control_guide"]=NSNull();value["ingredients_sheet"]=NSNull()
+    let one:[String:Any]=["path":"/first.png","source_sha256":String(repeating:"a",count:64),
+      "role":"subject","priority":"auto","size_policy":"quality","reference_frames":"25",
+      "strength":1.0,"attention_strength":0.7]
+    value["msr"]=["adapter_path":"/msr.safetensors","adapter_strength":1.0,
+      "references":[one]]
+    let request=try decode(value)
+    XCTAssertEqual(request.msr?.references.map(\.role),["subject"])
+    XCTAssertEqual(try JSONDecoder().decode(MLXDistilledRequest.self,
+      from:JSONEncoder().encode(request)).msr?.references.count,1)
+    value["msr"]=["adapter_path":"/msr.safetensors","adapter_strength":1.0,
+      "references":Array(repeating:one,count:6)]
+    XCTAssertThrowsError(try decode(value))
+    value["msr"]=["adapter_path":"/msr.safetensors","adapter_strength":1.0,
+      "references":[one]]
+    value["stage_one_loras"]=[["path":"/ordinary.safetensors","strength":1]]
+    XCTAssertThrowsError(try decode(value))
+    value["stage_one_loras"]=[];value["task"]="t2v"
+    XCTAssertThrowsError(try decode(value))
+  }
   func testIngredientsRequestRequiresFullLengthFrozenSheetAndSingleStage() throws {
     var value=base();value["version"]=6;value["task"]="ingredients"
     value["frames"]=121;value["noise_policy"]="mlx_threefry_bf16_v1"

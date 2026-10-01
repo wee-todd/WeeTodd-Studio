@@ -17,7 +17,7 @@ public struct LoRAPlan: Sendable {
   public let strength: Float
 
   public init(file: SafeTensorFile, strength: Float, targetShapes: [String: [UInt64]],
-    normalize: (String) -> String? = { $0 }) throws {
+    normalize: (String) -> String? = { $0 },auxiliaryTensors:Set<String>=[]) throws {
     guard strength.isFinite else { throw AdapterError.invalid("LoRA strength must be finite.") }
     let schemas = [
       (".lora_A.weight", ".lora_B.weight"),
@@ -31,7 +31,11 @@ public struct LoRAPlan: Sendable {
     struct Group { var schema: Int; var down: String?; var up: String? }
     var groups: [String: Group] = [:]
     var alphas: [String: String] = [:]
+    guard auxiliaryTensors.isSubset(of:Set(file.tensors.keys)) else {
+      throw AdapterError.invalid("Declared auxiliary adapter tensors are missing.")
+    }
     for name in file.tensors.keys.sorted() {
+      if auxiliaryTensors.contains(name) { continue }
       var matched = false
       for (index, suffixes) in schemas.enumerated() {
         let isDown = name.hasSuffix(suffixes.0)

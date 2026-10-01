@@ -41,6 +41,7 @@ public final class MLXMediaPipeline {
   private let request:MLXDistilledRequest
   private let sampler:MLXDistilledSamplingRunner?
   private let ingredientsSampler:MLXSingleStageRipple?
+  private let msrSampler:MLXSingleStageMSR?
   private let videoActivationBytes:Int
   private let transformerActivationBytes:Int
   private let videoBackend:MLXVideoBackend
@@ -69,7 +70,7 @@ public final class MLXMediaPipeline {
       throw LTXError.invalid("Developer decoder workspace must be positive and at most \(maximumVideoActivationMiB) MiB.")
     }
     let recipe=try request.recipe(), g=recipe.high
-    let geometries=request.ingredientsSheet == nil ? [recipe.low,recipe.high] : [recipe.high]
+    let geometries=request.ingredientsSheet == nil && request.msr == nil ? [recipe.low,recipe.high] : [recipe.high]
     for (index,geometry) in geometries.enumerated() {
       let layout=try request.referenceImages.first.map { try MLXReferenceLayout(geometry:geometry,firstStrength:$0.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil) }
       let guide=try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:geometry,contextFrames:$0) }
@@ -79,12 +80,13 @@ public final class MLXMediaPipeline {
       let ingredients=try request.ingredientsSheet.map {
         try MLXReferenceVideoLayout(geometry:geometry,strength:$0.referenceStrength)
       }
+      let msr=try MLXMSRReferencePlan.resolve(request,target:geometry)
       guard layout == nil || guide == nil else { throw LTXError.invalid("LTX extension cannot combine with endpoint references.") }
       let block=try MLXAVBlock(configuration:AVBlockConfiguration(
-        videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ingredients?.videoTokens ?? geometry.videoTokens,
+        videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
         audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
         maximumActivationBytes:transformerActivationBytes)
-      if layout != nil || union != nil || ingredients != nil { try block.admitPerTokenVideo() }
+      if layout != nil || union != nil || ingredients != nil || msr != nil { try block.admitPerTokenVideo() }
       if guide != nil { try block.admitPerTokenAV() }
       _ = try MLXDenoiser.admitRotary(configuration:block.configuration,maximumActivationBytes:transformerActivationBytes)
     }
@@ -100,6 +102,13 @@ public final class MLXMediaPipeline {
       _ = try MLXVideoEncodeTilePlan(frames:recipe.high.frames,
         width:recipe.high.width,height:recipe.high.height,
         maximumOwnedBufferBytes:videoActivationBytes)
+    }
+    if let msr=try MLXMSRReferencePlan.resolve(request,target:g) {
+      for plan in msr.plans {
+        _ = try MLXVideoEncodeTilePlan(frames:plan.geometry.frames,
+          width:plan.geometry.width,height:plan.geometry.height,
+          maximumOwnedBufferBytes:videoActivationBytes)
+      }
     }
     let c=videoConfiguration(for:g,activationBytes:videoActivationBytes)
     let videoShape:[Int],videoBytes:Int
@@ -132,13 +141,23 @@ public final class MLXMediaPipeline {
     self.videoActivationBytes=videoActivationBytes;self.transformerActivationBytes=transformerActivationBytes
     if let sheet=request.ingredientsSheet {
       sampler=nil
+      msrSampler=nil
       ingredientsSampler=try MLXSingleStageRipple(geometry:request.recipe().high,
         referenceStrength:sheet.referenceStrength,
         transformerRoot:URL(fileURLWithPath:request.transformerRoot),
         adapters:[LoRAAdapter(path:sheet.adapterPath,strength:sheet.adapterStrength)],
         task:.ingredients,maximumActivationBytes:transformerActivationBytes)
+    } else if let msr=request.msr {
+      sampler=nil;ingredientsSampler=nil
+      guard let layout=try MLXMSRReferencePlan.resolve(request,target:request.recipe().high)?.layout else {
+        throw LTXError.invalid("MSR reference layout is missing.")
+      }
+      msrSampler=try MLXSingleStageMSR(layout:layout,
+        transformerRoot:URL(fileURLWithPath:request.transformerRoot),
+        adapter:LoRAAdapter(path:msr.adapterPath,strength:msr.adapterStrength),
+        maximumActivationBytes:transformerActivationBytes)
     } else {
-      ingredientsSampler=nil
+      ingredientsSampler=nil;msrSampler=nil
       sampler=try MLXDistilledSamplingRunner(recipe:request.recipe(),transformerRoot:URL(fileURLWithPath:request.transformerRoot),
         upscalerCheckpoint:URL(fileURLWithPath:request.spatialUpscalerCheckpoint),statisticsCheckpoint:URL(fileURLWithPath:request.videoCheckpoint),
         firstStrength:request.referenceImages.first?.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil,
@@ -162,6 +181,13 @@ public final class MLXMediaPipeline {
     if let sheet=request.ingredientsSheet {
       try NativeMediaSource(path:sheet.path,sha256:sheet.sourceSHA256).verify()
       try MLXReferenceImage.inspect(URL(fileURLWithPath:sheet.path))
+      _ = try MLXVideoEncoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint))
+    }
+    if let msr=request.msr {
+      for reference in msr.references {
+        try NativeMediaSource(path:reference.path,sha256:reference.sourceSHA256).verify()
+        try MLXReferenceImage.inspect(URL(fileURLWithPath:reference.path))
+      }
       _ = try MLXVideoEncoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint))
     }
     if let source=request.audioReference {
@@ -225,6 +251,14 @@ public final class MLXMediaPipeline {
     let ingredientsGuide=try request.ingredientsSheet.map {
       try MLXIngredientsGuide.prepare($0,geometry:recipe.high,ffmpeg:ffmpeg,directory:imageDirectory)
     }
+    let msrResolved=try MLXMSRReferencePlan.resolve(request,target:recipe.high)
+    let msrGuides:[URL]=try msrResolved.map { resolved in
+      try zip(resolved.references,resolved.plans).enumerated().map { index,pair in
+        try report("msr_reference_prepare",index,resolved.references.count)
+        return try MLXMSRGuide.prepare(pair.0,plan:pair.1,ffmpeg:ffmpeg,
+          directory:imageDirectory,index:index)
+      }
+    } ?? []
     let preparedImages=try MLXReferenceImage.prepareStages(request.referenceImages,
       sizes:[(recipe.low.width,recipe.low.height),(recipe.high.width,recipe.high.height)],ffmpeg:ffmpeg,directory:imageDirectory) {
         try report("reference_prepare:stage\($0+1):"+$1)
@@ -255,7 +289,28 @@ public final class MLXMediaPipeline {
       ids=contexts.tokenIDs; timings["text"]=Date().timeIntervalSince(textStarted)
       try report("text_weights_released")
       let referenceStart=Date()
-      let preparedGuides:([(first:MLXArray,last:MLXArray?)],MLXArray?)=try autoreleasepool {
+      let preparedGuides:([(first:MLXArray,last:MLXArray?)],MLXArray?,[MLXArray])=try autoreleasepool {
+        if let resolved=msrResolved {
+          guard let msr=request.msr else { throw LTXError.invalid("MSR request is missing.") }
+          let slots=try MLXMSRSlotEmbedding.load(URL(fileURLWithPath:msr.adapterPath))
+          var encoded:[MLXArray]=[]
+          for (index,plan) in resolved.plans.enumerated() {
+            let tile=try MLXVideoEncodeTilePlan(frames:plan.geometry.frames,
+              width:plan.geometry.width,height:plan.geometry.height,
+              maximumOwnedBufferBytes:videoActivationBytes)
+            let latent=try MLXTiledVideoEncoder.encode(guide:msrGuides[index],
+              checkpoint:URL(fileURLWithPath:request.videoCheckpoint),plan:tile) {
+                try report("msr_guide_encode:\(index+1)",$0,$1)
+              }
+            let slot=try MLXMSRSlotEmbedding.embedding(slotID:index+1,state:slots)
+            let tokens=latent.reshaped([plan.geometry.videoTokens,128]).asType(.float32)+slot
+            eval(tokens);encoded.append(tokens)
+            try NativeMediaSource(path:resolved.references[index].path,
+              sha256:resolved.references[index].sourceSHA256).verify()
+            try report("msr_guide_ready",index+1,resolved.plans.count)
+          }
+          return ([],nil,encoded)
+        }
         if let ingredientsGuide {
           let plan=try MLXVideoEncodeTilePlan(frames:recipe.high.frames,
             width:recipe.high.width,height:recipe.high.height,
@@ -267,7 +322,7 @@ public final class MLXMediaPipeline {
           if let sheet=request.ingredientsSheet {
             try NativeMediaSource(path:sheet.path,sha256:sheet.sourceSHA256).verify()
           }
-          return ([],encoded.reshaped([recipe.high.videoTokens,128]))
+          return ([],encoded.reshaped([recipe.high.videoTokens,128]),[])
         }
         if let union=request.unionControlGuide {
           let plan=try MLXVideoEncodeTilePlan(frames:recipe.low.frames,
@@ -278,9 +333,9 @@ public final class MLXMediaPipeline {
             try report("control_guide_encode",$0,$1)
           }
           try NativeMediaSource(path:union.path,sha256:union.sourceSHA256).verify()
-          return ([],encoded.reshaped([plan.latentShape[0]*plan.latentShape[1]*plan.latentShape[2],128]))
+          return ([],encoded.reshaped([plan.latentShape[0]*plan.latentShape[1]*plan.latentShape[2],128]),[])
         }
-        guard !request.referenceImages.isEmpty else { return ([],nil) }
+        guard !request.referenceImages.isEmpty else { return ([],nil,[]) }
         let encoder=try MLXImageEncoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint))
         var cached:[URL:MLXArray]=[:],prepared:[(first:MLXArray,last:MLXArray?)]=[]
         for (index,images) in preparedImages.enumerated() {
@@ -297,15 +352,20 @@ public final class MLXMediaPipeline {
           }
           prepared.append((tokens[0],tokens.count == 2 ? tokens[1] : nil))
         }
-        return (prepared,nil)
+        return (prepared,nil,[])
       }
       try fm.removeItem(at:imageDirectory)
-      if !preparedGuides.0.isEmpty || preparedGuides.1 != nil {
+      if !preparedGuides.0.isEmpty || preparedGuides.1 != nil || !preparedGuides.2.isEmpty {
         timings["reference_encode"]=Date().timeIntervalSince(referenceStart)
         try report("reference_weights_released")
       }
       let sampled:[String:MLXArray]
-      if let ingredientsSampler {
+      if let msrSampler {
+        let started=Date()
+        sampled=try msrSampler.evaluate(videoContext:contexts.video,audioContext:contexts.audio,
+          references:preparedGuides.2,seed:request.seed,progress:report)
+        timings["sampling"]=Date().timeIntervalSince(started)
+      } else if let ingredientsSampler {
         guard let guide=preparedGuides.1 else {
           throw LTXError.invalid("Ingredients reference sheet was not encoded.")
         }
@@ -411,7 +471,7 @@ public final class MLXMediaPipeline {
         additionalFrames:publishedFrames,fps:g.fps,decodedSamples:admission.audioSamples).count
     }
     var metadata:[String:Any]=["status":"complete","scope":"developer Swift MLX distilled audiovisual generation",
-      "recipe":request.ingredientsSheet == nil ? DistilledTwoStageRecipe.identifier : "ltx25-ingredients-single-stage-v1",
+      "recipe":request.msr != nil ? "ltx25-msr-single-stage-v1" : request.ingredientsSheet == nil ? DistilledTwoStageRecipe.identifier : "ltx25-ingredients-single-stage-v1",
       "noise_algorithm":request.noisePolicy.algorithm,"seed":request.seed,
       "text_token_ids":ids,"width":g.width,"height":g.height,"frames":publishedFrames,"fps":g.fps,
       "video_seconds":Double(publishedFrames)/g.fps,
@@ -428,7 +488,7 @@ public final class MLXMediaPipeline {
       "video_publication":rawVideo ? "gpu-rgb24-pipe" : "png-sequence",
       "video_precision":videoBackend == .mlx ? "bfloat16" : "float32",
       "block_loading":"mlx-native-batched-evaluation","compiled_blocks":true,
-      "spatial_upscaler":request.ingredientsSheet == nil ? "mlx" : "none",
+      "spatial_upscaler":request.ingredientsSheet == nil && request.msr == nil ? "mlx" : "none",
       "text_weight_loading":"mlx-native-layer-batched-with-bounded-row-projections",
       "fixed_weight_loading":"mlx-native-evaluated-parameters",
       "audio_decoder":audioBackend.rawValue,"audio_estimated_workspace_bytes":admission.audioEstimatedBytes,
@@ -462,6 +522,12 @@ public final class MLXMediaPipeline {
       metadata["reference_conditioning"]="full-resolution VAE-encoded static sheet guide in one distilled stage"
       metadata["ingredients_sheet_sha256"]=sheet.sourceSHA256
       metadata["ingredients_adapter_scope"]="single_full_resolution_stage"
+    } else if let msr=request.msr {
+      metadata["reference_count"]=msr.references.count
+      metadata["reference_preparation"]="bounded per-image RGB24 stills repeated for 25/33 causal frames"
+      metadata["reference_conditioning"]="ordered VAE latent groups with learned slot embeddings, negative reference times and grouped attention"
+      metadata["msr_adapter_scope"]="single_full_resolution_stage"
+      metadata["msr_reference_sha256"]=msr.references.map(\.sourceSHA256)
     } else if request.referenceImages.isEmpty && extensionContextFrames == nil {
       metadata["reference_conditioning"]="none"
     }

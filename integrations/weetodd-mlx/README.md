@@ -117,9 +117,11 @@ LoRA math is not fused/requantized into the base weights. This preserves packed 
 and avoids dense CPU delta construction, but does not claim bitwise identity to a requantized
 fusion recipe. The block/stack probes apply block targets only; the denoiser and sampler apply
 both fixed and block targets through `MLXDenoiserWeights`. Compatible 2.3 factors are retained.
-IC/MSR/control adapters and conditioning beyond first-frame/FFLF, one-driver A2V,
+General IC/control adapters and conditioning beyond first-frame/FFLF, one-driver A2V,
 experimental after-extension/motion continuation and first-frame/audio scenes require
-separate execution contracts.
+separate execution contracts. The experimental direct-worker MSR contract accepts
+one to five ordered images through the installed rank-128 task adapter; Studio's MSR
+controls and ComfyUI export have not yet switched to that Swift route.
 
 ## Build and verify
 

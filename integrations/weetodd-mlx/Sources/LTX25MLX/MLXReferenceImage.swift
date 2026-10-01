@@ -63,6 +63,10 @@ public enum MLXReferenceImage {
     let source=try source(url)
     _ = try dimensions(source)
   }
+  static func size(_ url:URL) throws -> (width:Int,height:Int) {
+    let value=try dimensions(source(url))
+    return (value.0,value.1)
+  }
   private static func dimensions(_ source:CGImageSource) throws -> (Int,Int) {
     guard CGImageSourceGetCount(source)==1,
       let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any],
@@ -128,6 +132,29 @@ public enum MLXReferenceImage {
     let context=CIContext(options:[.workingColorSpace:CGColorSpace(name:CGColorSpace.sRGB)!, .cacheIntermediates:false])
     guard let result=context.createCGImage(resized,from:crop,format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)) else {
       throw LTXError.invalid("Cannot resize reference image.")
+    }
+    try Task.checkCancellation()
+    return try rgb(result).map { Float($0)/255*2-1 }
+  }
+  /// MSR subject/object references keep the complete image on a white canvas.
+  /// Background references continue to use `prepare`'s covering center crop.
+  static func prepareFitWhite(_ url:URL,width:Int,height:Int) throws -> [Float] {
+    _ = try MLXImageEncodePlan(width:width,height:height)
+    try Task.checkCancellation()
+    let source=try decoded(url)
+    let scale=min(Double(width)/Double(source.width),Double(height)/Double(source.height))
+    let w=max(1,min(width,Int((Double(source.width)*scale).rounded())))
+    let h=max(1,min(height,Int((Double(source.height)*scale).rounded())))
+    let ci=CIImage(cgImage:source),vertical=Double(h)/Double(source.height)
+    let resized=ci.applyingFilter("CILanczosScaleTransform",parameters:[
+      kCIInputScaleKey:vertical,kCIInputAspectRatioKey:(Double(w)/Double(source.width))/vertical])
+      .transformed(by:CGAffineTransform(translationX:Double(width-w)/2,y:Double(height-h)/2))
+    let canvas=CGRect(x:0,y:0,width:width,height:height)
+    let white=CIImage(color:CIColor(red:1,green:1,blue:1)).cropped(to:canvas)
+    let context=CIContext(options:[.workingColorSpace:CGColorSpace(name:CGColorSpace.sRGB)!, .cacheIntermediates:false])
+    guard let result=context.createCGImage(resized.composited(over:white),from:canvas,
+      format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)) else {
+      throw LTXError.invalid("Cannot fit MSR reference on its white canvas.")
     }
     try Task.checkCancellation()
     return try rgb(result).map { Float($0)/255*2-1 }

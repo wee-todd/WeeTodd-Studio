@@ -1,5 +1,22 @@
 # WeeTodd Studio implementation status
 
+Swift LTX 2.5 MSR 2026-10-01 (experimental direct-worker route): a strict
+version-7 request freezes one to five ordered image references by SHA-256,
+validates the installed rank-128 MSR adapter and its five learned slot tensors,
+fits subject images on white or crops backgrounds, and VAE-encodes each bounded
+25/33-frame guide separately. The shared Swift sampler applies negative reference
+times, learned slot embeddings and compact grouped attention in one full-resolution
+eight-evaluation stage. One- and two-image 121-frame renders at 512 × 256/24 fps
+both published stereo 48 kHz audio with no Python inference. The two-image
+worker took 80.16 seconds, including 60.18 seconds sampling, with a 4.08 GB peak
+Swift-process footprint (external FFmpeg excluded). Inspected frames kept the
+white and gray aliens distinct while one lifted a mug. Audio was quiet at
+-51.6 dBFS mean/-39.4 dBFS peak; audiovisual quality is not accepted from this
+sample. The five-image request passed installed-checkpoint memory preflight but
+was not rendered. Studio's MSR controls and ComfyUI export still use the Python
+route; larger geometry, all five rendered slots, preview/cancellation lifecycle,
+route parity and matched performance remain open.
+
 Swift LTX 2.5 Ingredients 2026-09-30 (experimental headless route): a strict
 version-6 request freezes one source sheet by SHA-256, validates an installed
 full-resolution LTX 2.3 rank-128 Ingredients adapter, repeats the image across

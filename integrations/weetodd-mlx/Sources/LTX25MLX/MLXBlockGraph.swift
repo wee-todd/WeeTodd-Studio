@@ -13,9 +13,11 @@ struct MLXBlockGraph {
   let configuration:AVBlockConfiguration
   let inputs:[String:Int]
   let weights:[String:Weight]
+  let videoAttentionGroups:[Int]
 
   static func bind(configuration:AVBlockConfiguration,inputs:[String:MLXArray],
-    weights:[String:MLXWeight],adapters:[String:[MLXLoRA]]) -> (Self,[MLXArray],[Int]) {
+    weights:[String:MLXWeight],adapters:[String:[MLXLoRA]],
+    videoAttentionGroups:[Int]=[]) -> (Self,[MLXArray],[Int]) {
     var arrays:[MLXArray]=[],inputSlots:[String:Int]=[:],weightSlots:[String:Weight]=[:]
     var signature=[inputs["video_modulation_indices"] == nil ? 0 : 1,
       inputs["audio_modulation_indices"] == nil ? 0 : 1]
@@ -31,7 +33,9 @@ struct MLXBlockGraph {
       signature += [packed.count,factors.count]
       weightSlots[name]=Weight(start:start,quantized:packed.count == 3,adapters:factors)
     }
-    return (Self(configuration:configuration,inputs:inputSlots,weights:weightSlots),arrays,signature)
+    signature += [videoAttentionGroups.count]+videoAttentionGroups
+    return (Self(configuration:configuration,inputs:inputSlots,weights:weightSlots,
+      videoAttentionGroups:videoAttentionGroups),arrays,signature)
   }
 
   func call(_ arrays:[MLXArray]) -> [MLXArray] {
@@ -51,7 +55,8 @@ struct MLXBlockGraph {
       if let bias=weights[name+".bias"] { result=result+arrays[bias.start].asType(.float32) }
       return result
     }
-    let result=MLXAVBlock.forward(configuration:configuration,x,parameter:parameter,linear:linear)
+    let result=MLXAVBlock.forward(configuration:configuration,x,parameter:parameter,linear:linear,
+      videoAttentionGroups:videoAttentionGroups)
     return [result["video"]!,result["audio"]!]
   }
 }
