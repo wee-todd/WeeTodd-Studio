@@ -127,6 +127,37 @@ final class NativeLTXPreparationTests: XCTestCase {
         "The Swift worker rejects \(section).\(key); Studio must not offer this profile.")
     }
   }
+  func testDFRProfileOffersOnlyEndpointTasksAndPreservesControls() throws {
+    let (root, original, runtime)=try fixture()
+    let url=root.appendingPathComponent("model.json")
+    var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:url)) as! [String:Any]
+    var config=recipe["config"] as! [String:Any]
+    config["dfr_enabled"]=true
+    config["dfr_detailing_lora_path"]="/models/detail.safetensors"
+    config["dfr_detailing_lora_strength"]=0.5
+    config["dfr_temporal_rounds"]=1
+    config["dfr_temporal_upsampler_path"]="/models/temporal.safetensors"
+    recipe["config"]=config
+    var components=recipe["components"] as! [String:Any]
+    components["loras"]=[]
+    recipe["components"]=components
+    try JSONSerialization.data(withJSONObject:recipe).write(to:url)
+    let profiles=try NativeLTXPreparation.catalog(directory:root.path)
+    XCTAssertEqual(profiles.count,1)
+    XCTAssertEqual((profiles[0]["generation"] as? [String:Any])?["supportedTasks"] as? [String],["t2v","i2v","fflf"])
+    var project=original
+    project.clips[0].profileID=url.path
+    let content=try NativeLTXPreparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    let effective=content["config"] as! [String:Any]
+    XCTAssertEqual(effective["dfr_temporal_rounds"] as? Int,1)
+    XCTAssertEqual(effective["dfr_detailing_lora_strength"] as? Double,0.5)
+    project.clips[0].generationSelection?.task="a2v"
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    config["dfr_temporal_upsampler_path"]=""
+    recipe["config"]=config
+    try JSONSerialization.data(withJSONObject:recipe).write(to:url)
+    XCTAssertTrue(try NativeLTXPreparation.catalog(directory:root.path).isEmpty)
+  }
   func testLegacyProfileNegativePromptIsReportedAndOmittedFromSwiftRecipe() throws {
     let (root, project, runtime) = try fixture()
     let url = root.appendingPathComponent("model.json")

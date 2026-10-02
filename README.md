@@ -158,7 +158,10 @@ and a prepared timeline audio mix can feed an independent Swift LTX A2V clip. A 
 Swift Union Control route now accepts a frozen half-resolution RGB24 guide and the installed
 LTX 2.3 Union IC-LoRA, with the task adapter active only in stage one. Studio's ordinary
 control-attachment UI, MSR, DFR and H3 extension controls remain outside the qualified
-Swift paths. A separate experimental headless Ingredients route accepts a frozen static
+Swift paths. An imported DFR profile with an installed Pixel-Spatial adapter can now be
+selected for Swift T2V, I2V or FFLF; the profile may request zero, one or two temporal
+x2 rounds. Ordinary LoRAs, A2V, extension and continuous scenes are rejected for DFR.
+Studio's dedicated DFR editor controls still use Python. A separate experimental headless Ingredients route accepts a frozen static
 reference sheet, repeats it across at least 121 frames, and samples with the compatible
 rank-128 task adapter in one full-resolution stage. Studio's Ingredients controls still use
 the Python route. An experimental direct Swift worker MSR route also accepts one to five
@@ -172,7 +175,9 @@ clips; a 41-frame request used a padded internal canvas and published exactly 41
 frames with matching audio duration. The direct Swift worker also accepts one or two
 learned temporal x2 rounds. A two-round 512 × 256 test published 193 frames at
 96 fps with synchronized audio; reviewed seam frames retained normal color after
-generated-slot noise and tile-handoff fixes. Studio DFR controls still use Python,
+generated-slot noise and tile-handoff fixes. A Studio-style two-round DFR recipe passed
+the installed Swift worker's 193-frame/96-fps preflight; a Studio-triggered render has
+not yet been qualified. Studio's dedicated DFR controls still use Python,
 and audiovisual quality needs broader review.
 Independent H3 A2V with a bounded timeline audio driver and optional opening image is
 experimental; its source conditions generated sound and motion rather than being copied.

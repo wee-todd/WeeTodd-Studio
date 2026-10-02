@@ -19,12 +19,17 @@ two to six shots with identical effective components and sampling settings also 
 Any scene shot may use one first-frame image. One consecutive interval of the same
 audio source can drive every shot, including shots with an image. Studio renders the
 group as one movie and accepts all member ranges together. Specialized IC-LoRA, MSR,
-Ingredients and DFR controls still use the explicitly selected Python route.
+Ingredients and dedicated DFR controls still use the explicitly selected Python route.
 An experimental direct Swift worker can execute spatial DFR from a version-8
 request with an installed Pixel-Spatial x2 adapter, including first/last images.
 Version-9 direct-worker requests add one or two learned temporal x2 rounds; an
 installed-weight two-round clip completed with normal color at the reviewed seams.
-Studio's DFR controls are not yet wired to this Swift path.
+An imported DFR profile can now select the Swift worker for T2V, I2V and FFLF, with
+zero, one or two temporal rounds. Its detailing adapter and optional temporal upscaler
+must be configured in the profile. Ordinary LoRAs, A2V, extension and continuous scenes
+are not supported with this route; the dedicated Studio DFR editor controls are not
+yet wired to it. A Studio-style two-round profile passed installed-weight worker
+preflight, but a Studio-triggered render is still unqualified.
 The worker reuses installed paged
 weights and the shared renderer. Unsupported controls fail native preflight; turn the option
 off explicitly for advanced workflows still provided by Python.

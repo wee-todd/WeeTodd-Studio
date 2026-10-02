@@ -93,6 +93,41 @@ final class StudioRecipeTests: XCTestCase {
     recipe=fixture();var config=recipe["config"] as! [String:Any];config["seed"]=true;recipe["config"]=config
     XCTAssertThrowsError(try compile(recipe))
   }
+  func testStudioDFRRecipeRoutesSpatialAndTemporalWithExactAdapter() throws {
+    var recipe=fixture()
+    var config=recipe["config"] as! [String:Any]
+    config["dfr_enabled"]=true
+    config["dfr_detailing_lora_path"]="/models/detail.safetensors"
+    config["dfr_detailing_lora_strength"]=0.5
+    recipe["config"]=config
+    let spatial=try compile(recipe)
+    XCTAssertEqual(spatial.version,8)
+    XCTAssertEqual(spatial.task,"dfr")
+    XCTAssertEqual(spatial.dfr?.adapterPath,"/models/detail.safetensors")
+    XCTAssertEqual(spatial.dfr?.adapterStrength,0.5)
+    XCTAssertEqual(spatial.referenceImages.map(\.role),["first","last"])
+    XCTAssertTrue(spatial.stageOneLoras.isEmpty)
+    config["dfr_temporal_rounds"]=2
+    config["dfr_temporal_upsampler_path"]="/models/temporal.safetensors"
+    recipe["config"]=config
+    let temporal=try compile(recipe)
+    XCTAssertEqual(temporal.version,9)
+    XCTAssertEqual(temporal.dfr?.temporalRounds,2)
+    XCTAssertEqual(temporal.dfr?.temporalUpscalerPath,"/models/temporal.safetensors")
+    config["dfr_temporal_upsampler_path"]=""
+    recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe))
+    config["dfr_temporal_upsampler_path"]="/models/temporal.safetensors"
+    config["dfr_prebaked_transformer_path"]="/models/prebaked"
+    recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe))
+    config["dfr_prebaked_transformer_path"]=""
+    recipe["config"]=config
+    var components=recipe["components"] as! [String:Any]
+    components["loras"]=[["/models/other.safetensors",0.5]]
+    recipe["components"]=components
+    XCTAssertThrowsError(try compile(recipe))
+  }
   func testRejectsInactiveDistilledNegativePromptBeforeModelLoad() throws {
     var recipe = fixture()
     var config = recipe["config"] as! [String: Any]

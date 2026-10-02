@@ -9,7 +9,10 @@ stage-one audio. A 49-frame 512×256/24 fps source produced a 97-frame/48 fps
 clip and a 193-frame/96 fps clip. The final two-round render took 136.15 seconds
 at a 4.06 GB Swift-process peak, excluding FFmpeg. Reviewed frames across all
 four seams retained normal color. Its audio was quiet at -66.4 dBFS mean.
-Studio/ComfyUI routing, higher-resolution memory, matched performance and
+An imported Studio DFR profile now routes T2V/I2V/FFLF through the same Swift
+worker. A two-round Studio-style recipe passed installed-weight preflight at
+193 frames/96 fps. The dedicated Studio DFR controls, a Studio-triggered
+render, ComfyUI routing, higher-resolution memory, matched performance and
 broad audiovisual quality remain open.
 
 Swift LTX 2.5 spatial DFR 2026-10-02 (experimental direct-worker route): strict

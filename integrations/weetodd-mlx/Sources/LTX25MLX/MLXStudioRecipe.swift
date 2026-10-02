@@ -29,7 +29,12 @@ public enum MLXStudioRecipe {
       let prompt=root["prompt"] as? String else { throw reject("format/engine/config/components/prompt") }
     // Inactive controls are accepted only at their neutral values. Distilled
     // CFG=1 cannot evaluate a negative prompt, so reject it before weights load.
-    let fixed:[String:Any] = ["pipeline_mode":"distilled","duration_mode":"manual","stage1_steps":8,"stage2_steps":3,
+    let dfrEnabled:Bool
+    if let value=config["dfr_enabled"] {
+      guard let flag=value as? NSNumber,CFGetTypeID(flag) == CFBooleanGetTypeID() else { throw reject("config.dfr_enabled") }
+      dfrEnabled=flag.boolValue
+    } else { dfrEnabled=false }
+    var fixed:[String:Any] = ["pipeline_mode":"distilled","duration_mode":"manual","stage1_steps":8,"stage2_steps":3,
       "stage1_sampler":"euler_ancestral","stage2_sampler":"euler","stage1_eta":1,"stage1_s_noise":1,"ancestral_seed_offset":10000,
       "video_cfg_scale":1,"audio_cfg_scale":1,"stg_scale":0,"video_rescale_scale":0,"audio_rescale_scale":0,"modality_scale":1,
       "stg_blocks":[],"low_memory":true,"low_ram_streaming":false,"prompt_context":"official_1024","feed_forward_backend":"reference_fp32",
@@ -38,7 +43,12 @@ public enum MLXStudioRecipe {
       "ic_lora_single_stage":false,"cfg_pp_batched":false,"cfg_pp_schedule":"full","sol_attention_profile":"disabled",
       "diffvae_optimization":"combined","diffvae_query_chunk_size":512,"diffvae_context_width_chunks":4,"diffvae_stage4_tile_width":0,
       "auto_duration_min_seconds":1,"auto_duration_max_seconds":20]
-    try keys(config,Set(fixed.keys).union(["width","height","duration_seconds","frame_rate","seed","negative_prompt"]),"config")
+    if dfrEnabled {
+      for key in ["dfr_enabled","dfr_detailing_lora_path","dfr_detailing_lora_strength",
+        "dfr_temporal_upsampler_path","dfr_temporal_rounds"] { fixed.removeValue(forKey:key) }
+    }
+    try keys(config,Set(fixed.keys).union(["width","height","duration_seconds","frame_rate","seed","negative_prompt",
+      "dfr_enabled","dfr_detailing_lora_path","dfr_detailing_lora_strength","dfr_temporal_upsampler_path","dfr_temporal_rounds"]),"config")
     for (key,expected) in fixed where config[key] != nil {
       let actual=config[key]!
       // JSON equality must distinguish booleans from 0/1.
@@ -80,6 +90,25 @@ public enum MLXStudioRecipe {
         guard strength > 0 else { throw reject("LoRA strength") }
         adapters.append(["path":path,"strength":strength,"enabled":true])
       }
+    }
+    var dfr:[String:Any]?
+    if dfrEnabled {
+      guard adapters.isEmpty else { throw reject("DFR cannot combine with ordinary LoRAs") }
+      if config["generated_keyframes"] != nil {
+        guard try integer(config,"generated_keyframes",0...0) == 0 else { throw reject("generated_keyframes") }
+      }
+      guard let adapter=config["dfr_detailing_lora_path"] as? String,
+        adapter.hasPrefix("/"),!adapter.utf8.contains(0) else { throw reject("dfr_detailing_lora_path") }
+      let strength=try number(config,"dfr_detailing_lora_strength")
+      guard strength > 0,strength <= 3 else { throw reject("dfr_detailing_lora_strength") }
+      let rounds=config["dfr_temporal_rounds"] == nil ? 0 : try integer(config,"dfr_temporal_rounds",0...2)
+      let temporal=config["dfr_temporal_upsampler_path"] as? String ?? ""
+      guard (rounds == 0 && temporal.isEmpty) ||
+        (rounds > 0 && temporal.hasPrefix("/") && !temporal.utf8.contains(0) && fps*Double(1 << rounds) <= 120) else {
+        throw reject("dfr_temporal_upsampler_path/dfr_temporal_rounds")
+      }
+      dfr=["adapter_path":adapter,"adapter_strength":strength]
+      if rounds > 0 { dfr!["temporal_upscaler_path"]=temporal; dfr!["temporal_rounds"]=rounds }
     }
     var references:[[String:Any]]=[],task="t2v",audioReference:[String:Any]?
     if let value=root["conditioning"] {
@@ -133,13 +162,22 @@ public enum MLXStudioRecipe {
       }
       }
     }
-    var request:[String:Any] = ["version":task == "a2v" ? 4 : 3,"engine":"ltx25","task":task,"prompt":prompt,"width":width,"height":height,"frames":frames,
+    if dfrEnabled && task == "a2v" { throw reject("DFR does not support A2V") }
+    var request:[String:Any] = ["version":dfrEnabled ? ((dfr!["temporal_rounds"] as? Int ?? 0) > 0 ? 9 : 8) : (task == "a2v" ? 4 : 3),
+      "engine":"ltx25","task":dfrEnabled ? "dfr" : task,"prompt":prompt,"width":width,"height":height,"frames":frames,
       "fps":fps,"seed":seed,"output_directory":outputDirectory,"gemma_root":resolved["text_encoder_path"]!,
       "transformer_root":resolved["transformer_path"]!,"connector_checkpoint":resolved["transformer_path"]!+"/pages/fixed.safetensors",
       "video_checkpoint":resolved["video_vae_path"]!,"audio_checkpoint":resolved["audio_vae_path"]!,
       "spatial_upscaler_checkpoint":resolved["spatial_upscaler_path"]!,"stage_one_loras":adapters,"stage_two_loras":adapters,
       "reference_images":references,"noise_policy":"mlx_threefry_bf16_v1"]
     if let audioReference { request["audio_reference"]=audioReference }
+    if let dfr {
+      request["audio_reference"]=NSNull()
+      request["union_control_guide"]=NSNull()
+      request["ingredients_sheet"]=NSNull()
+      request["msr"]=NSNull()
+      request["dfr"]=dfr
+    }
     return try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONSerialization.data(withJSONObject:request))
   }
 }

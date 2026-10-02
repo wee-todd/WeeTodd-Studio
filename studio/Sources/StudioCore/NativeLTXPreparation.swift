@@ -86,13 +86,25 @@ public enum NativeLTXPreparation {
       && (config["duration_mode"] as? String ?? "manual") == "manual"
       && config["stage1_steps"] as? Int == 8 && config["stage2_steps"] as? Int == 3
       && (config["stage1_sampler"] as? String ?? "euler_ancestral") == "euler_ancestral"
-      && (config["dfr_enabled"] as? Bool ?? false) == false
       && (components["ic_loras"] as? [Any] ?? []).isEmpty
       && (components["msr_lora_path"] as? String ?? "").isEmpty
       && (components["distilled_lora_path"] as? String ?? "").isEmpty
       && (components["duration_head_path"] as? String ?? "").isEmpty
       && config["ic_lora_single_stage"] as? Bool != true && !["control", "ref2va"].contains(task)
-    return ["supportedTasks": ordinary ? ["t2v", "i2v", "fflf", "a2v", "extension"] : [],
+    let dfrEnabled=config["dfr_enabled"] as? Bool ?? false
+    let adapter=config["dfr_detailing_lora_path"] as? String ?? ""
+    let strength=(config["dfr_detailing_lora_strength"] as? NSNumber)?.doubleValue ?? 0
+    let rounds=config["dfr_temporal_rounds"] as? Int ?? 0
+    let temporal=config["dfr_temporal_upsampler_path"] as? String ?? ""
+    let fps=(config["frame_rate"] as? NSNumber)?.doubleValue ?? 0
+    let dfrValid=ordinary && dfrEnabled && adapter.hasPrefix("/") && strength.isFinite && (0...3).contains(strength) && strength > 0
+      && (0...2).contains(rounds) && (rounds == 0 ? temporal.isEmpty : temporal.hasPrefix("/") && fps*Double(1 << rounds) <= 120)
+      && (config["dfr_prebaked_transformer_path"] as? String ?? "").isEmpty
+      && (config["generated_keyframes"] as? Int ?? 0) == 0
+      && (components["loras"] as? [Any] ?? []).isEmpty
+    return ["dfrEnabled": dfrValid,
+      "supportedTasks": dfrValid ? ["t2v", "i2v", "fflf"] : ordinary && !dfrEnabled
+      ? ["t2v", "i2v", "fflf", "a2v", "extension"] : [],
       "controls": ["evaluations": config["stage1_steps"] ?? 8, "refinementSteps": config["stage2_steps"] ?? 3,
         "cfg": config["video_cfg_scale"] ?? 1, "stepsEditable": false, "refinementStepsEditable": false,
         "cfgEditable": false, "shiftEditable": false,
@@ -161,6 +173,9 @@ public enum NativeLTXPreparation {
       one["clipID"] = member.id.uuidString
       let composed = try compose(resolve(one))
       let recipe = composed["recipe"] as! [String: Any]
+      guard ((recipe["config"] as? [String: Any])?["dfr_enabled"] as? Bool ?? false) == false else {
+        throw unsupported("DFR does not support continuous scenes")
+      }
       let task = (recipe["conditioning"] as? [String: Any])?["task"] as? String
       let hasImage = member.attachments.contains { $0.role == .first }
       let hasAudio = member.attachments.contains { $0.role == .audioDriver }
@@ -331,6 +346,13 @@ public enum NativeLTXPreparation {
       let nativeTask = task == "i2v" ? "fflf" : task
       candidates = candidates.filter { $0["task"] as? String == nativeTask }
         + candidates.filter { $0["task"] as? String != nativeTask }
+    }
+    if clip.profileID == "auto" {
+      candidates = candidates.filter {
+        (($0["generation"] as? [String: Any])?["dfrEnabled"] as? Bool ?? false) == false
+      } + candidates.filter {
+        (($0["generation"] as? [String: Any])?["dfrEnabled"] as? Bool ?? false) == true
+      }
     }
     guard let chosen = candidates.first, let profile = chosen["id"] as? String else {
       throw StudioError.invalid("No compatible Swift LTX recipe is available. Import a distilled recipe or select Automatic.")
