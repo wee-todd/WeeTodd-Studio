@@ -2,6 +2,62 @@ import XCTest
 @testable import LTX25MLX
 
 final class StudioRecipeTests: XCTestCase {
+  func testMSRStudioRecipeKeepsOrderedReferencesAndTheirControls() throws {
+    var recipe=fixture()
+    var components=recipe["components"] as! [String:Any]
+    components["msr_lora_path"]="/models/msr.safetensors"
+    components["msr_lora_strength"]=0.8
+    components["ic_loras"]=[["/models/msr.safetensors",0.8]]
+    components["spatial_upscaler_path"]=""
+    recipe["components"]=components
+    var config=recipe["config"] as! [String:Any]
+    config["ic_lora_single_stage"]=true;recipe["config"]=config
+    func reference(_ id:String,_ role:String) -> [String:Any] {
+      ["id":id,"kind":"image","role":"reference","path":"/\(id).png",
+       "sha256":String(repeating:"a",count:64),"strength":0.9,"description":"Description \(id)",
+       "reference_role":role,"reference_priority":"primary","reference_frames":"25",
+       "reference_size_policy":"balanced","attention_strength":0.7]
+    }
+    recipe["conditioning"]=["version":1,"task":"ref2va","audio_policy":"generated",
+      "inputs":[reference("room","background"),reference("hero","subject")]]
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,7);XCTAssertEqual(request.task,"msr")
+    XCTAssertEqual(request.msr?.references.map(\.path),["/hero.png","/room.png"])
+    XCTAssertEqual(request.msr?.references.first?.attentionStrength,0.7)
+    XCTAssertEqual(request.spatialUpscalerCheckpoint,"")
+    XCTAssertTrue(request.prompt.hasPrefix("Image 1 provides the subject: Description hero\nImage 2 provides the background: Description room"))
+    var invalid=components;invalid["ic_loras"]=[["/different.safetensors",0.8]]
+    recipe["components"]=invalid;XCTAssertThrowsError(try compile(recipe))
+  }
+  func testIngredientsStudioRecipeRequiresOneFrozenSheetAndSingleStage() throws {
+    var recipe=fixture()
+    var config=recipe["config"] as! [String:Any]
+    config["duration_seconds"]=5.0;config["ic_lora_single_stage"]=true;recipe["config"]=config
+    var components=recipe["components"] as! [String:Any]
+    components["ic_loras"]=[["/models/ingredients.safetensors",1.0]]
+    components["spatial_upscaler_path"]="";recipe["components"]=components
+    let sheet:[String:Any]=["id":"sheet","kind":"image","role":"control",
+      "control_type":"ingredients_reference_sheet","path":"/sheet.png",
+      "sha256":String(repeating:"b",count:64),"strength":0.75,"description":"Two warriors"]
+    recipe["conditioning"]=["version":1,"task":"control","audio_policy":"generated","inputs":[sheet]]
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,6);XCTAssertEqual(request.frames,121)
+    XCTAssertEqual(request.ingredientsSheet?.referenceStrength,0.75)
+    XCTAssertTrue(request.prompt.hasPrefix("Reference sheet: Two warriors\n\nGenerated video:"))
+    for key in ["transformer_path","text_encoder_path","video_vae_path","audio_vae_path"] {
+      var missing=recipe,varComponents=components;varComponents[key]="";missing["components"]=varComponents
+      XCTAssertThrowsError(try compile(missing),key)
+    }
+    var unknown=sheet;unknown["ignored_setting"]=true
+    var invalid=recipe;invalid["conditioning"]=["version":1,"task":"control","inputs":[unknown]]
+    XCTAssertThrowsError(try compile(invalid))
+    invalid=recipe;var ordinary=components;ordinary["loras"]=[["/models/style.safetensors",0.5]]
+    invalid["components"]=ordinary;XCTAssertThrowsError(try compile(invalid))
+    config["ic_lora_single_stage"]=false;recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe))
+    config["ic_lora_single_stage"]=true;config["duration_seconds"]=4.0;recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe))
+  }
   func testExtensionRecipeKeepsFrozenSourceAndOneCausalPublicationWindow() throws {
     var recipe=fixture()
     var config=recipe["config"] as! [String:Any]

@@ -180,7 +180,7 @@ public enum H3Continuation {
   }
 
   public static func save(_ rows: Rows, plan: Plan, width: Int, height: Int,
-    identity: String, directory: URL) throws -> (manifest: URL, sha256: String) {
+    identity: String, directory: URL) throws -> (manifest: URL, sha256: String, payloadSHA256:String) {
     let expected = try shape(contextFrames: plan.contextFrames,
       width: width, height: height)
     guard plan.saveContext, plan.tailTrimFrames == 0,
@@ -215,7 +215,7 @@ public enum H3Continuation {
       try payload.write(to: directory.appendingPathComponent("latents.f32"), options: .atomic)
       let path = directory.appendingPathComponent("manifest.json")
       try manifestData.write(to: path, options: .atomic)
-      return (path, digest(manifestData))
+      return (path, digest(manifestData),manifest.payloadSHA256)
     } catch {
       try? FileManager.default.removeItem(at: directory)
       throw error

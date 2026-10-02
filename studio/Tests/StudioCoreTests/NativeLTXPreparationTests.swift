@@ -5,6 +5,54 @@ import CryptoKit
 @testable import StudioCore
 
 final class NativeLTXPreparationTests: XCTestCase {
+  func testMSRCompositionFreezesReferencesAndRetainsEditorParameters() throws {
+    let (root,original,runtime)=try fixture()
+    let profile=root.appendingPathComponent("model.json")
+    var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    recipe["components"]=["transformer_path":"/models/transformer","loras":[],
+      "msr_lora_path":"/models/msr.safetensors","msr_lora_strength":1.0,
+      "ic_loras":[["/models/msr.safetensors",1.0]]]
+    var config=recipe["config"] as! [String:Any];config["ic_lora_single_stage"]=true
+    recipe["config"]=config;recipe["conditioning"]=["version":1,"task":"ref2va","inputs":[]]
+    try JSONSerialization.data(withJSONObject:recipe).write(to:profile)
+    var project=original;project.clips[0].generationSelection?.task="ref2va"
+    let file=root.appendingPathComponent("hero.png");try Data([1,2,3]).write(to:file)
+    let asset=MediaAsset(name:"Hero",kind:.image,path:file.path)
+    project.assets=[asset]
+    var attachment=Attachment(assetID:asset.id,role:.reference)
+    attachment.description="Warrior with braided hair";attachment.referenceFrames="25"
+    attachment.referenceSizePolicy="balanced";attachment.attentionStrength=0.7
+    project.clips[0].attachments=[attachment]
+    let result=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let content=result["recipe"] as! [String:Any]
+    let inputs=(content["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(inputs[0]["sha256"] as? String,SHA256.hash(data:Data([1,2,3])).map { String(format:"%02x",$0) }.joined())
+    XCTAssertEqual(inputs[0]["reference_frames"] as? String,"25")
+    XCTAssertEqual(inputs[0]["attention_strength"] as? Double,0.7)
+    XCTAssertEqual(inputs[0]["description"] as? String,attachment.description)
+    project.clips[0].attachments[0].attentionStrength=2
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+  }
+  func testIngredientsCompositionRequiresOneDescribedSheetAndFiveSeconds() throws {
+    let (root,original,runtime)=try fixture()
+    let profile=root.appendingPathComponent("model.json")
+    var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    recipe["components"]=["transformer_path":"/models/transformer","loras":[],
+      "ic_loras":[["/models/ingredients.safetensors",1.0]]]
+    var config=recipe["config"] as! [String:Any];config["ic_lora_single_stage"]=true
+    recipe["config"]=config;recipe["conditioning"]=["version":1,"task":"control","inputs":[]]
+    try JSONSerialization.data(withJSONObject:recipe).write(to:profile)
+    var project=original;project.clips[0].generationSelection?.task="control";project.clips[0].duration=5
+    let file=root.appendingPathComponent("sheet.png");try Data([1]).write(to:file)
+    let asset=MediaAsset(name:"Character sheet",kind:.image,path:file.path);project.assets=[asset]
+    var attachment=Attachment(assetID:asset.id,role:.control)
+    attachment.controlType="ingredients_reference_sheet";attachment.description="A warrior in four views"
+    project.clips[0].attachments=[attachment]
+    let result=try NativeLTXPreparation.compose(request:request(project,runtime))
+    XCTAssertEqual(((result["recipe"] as! [String:Any])["conditioning"] as! [String:Any])["task"] as? String,"control")
+    project.clips[0].duration=4
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+  }
   func testA2VCompositionRetainsNonzeroSourceIntervalAndRejectsMissingControls() throws {
     let (root,original,runtime)=try fixture()
     var project=original

@@ -3,6 +3,18 @@ import XCTest
 @testable import H3MLX
 
 final class H3WorkerReceiptTests: XCTestCase {
+  func testContinuationReceiptCarriesCollectableNativeContextAndExactUsableWindow() {
+    let result=H3WorkerReceipt.renderResult(video:URL(fileURLWithPath:"/tmp/take/render.mp4"),
+      metadata:["frames":90,"fps":24,"continuationManifest":"/tmp/take/continuation/manifest.json",
+        "continuationManifestSHA256":String(repeating:"a",count:64),
+        "continuationPayloadSHA256":String(repeating:"b",count:64)],jobID:UUID())
+    let artifact=result["continuation_artifact"] as? [String:String]
+    XCTAssertEqual(artifact?["payload_filename"],"latents.f32")
+    XCTAssertEqual(artifact?["manifest_sha256"],String(repeating:"a",count:64))
+    XCTAssertEqual(result["usable_source_in"] as? Double,0)
+    XCTAssertEqual(result["usable_duration"] as? Double,3.75)
+    XCTAssertEqual(result["use_complete_duration"] as? Bool,true)
+  }
   func testRenderCompletionPreservesRequestIdentity() {
     let jobID = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
     let video = URL(fileURLWithPath: "/tmp/take/render.mp4")

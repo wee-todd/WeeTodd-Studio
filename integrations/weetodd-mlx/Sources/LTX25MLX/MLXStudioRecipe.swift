@@ -6,6 +6,16 @@ import InferenceContracts
 /// Strict adapter for Studio's resolved recipe. This owns no inference or prompt rewriting.
 public enum MLXStudioRecipe {
   public static func compile(data:Data,outputDirectory:String) throws -> MLXDistilledRequest {
+    guard data.count <= 1024*1024 else { throw LTXError.invalid("Studio recipe exceeds 1 MiB.") }
+    if let root=try JSONSerialization.jsonObject(with:data) as? [String:Any],
+      let task=(root["conditioning"] as? [String:Any])?["task"] as? String,
+      ["ref2va","control"].contains(task) {
+      return try MLXStudioSpecializedRecipe.compile(data:data,outputDirectory:outputDirectory)
+    }
+    return try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONSerialization.data(
+      withJSONObject:compileFields(data:data,outputDirectory:outputDirectory)))
+  }
+  static func compileFields(data:Data,outputDirectory:String,requiresSpatialUpscaler:Bool=true) throws -> [String:Any] {
     guard data.count <= 1024*1024,
       let root=try JSONSerialization.jsonObject(with:data) as? [String:Any] else {
       throw LTXError.invalid("Studio recipe must be a JSON object of at most 1 MiB.")
@@ -78,7 +88,8 @@ public enum MLXStudioRecipe {
     if components["msr_lora_strength"] != nil,try number(components,"msr_lora_strength") != 1 { throw reject("msr_lora_strength") }
     var resolved:[String:String]=[:]
     for key in paths {
-      guard let value=components[key] as? String,!value.isEmpty else { throw reject(key) }
+      guard let value=components[key] as? String,
+        !value.isEmpty || (key == "spatial_upscaler_path" && !requiresSpatialUpscaler) else { throw reject(key) }
       resolved[key]=value
     }
     var adapters:[[String:Any]]=[]
@@ -178,6 +189,6 @@ public enum MLXStudioRecipe {
       request["msr"]=NSNull()
       request["dfr"]=dfr
     }
-    return try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONSerialization.data(withJSONObject:request))
+    return request
   }
 }

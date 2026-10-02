@@ -71,12 +71,12 @@ public enum NativeModelSetup {
     }
     let h3 = [
       component("checkpoint", "H3 task manifest", ["directory"]),
-      component("transformer", "H3 transformer", ["directory", "file"]),
-      component("text_encoder", "Qwen3-VL encoder", ["directory"]),
+      component("transformer", "H3 Comfy INT8 or compatible direct transformer", ["file"]),
+      component("text_encoder", "Qwen3-VL text encoder pages", ["directory"]),
       component("processor", "Qwen3-VL processor", ["directory"]),
       component("tokenizer", "Qwen tokenizer", ["directory", "file"]),
-      component("video_vae", "H3 video VAE", ["file", "directory"]),
-      component("audio_vae", "H3 audio VAE", ["file", "directory"]),
+      component("video_vae", "H3 video VAE", ["file"]),
+      component("audio_vae", "H3 folded-weight audio VAE", ["file"]),
     ]
     let ltx = [
       component("transformer_path", "LTX 2.5 distilled transformer", ["directory", "file"]),
@@ -93,7 +93,8 @@ public enum NativeModelSetup {
           ModelSetupPreset(id: "swift-\(engine)-\(suffix)", name: "\(title) · \(label) · Swift",
             engine: engine, task: task,
             description: "Reuse installed components in place. Text-only setup runs Swift worker preflight now; image and reference tasks run it after clip media is attached.",
-            components: fields)
+            components: fields + (engine == "h3" && task != "t2v"
+              ? [component("vision_encoder","Qwen3-VL vision tower",["file","directory"])] : []))
         }
     }
     let detail = component("dfr_detailing_lora_path", "Pixel-Spatial x2 DFR adapter", ["file"])
@@ -105,7 +106,14 @@ public enum NativeModelSetup {
         description: "Reuse installed DFR components in place. Swift worker preflight checks the full adapter stack before creating this profile.",
         components: ltx + [detail] + (rounds == 0 ? [] : [temporal]))
     }
-    return ordinary + dfr
+    let references=[("msr","ref2va","MSR images","msr_lora_path","MSR learned-slot adapter"),
+      ("ingredients","control","Ingredients sheet","ingredients_lora_path","Ingredients adapter")].map {
+      family,task,label,key,adapter in
+      ModelSetupPreset(id:"swift-ltx25-"+family,name:"LTX 2.5 · "+label+" · Swift",engine:"ltx25",task:task,
+        description:"Experimental single-stage reference generation. Link installed components, attach described images and prepare the clip for Swift worker preflight. Identity and audio quality remain under qualification.",
+        components:ltx.filter { $0.key != "spatial_upscaler_path" }+[component(key,adapter,["file"])])
+    }
+    return ordinary + dfr + references
   }
 
   public static func recipe(preset: ModelSetupPreset, selected: [String: String],
@@ -142,6 +150,15 @@ public enum NativeModelSetup {
         "duration_seconds": 5.0, "frame_rate": 24.0, "seed": 0,
         "stage1_steps": 8, "stage2_steps": 3, "low_memory": true,
         "low_ram_streaming": false]
+      if ["swift-ltx25-msr","swift-ltx25-ingredients"].contains(preset.id) {
+        let msr=preset.id == "swift-ltx25-msr",key=msr ? "msr_lora_path" : "ingredients_lora_path"
+        guard let adapter=components[key] as? String else { throw StudioError.invalid("Choose the dedicated reference adapter.") }
+        if !msr { components.removeValue(forKey:key) }
+        let strength=msr ? 1.0 : 1.2
+        components["ic_loras"]=[[adapter,strength]];components["spatial_upscaler_path"]=""
+        if msr { components["msr_lora_strength"]=strength }
+        config["ic_lora_single_stage"]=true
+      }
       if preset.id.hasPrefix("swift-ltx25-dfr-") {
         let rounds = preset.id == "swift-ltx25-dfr-spatial" ? 0
           : preset.id == "swift-ltx25-dfr-temporal-1" ? 1 : 2
@@ -212,6 +229,21 @@ private enum NativeModelInspector {
   static func matches(_ url: URL, key: String, engine: String, task: String) throws -> Bool {
     let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     if engine == "h3" {
+      if key == "vision_encoder" {
+        var file=url
+        if directory {
+          if let manifest=try? document(url.appendingPathComponent("paged_text_encoder_manifest.json")),
+            manifest["format"] as? String == "weetodd-h3-qwen-paged-v2",
+            let vision=manifest["vision"] as? [String:Any],vision["file"] as? String == "pages/vision.safetensors" {
+            file=url.appendingPathComponent("pages/vision.safetensors")
+          } else { file=url.appendingPathComponent("text_encoder.safetensors") }
+        }
+        let tensors=try header(file)
+        return tensors.keys.filter { $0.hasPrefix("visual.") }.count == 529
+          && (tensors["visual.patch_embed.proj.weight"] as? [String:Any])?["shape"] as? [Int] == [1152,3,2,16,16]
+          && (tensors["visual.blocks.26.attn.qkv.weight"] as? [String:Any])?["shape"] as? [Int] == [3456,288]
+          && (tensors["visual.deepstack_merger_list.2.linear_fc2.weight"] as? [String:Any])?["shape"] as? [Int] == [5120,1152]
+      }
       if key == "checkpoint" {
         guard directory, let info = try? document(url.appendingPathComponent("model_index.json"))["_minimax_h3"] as? [String: Any],
           let partition = info["partition"] as? String, let tasks = info["tasks"] as? [String] else { return false }
@@ -220,17 +252,11 @@ private enum NativeModelInspector {
       }
       if directory {
         switch key {
-        case "transformer":
-          guard let config = try? document(url.appendingPathComponent("config.json")) else { return false }
-          return config["latents_dim"] as? Int == 24 && config["audio_latents_dim"] as? Int == 32 &&
-            config["text_dim"] as? Int == 5120 &&
-            FileManager.default.fileExists(atPath: url.appendingPathComponent("paged_manifest.json").path)
         case "text_encoder":
           guard let config = try? document(url.appendingPathComponent("config.json")) else { return false }
           let text = embedded(config["text_config"]) ?? embedded(config["text_encoder"]) ?? config
           return (text["hidden_size"] as? Int ?? text["hidden"] as? Int) == 5120 &&
-            (FileManager.default.fileExists(atPath: url.appendingPathComponent("paged_text_encoder_manifest.json").path) ||
-              FileManager.default.fileExists(atPath: url.appendingPathComponent("text_encoder.safetensors").path))
+            FileManager.default.fileExists(atPath: url.appendingPathComponent("paged_text_encoder_manifest.json").path)
         case "processor":
           guard let config = (try? document(url.appendingPathComponent("processor_config.json"))) ??
             (try? document(url.appendingPathComponent("preprocessor_config.json"))) else { return false }
@@ -242,8 +268,16 @@ private enum NativeModelInspector {
         default: return false
         }
       }
-      guard ["video_vae", "audio_vae"].contains(key) else { return false }
       let tensors = try header(url)
+      if key == "transformer" {
+        func shape(_ name:String) -> [Int]? { (tensors[name] as? [String:Any])?["shape"] as? [Int] }
+        return ["model.diffusion_model.", "diffusion_model.", ""].contains { prefix in
+          shape(prefix+"video_patch_proj.weight") == [5376,96]
+            && shape(prefix+"audio_patch_proj.weight") == [5376,32]
+            && shape(prefix+"condition_proj.weight") == [5376,5120]
+        }
+      }
+      guard ["video_vae", "audio_vae"].contains(key) else { return false }
       let metadata = tensors["__metadata__"] as? [String: String] ?? [:]
       return key == "video_vae"
         ? metadata["minimax_h3_video_vae"] != nil && tensors.keys.contains(where: { $0.hasPrefix("decoder.") })
@@ -267,6 +301,32 @@ private enum NativeModelInspector {
     let metadata = tensors["__metadata__"] as? [String: String] ?? [:]
     let config = embedded(metadata["config"]) ?? [:]
     switch key {
+    case "msr_lora_path","ingredients_lora_path":
+      let keys=tensors.keys.filter { $0.hasSuffix(".lora_A.weight") || $0.hasSuffix(".lora_B.weight") }
+      let a=keys.filter { $0.hasSuffix(".lora_A.weight") }
+      guard keys.count == 960,a.count == 480,a.allSatisfy({ name in
+        let partner=name.replacingOccurrences(of:".lora_A.weight",with:".lora_B.weight")
+        guard let down=(tensors[name] as? [String:Any])?["shape"] as? [Int],down.count == 2,
+          let up=(tensors[partner] as? [String:Any])?["shape"] as? [Int],up.count == 2 else { return false }
+        return down[0] == 128 && up[1] == 128
+      }) else { return false }
+      if key == "ingredients_lora_path" {
+        return ["2.3","2.3.0"].contains(metadata["model_version"] ?? "")
+          && metadata["reference_downscale_factor"] == "1"
+          && metadata["reference_spatial_scale_factor"] == nil
+          && (metadata["reference_temporal_scale_factor"] ?? "1") == "1"
+          && (metadata["adapter_family"] ?? "ingredients_reference_sheet") == "ingredients_reference_sheet"
+      }
+      guard metadata["reference_slot_embedding_type"] == "fourier_mlp",
+        metadata["reference_token_order"] == "prepend",
+        metadata["reference_slot_time_offsets"] == "pic1_based_negative_time",
+        metadata["reference_slot_embedding_num_frequencies"] == "16",
+        metadata["reference_slot_embedding_hidden_dim"] == "256",
+        metadata["reference_slot_embedding_dim"] == "128" else { return false }
+      let shapes:[String:[Int]]=["frequencies":[16],"net.0.weight":[256,33],"net.0.bias":[256],"net.2.weight":[128,256],"net.2.bias":[128]]
+      return ["diffusion_model.reference_slot_embedding.","reference_slot_embedding."].contains { prefix in
+        shapes.allSatisfy { name,shape in (tensors[prefix+name] as? [String:Any])?["shape"] as? [Int] == shape }
+      }
     case "dfr_detailing_lora_path":
       guard metadata["model_version"] == "2.5",
         metadata["reference_downscale_factor"] == "2",

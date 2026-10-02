@@ -91,19 +91,25 @@ images on both shots and a continuous Qwen3-TTS audio driver completed in Swift 
 384 × 256, 24 fps and four seconds. The direct worker took 57.82 seconds at a 3.52 GB
 process peak, excluding FFmpeg; its exact cut began at frame 48. A Studio run prepared,
 rendered, accepted both shot ranges as one take, saved and reopened the project with
-Python unavailable. Specialized controls still require the explicitly selected Python
-route.
+Python unavailable. The experimental Swift route also supports MSR still images and one
+Ingredients sheet through dedicated setup profiles. Union Control attachments and other
+specialized combinations still require the explicitly selected Python route.
 Ordinary H3 and LTX 2.5 model setup now scans selected folders, links compatible
-installed components and creates native profiles without Python. Managed downloads,
-specialized adapter setup, asset/library tools and other engines remain separate migration work; this is not yet a
+installed components and creates native profiles without Python. Swift also downloads pinned
+LTX 2.5 packages, H3 Qwen pages, video VAE and tokenizer packages. Acquiring/converting
+the remaining H3 components, other specialized adapter setup, asset/library tools and other engines remain separate work; this is not yet a
 fully Python-free Studio release.
 The experimental Swift H3 worker has completed text-to-audiovisual, reference-conditioned
 and independent audio-driven takes.
 Direct worker tests now also cover a Swift-only version-2 latent continuation
 pair and a Ref2VA external movie extension with a final-frame seam anchor.
-Studio's **Clip Continuity** controls still use their existing route; they do
-not produce or consume the new Swift context artifact. Both Swift test joins
-remain visible, and the external route has a substantial speed/memory cost.
+Studio's **Match previous frame** now freezes the accepted source's last visible frame
+for Swift H3. **Save motion context** and **Continue scene** use native version-2
+context for text-only H3 clips. Installed-app frame and motion jobs passed live previews,
+acceptance, saving and reopening with Python unavailable. The motion output matched its
+headless and saved ComfyUI graph byte for byte. This proves route/lifecycle parity for
+one recipe; joins remain visible, and the external extension route still has a substantial
+speed/memory cost and no Swift Studio controls.
 The off-by-default Swift preparation path validates clip inputs, ordered references and profile
 settings, then requires worker preflight before a take can render. Enable **Use Swift MLX for H3
 (experimental)** in Runtime Settings to try text-to-AV, timed keyframes, or ordered Ref2VA with
@@ -667,7 +673,7 @@ configure the native MLX engines.
 1. Open **Studio Settings → Model setup**. Built-in presets appear independently of installed recipe
    count once a native worker or the optional renderer is configured. Choose H3 text/image/reference
    or LTX 2.3/2.5 text/image. Swift LTX 2.5 also offers spatial DFR and one- or two-round
-   temporal DFR presets when its worker is enabled. These presets reuse installed adapters;
+   temporal DFR presets, MSR images and Ingredients sheets when its worker is enabled. These presets reuse installed adapters;
    they do not download them.
 2. Choose **Set Up… → Use Existing Models**, select model folders (including an existing ComfyUI
    `models` folder), then scan. Inspection reads bounded headers and manifests, never model tensors.
@@ -680,8 +686,11 @@ configure the native MLX engines.
    Swift H3/LTX 2.5 presets use the same folder scan or **Import…** for each installed
    component, with no Python process or weight copy. Their scan reads bounded metadata;
    the selected worker validates the complete stack before a text render or after clip media
-   is attached for an image/reference render. Managed downloads remain on the optional
-   Python setup route.
+   is attached for an image/reference render. H3 image/reference setup explicitly asks for
+   a Qwen vision tower: choose installed vision-capable pages or a compatible raw
+   Qwen checkpoint for that field. Text encoding itself requires the supported paged pack.
+   Native H3 transformer/audio fields require compatible direct/folded-weight files;
+   older Python paged transformers and unfurled audio bundles are excluded from native choices.
 3. Use **Automatic** to select a lower-memory policy on Macs with 64 GB or less, **Lower Memory** to
    request supported memory-saving settings, or **Custom** to retain the preset policy for later
    advanced adjustment. Memory information is advisory and does not promise fit, allocate RAM, or
@@ -703,7 +712,20 @@ downloads the five official distilled components and
 converts transformer/Gemma to paged Q8. H3 encoder preparation downloads just the compact Q8 encoder,
 its support files and full Qwen architecture config, then retains the vision page.
 
-For H3, choose four downloads in the same library: the **text/image or reference Q8 transformer**,
+With Swift H3/LTX 2.5 enabled, compatible preconverted downloads run in Swift through
+URLSession. Transfers stream to disk, resume retained partial bytes, and verify exact pinned
+size and SHA-256 before installing a new folder atomically. Verified installed files are
+hardlinked on the same volume or linked across volumes; keep the original files available.
+Cancellation preserves partial downloads without publishing an incomplete package. Progress
+and **Cancel** appear in the setup window. The native path uses a Studio Keychain token or
+`HF_TOKEN`; it never writes the token into download state, provenance or logs.
+Native choices include LTX 2.5, H3 Qwen, H3 video VAE and tokenizer. The older H3 paged
+transformer/support downloads and source conversion still belong to the optional Python
+setup route. For Swift H3, import a supported direct transformer, folded audio VAE,
+task manifest and processor alongside these downloaded components; native setup is not
+yet a complete H3 acquisition/conversion solution.
+
+For the optional Python H3 setup, choose four downloads in the same library: the **text/image or reference Q8 transformer**,
 its matching **support files**, the **Q8 vision encoder**, and the **Q8 video VAE**. The support files
 include the official task manifest, audio VAE, tokenizer and processor. Downloads specific to another
 task are hidden; the encoder and video VAE can be reused across tasks. After installation, scan the
@@ -894,7 +916,20 @@ Guided setup now also offers **IC-LoRA control**, **Ingredients reference sheet*
 references**. Import the corresponding dedicated adapter in addition to the existing model
 components. Setup checks its tensor headers and compatibility; a style LoRA cannot substitute.
 These recipes use the existing distilled full-resolution single-stage renderer. They are separate
-from the basic image preset and do not require a spatial upscaler for that single-stage route.
+from the basic image preset and do not require a spatial upscaler for that single-stage route. With **Use Swift MLX for LTX 2.5** enabled, Model Setup offers
+**LTX 2.5 · MSR images · Swift** and **LTX 2.5 · Ingredients sheet · Swift**.
+Their folder scans inspect bounded adapter headers and link weights in place. Prepare runs
+shared worker preflight after the described images are attached. MSR keeps image order,
+with one optional background last, and maps role, priority, frame count, sizing, reference
+strength and attention strength. Ingredients uses one described sheet and at least 121 frames.
+Both run eight full-resolution evaluations; there is no second stage or spatial upscaler.
+Ordinary LoRAs, DFR and audio drivers cannot be combined with these single-adapter profiles.
+Installed-app five-second 512 × 256 jobs passed generation, two decoded previews, acceptance
+and reopening with Python unavailable. Their render-plus-acceptance times were 83.49 seconds
+for two-image MSR and 99.38 seconds for Ingredients; worker process peaks were 4.03/4.00 GB,
+excluding FFmpeg. The Ingredients result still duplicated subjects, so broad identity and
+audio quality remain unqualified. Saved recipe-backed ComfyUI MSR and Ingredients graphs
+produced byte-identical movies to these Studio takes; exported Studio movie jobs remain unqualified.
 
 - **Control:** attach a preprocessed guide video as Control and choose its matching guide type
   (such as depth, pose, motion tracks or crossview). The recipe's adapter must support that type.
@@ -1220,6 +1255,14 @@ that take. Saving is also inferred when a later H3 clip explicitly depends on it
 must match the generated endpoint within half a frame; Prepare suggests compatible durations.
 The target must use matching model components, dimensions, sampling and LoRA settings.
 
+With **Use Swift MLX for H3** enabled, frame matching uses native AVFoundation extraction
+and preserves the original editor attachments. Motion context currently requires text-only
+H3 generation and matching settings; image/reference/A2V context saving is rejected.
+Swift v2 `latents.f32` artifacts are distinct from Python v1 `latents.safetensors` artifacts.
+Saving keeps the complete terminal 17-frame grid and makes the accepted clip use that
+aligned duration, shown in preparation. Trimming its ending invalidates motion continuation.
+The worker fully verifies manifest/payload hashes before loading weights.
+
 LTX motion continuation needs a visible source with audio, at least 49 native frames long. Studio
 prepares that bounded tail, preserves synchronized timing, and adds only the new segment to the
 timeline. New durations must be multiples of eight native frames. LTX 2.3 requires compatible
@@ -1362,7 +1405,11 @@ Draw Things retains its existing conditioning and generation controls.
 
 The shared headless renderer can save and reload a bounded synchronized video/audio latent tail.
 Studio's motion continuity controls use this same opt-in contract. It remains available directly
-to headless clients; the app does not maintain a second sampler.
+to headless clients; the app does not maintain a second sampler. The JSON and file-content
+identity rules below describe the Python version-1 path. Swift uses `"version": 2`,
+checks component metadata identity and stores `latents.f32`; artifacts cannot cross engines.
+The Swift text-only path keeps terminal alignment when saving, rather than rejecting the
+aligned editorial-duration expansion. See [Clip continuity](#clip-continuity-in-studio).
 
 Add this to an H3 headless recipe to save context from its completed take:
 

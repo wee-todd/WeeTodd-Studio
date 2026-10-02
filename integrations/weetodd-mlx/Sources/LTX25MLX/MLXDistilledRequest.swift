@@ -119,7 +119,9 @@ public struct MLXDistilledRequest:Codable,Sendable {
         throw LTXError.invalid("DFR detailing adapter must appear only in its dedicated second-stage slot.")
       }
     }
-    for path in [gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,spatialUpscalerCheckpoint,outputDirectory] {
+    var requiredPaths=[gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,outputDirectory]
+    if !spatialUpscalerCheckpoint.isEmpty || ![6,7].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
+    for path in requiredPaths {
       guard path.hasPrefix("/"), path.utf8.count <= 4096, !path.utf8.contains(0) else {
         throw LTXError.invalid("Model and output paths must be explicit absolute local paths.")
       }

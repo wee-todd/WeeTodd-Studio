@@ -464,7 +464,7 @@ import UniformTypeIdentifiers
         "message": message])
     }
     let result: (videoFrames: Int, audioSamplesPerChannel: Int, audioSampleRate: Int)
-    var savedContextSHA256: String?
+    var savedContextSHA256: String?,savedPayloadSHA256:String?
     let onLatents: ([Float], [Float]) throws -> Void = { video, audio in
       guard let continuation, continuation.saveContext,
         let identity = continuationIdentity else { return }
@@ -473,7 +473,7 @@ import UniformTypeIdentifiers
       let saved = try H3Continuation.save(tail, plan: continuation,
         width: admission.geometry.width, height: admission.geometry.height,
         identity: identity, directory: staging.appendingPathComponent("continuation"))
-      savedContextSHA256 = saved.sha256
+      savedContextSHA256 = saved.sha256;savedPayloadSHA256=saved.payloadSHA256
     }
     if let stillRequest {
       let rendered = try H3Ref2VAStillRunner.run(stillRequest,
@@ -530,11 +530,12 @@ import UniformTypeIdentifiers
       "preflightSeconds": preflightSeconds,
       "seconds": Date().timeIntervalSince(started)]
     var completeMetadata = metadata
-    if let savedContextSHA256 {
+    if let savedContextSHA256,let savedPayloadSHA256 {
       completeMetadata["continuationManifest"] = output
         .appendingPathComponent("continuation")
         .appendingPathComponent("manifest.json").path
       completeMetadata["continuationManifestSHA256"] = savedContextSHA256
+      completeMetadata["continuationPayloadSHA256"] = savedPayloadSHA256
     }
     try recipeData.write(to: staging.appendingPathComponent("studio-recipe.json"),
       options: .withoutOverwriting)

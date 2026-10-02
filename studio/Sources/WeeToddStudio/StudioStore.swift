@@ -189,7 +189,7 @@ struct BridgeResponseBuffer {
         case "h3-native-describe": result = try NativeH3Preparation.describe(request: request)
         case "h3-native-prepare":
           guard let output else { throw StudioError.invalid("Preparation requires a job directory.") }
-          result = try NativeH3Preparation.prepare(request: request, destination: output)
+          result = try await NativeH3Preparation.prepareWithMedia(request: request, destination: output)
         case "ltx-native-catalog":
           let settings = request["runtime"] as! [String: Any]
           result = ["profiles": try NativeLTXPreparation.catalog(directory: settings["profilesDirectory"] as? String ?? "")]
@@ -1336,7 +1336,8 @@ extension Encodable {
       }
       let stillCurrent = current == c && signature(for: current) == submittedSignature
       var finishedClip = c
-      finishedClip.duration = preserveEditorialDuration ? c.duration : min(c.duration, renderedDuration)
+      finishedClip.duration = nativeH3 && continuationArtifact != nil && r["use_complete_duration"] as? Bool == true
+        ? renderedDuration : preserveEditorialDuration ? c.duration : min(c.duration, renderedDuration)
       let finishedSignature = signature(for: finishedClip)
       change { p in
         guard let i = p.clips.firstIndex(where: { $0.id == c.id }) else { return }

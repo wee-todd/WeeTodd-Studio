@@ -146,6 +146,9 @@ struct ContinuityInspector: View {
         Toggle("Save motion context", isOn: Binding(get: { clip.continuity?.saveContext ?? false }, set: { value in
           update { $0.saveContext = value }
         }))
+        if store.runtime.usesNativeH3 && store.project.shouldSaveContinuityContext(for:clip) {
+          Text("Saving motion context keeps the complete generated ending. The accepted clip duration may expand to the model's frame grid; preparation shows the exact duration.").foregroundStyle(.secondary)
+        }
         if store.project.shouldSaveContinuityContext(for: clip), clip.continuity?.saveContext != true {
           Text("Context will be saved automatically because a later H3 clip continues this clip.")
             .foregroundStyle(.secondary)

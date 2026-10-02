@@ -44,13 +44,33 @@ public struct ContinuationArtifact: Codable, Equatable {
   public var manifest: String
   public var manifestSHA256: String
   public var payloadSHA256: String
-  public init(manifest: String, manifestSHA256: String, payloadSHA256: String) {
+  public var payloadFilename: String
+  public init(manifest: String, manifestSHA256: String, payloadSHA256: String,
+    payloadFilename:String="latents.safetensors") {
     self.manifest = manifest; self.manifestSHA256 = manifestSHA256; self.payloadSHA256 = payloadSHA256
+    self.payloadFilename=payloadFilename
   }
   private enum CodingKeys: String, CodingKey {
     case manifest
     case manifestSHA256 = "manifest_sha256"
     case payloadSHA256 = "payload_sha256"
+    case payloadFilename = "payload_filename"
+  }
+  public init(from decoder:Decoder) throws {
+    let fields=try decoder.container(keyedBy:CodingKeys.self)
+    manifest=try fields.decode(String.self,forKey:.manifest)
+    manifestSHA256=try fields.decode(String.self,forKey:.manifestSHA256)
+    payloadSHA256=try fields.decode(String.self,forKey:.payloadSHA256)
+    payloadFilename=try fields.decodeIfPresent(String.self,forKey:.payloadFilename) ?? "latents.safetensors"
+    guard ["latents.safetensors","latents.f32"].contains(payloadFilename) else {
+      throw StudioError.invalid("Unsupported continuation payload filename.")
+    }
+  }
+  public func encode(to encoder:Encoder) throws {
+    var fields=encoder.container(keyedBy:CodingKeys.self)
+    try fields.encode(manifest,forKey:.manifest);try fields.encode(manifestSHA256,forKey:.manifestSHA256)
+    try fields.encode(payloadSHA256,forKey:.payloadSHA256)
+    if payloadFilename != "latents.safetensors" { try fields.encode(payloadFilename,forKey:.payloadFilename) }
   }
 }
 
@@ -99,7 +119,7 @@ extension StudioProject {
     }
   }
 
-  /// Only cheap filesystem metadata is read on the UI thread. Python verifies artifact hashes.
+  /// Only cheap filesystem metadata is read on the UI thread. Preparation and workers verify hashes.
   public func continuityDependencyFingerprint(for clip: Clip) -> String {
     if isContinuousSceneMember(clip) {
       do { return try continuousSceneInputFingerprint(for: clip) }
@@ -122,7 +142,7 @@ extension StudioProject {
         parts.append((try? encoder.encode(version?.continuationArtifact).base64EncodedString()) ?? "")
         var paths = [source.sourcePath]
         if let manifest = version?.continuationArtifact?.manifest {
-          paths += [manifest, URL(fileURLWithPath: manifest).deletingLastPathComponent().appendingPathComponent("latents.safetensors").path]
+          paths += [manifest, URL(fileURLWithPath: manifest).deletingLastPathComponent().appendingPathComponent(version!.continuationArtifact!.payloadFilename).path]
         }
         for path in paths {
           let attributes = try? FileManager.default.attributesOfItem(atPath: path)
@@ -168,14 +188,17 @@ extension ProjectStorage {
   /// Keep the immutable manifest beside its fixed-name tensor payload without rewriting hashes.
   public static func collectContinuationArtifact(_ artifact: ContinuationArtifact, to directory: URL) throws -> ContinuationArtifact {
     let source = URL(fileURLWithPath: artifact.manifest)
-    let payload = source.deletingLastPathComponent().appendingPathComponent("latents.safetensors")
+    guard ["latents.safetensors","latents.f32"].contains(artifact.payloadFilename) else {
+      throw StudioError.invalid("Unsupported continuation payload filename.")
+    }
+    let payload = source.deletingLastPathComponent().appendingPathComponent(artifact.payloadFilename)
     guard FileManager.default.fileExists(atPath: source.path), FileManager.default.fileExists(atPath: payload.path) else {
-      throw StudioError.invalid("Relink the continuation manifest and latents.safetensors before collecting this project.")
+      throw StudioError.invalid("Relink the continuation manifest and its latent payload before collecting this project.")
     }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
     do {
       try FileManager.default.copyItem(at: source, to: directory.appendingPathComponent("manifest.json"))
-      try FileManager.default.copyItem(at: payload, to: directory.appendingPathComponent("latents.safetensors"))
+      try FileManager.default.copyItem(at: payload, to: directory.appendingPathComponent(artifact.payloadFilename))
     } catch {
       try? FileManager.default.removeItem(at: directory)
       throw error

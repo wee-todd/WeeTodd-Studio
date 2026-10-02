@@ -78,10 +78,46 @@ public enum NativeLTXPreparation {
     }
     return result
   }
+  private static func specialization(_ recipe:[String:Any]) -> String? {
+    guard let config=recipe["config"] as? [String:Any],
+      let components=recipe["components"] as? [String:Any],
+      (config["pipeline_mode"] as? String ?? "distilled") == "distilled",
+      config["stage1_steps"] as? Int == 8,config["stage2_steps"] as? Int == 3,
+      config["ic_lora_single_stage"] as? Bool == true,
+      (config["dfr_enabled"] as? Bool ?? false) == false,
+      (components["loras"] as? [Any] ?? []).isEmpty,
+      let adapters=components["ic_loras"] as? [[Any]],adapters.count == 1,adapters[0].count == 2,
+      let path=adapters[0][0] as? String,path.hasPrefix("/"),
+      let strength=adapters[0][1] as? Double,strength.isFinite,strength>0,strength<=3 else { return nil }
+    let task=(recipe["conditioning"] as? [String:Any])?["task"] as? String
+    if task == "ref2va",components["msr_lora_path"] as? String == path,
+      ((components["msr_lora_strength"] as? Double) ?? 1) == strength { return "msr" }
+    if task == "control",(components["msr_lora_path"] as? String ?? "").isEmpty { return "ingredients" }
+    return nil
+  }
+  private static func sourceSHA256(_ path:String) throws -> String {
+    let fd=Darwin.open(path,O_RDONLY | O_CLOEXEC | O_NONBLOCK)
+    guard fd>=0 else { throw StudioError.invalid("Cannot read the reference image.") }
+    let handle=FileHandle(fileDescriptor:fd,closeOnDealloc:true);defer { try? handle.close() }
+    var status=stat()
+    guard fstat(fd,&status)==0,status.st_mode & S_IFMT == S_IFREG,
+      (1...128*1024*1024).contains(status.st_size) else {
+      throw StudioError.invalid("Reference images must be regular files under 128 MiB.")
+    }
+    var digest=SHA256(),count=0
+    while let bytes=try handle.read(upToCount:1024*1024),!bytes.isEmpty {
+      try Task.checkCancellation();count+=bytes.count
+      guard count<=status.st_size else { throw StudioError.invalid("Reference image changed during preparation.") }
+      digest.update(data:bytes)
+    }
+    guard count==status.st_size else { throw StudioError.invalid("Reference image changed during preparation.") }
+    return digest.finalize().map { String(format:"%02x",$0) }.joined()
+  }
   private static func descriptor(_ recipe: [String: Any]) -> [String: Any] {
     let config = recipe["config"] as? [String: Any] ?? [:]
     let components = recipe["components"] as? [String: Any] ?? [:]
     let task = (recipe["conditioning"] as? [String: Any])?["task"] as? String ?? "t2v"
+    let specialized=specialization(recipe)
     let ordinary = (config["pipeline_mode"] as? String ?? "distilled") == "distilled"
       && (config["duration_mode"] as? String ?? "manual") == "manual"
       && config["stage1_steps"] as? Int == 8 && config["stage2_steps"] as? Int == 3
@@ -103,12 +139,12 @@ public enum NativeLTXPreparation {
       && (config["generated_keyframes"] as? Int ?? 0) == 0
       && (components["loras"] as? [Any] ?? []).isEmpty
     return ["dfrEnabled": dfrValid,
-      "supportedTasks": dfrValid ? ["t2v", "i2v", "fflf"] : ordinary && !dfrEnabled
+      "supportedTasks": specialized != nil ? [specialized == "msr" ? "ref2va" : "control"] : dfrValid ? ["t2v", "i2v", "fflf"] : ordinary && !dfrEnabled
       ? ["t2v", "i2v", "fflf", "a2v", "extension"] : [],
-      "controls": ["evaluations": config["stage1_steps"] ?? 8, "refinementSteps": config["stage2_steps"] ?? 3,
+      "controls": ["evaluations": config["stage1_steps"] ?? 8, "refinementSteps": specialized != nil ? 0 : config["stage2_steps"] ?? 3,
         "cfg": config["video_cfg_scale"] ?? 1, "stepsEditable": false, "refinementStepsEditable": false,
         "cfgEditable": false, "shiftEditable": false,
-        "stepsExplanation": "Swift distilled sampling uses the qualified 8 + 3 schedule.",
+        "stepsExplanation": specialized != nil ? "Swift reference sampling uses eight full-resolution evaluations." : "Swift distilled sampling uses the qualified 8 + 3 schedule.",
         "cfgExplanation": "Distilled guidance is fixed.",
         "shiftExplanation": "This native adapter does not expose a Shift override."],
       "presets": [
@@ -333,7 +369,7 @@ public enum NativeLTXPreparation {
     let task = movieSource != nil ? "extension" : frameSource != nil
       ? (clip.attachments.contains { [.last, .keyframe].contains($0.role) } ? "fflf" : "i2v")
       : selection?.task ?? clip.inferredTask
-    guard ["t2v", "i2v", "fflf", "a2v", "extension"].contains(task) else { throw unsupported("task \(task) is not yet ported") }
+    guard ["t2v", "i2v", "fflf", "a2v", "extension","ref2va","control"].contains(task) else { throw unsupported("task \(task) is not yet ported") }
     guard clip.audioDriverSelection == nil || task == "a2v" else {
       throw unsupported("a prepared timeline audio driver requires the A2V task")
     }
@@ -360,7 +396,7 @@ public enum NativeLTXPreparation {
     let assets = try JSONDecoder().decode([MediaAsset].self, from: data(request["globalAssets"] ?? []))
     let selectedRecipe = try recipe(profile)
     var warnings = selection?.preset == .speed
-      ? ["Speed preserves the qualified 8 + 3 sampling schedule."] : []
+      ? [specialization(selectedRecipe) == nil ? "Speed preserves the qualified 8 + 3 sampling schedule." : "Speed preserves eight full-resolution reference evaluations."] : []
     if let inherited = (selectedRecipe["config"] as? [String: Any])?["negative_prompt"] as? String,
       !inherited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       warnings.append("The selected profile's negative prompt is not evaluated by distilled Swift sampling and is omitted.")
@@ -443,6 +479,7 @@ public enum NativeLTXPreparation {
     let prompt = clip.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !prompt.isEmpty else { throw StudioError.invalid("Write a prompt before preparing the render.") }
     var content = context.recipe
+    let specialized=specialization(content)
     // Stored profile media/context never become hidden clip dependencies.
     content.removeValue(forKey: "continuation"); content.removeValue(forKey: "reference_images")
     var config = content["config"] as! [String: Any]
@@ -456,6 +493,9 @@ public enum NativeLTXPreparation {
     let additionalFrames = Int(ceil(clip.duration * fps / 8 - 1e-9)) * 8
     let contextFrames = context.movieSource == nil ? 0 : clip.continuityMode == "motion" ? 49 : 25
     let frames = contextFrames + additionalFrames + (context.movieSource == nil ? 1 : 0)
+    if specialized == "ingredients",frames<121 {
+      throw StudioError.invalid("Ingredients needs at least 121 frames (five seconds at 24 fps).")
+    }
     let duration = Double(additionalFrames) / fps
     guard Double(frames - 1) / fps <= 20 else {
       throw unsupported("rounded generation plus source context exceeds 20 seconds")
@@ -483,7 +523,8 @@ public enum NativeLTXPreparation {
         "path": firstFramePath, "strength": 1.0, "frame_index": 0])
     }
     let allowed: Set<MediaRole> = ["t2v", "extension"].contains(context.task) ? [] : context.task == "i2v" ? [.first]
-      : context.task == "a2v" ? [.audioDriver, .first] : [.first, .last, .keyframe]
+      : context.task == "a2v" ? [.audioDriver, .first] : context.task == "ref2va" ? [.reference]
+      : context.task == "control" ? [.control] : [.first, .last, .keyframe]
     guard roles.isSubset(of: allowed) else { throw unsupported("attached media conflict with \(context.task); no inputs were discarded") }
     if context.task == "i2v", !roles.contains(.first) { throw StudioError.invalid("Image to video requires a First frame image.") }
     if context.task == "fflf", clip.generationSelection != nil, !roles.isSuperset(of: [.first, .last]) {
@@ -494,6 +535,12 @@ public enum NativeLTXPreparation {
     }
     if context.task == "a2v", attachments.filter({ $0.role == .first }).count > 1 {
       throw StudioError.invalid("Audio to video accepts at most one opening-frame image.")
+    }
+    if specialized == "msr",!(1...5).contains(attachments.count) {
+      throw StudioError.invalid("MSR needs one to five described still images.")
+    }
+    if specialized == "ingredients",attachments.count != 1 {
+      throw StudioError.invalid("Ingredients needs exactly one described reference sheet.")
     }
     for attachment in attachments {
       try Task.checkCancellation()
@@ -534,6 +581,31 @@ public enum NativeLTXPreparation {
           "path": path, "strength": 1, "source_start_seconds": start,
           "source_duration_seconds": sourceDuration]); continue
       }
+      if attachment.role == .reference || attachment.role == .control {
+        guard asset.kind == .image,attachment.strength.isFinite,(0...1).contains(attachment.strength),
+          !attachment.description.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else {
+          throw StudioError.invalid("Describe each reference image and use strength from 0 to 1.")
+        }
+        var input:[String:Any]=["id":attachment.id.uuidString,"kind":"image","path":path,
+          "sha256":try sourceSHA256(path),"strength":attachment.strength,"description":attachment.description]
+        if attachment.role == .reference {
+          let role=attachment.referenceRole ?? "subject",priority=attachment.referencePriority ?? "auto"
+          let referenceFrames=attachment.referenceFrames ?? "auto",size=attachment.referenceSizePolicy ?? "sol_auto"
+          let attention=attachment.attentionStrength ?? 1
+          guard ["subject","object","clothing","background"].contains(role),
+            ["auto","primary","supporting","background"].contains(priority),
+            ["auto","25","33"].contains(referenceFrames),["sol_auto","quality","balanced","speed"].contains(size),
+            attention.isFinite,(0...1).contains(attention) else { throw StudioError.invalid("Invalid MSR reference controls.") }
+          input["role"]="reference";input["reference_role"]=role;input["reference_priority"]=priority
+          input["reference_frames"]=referenceFrames;input["reference_size_policy"]=size;input["attention_strength"]=attention
+        } else {
+          guard attachment.controlType == "ingredients_reference_sheet" else {
+            throw unsupported("this profile requires an Ingredients sheet")
+          }
+          input["role"]="control";input["control_type"]=attachment.controlType
+        }
+        inputs.append(input);continue
+      }
       guard asset.kind == .image, attachment.strength.isFinite, (0...1).contains(attachment.strength) else {
         throw StudioError.invalid("Endpoint references must be images with strength from 0 to 1.")
       }
@@ -544,7 +616,10 @@ public enum NativeLTXPreparation {
       inputs.append(["id": attachment.id.uuidString, "kind": "image", "role": "keyframe", "path": path,
         "strength": attachment.strength, "frame_index": frame])
     }
-    if context.task != "a2v" && context.task != "extension" {
+    if inputs.filter({ $0["reference_role"] as? String == "background" }).count>1 {
+      throw StudioError.invalid("MSR accepts at most one background image.")
+    }
+    if !["a2v","extension","ref2va","control"].contains(context.task) {
       let indices = inputs.map { $0["frame_index"] as? String == "last" ? frames - 1 : $0["frame_index"] as! Int }
       guard Set(indices).count == indices.count, indices.allSatisfy({ $0 == 0 || $0 == frames - 1 }),
         inputs.count <= 2, context.task == "t2v" || indices.contains(0) else {

@@ -353,6 +353,76 @@ final class StudioReliabilityTests: XCTestCase {
       .write(to: directory.appendingPathComponent("studio-qualification.json"), options: .atomic)
   }
 
+  @MainActor func testInstalledNativeH3ContinuityLifecycleWithoutPython() async throws {
+    guard let manifest=ProcessInfo.processInfo.environment["WEETODD_NATIVE_H3_CONTINUITY_LIFECYCLE"] else {
+      throw XCTSkip("Opt-in installed H3 continuity lifecycle")
+    }
+    let options=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:manifest))) as! [String:String]
+    let root=URL(fileURLWithPath:try XCTUnwrap(options["output"])),profiles=root.appendingPathComponent("Profiles")
+    try FileManager.default.createDirectory(at:profiles,withIntermediateDirectories:true)
+    var profile=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:options["recipe"]!))) as! [String:Any]
+    profile.removeValue(forKey:"continuation")
+    let motion=options["mode"] == "motion"
+    var components=profile["components"] as! [String:Any];components["task"]=motion ? "t2va" : "fl2va"
+    if !motion,let vision=options["vision"] { components["vision_encoder"]=vision }
+    profile["components"]=components
+    profile["conditioning"]=["version":1,"task":motion ? "t2v" : "fflf","audio_policy":"generated","inputs":[]]
+    let profileURL=profiles.appendingPathComponent("continuity.json")
+    try JSONSerialization.data(withJSONObject:profile).write(to:profileURL)
+    let config=profile["config"] as! [String:Any]
+    let store=StudioStore(dataDirectory:root,restoreSession:false)
+    store.runtime=RuntimeSettings(root:"/unavailable",pythonPath:"/unavailable/python",profilesDirectory:profiles.path)
+    store.runtime.nativeH3Enabled=true;store.runtime.h3WorkerPath=options["worker"]
+    store.runtime.ffmpegPath=profile["ffmpeg"] as? String ?? "/opt/homebrew/bin/ffmpeg"
+    var source=Clip(name:"Accepted source",engine:.h3);source.sourcePath=try XCTUnwrap(options["source"])
+    source.duration=90.0/24;source.generationWidth=384;source.generationHeight=256
+    var version=RenderVersion(path:source.sourcePath,seed:20261001,prompt:"",recipePath:"",usableSourceIn:0,usableDuration:source.duration)
+    if motion {
+      let path=try XCTUnwrap(options["context"]),bytes=try Data(contentsOf:URL(fileURLWithPath:path))
+      let value=try JSONSerialization.jsonObject(with:bytes) as! [String:Any]
+      version.continuationArtifact=ContinuationArtifact(manifest:path,
+        manifestSHA256:SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined(),
+        payloadSHA256:value["payloadSHA256"] as! String,payloadFilename:"latents.f32")
+    }
+    source.versions=[version]
+    var target=Clip(name:"Swift continuity",engine:.h3);target.profileID=profileURL.path
+    target.prompt=profile["prompt"] as! String;target.duration=motion ? 85.0/24 : 2.5
+    target.generationWidth=config["width"] as! Int;target.generationHeight=config["height"] as! Int
+    target.seed=config["seed"] as! Int;target.generationSelection=GenerationSelection(task:"t2v")
+    target.continuity=ClipContinuity(mode:motion ? "motion" : "frame",sourceClipID:source.id,saveContext:motion)
+    store.project.clips=[source,target];store.selectedClipID=target.id
+    await store.reloadProfiles();await store.describeGeneration();XCTAssertNil(store.validationErrors[target.id])
+    await store.prepareSelected();XCTAssertNil(store.error)
+    let prepared=try XCTUnwrap(store.preparedRecipe)
+    var previews=Set<Int>();let observer=store.bridge.$livePreview.sink { if let revision=$0?.previewRevision { previews.insert(revision) } }
+    defer { observer.cancel() }
+    let started=Date();await store.renderPrepared();XCTAssertNil(store.error)
+    let take=try XCTUnwrap(store.selectedClip?.versions.last);XCTAssertGreaterThan(previews.count,0)
+    XCTAssertEqual(store.project.clips[0],source)
+    if motion {
+      let artifact=try XCTUnwrap(take.continuationArtifact);XCTAssertEqual(artifact.payloadFilename,"latents.f32")
+      let collected=try ProjectStorage.collectContinuationArtifact(artifact,to:root.appendingPathComponent("CollectedContext"))
+      XCTAssertTrue(FileManager.default.fileExists(atPath:URL(fileURLWithPath:collected.manifest).deletingLastPathComponent().appendingPathComponent("latents.f32").path))
+      XCTAssertEqual(store.selectedClip?.duration,85.0/24)
+    }
+    let saved=root.appendingPathComponent("accepted.weetodd");try ProjectStorage.write(store.project,to:saved)
+    let reopened=StudioStore(dataDirectory:root,restoreSession:false);reopened.runtime=store.runtime;reopened.load(saved)
+    XCTAssertEqual(reopened.project.clips[1].sourcePath,take.path)
+    XCTAssertEqual(reopened.project.clips[1].versions.last?.continuationArtifact,take.continuationArtifact)
+    try store.bridge.log.write(to:root.appendingPathComponent("worker-progress.log"),atomically:true,encoding:.utf8)
+    let evidence:[String:Any]=["mode":motion ? "motion" : "frame","video":take.path,"recipe":prepared,
+      "renderAndAcceptanceSeconds":Date().timeIntervalSince(started),"decodedPreviewCount":previews.count,
+      "pythonPath":store.runtime.pythonPath,"worker":store.runtime.h3WorkerPath!]
+    try JSONSerialization.data(withJSONObject:evidence,options:[.prettyPrinted,.sortedKeys]).write(to:root.appendingPathComponent("qualification.json"))
+    if motion {
+      var next=target;next.id=UUID();next.versions=[];next.sourcePath=""
+      next.continuity=ClipContinuity(mode:"motion",sourceClipID:target.id,saveContext:false)
+      reopened.project.clips.append(next);reopened.selectedClipID=next.id
+      await reopened.reloadProfiles();await reopened.prepareSelected();XCTAssertNil(reopened.error)
+      XCTAssertNotNil(reopened.preparedRecipe,"Reopened accepted context must prepare the next native take")
+    }
+  }
+
   @MainActor func testNativeH3RejectsAudioDriverBeforePythonPreparation() async throws {
     let fake = SuspendedBridge("unused")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false,
@@ -402,10 +472,22 @@ final class StudioReliabilityTests: XCTestCase {
       let asset = MediaAsset(name: "Endpoint", kind: .image, path: input["path"] as! String)
       assets.append(asset)
       let last = input["frame_index"] as? String == "last" || (input["frame_index"] as? Int ?? 0) > 0
-      var attachment = Attachment(assetID: asset.id, role: last ? .last : .first)
-      attachment.strength = input["strength"] as? Double ?? 1; clip.attachments.append(attachment)
+      let role:MediaRole = input["role"] as? String == "reference" ? .reference
+        : input["role"] as? String == "control" ? .control : last ? .last : .first
+      var attachment = Attachment(assetID: asset.id, role: role)
+      attachment.strength = input["strength"] as? Double ?? 1
+      attachment.description = input["description"] as? String ?? ""
+      attachment.referenceRole = input["reference_role"] as? String
+      attachment.referencePriority = input["reference_priority"] as? String
+      attachment.referenceFrames = input["reference_frames"] as? String
+      attachment.referenceSizePolicy = input["reference_size_policy"] as? String
+      attachment.attentionStrength = input["attention_strength"] as? Double
+      attachment.controlType = input["control_type"] as? String ?? ""
+      clip.attachments.append(attachment)
     }
-    clip.generationSelection = GenerationSelection(task: inputs.isEmpty ? "t2v" : inputs.count == 1 ? "i2v" : "fflf")
+    let recipeTask=(recipe["conditioning"] as? [String:Any])?["task"] as? String
+    clip.generationSelection = GenerationSelection(task: ["ref2va","control"].contains(recipeTask ?? "")
+      ? recipeTask! : inputs.isEmpty ? "t2v" : inputs.count == 1 ? "i2v" : "fflf")
     if let requestPath=config["editorRequest"] {
       let original=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:requestPath))) as! [String:Any]
       let projectData=try JSONSerialization.data(withJSONObject:original["project"]!)

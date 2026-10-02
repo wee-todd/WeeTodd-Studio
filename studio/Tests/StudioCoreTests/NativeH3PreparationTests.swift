@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import XCTest
 @testable import StudioCore
@@ -46,6 +47,82 @@ final class NativeH3PreparationTests: XCTestCase {
   private func request(_ project: StudioProject, _ runtime: [String: Any]) throws -> [String: Any] {
     ["project": try JSONSerialization.jsonObject(with: JSONEncoder().encode(project)),
       "clipID": project.clips[0].id.uuidString, "runtime": runtime]
+  }
+
+  func testFrameContinuityUsesVisibleVFRFrameWithoutMutatingStoredInputs() async throws {
+    let (root,original,runtime)=try fixture()
+    let profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="fl2va"
+    definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"fflf","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    let movie=try await NativeLTXPreparationTests().continuityMovie(root)
+    var source=Clip(engine:.movie);source.sourcePath=movie.path;source.sourceIn=0.15;source.duration=0.8
+    var target=original.clips[0];target.continuity=ClipContinuity(mode:"frame")
+    let stale=MediaAsset(name:"Old first",kind:.image,path:root.appendingPathComponent("missing.png").path)
+    target.attachments=[Attachment(assetID:stale.id,role:.first)]
+    var project=original;project.clips=[source,target];project.assets=[stale]
+    var body=try request(project,runtime);body["clipID"]=target.id.uuidString
+    let description=try NativeH3Preparation.describe(request:body)
+    XCTAssertEqual(description["readinessErrors"] as? [String],[])
+    let result=try await NativeH3Preparation.prepareWithMedia(request:body,destination:root.appendingPathComponent("prepared"))
+    let recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:result["recipePath"] as! String))) as! [String:Any]
+    let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(inputs.count,1);XCTAssertEqual(inputs[0]["frame_index"] as? Int,0)
+    XCTAssertTrue((inputs[0]["path"] as! String).hasSuffix("previous-frame.png"))
+    let report=(result["report"] as! [String:Any])["continuity"] as! [String:Any]
+    XCTAssertEqual(report["engine"] as? String,"h3")
+    XCTAssertEqual(report["sourceFrameTime"] as! Double,0.8,accuracy:0.001)
+    let saved=try JSONSerialization.jsonObject(with:Data(contentsOf:root.appendingPathComponent("prepared/editor-request.json"))) as! NSDictionary
+    XCTAssertEqual(saved,body as NSDictionary)
+    XCTAssertEqual(project.clips[1].attachments,target.attachments)
+  }
+
+  func testSaveMotionContextBuildsNativeVersionTwoContract() throws {
+    let (_,original,runtime)=try fixture();var project=original
+    project.clips[0].continuity=ClipContinuity(saveContext:true)
+    let result=try NativeH3Preparation.compose(request:request(project,runtime))
+    let recipe=result["recipe"] as! [String:Any]
+    let context=try XCTUnwrap(recipe["continuation"] as? [String:Any])
+    XCTAssertEqual(context["version"] as? Int,2)
+    XCTAssertEqual(context["context_frames"] as? Int,22)
+    XCTAssertEqual(context["save_context"] as? Bool,true)
+    XCTAssertNil(context["source_context"])
+    project.clips[0].duration=362.0/24
+    let rerender=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    XCTAssertEqual((rerender["config"] as! [String:Any])["duration_seconds"] as? Double,15)
+  }
+
+  func testMotionContextKeepsHashesAlignsSavedTailAndRejectsTampering() throws {
+    let (root,original,runtime)=try fixture()
+    let folder=root.appendingPathComponent("context");try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+    let payload=Data(repeating:0,count:7*2*2*96*4+2*37*32*4)
+    func hash(_ data:Data) -> String { SHA256.hash(data:data).map { String(format:"%02x",$0) }.joined() }
+    let manifest:[String:Any]=["format":"weetodd-h3-swift-continuation-v2","contextFrames":22,
+      "width":64,"height":64,"generatedFrames":90,"publishedFrames":90,"overlapFrames":0,
+      "identity":String(repeating:"c",count:64),"payloadBytes":payload.count,"payloadSHA256":hash(payload)]
+    let bytes=try JSONSerialization.data(withJSONObject:manifest)
+    try bytes.write(to:folder.appendingPathComponent("manifest.json"));try payload.write(to:folder.appendingPathComponent("latents.f32"))
+    let movie=root.appendingPathComponent("source.mp4");try Data([0]).write(to:movie)
+    var source=Clip(engine:.h3);source.sourcePath=movie.path;source.duration=3.75
+    source.versions=[RenderVersion(path:movie.path,seed:1,prompt:"",recipePath:"",usableSourceIn:0,usableDuration:3.75,
+      continuationArtifact:ContinuationArtifact(manifest:folder.appendingPathComponent("manifest.json").path,
+        manifestSHA256:hash(bytes),payloadSHA256:hash(payload),payloadFilename:"latents.f32"))]
+    var target=original.clips[0];target.duration=3;target.generationWidth=64;target.generationHeight=64
+    target.continuity=ClipContinuity(mode:"motion",saveContext:true)
+    var project=original;project.clips=[source,target]
+    func body() throws -> [String:Any] { var value=try request(project,runtime);value["clipID"]=target.id.uuidString;return value }
+    let result=try NativeH3Preparation.compose(request:body()),recipe=result["recipe"] as! [String:Any]
+    let context=recipe["continuation"] as! [String:Any]
+    XCTAssertEqual(context["source_manifest_sha256"] as? String,hash(bytes))
+    XCTAssertEqual(context["source_context"] as? String,folder.appendingPathComponent("manifest.json").path)
+    XCTAssertEqual((recipe["config"] as! [String:Any])["duration_seconds"] as? Double,85.0/24)
+    XCTAssertFalse(((result["report"] as! [String:Any])["warnings"] as! [String]).isEmpty)
+    project.clips[1].duration=15;XCTAssertThrowsError(try NativeH3Preparation.compose(request:body()))
+    project.clips[1].duration=3
+    var changed=payload;changed[0]=1;try changed.write(to:folder.appendingPathComponent("latents.f32"))
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:body()))
   }
 
   func testComposesTextOnlyRecipeWithoutDroppingUserInputs() throws {

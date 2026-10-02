@@ -10,8 +10,10 @@ The standalone app runs without ComfyUI.
 
 Swift H3 and LTX 2.5 setup can find compatible components in folders you select,
 including existing ComfyUI model libraries. Discovery reads bounded metadata and leaves
-weights in place. Managed downloads and specialized adapter setup still require the
-optional legacy setup route.
+weights in place. Compatible pinned preconverted downloads now run in Swift with
+streamed checksums, resume and cancellation. Native setup includes DFR, MSR and
+Ingredients profiles. The remaining H3 acquisition/conversion components and
+other specialized adapters still require an explicit supported source/setup path.
 
 [Get started](#get-started) · [Studio guide](studio/README.md) ·
 [Make a movie with Director](#make-a-movie-with-director) ·
@@ -157,7 +159,7 @@ with Python unavailable. Planned music-video A2V clips can retain their source i
 and a prepared timeline audio mix can feed an independent Swift LTX A2V clip. A developer
 Swift Union Control route now accepts a frozen half-resolution RGB24 guide and the installed
 LTX 2.3 Union IC-LoRA, with the task adapter active only in stage one. Studio's ordinary
-control-attachment UI, MSR, DFR and H3 extension controls remain outside the qualified
+Union control-attachment UI and H3 external extension controls remain outside the qualified
 Swift paths. Studio's Swift model setup now offers LTX 2.5 DFR spatial and one- or
 two-round temporal presets. It scans installed Pixel-Spatial and temporal adapter
 headers, links their weights in place and preflights the resulting profile. Such a
@@ -166,11 +168,18 @@ continuous scenes are rejected for DFR.
 Studio's dedicated DFR editor controls still use Python. A separate experimental
 headless Ingredients route accepts a frozen static
 reference sheet, repeats it across at least 121 frames, and samples with the compatible
-rank-128 task adapter in one full-resolution stage. Studio's Ingredients controls still use
-the Python route. An experimental direct Swift worker MSR route also accepts one to five
+rank-128 task adapter in one full-resolution stage. With the experimental Swift LTX worker
+selected, Studio now prepares described Ingredients sheets and MSR images without Python;
+Model Setup includes dedicated Swift presets and bounded adapter discovery. An experimental direct Swift worker MSR route also accepts one to five
 hash-frozen ordered stills, separately VAE-encodes bounded references, and applies its
 learned-slot LoRA with compact grouped attention. One- and two-image clips completed;
-five images passed memory preflight. Studio's MSR controls remain on their Python route.
+five images passed memory preflight. Installed-app MSR and Ingredients jobs each passed
+prepare, render, two decoded previews, acceptance and project reopening with Python unavailable.
+Their five-second 512 × 256 tests took 83.49 and 99.38 seconds through render plus acceptance,
+with 4.03 and 4.00 GB Swift-worker process peaks respectively, excluding FFmpeg. MSR kept the
+two subjects distinct; the Ingredients sample duplicated subjects. These are route checks,
+not broad identity/audio quality or matched production-size performance qualification.
+Saved ComfyUI MSR and Ingredients graphs produced byte-identical movies to their Studio takes.
 The experimental direct Swift worker also runs spatial DFR with generated keyframe
 slots, a clean half-resolution stage-two reference and the Pixel-Spatial x2 adapter
 at stage two. Text-only and first/last-image requests published 49-frame 512 × 256
@@ -1033,6 +1042,13 @@ review the displayed package contents before starting.
 Accept the selected repository's access terms on Hugging Face and configure **Hugging Face access**
 in Studio, or use your existing CLI login. Download only the package needed by your chosen engine.
 
+Swift setup downloads compatible LTX 2.5, H3 Qwen/video-VAE/tokenizer packages through
+URLSession using a Studio Keychain token or `HF_TOKEN`. The existing H3 paged-transformer
+and task-support packages below are for the Python renderer; they are excluded from native
+download choices. Swift H3 requires a compatible direct transformer and folded audio VAE
+imported separately. Source conversion and CLI-login authentication remain on the optional
+Python setup route. See [guided native setup](studio/README.md#guided-model-setup).
+
 | Package | Download size¹ | Included | Still separate |
 | --- | --- | --- | --- |
 | [H3 Q8 vision encoder](https://huggingface.co/Vayden/Qwen3-VL-32B-H3-MLX-q8-vision-paged) | 28.22 GB | Q8 language pages, retained vision tower, manifests and support files | Matching H3 transformer, video VAE and task support downloads below |
@@ -1051,7 +1067,7 @@ CLI users can follow the complete [LTX 2.5 download-to-recipe example](examples/
 Source conversion is optional and remains available in the catalog. For setup errors or an older
 managed runtime, see [Studio setup troubleshooting](studio/README.md#model-setup-troubleshooting).
 
-For H3, download four items: **the matching transformer + matching support files + Qwen vision
+For the Python H3 route, download four items: **the matching transformer + matching support files + Qwen vision
 encoder + Q8 video VAE**. Studio filters task-specific downloads for the selected preset. Scan all
 four installed directories together and create the recipe. The encoder and video VAE can be shared
 between text/image and reference clips. The support packages use pinned files directly from
@@ -1576,8 +1592,13 @@ appends the full-resolution reference group during one eight-evaluation distille
 stage. It publishes a synchronized audio stream and video. One 512 × 256 result
 completed; the sheet's subject designs appeared, but the output duplicated one
 subject and its generated audio was nearly silent. Identity and audio fidelity,
-other sheet layouts, production-scale speed, Studio controls and ComfyUI export
-remain unqualified. Do not present the headless route as Studio UI support.
+other sheet layouts and production-scale speed remain unqualified. Studio's experimental
+Swift route now accepts one described Ingredients sheet, preserves its strength and frozen
+identity, and passed installed-worker generation, previews, acceptance and reopening without
+Python. Its dedicated setup preset uses one adapter at strength 1.2, eight full-resolution
+evaluations and no spatial upscaler. A saved recipe-backed ComfyUI graph produced the same
+movie bytes as Studio; exported Studio movie jobs remain unqualified for this task.
+Existing composable nodes retain their Python sampler.
 
 Use **LTX 2.5 IC-LoRA Control Guide** for Canny edges, depth maps, pose skeletons, Motion Track, or
 another preprocessed control video. Connect the IMAGE batch from the matching preprocessor.
@@ -2259,7 +2280,7 @@ work. Results apply to the stated workflow and hardware conditions.
 | LTX 2.5 automatic duration | Usability | Low runtime cost | A real Q8 prompt probe spent 0.027 s in the MLX duration head after prompt encoding. | Opt-in modifier; manual duration remains authoritative unless connected. Raw predicted seconds and resolved `8k+1` frames are recorded. |
 | LTX 2.5 Diffusion VAE width tiling | Decode memory | Experimental | A 32-cell stage-four stripe reduced 512×512 peak from 8.27 GB to 7.62 GB. | Decode slowed from 61.99 s to 100.13 s and output was not pixel-identical. Select `stage4_width_tiles` only when memory is the priority. |
 | LTX 2.5 DFR | Full-resolution detail | Experimental | Exact prebaked Q8 pages completed the matched 256×256 probe in 19.41 s versus 89.91 s with live fusion. At 768×512 for five seconds, sampling took 102.36 s at a 28.91 GB MLX peak. The exact Diffusion VAE then took 966.45 s and drove complete-process peak to 164.58 GB. | Decoded video and PCM audio hashes matched the live-Q8 control at 256×256. Use prebaked pages for DFR sampling. Do not treat the exact Diffusion VAE workflow as a low-memory default. DFR changes composition and motion but preserves stage-one audio. |
-| LTX 2.5 DFR temporal refinement | Motion smoothness | Not production-ready | An older Python/MLX 768×512 Q8-paged I2V probe took 127.97 s and peaked at 9.65 GB, but developed color corruption. The direct Swift worker produced a 193-frame 512×256/96 fps two-round clip in 136.15 s at a 4.06 GB Swift-process peak, excluding FFmpeg. | Reviewed Swift seam frames retained normal color after generated-slot noise and pinned-prefix fixes. Studio and ComfyUI routing, higher-resolution memory, matched performance and broad audiovisual quality remain unqualified. |
+| LTX 2.5 DFR temporal refinement | Motion smoothness | Not production-ready | An older Python/MLX 768×512 Q8-paged I2V probe took 127.97 s and peaked at 9.65 GB, but developed color corruption. The direct Swift worker produced a 193-frame 512×256/96 fps two-round clip in 136.15 s at a 4.06 GB Swift-process peak, excluding FFmpeg. | Reviewed Swift seam frames retained normal color after generated-slot noise and pinned-prefix fixes. A spatial recipe ran through ComfyUI and a one-round recipe passed installed-app preparation, previews, acceptance and reopening. Higher-resolution memory, matched performance, dedicated editor controls and broad audiovisual quality remain unqualified. |
 
 ### Remaining optimization priorities
 

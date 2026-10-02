@@ -80,6 +80,21 @@ final class ClipContinuityTests: XCTestCase {
 }
 
 extension ClipContinuityTests {
+  func testNativeSwiftContextRoundTripsAndCollectsFloatPayload() throws {
+    let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at:root) }
+    let source=root.appendingPathComponent("source")
+    try FileManager.default.createDirectory(at:source,withIntermediateDirectories:true)
+    let manifest=Data("{}".utf8);try manifest.write(to:source.appendingPathComponent("manifest.json"))
+    try Data([4,5,6]).write(to:source.appendingPathComponent("latents.f32"))
+    let data=try JSONSerialization.data(withJSONObject:["manifest":source.appendingPathComponent("manifest.json").path,
+      "manifest_sha256":"a","payload_sha256":"b","payload_filename":"latents.f32"])
+    let artifact=try JSONDecoder().decode(ContinuationArtifact.self,from:data)
+    let collected=try ProjectStorage.collectContinuationArtifact(artifact,to:root.appendingPathComponent("collected"))
+    XCTAssertEqual(try Data(contentsOf:root.appendingPathComponent("collected/latents.f32")),Data([4,5,6]))
+    XCTAssertEqual(try JSONDecoder().decode(ContinuationArtifact.self,from:JSONEncoder().encode(collected)),collected)
+  }
+
   func testPortableArtifactCollectionPreservesManifestAndSiblingPayload() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }

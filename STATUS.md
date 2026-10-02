@@ -1,5 +1,40 @@
 # WeeTodd Studio implementation status
 
+Swift H3 Studio continuity and native downloads 2026-10-02 (experimental):
+frame matching freezes the accepted source's last visible frame through AVFoundation;
+text-only motion continuation prepares the existing Swift v2 latent contract, verifies
+source/payload hashes, collects `latents.f32`, and retains the complete terminal frame
+grid when saving another context. Installed-app frame/motion tests with Python unavailable
+passed previews, acceptance, saving and reopening; reopening the motion take also prepared
+the next dependency without generation. The motion take was byte-identical to the matching
+headless and saved ComfyUI graph. Frame/motion render-plus-acceptance took 278.06/330.12
+seconds; these differently conditioned jobs are not a matched speed comparison. H3 setup
+now asks for the required vision tower separately, admits paged text and compatible direct
+transformer/folded audio files, and excludes Python-only transformer/support download packs.
+Swift URLSession handles compatible LTX 2.5/H3 Qwen/video-VAE/tokenizer downloads with
+bounded disk streaming, pinned SHA verification, linked installed-file reuse, range resume,
+cancel retention and atomic no-overwrite publication. Focused fixture and real pinned-file
+HTTPS tests pass. Remaining H3 acquisition/conversion, image/A2V saved motion context,
+external-extension Studio controls, lifecycle breadth, matched performance and AV quality
+remain open; this is not full migration closure.
+
+Swift LTX 2.5 Studio references 2026-10-02 (experimental): MSR and Ingredients
+now compile Studio's described still-image contract to the existing single-stage
+Swift engines. MSR preserves one to five ordered frozen references and their
+role/priority/frame-count/sizing/strength/attention controls, placing one background
+last. Ingredients needs one frozen described sheet and at least 121 frames. Both
+use one dedicated adapter, eight full-resolution evaluations and no spatial
+upscaler; mixed ordinary LoRAs, DFR and audio drivers fail before generation.
+Native setup has explicit MSR/Ingredients presets and bounded adapter discovery.
+Installed-app jobs with Python unavailable each passed preparation, generation,
+two decoded previews, acceptance and reopening. Five-second 512 × 256 tests took
+83.49/99.38 seconds through render plus acceptance and peaked at 4.03/4.00 GB
+Swift-worker process footprint, excluding FFmpeg. MSR kept two subjects distinct;
+Ingredients duplicated subjects. These checks do not qualify broad identity/audio
+quality, production-size performance or every exported-job route. Saved ComfyUI MSR and
+Ingredients graphs also passed through the bundled Swift worker and produced byte-identical
+movies to their corresponding Studio takes.
+
 Swift LTX 2.5 temporal DFR 2026-10-02 (experimental direct-worker route):
 strict version-9 requests add one or two learned temporal x2 rounds to the
 spatial DFR stages. The Swift worker streams the installed BF16 temporal

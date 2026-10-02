@@ -18,6 +18,18 @@ import StudioCore
   @Published var downloadDestination = ""
   @Published var downloadMessage = ""
   @Published var setupLog = ""
+  @Published var downloading = false
+  @Published var downloadFraction = 0.0
+  @Published var downloadStatus = ""
+  var nativeDownloadCatalogURL: URL?
+  var readNativeDownloadToken: () async throws -> String? = {
+    let saved = try await BackgroundCredential.read { try ModelDownloadToken.read() }
+    let environment = try ModelDownloadToken.environment(ProcessInfo.processInfo.environment, savedToken: saved)
+    return environment["HF_TOKEN"]
+  }
+  private var nativeDownloadTask: Task<URL, Error>?
+  private var nativeDownloadCancelled = false
+  private var downloadAttempt = UUID()
   private let catalogBridge = Bridge()
 
   static func rendererAvailable(_ runtime: RuntimeSettings) -> Bool {
@@ -47,7 +59,15 @@ import StudioCore
         ($0.engine == "h3" && Self.nativeH3Available(runtime)) ||
           ($0.engine == "ltx25" && Self.nativeLTXAvailable(runtime))
       }
-      downloads = []
+      let bundled = nativeDownloadCatalogURL ?? NativeModelDownloads.bundledCatalog
+      let local = URL(fileURLWithPath: runtime.root).appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
+      let source = [bundled, local].compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0.path) }
+      nativeDownloadCatalogURL = source
+      downloads = try source.map { try NativeModelDownloads.catalog(at: $0).map(\.descriptor) } ?? []
+      downloads = downloads.filter {
+        ($0.supports(engine: "h3") && Self.nativeH3Available(runtime)) ||
+          ($0.supports(engine: "ltx25") && Self.nativeLTXAvailable(runtime))
+      }
       if Self.pythonAvailable(runtime) {
         let catalog = try await catalogBridge.invoke("setup-catalog", runtime: runtime, payload: [:])
         let legacy = try decode([ModelSetupPreset].self, from: catalog["presets"] ?? [])
@@ -57,7 +77,11 @@ import StudioCore
         }
         let downloadCatalog = try await catalogBridge.invoke(
           "setup-downloads", runtime: runtime, payload: [:])
-        downloads = try decode([ModelSetupDownload].self, from: downloadCatalog["downloads"] ?? [])
+        let legacyDownloads = try decode([ModelSetupDownload].self, from: downloadCatalog["downloads"] ?? [])
+        downloads += legacyDownloads.filter {
+          !($0.supports(engine: "h3") && Self.nativeH3Available(runtime)) &&
+            !($0.supports(engine: "ltx25") && Self.nativeLTXAvailable(runtime))
+        }
       }
     } catch {
       catalogError = "Optional legacy model setup is unavailable: " + error.localizedDescription
@@ -171,11 +195,36 @@ import StudioCore
   }
 
   func download(store: StudioStore) async {
-    guard !selectedDownloadID.isEmpty, !downloadDestination.isEmpty else { return }
+    guard !selectedDownloadID.isEmpty, !downloadDestination.isEmpty, !downloading else { return }
     error = ""
     downloadMessage = ""
     defer { captureLog(store.bridge) }
     do {
+      if selectedPreset?.id.hasPrefix("swift-") == true {
+        guard let catalog = nativeDownloadCatalogURL else { throw StudioError.invalid("The native download catalog is missing from this app.") }
+        downloading = true; downloadFraction = 0; downloadStatus = "Checking model download access…"
+        nativeDownloadCancelled = false; downloadAttempt = UUID()
+        let attempt = downloadAttempt
+        defer { downloading = false; nativeDownloadTask = nil }
+        let token = try await readNativeDownloadToken()
+        guard !nativeDownloadCancelled else { throw CancellationError() }
+        let id = selectedDownloadID, destination = URL(fileURLWithPath: downloadDestination), selectedRoots = roots
+        let task = Task.detached(priority: .utility) {
+          try await NativeModelDownloads.prepare(id: id, catalog: catalog, destination: destination,
+            existingRoots: selectedRoots, token: token, progress: { [weak self] message, fraction in
+              Task { @MainActor in
+                guard self?.downloading == true, self?.downloadAttempt == attempt else { return }
+                self?.downloadFraction = fraction; self?.downloadStatus = message
+              }
+            })
+        }
+        nativeDownloadTask = task
+        let path = try await task.value.path
+        if !roots.contains(path) { roots.append(path) }
+        downloadMessage = "Pinned model files verified and installed by Swift. Scan this folder to choose its components."
+        setupLog = String((setupLog + "\n" + downloadMessage + "\n" + path).suffix(60000))
+        return
+      }
       let response = try await store.bridge.invoke(
         "setup-download", runtime: store.runtime,
         payload: [
@@ -188,8 +237,12 @@ import StudioCore
       if !roots.contains(path) { roots.append(path) }
       downloadMessage =
         response["message"] as? String ?? "Model prepared. Scan the selected folders to use it."
+    } catch is CancellationError {
+      downloadMessage = "Download cancelled. Retry to resume the retained partial files."
     } catch { self.error = error.localizedDescription }
   }
+
+  func cancelDownload() { nativeDownloadCancelled = true; nativeDownloadTask?.cancel() }
 
   private func captureLog(_ bridge: Bridge) {
     setupLog = String((setupLog + "\n" + bridge.log).suffix(60000))

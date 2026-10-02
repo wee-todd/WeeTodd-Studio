@@ -71,7 +71,7 @@ struct ModelSetupView: View {
           Text("Set up compatible models").font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
-        Button("Done") { state.selectedPreset = nil }.disabled(bridge.busy)
+        Button("Done") { state.selectedPreset = nil }.disabled(bridge.busy || state.downloading)
       }
       Divider()
       ScrollViewReader { proxy in
@@ -100,7 +100,7 @@ struct ModelSetupView: View {
                 Button("Use Recipe for Selected Clip") {
                   state.useRecipeForSelectedClip(store: store)
                 }
-                .disabled(bridge.busy || clip.profileID == state.resultPath)
+                .disabled(bridge.busy || state.downloading || clip.profileID == state.resultPath)
                 Text(
                   clip.profileID == state.resultPath
                     ? "Selected for \(clip.name). Prepare the clip to validate its media and settings."
@@ -130,7 +130,11 @@ struct ModelSetupView: View {
       }
       Divider()
       HStack(spacing: 12) {
-        if bridge.busy {
+        if state.downloading {
+          ProgressView(value: state.downloadFraction).frame(width: 80)
+          Text(state.downloadStatus).font(.caption).lineLimit(2)
+          Button("Cancel") { state.cancelDownload() }
+        } else if bridge.busy {
           if bridge.fraction > 0 {
             ProgressView(value: bridge.fraction).frame(width: 80)
           } else {
@@ -149,11 +153,11 @@ struct ModelSetupView: View {
         Button("Create Recipe") { Task { await state.createRecipe(store: store) } }
           .buttonStyle(.borderedProminent)
           .disabled(
-            bridge.busy || !state.selection.missingComponents(for: preset).isEmpty
+            bridge.busy || state.downloading || !state.selection.missingComponents(for: preset).isEmpty
               || !state.resultPath.isEmpty)
       }
     }.padding(24).frame(width: 720, height: 760)
-      .interactiveDismissDisabled(bridge.busy)
+      .interactiveDismissDisabled(bridge.busy || state.downloading)
   }
 
   private var displayLog: String {
@@ -195,7 +199,7 @@ struct ModelSetupView: View {
           .disabled(state.roots.isEmpty || state.scanning)
         if state.scanning { ProgressView().controlSize(.small) }
       }
-    }.disabled(bridge.busy)
+    }.disabled(bridge.busy || state.downloading)
   }
 
   private var componentChoices: some View {
@@ -204,7 +208,7 @@ struct ModelSetupView: View {
       ForEach(preset.components) { component in
         componentRow(component)
       }
-    }.disabled(bridge.busy)
+    }.disabled(bridge.busy || state.downloading)
   }
 
   private func componentRow(_ component: ModelSetupComponent) -> some View {
@@ -301,7 +305,7 @@ struct ModelSetupView: View {
         "This Mac: \(Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824, specifier: "%.0f") GB unified memory"
       )
       .font(.caption).foregroundStyle(.secondary)
-    }.disabled(bridge.busy).onChange(of: state.memoryMode) { _, _ in state.resultPath = "" }
+    }.disabled(bridge.busy || state.downloading).onChange(of: state.memoryMode) { _, _ in state.resultPath = "" }
   }
 
   private var compatibleDownloads: [ModelSetupDownload] {
@@ -362,7 +366,7 @@ struct ModelSetupView: View {
         if !state.downloadMessage.isEmpty {
           Text(state.downloadMessage).font(.caption).textSelection(.enabled)
         }
-      }.padding(.top, 10).disabled(bridge.busy)
+      }.padding(.top, 10).disabled(bridge.busy || state.downloading)
         .onChange(of: state.selectedDownloadID) { _, _ in sourceTermsReviewed = false }
     }
   }

@@ -4,8 +4,11 @@ Swift owns this native MLX component; its execution does not invoke Python. Stud
 its LTX 2.5 worker for distilled T2V, first-image I2V, first/last-frame, one-driver A2V,
 after-extension, per-clip motion continuation and continuous scenes with optional
 first-frame images on any shot and one continuous source-audio driver. Its H3 worker
-is opt-in and experimental for T2VA, timed FL2VA and still-image Ref2VA. Other tasks retain their existing
-routes while native coverage qualifies.
+is opt-in and experimental for T2VA, timed FL2VA, ordered still/movie/audio Ref2VA,
+independent A2V and text-only native latent continuation. Studio now prepares MSR images,
+Ingredients sheets, H3 frame matching and H3 v2 saved motion context through these shared
+workers. Specialized routes remain experimental; the ordinary Union control UI and H3
+external-extension controls still retain their existing route.
 
 ## Implemented
 
@@ -45,8 +48,9 @@ routes while native coverage qualifies.
 - Experimental spatial DFR uses the same streamed denoiser with learned generated-keyframe
   markers, seam-aware canvas padding, an appended clean half-resolution reference in stage two,
   and a complete rank-32 Pixel-Spatial x2 task adapter scoped to that stage. The direct worker
-  supports text, first-image and first/last-image anchors; temporal DFR rounds and Studio controls
-  remain separate work.
+  supports text, first-image and first/last-image anchors, plus one or two learned temporal x2
+  rounds with frozen source audio. Setup-created or imported DFR profiles run through Studio
+  and the saved recipe-backed ComfyUI node; dedicated DFR editor controls remain separate work.
 - The developer media CLI connects trained text, both sampling stages, native video/audio VAEs,
   bounded RGB24 streaming/WAV output and an explicit external FFmpeg muxer. Components unload in order.
   Output publishes from an owned temporary directory only after all stages succeed; cooperative
@@ -125,8 +129,19 @@ both fixed and block targets through `MLXDenoiserWeights`. Compatible 2.3 factor
 General IC/control adapters and conditioning beyond first-frame/FFLF, one-driver A2V,
 experimental after-extension/motion continuation and first-frame/audio scenes require
 separate execution contracts. The experimental direct-worker MSR contract accepts
-one to five ordered images through the installed rank-128 task adapter; Studio's MSR
-controls and ComfyUI export have not yet switched to that Swift route.
+one to five ordered images through the installed rank-128 task adapter. Studio's MSR and
+Ingredients profiles now preserve frozen descriptions and reference controls, require eight
+full-resolution evaluations, and reject mixed ordinary LoRAs/DFR/audio drivers. Installed
+five-second, 512 × 256 MSR and Ingredients Studio takes passed previews, acceptance and
+reopening with Python unavailable, and their saved ComfyUI graphs reproduced the same MP4
+bytes. This does not qualify broader identity/audio quality; Ingredients duplicated subjects.
+H3 Studio frame/motion continuity also passed native lifecycle tests. The text-only motion
+take matched direct-worker and saved ComfyUI outputs byte for byte. Native v2 `latents.f32`
+contexts are distinct from Python v1 artifacts, and saving retains the complete terminal grid.
+H3 components still require compatible direct transformer and folded audio-VAE files;
+Python paged transformer/support packages are not native download choices. Swift now downloads
+compatible preconverted LTX 2.5, H3 Qwen/video-VAE/tokenizer packages without Python, streaming
+disk writes/checksums, resuming partial transfers and linking verified installed files.
 
 ## Build and verify
 

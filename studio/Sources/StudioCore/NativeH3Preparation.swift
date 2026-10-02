@@ -218,7 +218,7 @@ public enum NativeH3Preparation {
     guard let clip = project.clips.first(where: { $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }),
       clip.engine == .h3 else { throw StudioError.invalid("Select an H3 clip.") }
     let task = clip.inferredTask
-    guard clip.continuityMode == "independent", !project.isContinuousSceneMember(clip),
+    guard ["independent","motion"].contains(clip.continuityMode), !project.isContinuousSceneMember(clip),
       (clip.audioDriverSelection == nil || task == "a2v"), clip.musicSource == nil,
       clip.extensionDirection.isEmpty, clip.extensionSource.isEmpty else {
       throw unsupported("continuity, planned music and extension are not ported")
@@ -268,12 +268,47 @@ public enum NativeH3Preparation {
     guard supported(recipe) else { throw unsupported("the selected profile changed or contains unported settings") }
     return (project, clip, runtime, path, recipe)
   }
+  private static func frameRequest(_ request:[String:Any],imagePath:String?=nil) throws
+    -> (request:[String:Any],source:NativeLTXFrameSource)? {
+    guard let raw=request["project"],let clipID=request["clipID"] as? String else { return nil }
+    var project=try JSONDecoder().decode(StudioProject.self,from:data(raw))
+    guard let index=project.clips.firstIndex(where: { $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }),
+      project.clips[index].continuityMode == "frame" else { return nil }
+    let clip=project.clips[index]
+    guard clip.engine == .h3,!project.isContinuousSceneMember(clip),
+      ["t2v","i2v","fflf","a2v"].contains(clip.inferredTask),
+      !project.shouldSaveContinuityContext(for:clip) else {
+      throw unsupported("frame continuity cannot combine MSR, a scene, or saved motion context")
+    }
+    let source=try NativeLTXFrameSource(project:project,clip:clip)
+    var asset=MediaAsset(name:"Previous visible frame",kind:.image,path:imagePath ?? source.url.path)
+    asset.id=source.clipID
+    project.assets.removeAll { $0.id == asset.id };project.assets.append(asset)
+    project.clips[index].attachments.removeAll { $0.role == .first }
+    var opening=Attachment(assetID:asset.id,role:.first);opening.id=source.clipID
+    project.clips[index].attachments.insert(opening,at:0)
+    project.clips[index].continuity=nil
+    if clip.inferredTask != "a2v" {
+      project.clips[index].generationSelection=clip.generationSelection ?? GenerationSelection(task:"i2v")
+      project.clips[index].generationSelection!.task=clip.attachments.contains { $0.isEnabled && [.last,.keyframe].contains($0.role) } ? "fflf" : "i2v"
+    }
+    var normalized=request;normalized["project"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(project))
+    return (normalized,source)
+  }
   public static func compose(request: [String: Any]) throws -> [String: Any] {
+    guard try frameRequest(request) == nil else {
+      throw StudioError.invalid("Frame continuity requires native media preparation before composing a runnable recipe.")
+    }
+    return try compose(request:request,frameInput:nil,continuity:nil)
+  }
+  private static func compose(request:[String:Any],frameInput:(path:String,sha256:String)?,
+    continuity:[String:Any]?) throws -> [String:Any] {
     let (project, clip, runtime, path, original) = try resolve(request)
     let globalAssets = try JSONDecoder().decode([MediaAsset].self,
       from: data(request["globalAssets"] ?? []))
     let availableAssets = project.assets + globalAssets
     var recipe = original
+    let motion=try NativeH3MotionPlan(project:project,clip:clip)
     let text = clip.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { throw StudioError.invalid("Write a prompt before preparing the render.") }
     let prompt: String
@@ -285,7 +320,8 @@ public enum NativeH3Preparation {
     } else {
       prompt = "integrated_multimodal_description: [Shot 1] \(text)\n\noverall_soundscape: \(clip.soundscape)\n\nnon_diegetic_music: \(clip.music)"
     }
-    guard clip.duration.isFinite, (2.5...15).contains(clip.duration),
+    guard clip.duration.isFinite,
+      (2.5...(motion?.contract["save_context"] as? Bool == true && clip.continuityMode != "motion" ? 362.0/24 : 15)).contains(clip.duration),
       (0...Int(UInt32.max)).contains(clip.seed),
       clip.generationWidth > 0, clip.generationHeight > 0,
       clip.generationWidth % 32 == 0, clip.generationHeight % 32 == 0,
@@ -304,7 +340,7 @@ public enum NativeH3Preparation {
     }
     guard (2...100).contains(steps) else { throw unsupported("sigma grid points must be between 2 and 100") }
     config["width"] = clip.generationWidth; config["height"] = clip.generationHeight
-    config["duration_seconds"] = clip.duration; config["seed"] = clip.seed
+    config["duration_seconds"] = motion?.duration ?? clip.duration; config["seed"] = clip.seed
     config["steps"] = steps
     if let backend = clip.generationSelection?.projectionBackend { config["projection_backend"] = backend }
     recipe["config"] = config; recipe["prompt"] = prompt
@@ -351,14 +387,14 @@ public enum NativeH3Preparation {
           throw unsupported("H3 image, video and audio references require full strength and no timing or specialized controls")
         }
         let imagePath = try canonical(asset.path)
-        guard FileManager.default.isReadableFile(atPath: imagePath) else {
+        guard (attachment.role == .first && frameInput != nil) || FileManager.default.isReadableFile(atPath: imagePath) else {
           throw StudioError.invalid("Relink the H3 reference: \(asset.name)")
         }
         var input: [String: Any] = ["id": attachment.id.uuidString,
           "kind": isVideoReference ? "video" : isAudioReference ? "audio" : "image",
           "role": attachment.role.rawValue, "path": imagePath,
           "strength": 1.0,
-          "sha256": try sourceSHA256(imagePath,
+          "sha256": attachment.role == .first && frameInput != nil ? frameInput!.sha256 : try sourceSHA256(imagePath,
             maxBytes: isVideoReference ? 4 * 1024 * 1024 * 1024
               : isAudioReference ? 1024 * 1024 * 1024 : 128 * 1024 * 1024)]
         if attachment.role == .audioDriver {
@@ -419,6 +455,7 @@ public enum NativeH3Preparation {
     }
     if !loras.isEmpty { components["loras"] = loras }
     recipe["components"] = components
+    if let motion { recipe["continuation"]=motion.contract }
     if clip.inferredTask == "a2v" {
       recipe["conditioning"] = ["version": 1, "task": "a2v",
         "inputs": referenceInputs, "audio_policy": "generated"]
@@ -445,29 +482,42 @@ public enum NativeH3Preparation {
       throw StudioError.invalid("Select an executable FFmpeg in Runtime Settings.")
     }
     recipe["ffmpeg"] = try canonical(ffmpeg)
-    let report: [String: Any] = ["profile": URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent,
-      "generation": descriptor(recipe), "resolvedFingerprint": try fingerprint(recipe),
+    var report: [String: Any] = ["profile": URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent,
+      "generation": descriptor(recipe), "resolvedFingerprint": try fingerprint(continuity == nil ? recipe : ["recipe":recipe,"continuity":continuity!]),
       "selectionFingerprint": try fingerprint(original),
       "task": ["ref2va", "a2v"].contains(clip.inferredTask) ? clip.inferredTask
         : ["i2v", "fflf"].contains(clip.inferredTask) ? "fflf" : "t2v", "nativeFPS": 24,
       "nativePreparation": "swift", "productionQualified": false,
       "movieSettings": try JSONSerialization.jsonObject(with: JSONEncoder().encode(clip.settings(in: project))),
       "conditioning": ["inputs": referenceInputs.count]]
+    if let continuity { report["continuity"]=continuity }
+    if let motion {
+      report["continuity"]=motion.dependency;report["warnings"]=motion.warnings
+      report["resolvedFingerprint"]=try fingerprint(["recipe":recipe,"continuity":motion.dependency])
+    }
     return ["recipe": recipe, "report": report]
   }
   public static func describe(request: [String: Any]) throws -> [String: Any] {
-    let (_, _, _, path, original) = try resolve(request)
-    var errors: [String] = [], resolved = ""
+    let frame=try frameRequest(request)
+    let (_, _, _, path, original) = try resolve(frame?.request ?? request)
+    var errors: [String] = [], resolved = "",warnings=["Swift H3 generation is experimental and not production qualified."]
     var content = original
     do {
-      let result = try compose(request: request)
+      var dependency=frame?.source.report
+      if dependency != nil { dependency!["engine"]="h3" }
+      let result = try compose(request:frame?.request ?? request,
+        frameInput:frame.map { ($0.source.url.path,String(repeating:"0",count:64)) },continuity:dependency)
       content = result["recipe"] as! [String: Any]
       resolved = (result["report"] as? [String: Any])?["resolvedFingerprint"] as? String ?? ""
+      warnings += (result["report"] as? [String:Any])?["warnings"] as? [String] ?? []
     } catch { errors.append(error.localizedDescription) }
     let components = content["components"] as? [String: Any] ?? [:]
     var sources = [path] + components.values.compactMap { $0 as? String }.filter { $0.hasPrefix("/") }
     let inputs = (content["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]] ?? []
     sources += inputs.compactMap { $0["path"] as? String }
+    if let context=(content["continuation"] as? [String:Any])?["source_context"] as? String {
+      sources += [context,URL(fileURLWithPath:context).deletingLastPathComponent().appendingPathComponent("latents.f32").path]
+    }
     for pair in components["loras"] as? [[Any]] ?? [] {
       if let adapterPath = pair.first as? String { sources.append(adapterPath) }
     }
@@ -479,8 +529,33 @@ public enum NativeH3Preparation {
     }
     return ["profileID": path, "generation": descriptor(content), "fingerprint": resolved,
       "selectionFingerprint": try fingerprint(original), "sourcePaths": Array(Set(sources)).sorted(),
-      "warnings": ["Swift H3 generation is experimental and not production qualified."],
+      "warnings": warnings,
       "readinessErrors": errors]
+  }
+  public static func prepareWithMedia(request:[String:Any],destination:URL) async throws -> [String:Any] {
+    guard let frame=try frameRequest(request) else { return try prepare(request:request,destination:destination) }
+    var dependency=frame.source.report;dependency["engine"]="h3"
+    _ = try compose(request:frame.request,frameInput:(frame.source.url.path,String(repeating:"0",count:64)),continuity:dependency)
+    let parent=destination.deletingLastPathComponent()
+    try FileManager.default.createDirectory(at:parent,withIntermediateDirectories:true)
+    let staging=parent.appendingPathComponent(".h3-prepare-"+UUID().uuidString)
+    try FileManager.default.createDirectory(at:staging,withIntermediateDirectories:false)
+    defer { try? FileManager.default.removeItem(at:staging) }
+    let name="previous-frame.png",image=staging.appendingPathComponent(name)
+    let time=try await frame.source.extract(to:image)
+    let digest=try sourceSHA256(image.path,maxBytes:128*1024*1024)
+    dependency["sourceFrameTime"]=time
+    let final=destination.appendingPathComponent(name).path
+    let normalized=try frameRequest(request,imagePath:final)!
+    let result=try compose(request:normalized.request,frameInput:(final,digest),continuity:dependency)
+    let content=result["recipe"] as! [String:Any]
+    try data(content).write(to:staging.appendingPathComponent("recipe.json"),options:.withoutOverwriting)
+    try data(request).write(to:staging.appendingPathComponent("editor-request.json"),options:.withoutOverwriting)
+    try data(dependency).write(to:staging.appendingPathComponent("continuity.json"),options:.withoutOverwriting)
+    try Task.checkCancellation();try frame.source.verify()
+    try FileManager.default.moveItem(at:staging,to:destination)
+    return ["recipePath":destination.appendingPathComponent("recipe.json").path,
+      "prompt":content["prompt"]!,"report":result["report"]!]
   }
   public static func prepare(request: [String: Any], destination: URL) throws -> [String: Any] {
     let result = try compose(request: request)

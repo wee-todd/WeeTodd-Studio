@@ -182,11 +182,12 @@ def test_resident_vdn_preflight_discloses_memory_estimate_exclusions():
         MODULE.sampling_memory_policy(document)
 
 
-def test_swift_h3_workflow_preflight_does_not_silently_skip(tmp_path, monkeypatch):
+@pytest.mark.parametrize("engine", ["h3", "ltx25"])
+def test_swift_workflow_preflight_does_not_silently_skip(tmp_path, monkeypatch, engine):
     workflow = tmp_path / "swift-h3-api.json"
     workflow.write_text(json.dumps({"1": {
         "class_type": "WeeToddSwiftVideoGenerate",
-        "inputs": {"engine": "h3", "recipe_path": "/missing/recipe.json",
+        "inputs": {"engine": engine, "recipe_path": "/missing/recipe.json",
                    "swift_worker_path": "/missing/worker",
                    "filename_prefix": "WeeTodd/SwiftH3"},
     }}))
@@ -196,18 +197,19 @@ def test_swift_h3_workflow_preflight_does_not_silently_skip(tmp_path, monkeypatc
         MODULE.main()
 
 
-def test_swift_h3_workflow_preflight_validates_recipe_and_worker(tmp_path, monkeypatch):
+@pytest.mark.parametrize("engine", ["h3", "ltx25"])
+def test_swift_workflow_preflight_validates_recipe_and_worker(tmp_path, monkeypatch, engine):
     comfy = tmp_path / "comfy"
     comfy.mkdir()
     (comfy / "main.py").write_text("")
     (comfy / "folder_paths.py").write_text("")
     recipe = tmp_path / "recipe.json"
-    recipe.write_text(json.dumps({"format": "weetodd-headless-v2", "engine": "h3"}))
+    recipe.write_text(json.dumps({"format": "weetodd-headless-v2", "engine": engine}))
     worker = tmp_path / "worker"
     worker.write_text("#!/bin/sh\n")
     worker.chmod(0o755)
     workflow = tmp_path / "swift-h3-api.json"
-    inputs = {"engine": "h3", "recipe_path": str(recipe),
+    inputs = {"engine": engine, "recipe_path": str(recipe),
               "swift_worker_path": str(worker), "filename_prefix": "WeeTodd/SwiftH3"}
     workflow.write_text(json.dumps({"1": {
         "class_type": MODULE.SWIFT_VIDEO_NODE, "inputs": inputs,
@@ -229,6 +231,7 @@ def test_swift_h3_workflow_preflight_validates_recipe_and_worker(tmp_path, monke
     assert result["frames"] == 124
     assert calls[0]["worker"] == worker
     assert calls[0]["recipe"] == recipe
+    assert calls[0]["engine"] == engine
 
     inputs["filename_prefix"] = "../outside"
     with pytest.raises(ValueError, match="filename_prefix"):

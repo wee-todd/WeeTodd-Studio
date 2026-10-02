@@ -382,53 +382,54 @@ def runtime_preflight(
     }
 
 
-def _run_swift_preflight(*, worker: Path, recipe: Path, output: Path) -> dict:
+def _run_swift_preflight(*, worker: Path, recipe: Path, output: Path, engine: str) -> dict:
     from wee_todd_mlx.swift_video_worker import run_swift_video_worker
 
     return run_swift_video_worker(
-        worker=worker, engine="h3", recipe=recipe, output=output, mode="preflight"
+        worker=worker, engine=engine, recipe=recipe, output=output, mode="preflight"
     )
 
 
 def runtime_preflight_swift_recipe(
     *, graph: dict[str, dict], workflow_path: Path, project: Path, comfy_root: Path
 ) -> dict:
-    """Preflight a saved Swift H3 recipe without loading Python model weights."""
+    """Preflight a saved Swift H3/LTX recipe without loading Python model weights."""
 
     if not (comfy_root / "folder_paths.py").is_file() or not (comfy_root / "main.py").is_file():
         raise ValueError(f"ComfyUI root is invalid: {comfy_root}")
     _, node = unique_node(graph, SWIFT_VIDEO_NODE)
     inputs = node["inputs"]
-    if inputs.get("engine") != "h3":
-        raise ValueError("Swift H3 workflow must select the h3 engine")
+    engine = inputs.get("engine")
+    if engine not in {"h3", "ltx25"}:
+        raise ValueError("Swift workflow must select the h3 or ltx25 engine")
     prefix = inputs.get("filename_prefix")
     if not isinstance(prefix, str) or not prefix:
-        raise ValueError("Swift H3 filename_prefix is missing")
+        raise ValueError("Swift video filename_prefix is missing")
     relative = Path(prefix.replace("\\", "/"))
     if relative.is_absolute() or ".." in relative.parts or not relative.name:
-        raise ValueError("Swift H3 filename_prefix must stay inside ComfyUI output")
+        raise ValueError("Swift video filename_prefix must stay inside ComfyUI output")
     recipe_value = inputs.get("recipe_path")
     worker_value = inputs.get("swift_worker_path")
     if not isinstance(recipe_value, str) or not recipe_value:
-        raise ValueError("Swift H3 recipe_path is missing")
+        raise ValueError("Swift video recipe_path is missing")
     if not isinstance(worker_value, str) or not worker_value:
-        raise ValueError("Swift H3 swift_worker_path is missing")
+        raise ValueError("Swift video swift_worker_path is missing")
     recipe = Path(recipe_value).expanduser().resolve()
     worker = Path(worker_value).expanduser().resolve()
     if not recipe.is_file() or not 0 < recipe.stat().st_size <= 1024 * 1024:
-        raise FileNotFoundError("Swift H3 recipe is missing or exceeds 1 MiB")
+        raise FileNotFoundError("Swift video recipe is missing or exceeds 1 MiB")
     if not worker.is_file() or not os.access(worker, os.X_OK):
-        raise FileNotFoundError("Swift H3 worker is missing or not executable")
+        raise FileNotFoundError("Swift video worker is missing or not executable")
     data = recipe.read_bytes()
     document = json.loads(data)
     if not isinstance(document, dict) or document.get("format") != "weetodd-headless-v2":
-        raise ValueError("Swift H3 recipe must use weetodd-headless-v2")
-    if document.get("engine") != "h3":
-        raise ValueError("Swift H3 recipe engine does not match the workflow")
+        raise ValueError("Swift video recipe must use weetodd-headless-v2")
+    if document.get("engine") != engine:
+        raise ValueError("Swift recipe engine does not match the workflow")
     sys.path.insert(0, str(project / "src"))
-    with tempfile.TemporaryDirectory(prefix="weetodd-h3-workflow-preflight-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="weetodd-swift-workflow-preflight-") as scratch:
         result = _run_swift_preflight(
-            worker=worker, recipe=recipe, output=Path(scratch) / "preflight"
+            worker=worker, recipe=recipe, output=Path(scratch) / "preflight", engine=engine
         )
     return {
         "runtime_ready": True,
@@ -436,7 +437,7 @@ def runtime_preflight_swift_recipe(
         "workflow": str(workflow_path),
         "workflow_sha256": hashlib.sha256(workflow_path.read_bytes()).hexdigest(),
         "comfy_root": str(comfy_root),
-        "engine": "h3",
+        "engine": engine,
         "recipe": str(recipe),
         "recipe_sha256": hashlib.sha256(data).hexdigest(),
         "worker": str(worker),
@@ -470,12 +471,11 @@ def main() -> int:
         graph = load_api_workflow(path)
         swift_nodes = [node for node in graph.values()
                        if node["class_type"] == SWIFT_VIDEO_NODE]
-        if swift_nodes and any(node["inputs"].get("engine") == "h3"
-                               for node in swift_nodes):
+        if swift_nodes:
             if any(node["class_type"] == COMPONENT_NODE for node in graph.values()):
-                raise SystemExit("Swift H3 and composable H3 loaders cannot share this preflight")
+                raise SystemExit("Swift recipe nodes and composable H3 loaders cannot share this preflight")
             if args.comfy_root is None:
-                raise SystemExit("Swift H3 workflow preflight requires --comfy-root")
+                raise SystemExit("Swift video workflow preflight requires --comfy-root")
             try:
                 reports.append(runtime_preflight_swift_recipe(
                     graph=graph, workflow_path=path, project=project,
