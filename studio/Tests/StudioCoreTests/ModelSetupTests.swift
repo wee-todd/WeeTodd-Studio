@@ -104,7 +104,8 @@ final class ModelSetupTests: XCTestCase {
   func testNativeSetupCatalogAndRecipeWithoutPython() throws {
     let presets = NativeModelSetup.catalog()
     XCTAssertEqual(Set(presets.map(\.id)), Set(["swift-h3-text", "swift-h3-image",
-      "swift-h3-reference", "swift-ltx25-text", "swift-ltx25-image"]))
+      "swift-h3-reference", "swift-ltx25-text", "swift-ltx25-image",
+      "swift-ltx25-dfr-spatial", "swift-ltx25-dfr-temporal-1", "swift-ltx25-dfr-temporal-2"]))
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -128,6 +129,73 @@ final class ModelSetupTests: XCTestCase {
     selected["audio_vae_path"] = root.appendingPathComponent("missing").path
     XCTAssertThrowsError(try NativeModelSetup.recipe(preset: preset, selected: selected,
       memoryMode: .automatic))
+  }
+  func testDFRSetupPresetsPreserveSpecializedFieldsAndRejectAudioClip() throws {
+    let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+    defer { try? FileManager.default.removeItem(at:root) }
+    for rounds in 0...2 {
+      let id=rounds == 0 ? "swift-ltx25-dfr-spatial" : "swift-ltx25-dfr-temporal-\(rounds)"
+      let preset=try XCTUnwrap(NativeModelSetup.catalog().first { $0.id == id })
+      var selected:[String:String]=[:]
+      for component in preset.components {
+        let url=root.appendingPathComponent(component.key)
+        if component.kind == "directory" {
+          try FileManager.default.createDirectory(at:url,withIntermediateDirectories:true)
+        } else { try Data([1]).write(to:url) }
+        selected[component.key]=url.path
+      }
+      let recipe=try NativeModelSetup.recipe(preset:preset,selected:selected,memoryMode:.lowerMemory)
+      let config=recipe["config"] as! [String:Any]
+      let components=recipe["components"] as! [String:Any]
+      XCTAssertEqual(config["dfr_enabled"] as? Bool,true)
+      XCTAssertEqual(config["dfr_temporal_rounds"] as? Int,rounds)
+      XCTAssertEqual(config["dfr_detailing_lora_strength"] as? Double,0.5)
+      XCTAssertNil(components["dfr_detailing_lora_path"])
+      XCTAssertEqual(config["dfr_detailing_lora_path"] as? String,selected["dfr_detailing_lora_path"])
+      XCTAssertEqual((config["dfr_temporal_upsampler_path"] as? String)?.isEmpty,rounds == 0)
+      var clip=Clip(engine:.ltx25)
+      XCTAssertTrue(preset.supports(clip))
+      clip.attachments=[Attachment(assetID:UUID(),role:.first)]
+      XCTAssertTrue(preset.supports(clip))
+      clip.attachments=[Attachment(assetID:UUID(),role:.audioDriver)]
+      XCTAssertFalse(preset.supports(clip))
+    }
+  }
+  func testDFRScanDistinguishesDetailAdapterAndTemporalUpscaler() throws {
+    let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+    defer { try? FileManager.default.removeItem(at:root) }
+    func write(_ name:String,_ metadata:[String:String],_ tensors:[String:[Int]]) throws -> URL {
+      let url=root.appendingPathComponent(name)
+      var header:[String:Any]=["__metadata__":metadata]
+      for (key,shape) in tensors { header[key]=["dtype":"BF16","shape":shape,"data_offsets":[0,2]] }
+      let body=try JSONSerialization.data(withJSONObject:header)
+      var count=UInt64(body.count).littleEndian
+      var data=withUnsafeBytes(of:&count) { Data($0) }
+      data.append(body); data.append(contentsOf:[0,0])
+      try data.write(to:url)
+      return url
+    }
+    var pairs:[String:[Int]]=[:]
+    for block in 0..<48 {
+      for target in ["attn1.to_k","attn1.to_out.0","attn1.to_q","attn1.to_v",
+        "attn2.to_k","attn2.to_out.0","attn2.to_q","attn2.to_v","ff.proj_in","ff.proj_out"] {
+        let stem="diffusion_model.transformer_blocks.\(block).\(target)"
+        pairs[stem+".lora_A.weight"]=[32,1]
+        pairs[stem+".lora_B.weight"]=[1,32]
+      }
+    }
+    let adapter=try write("detail.safetensors",["model_version":"2.5",
+      "reference_downscale_factor":"2","reference_spatial_scale_factor":"2"],pairs)
+    _=try write("ordinary.safetensors",["model_version":"2.5"],pairs)
+    let temporal=try write("temporal.safetensors",["config":
+      "{\"_class_name\":\"LatentUpsampler\",\"in_channels\":128,\"mid_channels\":512,\"num_blocks_per_stage\":4,\"dims\":3,\"spatial_upsample\":false,\"temporal_upsample\":true}"],
+      ["initial_conv.weight":[512,128,3,3,3],"upsampler.0.weight":[1024,512,3,3,3],
+        "final_conv.weight":[128,512,3,3,3]])
+    let scan=try NativeModelSetup.scan(presetID:"swift-ltx25-dfr-temporal-1",roots:[root.path])
+    XCTAssertEqual(scan.candidates["dfr_detailing_lora_path"],[adapter.path])
+    XCTAssertEqual(scan.candidates["dfr_temporal_upsampler_path"],[temporal.path])
   }
 
   func testNativeScanUsesHeadersAndManifestsWithoutReadingWeights() throws {
@@ -181,7 +249,8 @@ final class ModelSetupTests: XCTestCase {
     guard let root = ProcessInfo.processInfo.environment["WEETODD_NATIVE_SCAN_ROOT"] else {
       throw XCTSkip("Opt-in installed-model discovery")
     }
-    for presetID in ["swift-h3-image", "swift-h3-reference", "swift-ltx25-text"] {
+    for presetID in ["swift-h3-image", "swift-h3-reference", "swift-ltx25-text",
+      "swift-ltx25-dfr-temporal-2"] {
       let result = try NativeModelSetup.scan(presetID: presetID, roots: [root])
       let missing = result.candidates.filter { $0.value.isEmpty }.map(\.key).sorted()
       XCTAssertTrue(missing.isEmpty, "\(presetID) missing \(missing); \(result.warnings)")

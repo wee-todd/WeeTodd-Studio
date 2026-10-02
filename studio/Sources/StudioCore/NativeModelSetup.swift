@@ -5,8 +5,8 @@ public struct NativeModelScanResult {
   public let warnings: [String]
 }
 
-/// Weight-free setup for the Swift audiovisual workers. This deliberately offers only
-/// ordinary profiles; specialized adapters need their own validated contracts.
+/// Weight-free setup for the Swift audiovisual workers. Specialized DFR presets
+/// retain explicit adapter contracts and are preflighted by the shared worker.
 public enum NativeModelSetup {
   public static let engines: Set<String> = ["h3", "ltx25"]
 
@@ -85,7 +85,7 @@ public enum NativeModelSetup {
       component("audio_vae_path", "LTX 2.5 audio VAE and vocoder", ["file"]),
       component("spatial_upscaler_path", "LTX spatial latent upscaler", ["file"]),
     ]
-    return [("h3", "MiniMax H3", h3), ("ltx25", "LTX 2.5", ltx)].flatMap { engine, title, fields in
+    let ordinary = [("h3", "MiniMax H3", h3), ("ltx25", "LTX 2.5", ltx)].flatMap { engine, title, fields in
       (engine == "h3" ? [("text", "t2v", "Text to video"),
         ("image", "fflf", "Image to video"), ("reference", "ref2va", "Reference to video")]
         : [("text", "t2v", "Text to video"), ("image", "fflf", "Image to video")])
@@ -96,6 +96,16 @@ public enum NativeModelSetup {
             components: fields)
         }
     }
+    let detail = component("dfr_detailing_lora_path", "Pixel-Spatial x2 DFR adapter", ["file"])
+    let temporal = component("dfr_temporal_upsampler_path", "LTX temporal x2 latent upscaler", ["file"])
+    let dfr = (0...2).map { rounds in
+      ModelSetupPreset(id: rounds == 0 ? "swift-ltx25-dfr-spatial" : "swift-ltx25-dfr-temporal-\(rounds)",
+        name: rounds == 0 ? "LTX 2.5 · DFR spatial · Swift" : "LTX 2.5 · DFR + \(rounds) temporal round\(rounds == 1 ? "" : "s") · Swift",
+        engine: "ltx25", task: "t2v",
+        description: "Reuse installed DFR components in place. Swift worker preflight checks the full adapter stack before creating this profile.",
+        components: ltx + [detail] + (rounds == 0 ? [] : [temporal]))
+    }
+    return ordinary + dfr
   }
 
   public static func recipe(preset: ModelSetupPreset, selected: [String: String],
@@ -120,7 +130,7 @@ public enum NativeModelSetup {
     }
     let lowMemory = memoryMode == .lowerMemory ||
       (memoryMode == .automatic && ProcessInfo.processInfo.physicalMemory <= 64 * 1_073_741_824)
-    let config: [String: Any]
+    var config: [String: Any]
     if preset.engine == "h3" {
       components["task"] = ["t2v": "t2va", "fflf": "fl2va", "ref2va": "ref2va"][preset.task]!
       config = ["width": 384, "height": 256, "duration_seconds": 2.5,
@@ -132,6 +142,20 @@ public enum NativeModelSetup {
         "duration_seconds": 5.0, "frame_rate": 24.0, "seed": 0,
         "stage1_steps": 8, "stage2_steps": 3, "low_memory": true,
         "low_ram_streaming": false]
+      if preset.id.hasPrefix("swift-ltx25-dfr-") {
+        let rounds = preset.id == "swift-ltx25-dfr-spatial" ? 0
+          : preset.id == "swift-ltx25-dfr-temporal-1" ? 1 : 2
+        guard let detail = components.removeValue(forKey: "dfr_detailing_lora_path") as? String else {
+          throw StudioError.invalid("Choose the Pixel-Spatial x2 DFR adapter.")
+        }
+        let temporal = components.removeValue(forKey: "dfr_temporal_upsampler_path") as? String ?? ""
+        config["width"] = 512; config["height"] = 256; config["duration_seconds"] = 2.0
+        config["dfr_enabled"] = true
+        config["dfr_detailing_lora_path"] = detail
+        config["dfr_detailing_lora_strength"] = 0.5
+        config["dfr_temporal_rounds"] = rounds
+        config["dfr_temporal_upsampler_path"] = temporal
+      }
     }
     return ["format": "weetodd-headless-v2", "engine": preset.engine,
       "candidate": preset.id, "components": components, "config": config,
@@ -243,6 +267,31 @@ private enum NativeModelInspector {
     let metadata = tensors["__metadata__"] as? [String: String] ?? [:]
     let config = embedded(metadata["config"]) ?? [:]
     switch key {
+    case "dfr_detailing_lora_path":
+      guard metadata["model_version"] == "2.5",
+        metadata["reference_downscale_factor"] == "2",
+        metadata["reference_spatial_scale_factor"] == "2" else { return false }
+      let keys = Array(tensors.keys.filter { $0 != "__metadata__" })
+      let a = keys.filter { $0.hasSuffix(".lora_A.weight") }
+      let b = Set(keys.filter { $0.hasSuffix(".lora_B.weight") })
+      return keys.count == 960 && a.count == 480 && b.count == 480 && a.allSatisfy { name in
+        let partner = name.replacingOccurrences(of: ".lora_A.weight", with: ".lora_B.weight")
+        guard b.contains(partner), let info = tensors[name] as? [String: Any],
+          let shape = info["shape"] as? [Int], shape.count == 2, shape[0] == 32,
+          let other = tensors[partner] as? [String: Any],
+          let otherShape = other["shape"] as? [Int], otherShape.count == 2,
+          otherShape[1] == 32 else { return false }
+        return true
+      }
+    case "dfr_temporal_upsampler_path":
+      guard config["_class_name"] as? String == "LatentUpsampler",
+        config["in_channels"] as? Int == 128, config["mid_channels"] as? Int == 512,
+        config["num_blocks_per_stage"] as? Int == 4, config["dims"] as? Int == 3,
+        config["spatial_upsample"] as? Bool == false,
+        config["temporal_upsample"] as? Bool == true else { return false }
+      return (tensors["initial_conv.weight"] as? [String: Any])?["shape"] as? [Int] == [512,128,3,3,3]
+        && (tensors["upsampler.0.weight"] as? [String: Any])?["shape"] as? [Int] == [1024,512,3,3,3]
+        && (tensors["final_conv.weight"] as? [String: Any])?["shape"] as? [Int] == [128,512,3,3,3]
     case "transformer_path":
       return metadata["model_version"]?.hasPrefix("2.5") == true && config["transformer"] is [String: Any] &&
         tensors.keys.contains(where: { $0.hasSuffix("patchify_proj.weight") })

@@ -18,6 +18,9 @@ public struct ModelSetupPreset: Codable, Identifiable, Equatable {
 
   public func supports(_ clip: Clip) -> Bool {
     guard engine == clip.engine.rawValue else { return false }
+    if id.hasPrefix("swift-ltx25-dfr-") {
+      return ["t2v", "i2v", "fflf"].contains(clip.inferredTask)
+    }
     return task == clip.inferredTask
       || (engine == "ltx25" && task == "t2v" && ["fflf", "a2v"].contains(clip.inferredTask))
   }

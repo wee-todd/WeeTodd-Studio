@@ -34,12 +34,15 @@ final class NativeModelSetupTests: XCTestCase {
     }
     let original = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: source))) as! [String: Any]
     let engine = try XCTUnwrap(original["engine"] as? String)
-    let preset = try XCTUnwrap(NativeModelSetup.catalog().first {
-      $0.id == (engine == "h3" ? "swift-h3-text" : "swift-ltx25-text")
-    })
+    let sourceConfig = original["config"] as? [String: Any] ?? [:]
+    let rounds = sourceConfig["dfr_temporal_rounds"] as? Int ?? 0
+    let id = engine == "h3" ? "swift-h3-text" : sourceConfig["dfr_enabled"] as? Bool == true
+      ? (rounds == 0 ? "swift-ltx25-dfr-spatial" : "swift-ltx25-dfr-temporal-\(rounds)")
+      : "swift-ltx25-text"
+    let preset = try XCTUnwrap(NativeModelSetup.catalog().first { $0.id == id })
     let sourceComponents = try XCTUnwrap(original["components"] as? [String: Any])
     let selected = try Dictionary(uniqueKeysWithValues: preset.components.map { field in
-      (field.key, try XCTUnwrap(sourceComponents[field.key] as? String))
+      (field.key, try XCTUnwrap((sourceComponents[field.key] ?? sourceConfig[field.key]) as? String))
     })
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

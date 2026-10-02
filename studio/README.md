@@ -24,9 +24,11 @@ An experimental direct Swift worker can execute spatial DFR from a version-8
 request with an installed Pixel-Spatial x2 adapter, including first/last images.
 Version-9 direct-worker requests add one or two learned temporal x2 rounds; an
 installed-weight two-round clip completed with normal color at the reviewed seams.
-An imported DFR profile can now select the Swift worker for T2V, I2V and FFLF, with
-zero, one or two temporal rounds. Its detailing adapter and optional temporal upscaler
-must be configured in the profile. Ordinary LoRAs, A2V, extension and continuous scenes
+Swift model setup now offers DFR spatial, one-round temporal and two-round temporal
+presets. Select installed components in **Studio Settings → Model setup**; the scanner
+recognizes the Pixel-Spatial detailing adapter and temporal latent upscaler from their
+headers, and the worker preflights the linked profile without Python. Such a profile
+supports T2V, I2V and FFLF. Ordinary LoRAs, A2V, extension and continuous scenes
 are not supported with this route; the dedicated Studio DFR editor controls are not
 yet wired to it. A Studio-style two-round profile passed installed-weight worker
 preflight, but a Studio-triggered render is still unqualified.
@@ -664,7 +666,9 @@ configure the native MLX engines.
 
 1. Open **Studio Settings → Model setup**. Built-in presets appear independently of installed recipe
    count once a native worker or the optional renderer is configured. Choose H3 text/image/reference
-   or LTX 2.3/2.5 text/image. Swift H3 and LTX 2.5 presets appear when their worker is enabled.
+   or LTX 2.3/2.5 text/image. Swift LTX 2.5 also offers spatial DFR and one- or two-round
+   temporal DFR presets when its worker is enabled. These presets reuse installed adapters;
+   they do not download them.
 2. Choose **Set Up… → Use Existing Models**, select model folders (including an existing ComfyUI
    `models` folder), then scan. Inspection reads bounded headers and manifests, never model tensors.
    A single candidate is selected automatically; multiple candidates require your choice. Missing
