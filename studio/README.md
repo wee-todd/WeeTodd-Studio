@@ -18,8 +18,9 @@ standard LoRAs, including LTX 2.3 adapters. Continuous scenes of
 two to six shots with identical effective components and sampling settings also use Swift.
 Any scene shot may use one first-frame image. One consecutive interval of the same
 audio source can drive every shot, including shots with an image. Studio renders the
-group as one movie and accepts all member ranges together. Specialized IC-LoRA, MSR,
-Ingredients and dedicated DFR controls still use the explicitly selected Python route.
+group as one movie and accepts all member ranges together. Experimental native setup profiles
+now expose MSR, Ingredients and Union Control through Swift. Other specialized IC-LoRAs
+and dedicated DFR editor controls still use the explicitly selected Python route.
 An experimental direct Swift worker can execute spatial DFR from a version-8
 request with an installed Pixel-Spatial x2 adapter, including first/last images.
 Version-9 direct-worker requests add one or two learned temporal x2 rounds; an
@@ -92,7 +93,13 @@ images on both shots and a continuous Qwen3-TTS audio driver completed in Swift 
 process peak, excluding FFmpeg; its exact cut began at frame 48. A Studio run prepared,
 rendered, accepted both shot ranges as one take, saved and reopened the project with
 Python unavailable. The experimental Swift route also supports MSR still images and one
-Ingredients sheet through dedicated setup profiles. Union Control attachments and other
+Ingredients sheet through dedicated setup profiles. A dedicated Union Control preset accepts
+one preprocessed Canny, depth or pose movie. Studio streams a quarter-canvas RGB24 guide,
+resamples presentation timestamps to the target cadence and freezes its checksum. A source
+shorter than the editorial clip fails before inference; the last source frame can fill rounded
+model-grid padding. Union requires final width and height divisible by 128. The compatible
+LTX 2.3 rank-64 Union adapter is active only in stage one
+of the distilled 8 + 3 schedule. Motion Track, CrossView and other
 specialized combinations still require the explicitly selected Python route.
 Ordinary H3 and LTX 2.5 model setup now scans selected folders, links compatible
 installed components and creates native profiles without Python. Swift also downloads pinned
@@ -108,8 +115,15 @@ for Swift H3. **Save motion context** and **Continue scene** use native version-
 context for text-only H3 clips. Installed-app frame and motion jobs passed live previews,
 acceptance, saving and reopening with Python unavailable. The motion output matched its
 headless and saved ComfyUI graph byte for byte. This proves route/lifecycle parity for
-one recipe; joins remain visible, and the external extension route still has a substantial
-speed/memory cost and no Swift Studio controls.
+one recipe; joins remain visible. With Swift H3 enabled, **Extend → After** now prepares an
+experimental 4–15-second Ref2VA extension. Choose the reference-capable profile and write the
+continuation action; preparation preserves a complete structured continuation prompt or maps
+the action, soundscape and music into its required sections. Studio freezes only the source's
+visible ending, up to 175 aligned frames at 24 fps and a 256-pixel reference edge. The worker
+anchors the new shot to its final frame and generates a new soundtrack. This route publishes
+only new frames, starting at source offset zero; the source take remains unchanged. Extra media,
+saved motion context and before-extension are rejected. Extension quality and matched speed
+and memory remain under qualification.
 The off-by-default Swift preparation path validates clip inputs, ordered references and profile
 settings, then requires worker preflight before a take can render. Enable **Use Swift MLX for H3
 (experimental)** in Runtime Settings to try text-to-AV, timed keyframes, or ordered Ref2VA with

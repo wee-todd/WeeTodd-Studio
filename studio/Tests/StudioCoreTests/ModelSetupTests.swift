@@ -106,7 +106,7 @@ final class ModelSetupTests: XCTestCase {
     XCTAssertEqual(Set(presets.map(\.id)), Set(["swift-h3-text", "swift-h3-image",
       "swift-h3-reference", "swift-ltx25-text", "swift-ltx25-image",
       "swift-ltx25-dfr-spatial", "swift-ltx25-dfr-temporal-1", "swift-ltx25-dfr-temporal-2",
-      "swift-ltx25-msr", "swift-ltx25-ingredients"]))
+      "swift-ltx25-msr", "swift-ltx25-ingredients", "swift-ltx25-union"]))
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -344,5 +344,18 @@ final class ModelSetupTests: XCTestCase {
       let missing = result.candidates.filter { $0.value.isEmpty }.map(\.key).sorted()
       XCTAssertTrue(missing.isEmpty, "\(presetID) missing \(missing); \(result.warnings)")
     }
+  }
+  func testInstalledUnionScanAndRecipeWhenRequested() throws {
+    guard let root=ProcessInfo.processInfo.environment["WEETODD_NATIVE_SCAN_ROOT"],
+      let adapter=ProcessInfo.processInfo.environment["WEETODD_NATIVE_UNION_ADAPTER"] else { throw XCTSkip("Opt-in installed Union setup") }
+    let preset=try XCTUnwrap(NativeModelSetup.catalog().first { $0.id == "swift-ltx25-union" })
+    let scan=try NativeModelSetup.scan(presetID:preset.id,roots:[root,adapter])
+    let selected=try Dictionary(uniqueKeysWithValues:preset.components.map { ($0.key,try XCTUnwrap(scan.candidates[$0.key]?.first,$0.key)) })
+    let recipe=try NativeModelSetup.recipe(preset:preset,selected:selected,memoryMode:.lowerMemory)
+    XCTAssertEqual((recipe["config"] as? [String:Any])?["ic_lora_single_stage"] as? Bool,false)
+    let components=recipe["components"] as! [String:Any]
+    XCTAssertEqual((components["ic_loras"] as? [[Any]])?.first?.first as? String,selected["union_lora_path"])
+    XCTAssertNil(components["union_lora_path"])
+    XCTAssertNotNil(components["spatial_upscaler_path"])
   }
 }

@@ -363,10 +363,12 @@ final class StudioReliabilityTests: XCTestCase {
     var profile=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:options["recipe"]!))) as! [String:Any]
     profile.removeValue(forKey:"continuation")
     let motion=options["mode"] == "motion"
-    var components=profile["components"] as! [String:Any];components["task"]=motion ? "t2va" : "fl2va"
+    let external=options["mode"] == "extension"
+    XCTAssertTrue(["motion","frame","extension"].contains(options["mode"] ?? ""))
+    var components=profile["components"] as! [String:Any];components["task"]=motion ? "t2va" : external ? "ref2va" : "fl2va"
     if !motion,let vision=options["vision"] { components["vision_encoder"]=vision }
     profile["components"]=components
-    profile["conditioning"]=["version":1,"task":motion ? "t2v" : "fflf","audio_policy":"generated","inputs":[]]
+    profile["conditioning"]=["version":1,"task":motion ? "t2v" : external ? "ref2va" : "fflf","audio_policy":"generated","inputs":[]]
     let profileURL=profiles.appendingPathComponent("continuity.json")
     try JSONSerialization.data(withJSONObject:profile).write(to:profileURL)
     let config=profile["config"] as! [String:Any]
@@ -386,19 +388,30 @@ final class StudioReliabilityTests: XCTestCase {
     }
     source.versions=[version]
     var target=Clip(name:"Swift continuity",engine:.h3);target.profileID=profileURL.path
-    target.prompt=profile["prompt"] as! String;target.duration=motion ? 85.0/24 : 2.5
+    target.prompt=profile["prompt"] as! String;target.duration=motion ? 85.0/24 : external ? config["duration_seconds"] as! Double : 2.5
     target.generationWidth=config["width"] as! Int;target.generationHeight=config["height"] as! Int
     target.seed=config["seed"] as! Int;target.generationSelection=GenerationSelection(task:"t2v")
-    target.continuity=ClipContinuity(mode:motion ? "motion" : "frame",sourceClipID:source.id,saveContext:motion)
+    if external {
+      target.extensionDirection="after";target.extensionSource=source.sourcePath;target.extensionClipID=source.id
+      target.generationSelection?.task="extension"
+    } else { target.continuity=ClipContinuity(mode:motion ? "motion" : "frame",sourceClipID:source.id,saveContext:motion) }
     store.project.clips=[source,target];store.selectedClipID=target.id
     await store.reloadProfiles();await store.describeGeneration();XCTAssertNil(store.validationErrors[target.id])
     await store.prepareSelected();XCTAssertNil(store.error)
     let prepared=try XCTUnwrap(store.preparedRecipe)
     var previews=Set<Int>();let observer=store.bridge.$livePreview.sink { if let revision=$0?.previewRevision { previews.insert(revision) } }
     defer { observer.cancel() }
+    defer {
+      try? store.bridge.log.write(to:root.appendingPathComponent("worker-progress.log"),atomically:true,encoding:.utf8)
+      let outcome:[String:Any]=["mode":options["mode"]!,"decodedPreviewCount":previews.count,
+        "error":store.error ?? "","pythonPath":store.runtime.pythonPath]
+      try? JSONSerialization.data(withJSONObject:outcome,options:[.prettyPrinted,.sortedKeys])
+        .write(to:root.appendingPathComponent("lifecycle-outcome.json"))
+    }
     let started=Date();await store.renderPrepared();XCTAssertNil(store.error)
     let take=try XCTUnwrap(store.selectedClip?.versions.last);XCTAssertGreaterThan(previews.count,0)
     XCTAssertEqual(store.project.clips[0],source)
+    if external { XCTAssertEqual(store.selectedClip?.sourceIn,0);XCTAssertEqual(store.selectedClip?.duration,target.duration) }
     if motion {
       let artifact=try XCTUnwrap(take.continuationArtifact);XCTAssertEqual(artifact.payloadFilename,"latents.f32")
       let collected=try ProjectStorage.collectContinuationArtifact(artifact,to:root.appendingPathComponent("CollectedContext"))
@@ -410,7 +423,7 @@ final class StudioReliabilityTests: XCTestCase {
     XCTAssertEqual(reopened.project.clips[1].sourcePath,take.path)
     XCTAssertEqual(reopened.project.clips[1].versions.last?.continuationArtifact,take.continuationArtifact)
     try store.bridge.log.write(to:root.appendingPathComponent("worker-progress.log"),atomically:true,encoding:.utf8)
-    let evidence:[String:Any]=["mode":motion ? "motion" : "frame","video":take.path,"recipe":prepared,
+    let evidence:[String:Any]=["mode":motion ? "motion" : external ? "extension" : "frame","video":take.path,"recipe":prepared,
       "renderAndAcceptanceSeconds":Date().timeIntervalSince(started),"decodedPreviewCount":previews.count,
       "pythonPath":store.runtime.pythonPath,"worker":store.runtime.h3WorkerPath!]
     try JSONSerialization.data(withJSONObject:evidence,options:[.prettyPrinted,.sortedKeys]).write(to:root.appendingPathComponent("qualification.json"))
@@ -469,7 +482,7 @@ final class StudioReliabilityTests: XCTestCase {
     var assets: [MediaAsset] = []
     let inputs = (recipe["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]] ?? []
     for input in inputs {
-      let asset = MediaAsset(name: "Endpoint", kind: .image, path: input["path"] as! String)
+      let asset = MediaAsset(name: "Endpoint", kind: input["kind"] as? String == "video" ? .video : .image, path: input["path"] as! String)
       assets.append(asset)
       let last = input["frame_index"] as? String == "last" || (input["frame_index"] as? Int ?? 0) > 0
       let role:MediaRole = input["role"] as? String == "reference" ? .reference

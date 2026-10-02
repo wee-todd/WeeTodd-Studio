@@ -17,7 +17,6 @@ enum MLXStudioSpecializedRecipe {
       (conditioning["audio_policy"] as? String ?? "generated") == "generated",
       let task=conditioning["task"] as? String,["ref2va","control"].contains(task),
       let inputs=conditioning["inputs"] as? [[String:Any]],
-      config["ic_lora_single_stage"] as? Bool == true,
       (config["dfr_enabled"] as? Bool ?? false) == false,
       (components["loras"] as? [Any] ?? []).isEmpty,
       let adapters=components["ic_loras"] as? [[Any]],adapters.count == 1,
@@ -28,6 +27,35 @@ enum MLXStudioSpecializedRecipe {
       let prompt=root["prompt"] as? String else {
       throw invalid("requires one dedicated adapter, generated audio, and distilled single-stage sampling")
     }
+    if let flag=config["ic_lora_single_stage"] as? NSNumber,CFGetTypeID(flag) != CFBooleanGetTypeID() {
+      throw invalid("ic_lora_single_stage must be a boolean")
+    }
+    let single=config["ic_lora_single_stage"] as? Bool ?? false
+    if task == "control",!single {
+      guard inputs.count == 1,(components["msr_lora_path"] as? String ?? "").isEmpty,
+        strength.doubleValue <= 2 else { throw invalid("Union Control needs one guide and its stage-one adapter") }
+      let input=inputs[0]
+      guard Set(input.keys).isSubset(of:["id","kind","role","path","sha256","strength","control_type","format"]),
+        let id=input["id"] as? String,!id.isEmpty,
+        input["kind"] as? String == "video",input["role"] as? String == "control",
+        input["format"] as? String == "rgb24",
+        ["canny_edges","depth_map","pose_skeleton"].contains(input["control_type"] as? String ?? ""),
+        let path=input["path"] as? String,let digest=input["sha256"] as? String else {
+        throw invalid("Union Control needs a frozen RGB24 Canny, depth or pose guide prepared by Studio")
+      }
+      components["ic_loras"]=[];root["components"]=components
+      root["conditioning"]=["version":1,"task":"t2v","audio_policy":"generated","inputs":[]]
+      var request=try MLXStudioRecipe.compileFields(data:JSONSerialization.data(withJSONObject:root),outputDirectory:outputDirectory)
+      guard (request["width"] as! Int)%128 == 0,(request["height"] as! Int)%128 == 0 else {
+        throw invalid("Union's quarter-canvas guide requires final dimensions divisible by 128")
+      }
+      request["version"]=5;request["task"]="union_control"
+      request["audio_reference"]=NSNull()
+      request["union_control_guide"]=["path":path,"source_sha256":digest,"adapter_path":adapter,
+        "adapter_strength":strength,"reference_strength":input["strength"] ?? 1]
+      return try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONSerialization.data(withJSONObject:request))
+    }
+    guard single else { throw invalid("MSR and Ingredients require single-stage sampling") }
     var ids=Set<String>()
     for input in inputs {
       guard let id=input["id"] as? String,!id.isEmpty,ids.insert(id).inserted,

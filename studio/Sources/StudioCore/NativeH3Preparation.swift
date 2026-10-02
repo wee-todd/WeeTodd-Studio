@@ -1,4 +1,5 @@
 import CryptoKit
+import AVFoundation
 import Darwin
 import Foundation
 
@@ -183,7 +184,7 @@ public enum NativeH3Preparation {
     let config = recipe["config"] as? [String: Any] ?? [:]
     let modelTask = (recipe["components"] as? [String: Any])?["task"] as? String
     let task = modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"
-    return ["supportedTasks": task == "ref2va" ? ["ref2va", "a2v"] : [task], "controls": [
+    return ["supportedTasks": task == "ref2va" ? ["ref2va", "a2v", "extension"] : [task], "controls": [
       "evaluations": max(0, (config["steps"] as? Int ?? 20) - 1),
       "stepsEditable": true, "refinementStepsEditable": false,
       "cfgEditable": false, "shiftEditable": false,
@@ -295,14 +296,92 @@ public enum NativeH3Preparation {
     var normalized=request;normalized["project"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(project))
     return (normalized,source)
   }
+  private static func extensionRequest(_ request:[String:Any],moviePath:String?=nil) throws
+    -> (request:[String:Any],source:NativeLTXMovieSource,clip:Clip)? {
+    guard let raw=request["project"],let clipID=request["clipID"] as? String else { return nil }
+    var project=try JSONDecoder().decode(StudioProject.self,from:data(raw))
+    guard let index=project.clips.firstIndex(where: { $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }),
+      !project.clips[index].extensionDirection.isEmpty else { return nil }
+    let clip=project.clips[index]
+    guard clip.engine == .h3,clip.extensionDirection == "after",clip.continuityMode == "independent",
+      !project.isContinuousSceneMember(clip),!project.shouldSaveContinuityContext(for:clip),
+      clip.audioDriverSelection == nil,clip.musicSource == nil,
+      clip.attachments.allSatisfy({ $0.role == .lora }),clip.duration.isFinite,(4...15).contains(clip.duration) else {
+      throw unsupported("external extension needs a 4–15 second after-clip with no extra media or saved latent context")
+    }
+    let source=try NativeLTXMovieSource(project:project,clip:clip)
+    let prompt=try extensionPrompt(clip:clip)
+    var asset=MediaAsset(name:"Visible source tail",kind:.video,path:moviePath ?? source.url.path);asset.id=clip.id
+    project.assets.removeAll { $0.id == asset.id };project.assets.append(asset)
+    var reference=Attachment(assetID:asset.id,role:.reference);reference.id=clip.id
+    project.clips[index].attachments.append(reference)
+    project.clips[index].extensionDirection="";project.clips[index].extensionSource="";project.clips[index].extensionClipID=nil
+    project.clips[index].prompt=prompt
+    project.clips[index].generationSelection=clip.generationSelection ?? GenerationSelection(task:"ref2va")
+    project.clips[index].generationSelection!.task="ref2va"
+    var normalized=request;normalized["project"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(project))
+    return (normalized,source,clip)
+  }
+  static func extensionPrompt(clip:Clip) throws -> String {
+    let text=clip.prompt.trimmingCharacters(in:.whitespacesAndNewlines)
+    guard !text.isEmpty else { throw StudioError.invalid("Write the continuation action before preparing the extension.") }
+    let markers=["subject_definitions:","summary:","[video continuation","retention_analysis:",
+      "detailed_description:","overall_soundscape:","non_diegetic_music:","<Video 1>","<Picture 1>"]
+    if markers.allSatisfy(text.contains) { return text }
+    var action=text,soundscape=clip.soundscape,music=clip.music
+    if text.hasPrefix("integrated_multimodal_description:") {
+      let fields=["integrated_multimodal_description:","overall_soundscape:","non_diegetic_music:"]
+      let ranges=fields.compactMap { text.range(of:$0) }
+      guard ranges.count == 3,ranges[0].upperBound <= ranges[1].lowerBound,
+        ranges[1].upperBound <= ranges[2].lowerBound else {
+        throw StudioError.invalid("The H3 prompt needs complete, ordered action, soundscape and music sections.")
+      }
+      action=String(text[ranges[0].upperBound..<ranges[1].lowerBound]).trimmingCharacters(in:.whitespacesAndNewlines)
+      soundscape=String(text[ranges[1].upperBound..<ranges[2].lowerBound]).trimmingCharacters(in:.whitespacesAndNewlines)
+      music=String(text[ranges[2].upperBound...]).trimmingCharacters(in:.whitespacesAndNewlines)
+      guard !action.isEmpty,!soundscape.isEmpty,!music.isEmpty else {
+        throw StudioError.invalid("The H3 prompt needs nonempty action, soundscape and music sections.")
+      }
+    } else if ["subject_definitions:","retention_analysis:","[video continuation"].contains(where:text.contains) {
+      throw StudioError.invalid("The continuation prompt is incomplete. Supply all six H3 reference sections or write the action in plain text.")
+    }
+    return """
+      subject_definitions:
+      <Video 1> is the source scene's visible audiovisual tail. <Picture 1> is its terminal reference frame and the opening seam guide.
+
+      summary:
+      [video continuation + keyframe completion] Continue the scene from <Picture 1>. \(action)
+
+      retention_analysis:
+      <Video 1>: fully_preserved - retain subject identity, scene, camera, lighting and sound continuity.
+      <Picture 1>: fully_preserved - use this as the opening frame, then carry out the requested action.
+
+      detailed_description:
+      \(action.hasPrefix("[Shot ") ? action : "[Shot 1] " + action)
+
+      overall_soundscape:
+      \(soundscape)
+
+      non_diegetic_music:
+      \(music)
+      """
+  }
+  private static func extensionResult(_ result:[String:Any],dependency:[String:Any]) throws -> [String:Any] {
+    var recipe=result["recipe"] as! [String:Any],conditioning=recipe["conditioning"] as! [String:Any]
+    conditioning["task"]="extension";recipe["conditioning"]=conditioning
+    var report=result["report"] as! [String:Any]
+    report["task"]="extension";report["continuity"]=dependency
+    report["resolvedFingerprint"]=try fingerprint(["recipe":recipe,"continuity":dependency])
+    return ["recipe":recipe,"report":report]
+  }
   public static func compose(request: [String: Any]) throws -> [String: Any] {
-    guard try frameRequest(request) == nil else {
-      throw StudioError.invalid("Frame continuity requires native media preparation before composing a runnable recipe.")
+    guard try frameRequest(request) == nil,try extensionRequest(request) == nil else {
+      throw StudioError.invalid("Frame continuity and extension require native media preparation before composing a runnable recipe.")
     }
     return try compose(request:request,frameInput:nil,continuity:nil)
   }
   private static func compose(request:[String:Any],frameInput:(path:String,sha256:String)?,
-    continuity:[String:Any]?) throws -> [String:Any] {
+    continuity:[String:Any]?,videoInput:(path:String,sha256:String)?=nil) throws -> [String:Any] {
     let (project, clip, runtime, path, original) = try resolve(request)
     let globalAssets = try JSONDecoder().decode([MediaAsset].self,
       from: data(request["globalAssets"] ?? []))
@@ -387,14 +466,15 @@ public enum NativeH3Preparation {
           throw unsupported("H3 image, video and audio references require full strength and no timing or specialized controls")
         }
         let imagePath = try canonical(asset.path)
-        guard (attachment.role == .first && frameInput != nil) || FileManager.default.isReadableFile(atPath: imagePath) else {
+        let frozen=attachment.role == .first ? frameInput : isVideoReference && videoInput?.path == imagePath ? videoInput : nil
+        guard frozen != nil || FileManager.default.isReadableFile(atPath: imagePath) else {
           throw StudioError.invalid("Relink the H3 reference: \(asset.name)")
         }
         var input: [String: Any] = ["id": attachment.id.uuidString,
           "kind": isVideoReference ? "video" : isAudioReference ? "audio" : "image",
           "role": attachment.role.rawValue, "path": imagePath,
           "strength": 1.0,
-          "sha256": attachment.role == .first && frameInput != nil ? frameInput!.sha256 : try sourceSHA256(imagePath,
+          "sha256": frozen != nil ? frozen!.sha256 : try sourceSHA256(imagePath,
             maxBytes: isVideoReference ? 4 * 1024 * 1024 * 1024
               : isAudioReference ? 1024 * 1024 * 1024 : 128 * 1024 * 1024)]
         if attachment.role == .audioDriver {
@@ -499,14 +579,21 @@ public enum NativeH3Preparation {
   }
   public static func describe(request: [String: Any]) throws -> [String: Any] {
     let frame=try frameRequest(request)
-    let (_, _, _, path, original) = try resolve(frame?.request ?? request)
+    let extensionSource=try extensionRequest(request)
+    let normalized=extensionSource?.request ?? frame?.request ?? request
+    let (_, _, _, path, original) = try resolve(normalized)
     var errors: [String] = [], resolved = "",warnings=["Swift H3 generation is experimental and not production qualified."]
     var content = original
     do {
       var dependency=frame?.source.report
       if dependency != nil { dependency!["engine"]="h3" }
-      let result = try compose(request:frame?.request ?? request,
-        frameInput:frame.map { ($0.source.url.path,String(repeating:"0",count:64)) },continuity:dependency)
+      var result = try compose(request:normalized,
+        frameInput:frame.map { ($0.source.url.path,String(repeating:"0",count:64)) },continuity:dependency,
+        videoInput:extensionSource.map { ($0.source.url.path,String(repeating:"0",count:64)) })
+      if let extensionSource {
+        var source=extensionSource.source.report;source["engine"]="h3";source["mode"]="externalExtension"
+        result=try extensionResult(result,dependency:source)
+      }
       content = result["recipe"] as! [String: Any]
       resolved = (result["report"] as? [String: Any])?["resolvedFingerprint"] as? String ?? ""
       warnings += (result["report"] as? [String:Any])?["warnings"] as? [String] ?? []
@@ -533,6 +620,40 @@ public enum NativeH3Preparation {
       "readinessErrors": errors]
   }
   public static func prepareWithMedia(request:[String:Any],destination:URL) async throws -> [String:Any] {
+    if let source=try extensionRequest(request) {
+      let provisional=try compose(request:source.request,frameInput:nil,continuity:nil,
+        videoInput:(source.source.url.path,String(repeating:"0",count:64)))
+      let parent=destination.deletingLastPathComponent()
+      try FileManager.default.createDirectory(at:parent,withIntermediateDirectories:true)
+      let staging=parent.appendingPathComponent(".h3-prepare-"+UUID().uuidString)
+      try FileManager.default.createDirectory(at:staging,withIntermediateDirectories:false)
+      defer { try? FileManager.default.removeItem(at:staging) }
+      let mediaDuration=try await AVURLAsset(url:source.source.url).load(.duration).seconds
+      let visible=source.source.duration ?? mediaDuration
+      guard visible.isFinite,visible>=5.0/24 else { throw unsupported("extension source needs at least five visible frames") }
+      let available=min(175,Int(floor(min(visible,175.0/24)*24+1e-7)))
+      let contextFrames=5+17*((available-5)/17)
+      let scale=min(256.0/Double(source.clip.generationWidth),256.0/Double(source.clip.generationHeight))
+      let width=max(64,Int(Double(source.clip.generationWidth)*scale/32)*32)
+      let height=max(64,Int(Double(source.clip.generationHeight)*scale/32)*32)
+      let content=provisional["recipe"] as! [String:Any],name="source-tail.mp4"
+      let digest=try await source.source.extract(to:staging.appendingPathComponent(name),
+        ffmpeg:URL(fileURLWithPath:content["ffmpeg"] as! String),fps:24,width:width,height:height,contextFrames:contextFrames)
+      let final=destination.appendingPathComponent(name).path
+      let normalized=try extensionRequest(request,moviePath:final)!
+      var dependency=source.source.report;dependency["engine"]="h3";dependency["mode"]="externalExtension"
+      dependency["preparedSHA256"]=digest;dependency["contextFrames"]=contextFrames
+      dependency["referenceWidth"]=width;dependency["referenceHeight"]=height
+      let result=try extensionResult(compose(request:normalized.request,frameInput:nil,continuity:nil,
+        videoInput:(final,digest)),dependency:dependency)
+      let recipe=result["recipe"] as! [String:Any]
+      try data(recipe).write(to:staging.appendingPathComponent("recipe.json"),options:.withoutOverwriting)
+      try data(request).write(to:staging.appendingPathComponent("editor-request.json"),options:.withoutOverwriting)
+      try data(dependency).write(to:staging.appendingPathComponent("continuity.json"),options:.withoutOverwriting)
+      try Task.checkCancellation();try source.source.verify()
+      try FileManager.default.moveItem(at:staging,to:destination)
+      return ["recipePath":destination.appendingPathComponent("recipe.json").path,"prompt":recipe["prompt"]!,"report":result["report"]!]
+    }
     guard let frame=try frameRequest(request) else { return try prepare(request:request,destination:destination) }
     var dependency=frame.source.report;dependency["engine"]="h3"
     _ = try compose(request:frame.request,frameInput:(frame.source.url.path,String(repeating:"0",count:64)),continuity:dependency)

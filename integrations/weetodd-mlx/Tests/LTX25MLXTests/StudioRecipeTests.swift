@@ -2,6 +2,27 @@ import XCTest
 @testable import LTX25MLX
 
 final class StudioRecipeTests: XCTestCase {
+  func testUnionStudioRecipeRetainsFrozenGuideAndStageOneAdapter() throws {
+    var recipe=fixture(),components=fixture()["components"] as! [String:Any]
+    var config=recipe["config"] as! [String:Any];config["width"]=512;config["height"]=256;recipe["config"]=config
+    components["ic_loras"]=[["/models/union.safetensors",0.8]];recipe["components"]=components
+    let input:[String:Any]=["id":"guide","kind":"video","role":"control","control_type":"pose_skeleton",
+      "path":"/guide.rgb24","sha256":String(repeating:"a",count:64),"strength":0.7,"format":"rgb24"]
+    recipe["conditioning"]=["version":1,"task":"control","audio_policy":"generated","inputs":[input]]
+    let compiled=try compile(recipe)
+    XCTAssertEqual(compiled.version,5);XCTAssertEqual(compiled.task,"union_control")
+    XCTAssertEqual(compiled.unionControlGuide?.path,"/guide.rgb24")
+    XCTAssertEqual(compiled.unionControlGuide?.adapterStrength,0.8)
+    XCTAssertEqual(compiled.unionControlGuide?.referenceStrength,0.7)
+    XCTAssertTrue(compiled.stageOneLoras.isEmpty);XCTAssertTrue(compiled.stageTwoLoras.isEmpty)
+    config["width"]=1344;recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe));config["width"]=512;recipe["config"]=config
+    var wrong=input;wrong["control_type"]="motion_track"
+    recipe["conditioning"]=["version":1,"task":"control","inputs":[wrong]]
+    XCTAssertThrowsError(try compile(recipe))
+    wrong=input;wrong["format"]="mp4";recipe["conditioning"]=["version":1,"task":"control","inputs":[wrong]]
+    XCTAssertThrowsError(try compile(recipe))
+  }
   func testMSRStudioRecipeKeepsOrderedReferencesAndTheirControls() throws {
     var recipe=fixture()
     var components=recipe["components"] as! [String:Any]

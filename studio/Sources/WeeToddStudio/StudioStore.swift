@@ -1306,7 +1306,9 @@ extension Encodable {
       if let start = r["usable_source_in"] as? Double, let duration = r["usable_duration"] as? Double {
         renderedStart = start
         renderedDuration = duration
-      } else if !c.extensionSource.isEmpty {
+      } else if !c.extensionSource.isEmpty && !nativeH3 {
+        // Swift H3 publishes only the newly generated interval. Legacy
+        // extension renderers publish the source followed by that interval.
         let source = try await bridge.invoke(
           "inspect", runtime: settings, payload: ["path": c.extensionSource])
         let sourceDuration = source["duration"] as? Double ?? 0

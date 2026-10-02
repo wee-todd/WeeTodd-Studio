@@ -5,6 +5,35 @@ import CryptoKit
 @testable import StudioCore
 
 final class NativeLTXPreparationTests: XCTestCase {
+  func testUnionCompositionRetainsOneVideoAndRejectsWrongFamily() throws {
+    let (root,original,runtime)=try fixture();let profile=root.appendingPathComponent("model.json")
+    var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    recipe["components"]=["transformer_path":"/models/transformer","loras":[],"ic_loras":[["/models/union.safetensors",1.0]]]
+    recipe["conditioning"]=["version":1,"task":"control","inputs":[]]
+    try JSONSerialization.data(withJSONObject:recipe).write(to:profile)
+    var project=original;project.clips[0].generationSelection?.task="control"
+    project.clips[0].generationWidth=512;project.clips[0].generationHeight=256
+    let file=root.appendingPathComponent("guide.mp4");try Data([1]).write(to:file)
+    let asset=MediaAsset(name:"Pose guide",kind:.video,path:file.path);project.assets=[asset]
+    var attachment=Attachment(assetID:asset.id,role:.control);attachment.controlType="pose_skeleton";attachment.strength=0.7
+    project.clips[0].attachments=[attachment]
+    XCTAssertEqual(try NativeLTXPreparation.catalog(directory:root.path).count,1)
+    let result=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let input=(((result["recipe"] as! [String:Any])["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]])[0]
+    XCTAssertEqual(input["kind"] as? String,"video");XCTAssertEqual(input["control_type"] as? String,"pose_skeleton")
+    var ingredients=recipe,ingredientsConfig=recipe["config"] as! [String:Any]
+    ingredientsConfig["ic_lora_single_stage"]=true;ingredients["config"]=ingredientsConfig
+    try JSONSerialization.data(withJSONObject:ingredients).write(to:root.appendingPathComponent("aaa-ingredients.json"))
+    let selected=try NativeLTXPreparation.compose(request:request(project,runtime))
+    XCTAssertEqual((selected["report"] as? [String:Any])?["profile"] as? String,"model")
+    project.clips[0].generationWidth=1344
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project.clips[0].generationWidth=512
+    project.clips[0].attachments[0].controlType="motion_track"
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project.clips[0].attachments=[attachment,attachment]
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+  }
   func testMSRCompositionFreezesReferencesAndRetainsEditorParameters() throws {
     let (root,original,runtime)=try fixture()
     let profile=root.appendingPathComponent("model.json")
@@ -499,6 +528,43 @@ final class NativeLTXPreparationTests: XCTestCase {
     }
     input.markAsFinished(); writer.endSession(atSourceTime: CMTime(seconds: 1.5, preferredTimescale: 600))
     await writer.finishWriting(); XCTAssertEqual(writer.status, .completed); return url
+  }
+
+  func testUnionGuideResamplesVFRInOrderAndFreezesQuarterCanvas() async throws {
+    let (root,original,runtime)=try fixture(),movie=try await continuityMovie(root)
+    let target=root.appendingPathComponent("test.rgb24")
+    let digest=try await NativeLTXControlGuide.prepare(source:movie,destination:target,width:512,height:256,
+      frames:33,fps:24,editorialDuration:1)
+    let bytes=try Data(contentsOf:target),frameBytes=128*64*3
+    XCTAssertEqual(bytes.count,33*frameBytes)
+    XCTAssertEqual(digest,SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined())
+    for (frame,channel) in [(0,0),(5,1),(20,2),(32,0)] {
+      let offset=frame*frameBytes+(32*128+64)*3
+      XCTAssertGreaterThan(bytes[offset+channel],200)
+      XCTAssertLessThan(bytes[offset+(channel+1)%3],35)
+    }
+    do {
+      _=try await NativeLTXControlGuide.prepare(source:movie,destination:root.appendingPathComponent("too-long.rgb24"),
+        width:512,height:256,frames:49,fps:24,editorialDuration:2)
+      XCTFail("Short guide should fail before publication")
+    } catch { XCTAssertFalse(FileManager.default.fileExists(atPath:root.appendingPathComponent("too-long.rgb24").path)) }
+    let profile=root.appendingPathComponent("model.json")
+    var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    recipe["components"]=["transformer_path":"/models/transformer","loras":[],"ic_loras":[["/models/union.safetensors",1.0]]]
+    recipe["conditioning"]=["version":1,"task":"control","inputs":[]]
+    try JSONSerialization.data(withJSONObject:recipe).write(to:profile)
+    var project=original;project.clips[0].generationSelection?.task="control"
+    project.clips[0].duration=4.0/3;project.clips[0].generationWidth=512;project.clips[0].generationHeight=256
+    let asset=MediaAsset(name:"Guide",kind:.video,path:movie.path);project.assets=[asset]
+    project.clips[0].attachments=[Attachment(assetID:asset.id,role:.control)]
+    let output=root.appendingPathComponent("job"),body=try request(project,runtime)
+    let prepared=try await NativeLTXPreparation.prepareWithMedia(request:body,destination:output)
+    let frozen=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:prepared["recipePath"] as! String))) as! [String:Any]
+    let input=((frozen["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]])[0]
+    XCTAssertEqual(input["format"] as? String,"rgb24");XCTAssertEqual(input["sha256"] as? String,digest)
+    XCTAssertEqual(input["path"] as? String,output.appendingPathComponent("union-guide.rgb24").path)
+    XCTAssertEqual(try Data(contentsOf:output.appendingPathComponent("union-guide.rgb24")),bytes)
+    XCTAssertTrue(FileManager.default.fileExists(atPath:output.appendingPathComponent("editor-request.json").path))
   }
 
   func testMatchPreviousFrameUsesLastVisibleVFRTimestampAndPreservesOriginalRequest() async throws {

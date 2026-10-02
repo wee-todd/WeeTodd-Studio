@@ -113,7 +113,10 @@ public enum NativeModelSetup {
         description:"Experimental single-stage reference generation. Link installed components, attach described images and prepare the clip for Swift worker preflight. Identity and audio quality remain under qualification.",
         components:ltx.filter { $0.key != "spatial_upscaler_path" }+[component(key,adapter,["file"])])
     }
-    return ordinary + dfr + references
+    let union=ModelSetupPreset(id:"swift-ltx25-union",name:"LTX 2.5 · Union Control · Swift",engine:"ltx25",task:"control",
+      description:"Experimental two-stage control generation. Attach one preprocessed Canny, depth or pose movie. Studio freezes a quarter-canvas RGB guide; the Union adapter is active only in stage one.",
+      components:ltx+[component("union_lora_path","LTX 2.3 Union rank-64 adapter",["file"])])
+    return ordinary + dfr + references + [union]
   }
 
   public static func recipe(preset: ModelSetupPreset, selected: [String: String],
@@ -150,6 +153,12 @@ public enum NativeModelSetup {
         "duration_seconds": 5.0, "frame_rate": 24.0, "seed": 0,
         "stage1_steps": 8, "stage2_steps": 3, "low_memory": true,
         "low_ram_streaming": false]
+      if preset.id == "swift-ltx25-union" {
+        guard let adapter=components.removeValue(forKey:"union_lora_path") as? String else {
+          throw StudioError.invalid("Choose the dedicated Union Control adapter.")
+        }
+        components["ic_loras"]=[[adapter,1.0]];config["ic_lora_single_stage"]=false
+      }
       if ["swift-ltx25-msr","swift-ltx25-ingredients"].contains(preset.id) {
         let msr=preset.id == "swift-ltx25-msr",key=msr ? "msr_lora_path" : "ingredients_lora_path"
         guard let adapter=components[key] as? String else { throw StudioError.invalid("Choose the dedicated reference adapter.") }
@@ -301,6 +310,16 @@ private enum NativeModelInspector {
     let metadata = tensors["__metadata__"] as? [String: String] ?? [:]
     let config = embedded(metadata["config"]) ?? [:]
     switch key {
+    case "union_lora_path":
+      let keys=tensors.keys.filter { $0.hasSuffix(".lora_A.weight") || $0.hasSuffix(".lora_B.weight") }
+      let a=keys.filter { $0.hasSuffix(".lora_A.weight") }
+      return keys.count == 960 && a.count == 480 && metadata["model_version"]?.hasPrefix("2.3") == true
+        && metadata["reference_downscale_factor"] == "2" && a.allSatisfy { name in
+          let partner=name.replacingOccurrences(of:".lora_A.weight",with:".lora_B.weight")
+          guard let down=(tensors[name] as? [String:Any])?["shape"] as? [Int],down.count == 2,
+            let up=(tensors[partner] as? [String:Any])?["shape"] as? [Int],up.count == 2 else { return false }
+          return down[0] == 64 && up[1] == 64
+        }
     case "msr_lora_path","ingredients_lora_path":
       let keys=tensors.keys.filter { $0.hasSuffix(".lora_A.weight") || $0.hasSuffix(".lora_B.weight") }
       let a=keys.filter { $0.hasSuffix(".lora_A.weight") }

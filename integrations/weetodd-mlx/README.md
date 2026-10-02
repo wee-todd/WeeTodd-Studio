@@ -7,8 +7,12 @@ first-frame images on any shot and one continuous source-audio driver. Its H3 wo
 is opt-in and experimental for T2VA, timed FL2VA, ordered still/movie/audio Ref2VA,
 independent A2V and text-only native latent continuation. Studio now prepares MSR images,
 Ingredients sheets, H3 frame matching and H3 v2 saved motion context through these shared
-workers. Specialized routes remain experimental; the ordinary Union control UI and H3
-external-extension controls still retain their existing route.
+workers. Studio also streams a preprocessed Canny/depth/pose movie to a frozen quarter-canvas
+Union guide for the existing stage-one-only adapter. Its final canvas must be divisible by 128.
+Studio also prepares after-extensions for the H3 Ref2VA worker from a bounded audiovisual
+source tail and its final-frame seam guide. Plain and ordinary structured H3 prompts map into
+the required continuation sections; completed six-section reference prompts are preserved.
+Specialized routes remain experimental; other IC-LoRAs retain their existing route.
 
 ## Implemented
 

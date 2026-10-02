@@ -1,9 +1,76 @@
 import CryptoKit
+import AVFoundation
 import Foundation
 import XCTest
 @testable import StudioCore
 
 final class NativeH3PreparationTests: XCTestCase {
+  func testExtensionPromptRetainsStructuredAudioWithoutEmbeddingHeadersInAction() throws {
+    var clip=Clip(engine:.h3)
+    clip.prompt="integrated_multimodal_description: [Shot 1] The robot lowers its arm.\n\noverall_soundscape: Rain and a metallic whir.\n\nnon_diegetic_music: A quiet cello."
+    clip.soundscape="stale room tone";clip.music="stale music"
+    let prompt=try NativeH3Preparation.extensionPrompt(clip:clip)
+    XCTAssertFalse(prompt.contains("integrated_multimodal_description:"))
+    XCTAssertFalse(prompt.contains("stale"))
+    XCTAssertTrue(prompt.contains("detailed_description:\n[Shot 1] The robot lowers its arm."))
+    XCTAssertTrue(prompt.contains("overall_soundscape:\nRain and a metallic whir."))
+    XCTAssertTrue(prompt.contains("non_diegetic_music:\nA quiet cello."))
+    XCTAssertEqual(prompt.components(separatedBy:"overall_soundscape:").count,2)
+    clip.prompt="subject_definitions: <Video 1>\nsummary: [video continuation] continue"
+    XCTAssertThrowsError(try NativeH3Preparation.extensionPrompt(clip:clip))
+    clip.prompt="integrated_multimodal_description: walk\nnon_diegetic_music: N/A"
+    XCTAssertThrowsError(try NativeH3Preparation.extensionPrompt(clip:clip))
+  }
+  func testExternalExtensionDescriptionChoosesRef2VAAndRequiresAsyncPreparation() throws {
+    let (root,original,runtime)=try fixture(),profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="ref2va"
+    components["vision_encoder"]="/model/vision.safetensors";definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    let movie=root.appendingPathComponent("source.mov");try Data([0]).write(to:movie)
+    var project=original;project.clips[0].extensionDirection="after";project.clips[0].extensionSource=movie.path
+    let description=try NativeH3Preparation.describe(request:request(project,runtime))
+    XCTAssertEqual(description["readinessErrors"] as? [String],[])
+    XCTAssertTrue((description["sourcePaths"] as? [String] ?? []).contains(movie.path))
+    XCTAssertTrue(((description["generation"] as? [String:Any])?["supportedTasks"] as? [String] ?? []).contains("extension"))
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    project.clips[0].duration=3
+    XCTAssertThrowsError(try NativeH3Preparation.describe(request:request(project,runtime)))
+    project.clips[0].duration=5;project.clips[0].extensionDirection="before"
+    XCTAssertThrowsError(try NativeH3Preparation.describe(request:request(project,runtime)))
+  }
+  func testInstalledExtensionPreparationFreezesBoundedTailAndPreservesEditor() async throws {
+    guard let source=ProcessInfo.processInfo.environment["WEETODD_H3_EXTENSION_SOURCE"],
+      let ffmpeg=ProcessInfo.processInfo.environment["WEETODD_H3_EXTENSION_FFMPEG"] else { throw XCTSkip("Opt-in audiovisual extension preparation") }
+    let (root,original,originalRuntime)=try fixture(),profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="ref2va"
+    components["vision_encoder"]="/model/vision.safetensors";definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    var project=original,runtime=originalRuntime;runtime["ffmpegPath"]=ffmpeg
+    project.clips[0].extensionDirection="after";project.clips[0].extensionSource=source
+    project.clips[0].duration=4;project.clips[0].generationWidth=384;project.clips[0].generationHeight=256
+    let body=try request(project,runtime),target=root.appendingPathComponent("prepared")
+    let prepared=try await NativeH3Preparation.prepareWithMedia(request:body,destination:target)
+    let recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:prepared["recipePath"] as! String))) as! [String:Any]
+    let contract=recipe["conditioning"] as! [String:Any],inputs=contract["inputs"] as! [[String:Any]]
+    XCTAssertEqual(contract["task"] as? String,"extension");XCTAssertEqual(inputs.count,1)
+    let file=URL(fileURLWithPath:inputs[0]["path"] as! String),bytes=try Data(contentsOf:file)
+    XCTAssertEqual(inputs[0]["sha256"] as? String,SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined())
+    let report=prepared["report"] as! [String:Any],dependency=report["continuity"] as! [String:Any]
+    let frames=dependency["contextFrames"] as! Int
+    XCTAssertLessThanOrEqual(frames,175);XCTAssertEqual((frames-5)%17,0)
+    let asset=AVURLAsset(url:file),duration=try await asset.load(.duration).seconds
+    XCTAssertEqual(duration,Double(frames)/24,accuracy:0.1)
+    let audio=try await asset.loadTracks(withMediaType:.audio);XCTAssertEqual(audio.count,1)
+    XCTAssertEqual((try JSONSerialization.jsonObject(with:Data(contentsOf:target.appendingPathComponent("editor-request.json")))) as! NSDictionary,body as NSDictionary)
+    XCTAssertTrue((recipe["prompt"] as! String).contains("<Picture 1>: fully_preserved"))
+    XCTAssertEqual(project.clips[0].extensionSource,source)
+    do { _=try await NativeH3Preparation.prepareWithMedia(request:body,destination:target);XCTFail("Must preserve existing prepared job") }
+    catch { XCTAssertEqual(try Data(contentsOf:file),bytes) }
+  }
   func testInstalledCompatibleFL2VAProfileAppearsAsFirstLastTask() throws {
     guard let path = ProcessInfo.processInfo.environment["WEETODD_H3_FL2VA_PROFILE"] else {
       throw XCTSkip("Set an installed FL2VA Studio profile for catalog admission.")

@@ -158,9 +158,8 @@ A full Studio preparation, render, grouped acceptance and project reopening also
 with Python unavailable. Planned music-video A2V clips can retain their source interval,
 and a prepared timeline audio mix can feed an independent Swift LTX A2V clip. A developer
 Swift Union Control route now accepts a frozen half-resolution RGB24 guide and the installed
-LTX 2.3 Union IC-LoRA, with the task adapter active only in stage one. Studio's ordinary
-Union control-attachment UI and H3 external extension controls remain outside the qualified
-Swift paths. Studio's Swift model setup now offers LTX 2.5 DFR spatial and one- or
+LTX 2.3 Union IC-LoRA, with the task adapter active only in stage one. Other IC-LoRA
+control attachments remain outside the qualified Swift paths. Studio's Swift model setup now offers LTX 2.5 DFR spatial and one- or
 two-round temporal presets. It scans installed Pixel-Spatial and temporal adapter
 headers, links their weights in place and preflights the resulting profile. Such a
 profile supports Swift T2V, I2V or FFLF; ordinary LoRAs, A2V, extension and
@@ -180,6 +179,15 @@ with 4.03 and 4.00 GB Swift-worker process peaks respectively, excluding FFmpeg.
 two subjects distinct; the Ingredients sample duplicated subjects. These are route checks,
 not broad identity/audio quality or matched production-size performance qualification.
 Saved ComfyUI MSR and Ingredients graphs produced byte-identical movies to their Studio takes.
+Studio also prepares one preprocessed Canny, depth or pose movie for the dedicated Swift Union
+Control preset. It streams a quarter-canvas RGB24 guide, validates source coverage and freezes
+the guide checksum; its compatible LTX 2.3 adapter remains scoped to stage one of 8 + 3 sampling.
+Final dimensions must be divisible by 128. An installed-app 33-frame 512 × 256 job passed
+previews, acceptance and reopening with Python unavailable, taking 33.49 seconds through
+render and acceptance at a 3.21 GB peak Swift-worker footprint, excluding FFmpeg. Its saved
+ComfyUI graph produced byte-identical video. This small route test is not a matched
+production-size performance comparison.
+This does not enable Motion Track, CrossView or combined task adapters through Swift.
 The experimental direct Swift worker also runs spatial DFR with generated keyframe
 slots, a clean half-resolution stage-two reference and the Pixel-Spatial x2 adapter
 at stage two. Text-only and first/last-image requests published 49-frame 512 × 256
@@ -1175,14 +1183,23 @@ the internal node, native headless contract, and Studio's opt-in **Clip Continui
 Studio also supports visible-frame matching and compatible LTX source-tail continuation.
 An experimental **direct Swift H3 worker** can save and load its own version-2
 normalized audiovisual latent context for text-to-AV chaining. It is not
-interchangeable with Python's version-1 SafeTensors context and is not yet
-selected by Studio's continuity controls or ComfyUI export. A separate direct
+interchangeable with Python's version-1 SafeTensors context. Studio now selects
+it for text-only saved motion continuation; a saved ComfyUI graph reproduced
+the Studio take byte for byte. A separate direct
 Swift Ref2VA extension route prepares an audio-bearing source movie and its
 true last frame as a frame-zero seam anchor. Both routes published installed-
 weight clips at 384 × 256, but the first-frame joins remained visible and the
 Ref2VA extension took 690.70 seconds with an 8.13 GB peak Swift-process
 footprint (external FFmpeg excluded). These routes are execution proofs, not
 quality or performance approval; see [current status](STATUS.md).
+With Swift H3 enabled, **Extend → After** prepares a 4–15-second Ref2VA extension.
+Studio freezes the accepted source's visible audiovisual tail on the aligned reference grid,
+bounded to 175 frames at 24 fps and a 256-pixel reference edge. The original movie and editor
+settings remain intact. The worker uses the excerpt's final frame as the opening seam guide
+and generates only the new shot and soundtrack. Extra attached media, saved latent context
+and before-extensions are rejected. A complete structured continuation prompt stays unchanged;
+plain actions and existing H3 action/sound/music sections are mapped into the required
+reference-prompt sections, which remain visible in preparation.
 For a continuous local LTX 2.5 scene, connect following shots with **Continue scene** in
 Studio. This uses the native video/audio latent chain, renders the group as one movie, and
 decodes the assembled timeline once. It supports two to six shots up to 30 seconds, with

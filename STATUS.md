@@ -1,5 +1,35 @@
 # WeeTodd Studio implementation status
 
+Swift H3 external extension Studio routing 2026-10-02 (experimental):
+the existing Extend → After action now prepares a 4–15-second Ref2VA request
+with a frozen visible audiovisual source tail, at most 175 frames at 24 fps
+and a 256-pixel reference edge. Complete continuation prompts are preserved;
+plain actions and H3 action/sound/music sections map into the required reference
+sections. Extra media, saved latent context and before-extensions fail preparation.
+An installed-app worker with Python unavailable produced 107 frames at 384 × 256
+and 32 kHz stereo sound in 778.78 seconds, including 642.26 seconds sampling,
+at an 8.09 GB peak Swift-worker footprint, excluding FFmpeg. A decoded preview
+was observed. The initial Studio acceptance hit a legacy Python inspection path:
+it incorrectly treated the result as source-plus-extension. Swift H3 now accepts
+the worker's new frames at source offset zero. Replaying the completed render
+receipt passed source preservation, acceptance, saving and reopening without
+another generation. The corrected final-app end-to-end generation has not been
+rerun. These tests do not establish external-extension ComfyUI parity, matched
+performance, seam quality or broad audio acceptance.
+
+Swift LTX Union Studio routing 2026-10-02 (experimental): Model Setup offers
+a dedicated Union Control preset with bounded rank-64 adapter discovery. Studio
+streams one preprocessed Canny, depth or pose movie through AVFoundation/CoreImage
+to a frozen quarter-canvas RGB24 guide, resampling VFR timestamps and validating
+source coverage, checksums and a final canvas divisible by 128 before generation.
+The adapter runs only in stage one of the existing 8 + 3 schedule. An installed-app
+33-frame 512 × 256/24 fps job with Python unavailable passed two decoded previews,
+acceptance, saving and reopening. Render/acceptance took 33.49 seconds and peaked
+at 3.21 GB Swift-worker process footprint, excluding FFmpeg. A saved ComfyUI graph
+passed and produced byte-identical video. This closes those Union route subchecks;
+Motion Track, CrossView, combined controls, production-size matched speed/memory
+and broad audiovisual quality remain open.
+
 Swift H3 Studio continuity and native downloads 2026-10-02 (experimental):
 frame matching freezes the accepted source's last visible frame through AVFoundation;
 text-only motion continuation prepares the existing Swift v2 latent contract, verifies

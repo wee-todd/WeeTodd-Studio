@@ -83,13 +83,15 @@ public enum NativeLTXPreparation {
       let components=recipe["components"] as? [String:Any],
       (config["pipeline_mode"] as? String ?? "distilled") == "distilled",
       config["stage1_steps"] as? Int == 8,config["stage2_steps"] as? Int == 3,
-      config["ic_lora_single_stage"] as? Bool == true,
       (config["dfr_enabled"] as? Bool ?? false) == false,
       (components["loras"] as? [Any] ?? []).isEmpty,
       let adapters=components["ic_loras"] as? [[Any]],adapters.count == 1,adapters[0].count == 2,
       let path=adapters[0][0] as? String,path.hasPrefix("/"),
       let strength=adapters[0][1] as? Double,strength.isFinite,strength>0,strength<=3 else { return nil }
     let task=(recipe["conditioning"] as? [String:Any])?["task"] as? String
+    if task == "control",config["ic_lora_single_stage"] as? Bool != true,
+      strength<=2,(components["msr_lora_path"] as? String ?? "").isEmpty { return "union" }
+    guard config["ic_lora_single_stage"] as? Bool == true else { return nil }
     if task == "ref2va",components["msr_lora_path"] as? String == path,
       ((components["msr_lora_strength"] as? Double) ?? 1) == strength { return "msr" }
     if task == "control",(components["msr_lora_path"] as? String ?? "").isEmpty { return "ingredients" }
@@ -138,13 +140,13 @@ public enum NativeLTXPreparation {
       && (config["dfr_prebaked_transformer_path"] as? String ?? "").isEmpty
       && (config["generated_keyframes"] as? Int ?? 0) == 0
       && (components["loras"] as? [Any] ?? []).isEmpty
-    return ["dfrEnabled": dfrValid,
+    return ["dfrEnabled": dfrValid,"referenceFamily": specialized ?? "ordinary",
       "supportedTasks": specialized != nil ? [specialized == "msr" ? "ref2va" : "control"] : dfrValid ? ["t2v", "i2v", "fflf"] : ordinary && !dfrEnabled
       ? ["t2v", "i2v", "fflf", "a2v", "extension"] : [],
-      "controls": ["evaluations": config["stage1_steps"] ?? 8, "refinementSteps": specialized != nil ? 0 : config["stage2_steps"] ?? 3,
+      "controls": ["evaluations": config["stage1_steps"] ?? 8, "refinementSteps": specialized != nil && specialized != "union" ? 0 : config["stage2_steps"] ?? 3,
         "cfg": config["video_cfg_scale"] ?? 1, "stepsEditable": false, "refinementStepsEditable": false,
         "cfgEditable": false, "shiftEditable": false,
-        "stepsExplanation": specialized != nil ? "Swift reference sampling uses eight full-resolution evaluations." : "Swift distilled sampling uses the qualified 8 + 3 schedule.",
+        "stepsExplanation": specialized != nil && specialized != "union" ? "Swift reference sampling uses eight full-resolution evaluations." : "Swift distilled sampling uses the qualified 8 + 3 schedule.",
         "cfgExplanation": "Distilled guidance is fixed.",
         "shiftExplanation": "This native adapter does not expose a Shift override."],
       "presets": [
@@ -378,6 +380,14 @@ public enum NativeLTXPreparation {
       (clip.profileID == "auto" || $0["id"] as? String == clip.profileID)
         && (($0["generation"] as? [String: Any])?["supportedTasks"] as? [String] ?? []).contains(task)
     }
+    if task == "control",clip.profileID == "auto" {
+      let controls=clip.attachments.filter { $0.role == .control }.map(\.controlType)
+      if !controls.isEmpty {
+        let family=controls.allSatisfy { $0 == "ingredients_reference_sheet" } ? "ingredients"
+          : controls.allSatisfy { ["canny_edges","depth_map","pose_skeleton"].contains($0) } ? "union" : "unsupported"
+        candidates=candidates.filter { ($0["generation"] as? [String:Any])?["referenceFamily"] as? String == family }
+      }
+    }
     if selection != nil, selection?.preset != .custom, clip.profileID == "auto" {
       let nativeTask = task == "i2v" ? "fflf" : task
       candidates = candidates.filter { $0["task"] as? String == nativeTask }
@@ -396,7 +406,7 @@ public enum NativeLTXPreparation {
     let assets = try JSONDecoder().decode([MediaAsset].self, from: data(request["globalAssets"] ?? []))
     let selectedRecipe = try recipe(profile)
     var warnings = selection?.preset == .speed
-      ? [specialization(selectedRecipe) == nil ? "Speed preserves the qualified 8 + 3 sampling schedule." : "Speed preserves eight full-resolution reference evaluations."] : []
+      ? [specialization(selectedRecipe) == nil || specialization(selectedRecipe) == "union" ? "Speed preserves the qualified 8 + 3 sampling schedule." : "Speed preserves eight full-resolution reference evaluations."] : []
     if let inherited = (selectedRecipe["config"] as? [String: Any])?["negative_prompt"] as? String,
       !inherited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       warnings.append("The selected profile's negative prompt is not evaluated by distilled Swift sampling and is omitted.")
@@ -480,6 +490,9 @@ public enum NativeLTXPreparation {
     guard !prompt.isEmpty else { throw StudioError.invalid("Write a prompt before preparing the render.") }
     var content = context.recipe
     let specialized=specialization(content)
+    if specialized == "union",(clip.generationWidth%128 != 0 || clip.generationHeight%128 != 0) {
+      throw StudioError.invalid("Union Control requires final dimensions divisible by 128 for its quarter-canvas guide.")
+    }
     // Stored profile media/context never become hidden clip dependencies.
     content.removeValue(forKey: "continuation"); content.removeValue(forKey: "reference_images")
     var config = content["config"] as! [String: Any]
@@ -539,8 +552,8 @@ public enum NativeLTXPreparation {
     if specialized == "msr",!(1...5).contains(attachments.count) {
       throw StudioError.invalid("MSR needs one to five described still images.")
     }
-    if specialized == "ingredients",attachments.count != 1 {
-      throw StudioError.invalid("Ingredients needs exactly one described reference sheet.")
+    if ["ingredients","union"].contains(specialized ?? ""),attachments.count != 1 {
+      throw StudioError.invalid("This control profile needs exactly one guide attachment.")
     }
     for attachment in attachments {
       try Task.checkCancellation()
@@ -582,6 +595,15 @@ public enum NativeLTXPreparation {
           "source_duration_seconds": sourceDuration]); continue
       }
       if attachment.role == .reference || attachment.role == .control {
+        if specialized == "union" {
+          guard asset.kind == .video,attachment.role == .control,
+            ["canny_edges","depth_map","pose_skeleton"].contains(attachment.controlType),
+            attachment.strength.isFinite,(0...1).contains(attachment.strength),attachment.time == 0 else {
+            throw StudioError.invalid("Union needs one preprocessed Canny, depth or pose movie at time zero, with strength from 0 to 1.")
+          }
+          inputs.append(["id":attachment.id.uuidString,"kind":"video","role":"control","path":path,
+            "control_type":attachment.controlType,"strength":attachment.strength]);continue
+        }
         guard asset.kind == .image,attachment.strength.isFinite,(0...1).contains(attachment.strength),
           !attachment.description.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else {
           throw StudioError.invalid("Describe each reference image and use strength from 0 to 1.")
@@ -689,6 +711,33 @@ public enum NativeLTXPreparation {
   public static func prepareWithMedia(request: [String: Any], destination: URL) async throws -> [String: Any] {
     if try sceneRequest(request) != nil { return try prepare(request: request, destination: destination) }
     let context = try resolve(request)
+    if specialization(context.recipe) == "union" {
+      var composed=try compose(context),content=composed["recipe"] as! [String:Any]
+      var conditioning=content["conditioning"] as! [String:Any]
+      var inputs=conditioning["inputs"] as! [[String:Any]]
+      let config=content["config"] as! [String:Any],fps=config["frame_rate"] as! Double
+      let frames=Int(((config["duration_seconds"] as! Double)*fps/8).rounded())*8+1
+      let parent=destination.deletingLastPathComponent()
+      try FileManager.default.createDirectory(at:parent,withIntermediateDirectories:true)
+      let staging=parent.appendingPathComponent(".prepare-"+UUID().uuidString)
+      try FileManager.default.createDirectory(at:staging,withIntermediateDirectories:false)
+      defer { try? FileManager.default.removeItem(at:staging) }
+      let original=inputs[0]["path"] as! String,name="union-guide.rgb24"
+      let digest=try await NativeLTXControlGuide.prepare(source:URL(fileURLWithPath:original),
+        destination:staging.appendingPathComponent(name),width:config["width"] as! Int,height:config["height"] as! Int,
+        frames:frames,fps:fps,editorialDuration:context.clip.duration)
+      inputs[0]["path"]=destination.appendingPathComponent(name).path;inputs[0]["sha256"]=digest;inputs[0]["format"]="rgb24"
+      conditioning["inputs"]=inputs;content["conditioning"]=conditioning
+      var report=composed["report"] as! [String:Any]
+      report["resolvedFingerprint"]=try fingerprint(content)
+      report["controlGuide"]=["source":original,"sha256":digest,"frames":frames,
+        "width":(config["width"] as! Int)/4,"height":(config["height"] as! Int)/4,"nativePreparation":"swift"]
+      try data(content).write(to:staging.appendingPathComponent("recipe.json"),options:.withoutOverwriting)
+      try data(request).write(to:staging.appendingPathComponent("editor-request.json"),options:.withoutOverwriting)
+      try Task.checkCancellation();try FileManager.default.moveItem(at:staging,to:destination)
+      composed["report"]=report
+      return ["recipePath":destination.appendingPathComponent("recipe.json").path,"prompt":content["prompt"]!,"report":report]
+    }
     if let source = context.movieSource {
       let provisional = try compose(context, moviePath: source.url.path,
         movieSHA256: String(repeating: "0", count: 64))

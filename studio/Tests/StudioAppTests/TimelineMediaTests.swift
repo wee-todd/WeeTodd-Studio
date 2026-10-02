@@ -5,6 +5,55 @@ import XCTest
 @testable import WeeToddStudio
 
 final class TimelineMediaTests: XCTestCase {
+  @MainActor func testSwiftH3ExtensionAcceptsNewFramesWithoutPythonAndReopens() async throws {
+    let folder=try directory()
+    let generated=ProcessInfo.processInfo.environment["WEETODD_H3_EXTENSION_RESULT_MOVIE"]
+    let result:URL
+    if let generated { result=URL(fileURLWithPath:generated) }
+    else {
+      let video=try await movie(in:folder),sound=try audio(in:folder)
+      let ffmpeg=URL(fileURLWithPath:ProcessInfo.processInfo.environment["WEETODD_TEST_FFMPEG"] ?? "/opt/homebrew/bin/ffmpeg")
+      guard FileManager.default.isExecutableFile(atPath:ffmpeg.path) else { throw XCTSkip("Audiovisual fixture needs FFmpeg") }
+      result=folder.appendingPathComponent("audiovisual.mp4")
+      let mux=Process();mux.executableURL=ffmpeg
+      mux.arguments=["-hide_banner","-loglevel","error","-i",video.path,"-i",sound.path,
+        "-c:v","copy","-c:a","aac","-shortest",result.path]
+      try mux.run();mux.waitUntilExit();XCTAssertEqual(mux.terminationStatus,0)
+    }
+    let invocation:Bridge.Invocation = { command,_,_,_ in
+      guard command == "h3-native-render" || command == "h3-native-describe" else {
+        throw StudioError.invalid("Unexpected non-native command: \(command)")
+      }
+      return command == "h3-native-render" ? ["video":result.path,"nativeRuntime":"swift-mlx"] : [:]
+    }
+    let store=StudioStore(dataDirectory:folder,restoreSession:false,invocation:invocation)
+    store.runtime.nativeH3Enabled=true;store.runtime.pythonPath="/unavailable/python"
+    var source=Clip(engine:.h3);source.sourcePath=result.path;source.duration=2.5
+    var target=Clip(engine:.h3);target.duration=generated == nil ? 2.5 : 4
+    target.extensionDirection="after";target.extensionSource=source.sourcePath;target.extensionClipID=source.id
+    store.project.clips=[source,target];store.selectedClipID=target.id
+    store.preparedRecipe="/tmp/prepared/native-extension.json"
+    store.preparedFingerprint=store.signature(for:target)
+    await store.renderPrepared()
+    XCTAssertNil(store.error)
+    XCTAssertEqual(store.project.clips[0],source)
+    let accepted=try XCTUnwrap(store.selectedClip),take=try XCTUnwrap(accepted.versions.last)
+    XCTAssertEqual(accepted.sourceIn,0);XCTAssertEqual(accepted.duration,target.duration)
+    XCTAssertEqual(take.usableSourceIn,0)
+    let saved=folder.appendingPathComponent("extension.weetodd")
+    try ProjectStorage.write(store.project,to:saved)
+    let reopened=StudioStore(dataDirectory:folder,restoreSession:false);reopened.load(saved)
+    XCTAssertEqual(reopened.project.clips[1],accepted)
+    if let evidence=ProcessInfo.processInfo.environment["WEETODD_H3_EXTENSION_ACCEPTANCE_EVIDENCE"] {
+      let evidenceURL=URL(fileURLWithPath:evidence)
+      let retained=evidenceURL.deletingLastPathComponent().appendingPathComponent("accepted-corrected.weetodd")
+      try ProjectStorage.write(store.project,to:retained)
+      let body:[String:Any]=["video":result.path,"sourceIn":accepted.sourceIn,"duration":accepted.duration,
+        "acceptedProject":retained.path,"pythonPath":store.runtime.pythonPath,"renderReceiptReplayed":true,
+        "acceptanceAndReopening":"passed"]
+      try JSONSerialization.data(withJSONObject:body,options:[.prettyPrinted,.sortedKeys]).write(to:evidenceURL)
+    }
+  }
   func directory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
