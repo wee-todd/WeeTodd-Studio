@@ -17,9 +17,11 @@ two-round Studio-style recipe passed installed-weight preflight at
 graph through the Swift worker. A separate one-round 49-frame Swift render
 delivered first/final decoded previews, visible temporal sampling progress,
 and staged release events; cancelling a second worker during sampling exited
-with status 130 without publishing partial media. Dedicated Studio DFR controls,
-a Studio-triggered render, broader ComfyUI route parity, higher-resolution
-memory, matched performance and broad audiovisual quality remain open.
+with status 130 without publishing partial media. An installed-app Studio job
+also prepared and rendered one-round DFR with Python unavailable, delivered two
+previews, accepted the take, and reopened the saved project. Dedicated Studio
+DFR controls, broader route parity, higher-resolution memory, matched
+performance and broad audiovisual quality remain open.
 
 Swift LTX 2.5 spatial DFR 2026-10-02 (experimental direct-worker route): strict
 version-8 requests use the installed distilled Q8 transformer and complete

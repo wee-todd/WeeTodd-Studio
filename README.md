@@ -179,9 +179,10 @@ frames with matching audio duration. The direct Swift worker also accepts one or
 learned temporal x2 rounds. A two-round 512 × 256 test published 193 frames at
 96 fps with synchronized audio; reviewed seam frames retained normal color after
 generated-slot noise and tile-handoff fixes. A Studio-style two-round DFR recipe passed
-the installed Swift worker's 193-frame/96-fps preflight; a Studio-triggered render has
-not yet been qualified. Studio's dedicated DFR controls still use Python,
-and audiovisual quality needs broader review.
+the installed Swift worker's 193-frame/96-fps preflight. A one-round Studio job
+rendered with the packaged Swift worker and Python unavailable, delivered two decoded
+previews, accepted a take and reopened the saved project. Studio's dedicated DFR
+controls still use Python; audiovisual quality needs broader review.
 Independent H3 A2V with a bounded timeline audio driver and optional opening image is
 experimental; its source conditions generated sound and motion rather than being copied.
 
