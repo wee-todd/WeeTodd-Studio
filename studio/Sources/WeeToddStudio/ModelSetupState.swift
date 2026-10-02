@@ -5,6 +5,7 @@ import StudioCore
   @Published var presets: [ModelSetupPreset] = []
   @Published var downloads: [ModelSetupDownload] = []
   @Published var loadingCatalog = false
+  @Published var scanning = false
   @Published var catalogError = ""
   @Published var selectedPreset: ModelSetupPreset?
   @Published var roots: [String] = []
@@ -77,13 +78,20 @@ import StudioCore
   }
 
   func scan(store: StudioStore) async {
-    guard let preset = selectedPreset, !roots.isEmpty else { return }
+    guard let preset = selectedPreset, !roots.isEmpty, !scanning else { return }
+    scanning = true
     error = ""
     resultPath = ""
-    defer { captureLog(store.bridge) }
+    defer { scanning = false; captureLog(store.bridge) }
     do {
       if preset.id.hasPrefix("swift-") {
-        warnings = ["Import components directly below. Text-to-video setup runs worker preflight now; media tasks run it after clip media is attached."]
+        let presetID = preset.id, selectedRoots = roots
+        let result = try await Task.detached(priority: .userInitiated) {
+          try NativeModelSetup.scan(presetID: presetID, roots: selectedRoots)
+        }.value
+        guard selectedPreset?.id == presetID, roots == selectedRoots else { return }
+        selection.applyScan(result.candidates)
+        warnings = result.warnings
         return
       }
       let response = try await store.bridge.invoke(

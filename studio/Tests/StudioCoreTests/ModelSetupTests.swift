@@ -129,4 +129,62 @@ final class ModelSetupTests: XCTestCase {
     XCTAssertThrowsError(try NativeModelSetup.recipe(preset: preset, selected: selected,
       memoryMode: .automatic))
   }
+
+  func testNativeScanUsesHeadersAndManifestsWithoutReadingWeights() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    func tensor(_ name: String, metadata: [String: String], names: [String]) throws -> URL {
+      let file = root.appendingPathComponent(name)
+      var header: [String: Any] = ["__metadata__": metadata]
+      for key in names { header[key] = ["dtype": "F32", "shape": [1], "data_offsets": [0, 4]] }
+      let bytes = try JSONSerialization.data(withJSONObject: header)
+      var prefix = UInt64(bytes.count).littleEndian
+      var output = withUnsafeBytes(of: &prefix) { Data($0) }
+      output.append(bytes)
+      output.append(contentsOf: [0, 0, 0, 0])
+      try output.write(to: file)
+      return file
+    }
+    let transformer = try tensor("arbitrary.safetensors", metadata: [
+      "model_version": "2.5.0", "config": "{\"transformer\":{\"num_layers\":48}}"
+    ], names: ["model.diffusion_model.patchify_proj.weight"])
+    _ = try tensor("misleading-ltx-transformer.safetensors", metadata: [:], names: ["wrong.weight"])
+    let upscaler = try tensor("upscale.safetensors", metadata: [
+      "config": "{\"_class_name\":\"LatentUpsampler\",\"in_channels\":128,\"dims\":3,\"spatial_upsample\":true,\"temporal_upsample\":false}"
+    ], names: ["initial_conv.weight"])
+    let scan = try NativeModelSetup.scan(presetID: "swift-ltx25-text", roots: [root.path])
+    XCTAssertEqual(scan.candidates["transformer_path"], [transformer.path])
+    XCTAssertEqual(scan.candidates["spatial_upscaler_path"], [upscaler.path])
+    XCTAssertTrue(scan.candidates["audio_vae_path", default: []].isEmpty)
+    XCTAssertTrue(scan.warnings.contains { $0.contains("audio VAE") })
+  }
+
+  func testNativeScanDistinguishesH3TaskPartitions() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    for (name, partition, tasks) in [("FL2VA", "fl2va", ["t2va", "fl2va"]),
+      ("Ref2VA", "ref2va", ["ref2va"])] {
+      let folder = root.appendingPathComponent(name)
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+      let document: [String: Any] = ["_minimax_h3": ["partition": partition, "tasks": tasks]]
+      try JSONSerialization.data(withJSONObject: document).write(to: folder.appendingPathComponent("model_index.json"))
+    }
+    let image = try NativeModelSetup.scan(presetID: "swift-h3-image", roots: [root.path])
+    let reference = try NativeModelSetup.scan(presetID: "swift-h3-reference", roots: [root.path])
+    XCTAssertEqual(image.candidates["checkpoint"], [root.appendingPathComponent("FL2VA").path])
+    XCTAssertEqual(reference.candidates["checkpoint"], [root.appendingPathComponent("Ref2VA").path])
+  }
+
+  func testInstalledNativeScanFindsCompatibleStacksWhenRequested() throws {
+    guard let root = ProcessInfo.processInfo.environment["WEETODD_NATIVE_SCAN_ROOT"] else {
+      throw XCTSkip("Opt-in installed-model discovery")
+    }
+    for presetID in ["swift-h3-image", "swift-h3-reference", "swift-ltx25-text"] {
+      let result = try NativeModelSetup.scan(presetID: presetID, roots: [root])
+      let missing = result.candidates.filter { $0.value.isEmpty }.map(\.key).sorted()
+      XCTAssertTrue(missing.isEmpty, "\(presetID) missing \(missing); \(result.warnings)")
+    }
+  }
 }

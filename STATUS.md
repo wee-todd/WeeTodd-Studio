@@ -1,5 +1,15 @@
 # WeeTodd Studio implementation status
 
+Swift native model discovery 2026-10-02 (ordinary profiles): Studio scans user-selected
+folders for H3 and LTX 2.5 components with bounded manifest and SafeTensors header reads.
+It skips model payloads and known cache/page folders, follows installed symlinked models,
+deduplicates candidates, and keeps scanning off the UI thread. The installed ComfyUI model
+library supplied complete H3 image/reference and LTX 2.5 text candidate sets in a focused
+scan test. Model choice remains explicit when multiple candidates match. Worker preflight
+still validates the selected complete stack. Managed downloads, specialized-adapter setup
+and full distribution qualification remain open; the scan alone does not close the
+Python-free setup gate.
+
 Swift native model setup 2026-10-01 (ordinary profiles): when a bundled worker is
 enabled, Studio lists H3 text/image/reference and LTX 2.5 text/image Swift presets
 without invoking Python. Users link existing components in place; the Swift
@@ -7,8 +17,8 @@ profile builder writes bounded headless-v2 recipes and invokes the selected
 worker's preflight for text-to-video before retaining a profile. Image and
 reference profiles require clip media and run preflight at clip preparation.
 Focused tests passed with Python unavailable, and installed H3 and LTX 2.5
-component sets each passed the generated profile's worker preflight. Folder
-scanning, managed downloads, specialized adapter setup and full distribution
+component sets each passed the generated profile's worker preflight. Managed
+downloads, specialized adapter setup and full distribution
 qualification remain open.
 
 Swift H3 continuation and external extension 2026-10-01 (experimental direct-worker

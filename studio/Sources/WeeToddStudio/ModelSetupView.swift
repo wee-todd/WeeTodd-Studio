@@ -78,11 +78,7 @@ struct ModelSetupView: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 18) {
             Text(preset.description).font(.callout).foregroundStyle(.secondary)
-            if !preset.id.hasPrefix("swift-") { existingModels }
-            else {
-              Text("Import each installed component below. Files stay in place; model weights are not copied.")
-                .font(.caption).foregroundStyle(.secondary)
-            }
+            existingModels
             componentChoices
             memoryPolicy
             if !compatibleDownloads.isEmpty { downloads.id("modelDownloads") }
@@ -196,7 +192,8 @@ struct ModelSetupView: View {
           }
         }
         Button("Scan Selected Folders") { Task { await state.scan(store: store) } }
-          .disabled(state.roots.isEmpty)
+          .disabled(state.roots.isEmpty || state.scanning)
+        if state.scanning { ProgressView().controlSize(.small) }
       }
     }.disabled(bridge.busy)
   }

@@ -8,6 +8,11 @@ and assemble the results in a native macOS editor. WeeTodd Studio is the primary
 Our **ComfyUI nodes remain maintained** for users who prefer graphs, automation and reusable pipelines.
 The standalone app runs without ComfyUI.
 
+Swift H3 and LTX 2.5 setup can find compatible components in folders you select,
+including existing ComfyUI model libraries. Discovery reads bounded metadata and leaves
+weights in place. Managed downloads and specialized adapter setup still require the
+optional legacy setup route.
+
 [Get started](#get-started) · [Studio guide](studio/README.md) ·
 [Make a movie with Director](#make-a-movie-with-director) ·
 [Create a music video](#create-a-music-video) ·
@@ -408,9 +413,9 @@ Open **Studio Settings → Model setup**, choose a model/task preset, and use **
 or the model download controls. **Create Recipe** validates the component set. On a clip, choose
 **WeeTodd (local)** and its **Model**; compatible installed components are selected automatically.
 With the Swift worker enabled, ordinary H3 and LTX 2.5 presets can link installed components and
-create profiles without Python. Text-to-video setup runs worker preflight immediately; image and
-reference profiles run it after clip media is attached. Folder scanning and managed downloads remain
-on the optional Python setup route.
+create profiles without Python. Folder scanning reads bounded component metadata without copying
+weights. Text-to-video setup runs worker preflight immediately; image and reference profiles run it
+after clip media is attached. Managed downloads remain on the optional Python setup route.
 Native H3, LTX 2.3 and LTX 2.5 offer different conditioning and sampling controls.
 Use the [model setup guide](studio/README.md#guided-model-setup) and
 [clip generation controls](studio/README.md#clip-generation-controls) for the supported combinations.
@@ -838,8 +843,9 @@ Studio users can open **Studio Settings → Model setup**, choose an H3/LTX pres
 **Use Existing Models**. Scan an existing ComfyUI model folder or another shared library, resolve
 any ambiguous components, then create a validated recipe. Weights remain in their existing locations.
 Image/reference presets prepare the components first; required clip media is validated after attachment.
-The Swift H3/LTX 2.5 presets use direct component import rather than folder scanning; their
-text-to-video profiles pass the selected Swift worker's preflight before appearing in Studio.
+The Swift H3/LTX 2.5 presets also scan folders or import individual components without copying
+weights. Their text-to-video profiles pass the selected Swift worker's preflight before appearing
+in Studio.
 See [guided setup](studio/README.md#guided-model-setup) and the
 [portable LTX 2.5 recipe example](examples/headless/ltx25_distilled_q8_t2v.json).
 

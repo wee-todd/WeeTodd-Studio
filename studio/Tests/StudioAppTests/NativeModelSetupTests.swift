@@ -3,6 +3,28 @@ import StudioCore
 @testable import WeeToddStudio
 
 final class NativeModelSetupTests: XCTestCase {
+  @MainActor func testNativeFolderScanUpdatesSetupWithoutPython() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let checkpoint = root.appendingPathComponent("FL2VA")
+    try FileManager.default.createDirectory(at: checkpoint, withIntermediateDirectories: true)
+    try JSONSerialization.data(withJSONObject: ["_minimax_h3": [
+      "partition": "fl2va", "tasks": ["t2va", "fl2va"]
+    ]]).write(to: checkpoint.appendingPathComponent("model_index.json"))
+    let store = StudioStore(dataDirectory: root, restoreSession: false)
+    store.runtime = RuntimeSettings(root: "/missing", pythonPath: "/missing/python",
+      profilesDirectory: root.appendingPathComponent("profiles").path)
+    let state = ModelSetupState()
+    let preset = try XCTUnwrap(NativeModelSetup.catalog().first { $0.id == "swift-h3-image" })
+    state.begin(preset)
+    state.roots = [root.path]
+    await state.scan(store: store)
+    XCTAssertTrue(state.error.isEmpty, state.error)
+    XCTAssertEqual(state.selection.components["checkpoint"], checkpoint.path)
+    XCTAssertFalse(state.scanning)
+  }
+
   @MainActor func testInstalledComponentsPassSwiftSetupPreflightWithoutPython() async throws {
     let environment = ProcessInfo.processInfo.environment
     guard let source = environment["WEETODD_NATIVE_SETUP_SOURCE"],

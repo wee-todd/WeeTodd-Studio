@@ -81,9 +81,9 @@ process peak, excluding FFmpeg; its exact cut began at frame 48. A Studio run pr
 rendered, accepted both shot ranges as one take, saved and reopened the project with
 Python unavailable. Specialized controls still require the explicitly selected Python
 route.
-Ordinary H3 and LTX 2.5 model setup now links existing components and creates native
-profiles without Python. Folder scanning, managed downloads, specialized adapter setup,
-asset/library tools and other engines remain separate migration work; this is not yet a
+Ordinary H3 and LTX 2.5 model setup now scans selected folders, links compatible
+installed components and creates native profiles without Python. Managed downloads,
+specialized adapter setup, asset/library tools and other engines remain separate migration work; this is not yet a
 fully Python-free Studio release.
 The experimental Swift H3 worker has completed text-to-audiovisual, reference-conditioned
 and independent audio-driven takes.
@@ -663,8 +663,10 @@ configure the native MLX engines.
    source terms and destination for review; it does not immediately start the transfer. Components
    without a catalog download can still be imported. Validation explains incompatible architecture
    or task support.
-   Swift H3/LTX 2.5 presets instead use **Import…** for each installed component, with no
-   Python process or weight copy. Folder scanning and managed downloads remain on the optional
+   Swift H3/LTX 2.5 presets use the same folder scan or **Import…** for each installed
+   component, with no Python process or weight copy. Their scan reads bounded metadata;
+   the selected worker validates the complete stack before a text render or after clip media
+   is attached for an image/reference render. Managed downloads remain on the optional
    Python setup route.
 3. Use **Automatic** to select a lower-memory policy on Macs with 64 GB or less, **Lower Memory** to
    request supported memory-saving settings, or **Custom** to retain the preset policy for later
