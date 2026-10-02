@@ -73,7 +73,8 @@ import MLX
     if let direct=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any],
       ((direct["version"] as? Int == 5 && direct["task"] as? String == "union_control") ||
         (direct["version"] as? Int == 6 && direct["task"] as? String == "ingredients") ||
-        (direct["version"] as? Int == 7 && direct["task"] as? String == "msr")) {
+        (direct["version"] as? Int == 7 && direct["task"] as? String == "msr") ||
+        (direct["version"] as? Int == 8 && direct["task"] as? String == "dfr")) {
       request=try JSONDecoder().decode(MLXDistilledRequest.self,from:recipeData)
       guard URL(fileURLWithPath:request.outputDirectory).standardizedFileURL.path ==
         URL(fileURLWithPath:args[4]).standardizedFileURL.path else {

@@ -17,6 +17,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
   public let unionControlGuide:MLXUnionControlGuide?
   public let ingredientsSheet:MLXIngredientsSheet?
   public let msr:MLXMSRRequest?
+  public let dfr:MLXDFRRequest?
   public let noisePolicy:MLXNoisePolicy
   enum CodingKeys:String,CodingKey,CaseIterable {
     case version,engine,task,prompt,width,height,frames,fps,seed
@@ -24,7 +25,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     case audioReference="audio_reference"
     case unionControlGuide="union_control_guide"
     case ingredientsSheet="ingredients_sheet"
-    case msr
+    case msr,dfr
     case gemmaRoot="gemma_root",transformerRoot="transformer_root",connectorCheckpoint="connector_checkpoint"
     case videoCheckpoint="video_checkpoint",audioCheckpoint="audio_checkpoint",spatialUpscalerCheckpoint="spatial_upscaler_checkpoint"
     case outputDirectory="output_directory",stageOneLoras="stage_one_loras",stageTwoLoras="stage_two_loras"
@@ -45,6 +46,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if requestVersion < 5 { expected.remove("union_control_guide") }
     if requestVersion < 6 { expected.remove("ingredients_sheet") }
     if requestVersion < 7 { expected.remove("msr") }
+    if requestVersion < 8 { expected.remove("dfr") }
     guard Set(all.allKeys.map(\.stringValue)) == expected else {
       throw LTXError.invalid("Two-stage request has missing or unsupported fields.")
     }
@@ -67,8 +69,10 @@ public struct MLXDistilledRequest:Codable,Sendable {
     audioReference=version < 4 ? nil : try c.decodeIfPresent(MLXAudioReference.self,forKey:.audioReference)
     unionControlGuide=version < 5 ? nil : try c.decodeIfPresent(MLXUnionControlGuide.self,forKey:.unionControlGuide)
     ingredientsSheet=version < 6 ? nil : try c.decodeIfPresent(MLXIngredientsSheet.self,forKey:.ingredientsSheet)
-    msr=version < 7 ? nil : try c.decode(MLXMSRRequest.self,forKey:.msr)
+    msr=version < 7 ? nil : try c.decodeIfPresent(MLXMSRRequest.self,forKey:.msr)
+    dfr=version < 8 ? nil : try c.decodeIfPresent(MLXDFRRequest.self,forKey:.dfr)
     noisePolicy=version < 3 ? .native : try c.decode(MLXNoisePolicy.self,forKey:.noisePolicy)
+    let dfrCanvas=try version == 8 ? MLXDFRCanvas(frames:frames) : nil
     let roles=referenceImages.map(\.role)
     guard (version == 4 && task == "a2v" && (roles.isEmpty || roles == ["first"]) && audioReference != nil) ||
       (version == 5 && task == "union_control" && roles.isEmpty &&
@@ -80,6 +84,11 @@ public struct MLXDistilledRequest:Codable,Sendable {
       (version == 7 && task == "msr" && roles.isEmpty && audioReference == nil &&
         unionControlGuide == nil && ingredientsSheet == nil && msr != nil &&
         stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX) ||
+      (version == 8 && task == "dfr" &&
+        (roles.isEmpty || roles == ["first"] || roles == ["first","last"]) && audioReference == nil &&
+        unionControlGuide == nil && ingredientsSheet == nil && msr == nil && dfr != nil &&
+        stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX &&
+        dfrCanvas != nil) ||
       (version == 1 && task == "t2v") || ((version == 2 || version == 3) &&
       ((task == "t2v" && roles.isEmpty) || (task == "i2v" && roles == ["first"]) || (task == "fflf" && roles == ["first","last"] && frames>1))) else {
       throw LTXError.invalid("Request version/task must match its explicit ordered endpoint references.")
@@ -104,6 +113,11 @@ public struct MLXDistilledRequest:Codable,Sendable {
         throw LTXError.invalid("MSR adapter must appear only in its dedicated single-stage slot.")
       }
     }
+    if let dfr {
+      guard !(stageOneLoras + stageTwoLoras).contains(where: { $0.path == dfr.adapterPath }) else {
+        throw LTXError.invalid("DFR detailing adapter must appear only in its dedicated second-stage slot.")
+      }
+    }
     for path in [gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,spatialUpscalerCheckpoint,outputDirectory] {
       guard path.hasPrefix("/"), path.utf8.count <= 4096, !path.utf8.contains(0) else {
         throw LTXError.invalid("Model and output paths must be explicit absolute local paths.")
@@ -126,9 +140,11 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if version >= 5 { try c.encode(unionControlGuide,forKey:.unionControlGuide) }
     if version >= 6 { try c.encode(ingredientsSheet,forKey:.ingredientsSheet) }
     if version >= 7 { try c.encode(msr,forKey:.msr) }
+    if version >= 8 { try c.encode(dfr,forKey:.dfr) }
   }
   public func recipe() throws -> DistilledTwoStageRecipe {
-    try DistilledTwoStageRecipe(width:width,height:height,frames:frames,fps:fps,seed:seed)
+    try DistilledTwoStageRecipe(width:width,height:height,
+      frames:dfr == nil ? frames : MLXDFRCanvas(frames:frames).frames,fps:fps,seed:seed)
   }
   public static func load(_ url:URL) throws -> Self {
     guard url.isFileURL else { throw LTXError.invalid("Request must be a local file.") }
@@ -144,6 +160,27 @@ public struct MLXDistilledRequest:Codable,Sendable {
     let data=try handle.read(upToCount:1024*1024+1) ?? Data()
     guard data.count <= 1024*1024 else { throw LTXError.invalid("Request exceeds1MiB.") }
     return try JSONDecoder().decode(Self.self,from:data)
+  }
+}
+
+/// The official Pixel-Spatial x2 adapter applies to DFR's full-resolution stage.
+public struct MLXDFRRequest:Codable,Sendable {
+  public let adapterPath:String
+  public let adapterStrength:Float
+  enum CodingKeys:String,CodingKey,CaseIterable {
+    case adapterPath="adapter_path",adapterStrength="adapter_strength"
+  }
+  public init(from decoder:Decoder) throws {
+    let c=try decoder.container(keyedBy:CodingKeys.self)
+    guard Set(c.allKeys.map(\.stringValue)) == Set(CodingKeys.allCases.map(\.rawValue)) else {
+      throw LTXError.invalid("DFR needs its exact detailing-adapter fields.")
+    }
+    adapterPath=try c.decode(String.self,forKey:.adapterPath)
+    adapterStrength=try c.decode(Float.self,forKey:.adapterStrength)
+    guard adapterPath.hasPrefix("/"),adapterPath.utf8.count <= 4096,!adapterPath.utf8.contains(0),
+      adapterStrength.isFinite,adapterStrength > 0,adapterStrength <= 3 else {
+      throw LTXError.invalid("DFR detailing adapter path or strength is invalid.")
+    }
   }
 }
 

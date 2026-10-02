@@ -4,6 +4,22 @@ import InferenceTestSupport
 @testable import LTX25Engine
 
 final class LTXAdapterCompatibilityTests: XCTestCase {
+  func testPixelSpatialDFRRejectsIncompleteOrMisclassifiedAdapter() throws {
+    let tensors: [(String, [Int], String)] = [
+      ("diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.weight", [32, 4096], "BF16"),
+      ("diffusion_model.transformer_blocks.0.attn1.to_q.lora_B.weight", [4096, 32], "BF16")]
+    for metadata in [
+      ["model_version":"2.5","reference_downscale_factor":"2","reference_spatial_scale_factor":"2"],
+      ["model_version":"2.3","reference_downscale_factor":"2","reference_spatial_scale_factor":"2"],
+      ["model_version":"2.5","reference_downscale_factor":"1","reference_spatial_scale_factor":"2"],
+      ["model_version":"2.5","reference_downscale_factor":"2","reference_spatial_scale_factor":"1"]] {
+      try withTensorFile(metadata:metadata,tensors:tensors) { url in
+        let file=try SafeTensorFile(url:url)
+        XCTAssertThrowsError(try LTXAdapterCompatibility.pixelSpatialDFRPlan(file:file,strength:0.5))
+        XCTAssertThrowsError(try LTXAdapterCompatibility.standardPlan(file:file,strength:0.5))
+      }
+    }
+  }
   func testLTX23MetadataAndComfyNamesRemainCompatibleWith25() throws {
     try withTensorFile(metadata: ["model_version": "2.3.0", "lora_alpha": "4"], tensors: [
       ("diffusion_model.transformer_blocks.0.attn1.to_out.0.lora_A.weight", [2, 4096], "BF16"),

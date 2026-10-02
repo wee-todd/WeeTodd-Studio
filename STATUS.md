@@ -1,5 +1,21 @@
 # WeeTodd Studio implementation status
 
+Swift LTX 2.5 spatial DFR 2026-10-02 (experimental direct-worker route): strict
+version-8 requests use the installed distilled Q8 transformer and complete
+rank-32 Pixel-Spatial x2 LoRA at strength 0.5 in stage two. Swift generates
+seam keyframe slots, applies the checkpoint's learned marker, upscales both
+the video and keyframes, and conditions stage two on the clean half-resolution
+stage-one latent. Text, first-image and first/last-image requests are admitted;
+text and first/last requests produced 49-frame 512 × 256/24 fps MP4s, and a
+41-frame request padded internally to 49 frames then published exactly 41
+video frames with 82,000 stereo 48 kHz audio samples. The text-only job took
+48.49 seconds at a 3.55 GB Swift-process peak; first/last took 42.60 seconds
+at 3.15 GB, external FFmpeg excluded. The first/last contact sheet shows the
+cup leave the shelf and the final empty shelf. The text-only sample's quiet
+ambient track measured -69.5 dBFS mean/-57.8 dBFS peak; broader sound and
+visual quality are not accepted. Studio/ComfyUI routing, temporal DFR rounds,
+large geometry, lifecycle and matched speed/memory remain open.
+
 Swift native model discovery 2026-10-02 (ordinary profiles): Studio scans user-selected
 folders for H3 and LTX 2.5 components with bounded manifest and SafeTensors header reads.
 It skips model payloads and known cache/page folders, follows installed symlinked models,

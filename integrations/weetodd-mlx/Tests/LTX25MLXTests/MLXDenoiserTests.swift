@@ -4,6 +4,27 @@ import LTX25Engine
 @testable import LTX25MLX
 
 final class MLXDenoiserTests: XCTestCase {
+  func testGeneratedKeyframeMarkerChangesOnlyMarkedProjectionRows() throws {
+    let f = try fixture()
+    let inputs = f.inputs.mapValues { MLXArray($0) }
+    let blocks: MLXDenoiser.BlockProvider = { try self.weight("transformer_blocks.\($0)." + $1, $2) }
+    let baseline = try MLXDenoiser(configuration: f.configuration, blockCount: 1)
+      .evaluate(inputs, sigma: f.sigma, fixedWeights: weight, blockWeights: blocks)
+    var markerReads = 0
+    let marked = try MLXDenoiser(configuration: f.configuration, blockCount: 1, keyframeMarkerRows: 1)
+      .evaluate(inputs, sigma: f.sigma, fixedWeights: { name, shape in
+        if name == "keyframes_abs_pos_embedding" {
+          markerReads += 1
+          XCTAssertEqual(shape, [1, f.configuration.videoDimension])
+          return try MLXWeight(dense: MLXArray.ones(shape) * 3)
+        }
+        return try self.weight(name, shape)
+      }, blockWeights: blocks)
+    XCTAssertEqual(markerReads, 1)
+    XCTAssertGreaterThan((marked["video"]! - baseline["video"]!).abs().max().item(Float.self), 0.0001)
+    XCTAssertThrowsError(try MLXDenoiser(configuration: f.configuration, blockCount: 1,
+      keyframeMarkerRows: f.configuration.videoTokens + 1))
+  }
   struct Fixture: Decodable {
     let configuration: AVBlockConfiguration
     let inputs: [String:[Float]]

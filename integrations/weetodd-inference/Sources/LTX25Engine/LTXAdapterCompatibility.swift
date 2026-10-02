@@ -111,6 +111,27 @@ public enum LTXAdapterCompatibility {
     return plan
   }
 
+  /// Pixel-Spatial x2 is a stage-two DFR task adapter, not an ordinary LoRA.
+  /// Its reference metadata and complete rank-32 projection set are required.
+  public static func pixelSpatialDFRPlan(file: SafeTensorFile, strength: Float) throws -> LoRAPlan {
+    guard file.metadata["model_version"] == "2.5",
+      file.metadata["reference_downscale_factor"] == "2",
+      file.metadata["reference_spatial_scale_factor"] == "2" else {
+      throw LTXError.invalid("DFR needs the LTX 2.5 Pixel-Spatial x2 reference adapter.")
+    }
+    let plan = try LoRAPlan(file:file,strength:strength,targetShapes:targetShapes,normalize:normalize)
+    let expected = Set((0..<48).flatMap { block in
+      ["attn1.to_k","attn1.to_out","attn1.to_q","attn1.to_v",
+       "attn2.to_k","attn2.to_out","attn2.to_q","attn2.to_v",
+       "ff.proj_in","ff.proj_out"].map { "transformer_blocks.\(block).\($0)" }
+    })
+    guard plan.pairs.count == 480,Set(plan.pairs.map(\.target)) == expected,
+      plan.pairs.allSatisfy({ $0.rank == 32 }) else {
+      throw LTXError.invalid("DFR needs its complete 48-block rank-32 Pixel-Spatial adapter.")
+    }
+    return plan
+  }
+
   public static func normalize(_ source: String) -> String? {
     var key = source
     let prefixes = ["base_model.model.model.diffusion_model.", "base_model.model.diffusion_model.",

@@ -20,6 +20,9 @@ Any scene shot may use one first-frame image. One consecutive interval of the sa
 audio source can drive every shot, including shots with an image. Studio renders the
 group as one movie and accepts all member ranges together. Specialized IC-LoRA, MSR,
 Ingredients and DFR controls still use the explicitly selected Python route.
+An experimental direct Swift worker can execute spatial DFR from a version-8
+request with an installed Pixel-Spatial x2 adapter, including first/last images.
+This has not been wired to Studio's DFR controls or temporal refinement.
 The worker reuses installed paged
 weights and the shared renderer. Unsupported controls fail native preflight; turn the option
 off explicitly for advanced workflows still provided by Python.

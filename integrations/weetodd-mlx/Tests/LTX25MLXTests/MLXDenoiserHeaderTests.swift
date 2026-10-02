@@ -90,6 +90,13 @@ final class MLXDenoiserHeaderTests: XCTestCase {
     let tensors=shapes.map { ($0.key,$0.value,"F32") }
     try withTensorFile(tensors:tensors) { url in
       XCTAssertNoThrow(try MLXFixedSource(url:url,configuration:c))
+      XCTAssertThrowsError(try MLXFixedSource(url:url,configuration:c,requireKeyframeMarker:true))
+    }
+    try withTensorFile(tensors:tensors+[("model.diffusion_model.keyframes_abs_pos_embedding",
+      [1,c.videoDimension],"F32")]) { url in
+      let source=try MLXFixedSource(url:url,configuration:c,requireKeyframeMarker:true)
+      XCTAssertEqual(try source.read("keyframes_abs_pos_embedding",shape:[1,c.videoDimension]).shape,
+        [1,c.videoDimension])
     }
     try withTensorFile(tensors:Array(tensors.dropLast())) { url in
       XCTAssertThrowsError(try MLXFixedSource(url:url,configuration:c))

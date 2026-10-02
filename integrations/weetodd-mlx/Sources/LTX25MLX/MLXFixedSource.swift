@@ -11,9 +11,11 @@ public final class MLXFixedSource {
   private let names:[String:String]
   private let shapes:[String:[Int]]
   private let native:MLXNativeWeightSource?
-  public init(url:URL,configuration:AVBlockConfiguration,nativeLoading:Bool=true) throws {
+  public init(url:URL,configuration:AVBlockConfiguration,nativeLoading:Bool=true,
+    requireKeyframeMarker:Bool=false) throws {
     try configuration.validate()
-    let shapes=DenoiserLayout.weightShapes(configuration)
+    var shapes=DenoiserLayout.weightShapes(configuration)
+    if requireKeyframeMarker { shapes["keyframes_abs_pos_embedding"]=[1,configuration.videoDimension] }
     let file=try SafeTensorFile(url:url,maximumHeaderBytes:1024*1024)
     var names:[String:String]=[:]
     for original in file.tensors.keys {

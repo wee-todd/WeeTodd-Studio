@@ -89,7 +89,8 @@ public final class MLXDenoiserWeights {
     unionControlAdapterPath:String?=nil,
     ingredientsAdapterPath:String?=nil,
     msrAdapterPath:String?=nil,
-    maximumActivationBytes:Int=2*1024*1024*1024) throws {
+    maximumActivationBytes:Int=2*1024*1024*1024,requireKeyframeMarker:Bool=false,
+    pixelSpatialDFRAdapterPath:String?=nil) throws {
     try configuration.validate()
     guard root.isFileURL else { throw LTXError.invalid("Paged transformer must be local.") }
     let root=root.resolvingSymlinksInPath().standardizedFileURL
@@ -121,7 +122,8 @@ public final class MLXDenoiserWeights {
       }
       return url
     }
-    let fixed=try MLXFixedSource(url:location(manifest.fixed,requireHash:false),configuration:configuration)
+    let fixed=try MLXFixedSource(url:location(manifest.fixed,requireHash:false),configuration:configuration,
+      requireKeyframeMarker:requireKeyframeMarker)
     guard fixed.tensorCount == manifest.fixed.tensorCount, fixed.tensorBytes == manifest.fixed.tensorBytes else {
       throw LTXError.invalid("Fixed header differs from manifest.")
     }
@@ -137,7 +139,7 @@ public final class MLXDenoiserWeights {
     }
     let stack=try MLXLoRAStack(adapters:adapters,
       unionControlAdapterPath:unionControlAdapterPath,ingredientsAdapterPath:ingredientsAdapterPath,
-      msrAdapterPath:msrAdapterPath)
+      msrAdapterPath:msrAdapterPath,pixelSpatialDFRAdapterPath:pixelSpatialDFRAdapterPath)
     var targets=Dictionary(uniqueKeysWithValues:DenoiserLayout.weightShapes(configuration)
       .filter { $0.key.hasSuffix(".weight") }.map { (String($0.key.dropLast(7)),$0.value) })
     for index in 0..<48 {

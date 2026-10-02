@@ -165,6 +165,12 @@ the Python route. An experimental direct Swift worker MSR route also accepts one
 hash-frozen ordered stills, separately VAE-encodes bounded references, and applies its
 learned-slot LoRA with compact grouped attention. One- and two-image clips completed;
 five images passed memory preflight. Studio's MSR controls remain on their Python route.
+The experimental direct Swift worker also runs spatial DFR with generated keyframe
+slots, a clean half-resolution stage-two reference and the Pixel-Spatial x2 adapter
+at stage two. Text-only and first/last-image requests published 49-frame 512 × 256
+clips; a 41-frame request used a padded internal canvas and published exactly 41
+frames with matching audio duration. Studio DFR controls and temporal DFR refinement
+have not moved to Swift, and audio/visual quality needs broader review.
 Independent H3 A2V with a bounded timeline audio driver and optional opening image is
 experimental; its source conditions generated sound and motion rather than being copied.
 

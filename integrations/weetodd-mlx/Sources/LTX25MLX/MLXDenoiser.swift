@@ -24,6 +24,7 @@ public final class MLXDenoiser {
   private let blockCount:Int
   private let cacheBytes:Int
   private let maximumRotaryBytes:Int
+  private let keyframeMarkerRows:Int
   private var fixedResidentBytes=0
   private var active=false
 
@@ -40,7 +41,12 @@ public final class MLXDenoiser {
   }
 
   public init(configuration:AVBlockConfiguration,blockCount:Int=48,cacheBytes:Int=128*1024*1024,
-    maximumActivationBytes:Int=2*1024*1024*1024,videoAttentionGroups:[Int]=[]) throws {
+    maximumActivationBytes:Int=2*1024*1024*1024,videoAttentionGroups:[Int]=[],
+    keyframeMarkerRows:Int=0) throws {
+    guard keyframeMarkerRows>=0,keyframeMarkerRows<=configuration.videoTokens else {
+      throw LTXError.invalid("Generated keyframe marker rows exceed the video token layout.")
+    }
+    self.keyframeMarkerRows=keyframeMarkerRows
     maximumRotaryBytes=try Self.admitRotary(configuration:configuration,maximumActivationBytes:maximumActivationBytes)
     stack=try MLXAVStack(configuration:configuration,blockCount:blockCount,cacheBytes:cacheBytes,
       maximumActivationBytes:maximumActivationBytes,videoAttentionGroups:videoAttentionGroups)
@@ -160,7 +166,19 @@ public final class MLXDenoiser {
     }
     for (name,prefix) in [("video",""),("audio","audio_")] {
       let rounded=current[name+"_latent"]!.asType(.bfloat16).asType(.float32)
-      prepared[name]=try linear(prefix+"patchify_proj",rounded,weights:fixedWeights,adapters:fixedAdapters)
+      var projection=try linear(prefix+"patchify_proj",rounded,weights:fixedWeights,adapters:fixedAdapters)
+      if name == "video" && keyframeMarkerRows > 0 {
+        let marker=try fixedWeights("keyframes_abs_pos_embedding",[1,configuration.videoDimension])
+        guard marker.shape == [1,configuration.videoDimension] else {
+          throw LTXError.invalid("Generated keyframe marker shape differs from the checkpoint.")
+        }
+        let value=try marker.tensor().asType(.float32)
+        let split=configuration.videoTokens-keyframeMarkerRows
+        projection=concatenated([projection[0..<split],projection[split..<configuration.videoTokens]+value],axis:0)
+        eval(projection)
+        try report("keyframe_marker")
+      }
+      prepared[name]=projection
       prepared[name+"_text"]=current[name+"_text"]!.asType(.bfloat16).asType(.float32)
       try report(prefix+"patchify_proj")
     }

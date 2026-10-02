@@ -42,6 +42,11 @@ routes while native coverage qualifies.
   payload reads. Video, text and audio stay in MLX across stages. The spatial upscaler uses
   full-volume group normalization and the trained convolution/shuffle order; its independent
   installed oracle matches exactly. This does not claim whole-job same-seed bitwise equivalence.
+- Experimental spatial DFR uses the same streamed denoiser with learned generated-keyframe
+  markers, seam-aware canvas padding, an appended clean half-resolution reference in stage two,
+  and a complete rank-32 Pixel-Spatial x2 task adapter scoped to that stage. The direct worker
+  supports text, first-image and first/last-image anchors; temporal DFR rounds and Studio controls
+  remain separate work.
 - The developer media CLI connects trained text, both sampling stages, native video/audio VAEs,
   bounded RGB24 streaming/WAV output and an explicit external FFmpeg muxer. Components unload in order.
   Output publishes from an owned temporary directory only after all stages succeed; cooperative

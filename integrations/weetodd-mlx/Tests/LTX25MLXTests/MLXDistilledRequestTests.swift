@@ -4,6 +4,33 @@ import Darwin
 import LTX25MLX
 
 final class MLXDistilledRequestTests:XCTestCase {
+  func testDFRRequestRequiresDedicatedAdapterAndExactSeamCanvas() throws {
+    var value=base();value["version"]=8;value["task"]="dfr"
+    value["noise_policy"]="mlx_threefry_bf16_v1"
+    value["reference_images"]=[];value["audio_reference"]=NSNull()
+    value["union_control_guide"]=NSNull();value["ingredients_sheet"]=NSNull()
+    value["msr"]=NSNull();value["frames"]=49
+    value["dfr"]=["adapter_path":"/pixel-spatial.safetensors","adapter_strength":0.5]
+    let request=try decode(value)
+    XCTAssertEqual(request.dfr?.adapterStrength,0.5)
+    XCTAssertEqual(try JSONDecoder().decode(MLXDistilledRequest.self,
+      from:JSONEncoder().encode(request)).dfr?.adapterPath,"/pixel-spatial.safetensors")
+    let first:[String:Any]=["role":"first","path":"/first.png","strength":1,"crf":33]
+    let last:[String:Any]=["role":"last","path":"/last.png","strength":0.8,"crf":0]
+    value["reference_images"]=[first,last]
+    XCTAssertEqual(try decode(value).referenceImages.map(\.role),["first","last"])
+    value["reference_images"]=[first]
+    XCTAssertEqual(try decode(value).referenceImages.map(\.role),["first"])
+    value["reference_images"]=[last]
+    XCTAssertThrowsError(try decode(value))
+    value["reference_images"]=[]
+    value["frames"]=41;XCTAssertEqual(try decode(value).recipe().high.frames,49)
+    value["frames"]=49;value["stage_two_loras"]=[["path":"/ordinary.safetensors","strength":1]]
+    XCTAssertThrowsError(try decode(value))
+    value["stage_two_loras"]=[];value["dfr"]=NSNull();XCTAssertThrowsError(try decode(value))
+    value["dfr"]=["adapter_path":"/pixel-spatial.safetensors","adapter_strength":0.5]
+    value["task"]="t2v";XCTAssertThrowsError(try decode(value))
+  }
   func testMSRRequestKeepsOrderedOneToFiveReferencesAndRejectsOtherTasks() throws {
     var value=base();value["version"]=7;value["task"]="msr"
     value["noise_policy"]="mlx_threefry_bf16_v1"

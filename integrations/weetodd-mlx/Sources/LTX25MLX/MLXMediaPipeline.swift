@@ -42,6 +42,7 @@ public final class MLXMediaPipeline {
   private let sampler:MLXDistilledSamplingRunner?
   private let ingredientsSampler:MLXSingleStageRipple?
   private let msrSampler:MLXSingleStageMSR?
+  private let dfrSampler:MLXDFRSamplingRunner?
   private let videoActivationBytes:Int
   private let transformerActivationBytes:Int
   private let videoBackend:MLXVideoBackend
@@ -81,12 +82,18 @@ public final class MLXMediaPipeline {
         try MLXReferenceVideoLayout(geometry:geometry,strength:$0.referenceStrength)
       }
       let msr=try MLXMSRReferencePlan.resolve(request,target:geometry)
+      let dfr=try request.dfr.map { _ in try MLXDFRLayout(geometry:geometry,
+        slotFrames:MLXDFRCanvas(frames:recipe.high.frames).slotFrames,
+        reference:index == 1 ? recipe.low : nil,
+        firstStrength:request.referenceImages.first?.strength,
+        lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil) }
       guard layout == nil || guide == nil else { throw LTXError.invalid("LTX extension cannot combine with endpoint references.") }
       let block=try MLXAVBlock(configuration:AVBlockConfiguration(
-        videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
+        videoTokens:dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
         audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
         maximumActivationBytes:transformerActivationBytes)
-      if layout != nil || union != nil || ingredients != nil || msr != nil { try block.admitPerTokenVideo() }
+      if layout != nil || union != nil || ingredients != nil || msr != nil || (dfr?.referenceTokens ?? 0) > 0 ||
+        (dfr != nil && !request.referenceImages.isEmpty) { try block.admitPerTokenVideo() }
       if guide != nil { try block.admitPerTokenAV() }
       _ = try MLXDenoiser.admitRotary(configuration:block.configuration,maximumActivationBytes:transformerActivationBytes)
     }
@@ -142,13 +149,14 @@ public final class MLXMediaPipeline {
     if let sheet=request.ingredientsSheet {
       sampler=nil
       msrSampler=nil
+      dfrSampler=nil
       ingredientsSampler=try MLXSingleStageRipple(geometry:request.recipe().high,
         referenceStrength:sheet.referenceStrength,
         transformerRoot:URL(fileURLWithPath:request.transformerRoot),
         adapters:[LoRAAdapter(path:sheet.adapterPath,strength:sheet.adapterStrength)],
         task:.ingredients,maximumActivationBytes:transformerActivationBytes)
     } else if let msr=request.msr {
-      sampler=nil;ingredientsSampler=nil
+      sampler=nil;ingredientsSampler=nil;dfrSampler=nil
       guard let layout=try MLXMSRReferencePlan.resolve(request,target:request.recipe().high)?.layout else {
         throw LTXError.invalid("MSR reference layout is missing.")
       }
@@ -156,8 +164,20 @@ public final class MLXMediaPipeline {
         transformerRoot:URL(fileURLWithPath:request.transformerRoot),
         adapter:LoRAAdapter(path:msr.adapterPath,strength:msr.adapterStrength),
         maximumActivationBytes:transformerActivationBytes)
+    } else if let dfr=request.dfr {
+      sampler=nil;ingredientsSampler=nil;msrSampler=nil
+      let recipe=try request.recipe()
+      dfrSampler=try MLXDFRSamplingRunner(recipe:recipe,
+        transformerRoot:URL(fileURLWithPath:request.transformerRoot),
+        upscalerCheckpoint:URL(fileURLWithPath:request.spatialUpscalerCheckpoint),
+        statisticsCheckpoint:URL(fileURLWithPath:request.videoCheckpoint),
+        slotFrames:try MLXDFRCanvas(frames:recipe.high.frames).slotFrames,
+        detailingAdapter:LoRAAdapter(path:dfr.adapterPath,strength:dfr.adapterStrength),
+        firstStrength:request.referenceImages.first?.strength,
+        lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil,
+        maximumActivationBytes:transformerActivationBytes)
     } else {
-      ingredientsSampler=nil;msrSampler=nil
+      ingredientsSampler=nil;msrSampler=nil;dfrSampler=nil
       sampler=try MLXDistilledSamplingRunner(recipe:request.recipe(),transformerRoot:URL(fileURLWithPath:request.transformerRoot),
         upscalerCheckpoint:URL(fileURLWithPath:request.spatialUpscalerCheckpoint),statisticsCheckpoint:URL(fileURLWithPath:request.videoCheckpoint),
         firstStrength:request.referenceImages.first?.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil,
@@ -360,7 +380,14 @@ public final class MLXMediaPipeline {
         try report("reference_weights_released")
       }
       let sampled:[String:MLXArray]
-      if let msrSampler {
+      if let dfrSampler {
+        let started=Date()
+        sampled=try dfrSampler.evaluate(videoContext:contexts.video,audioContext:contexts.audio,
+          references:preparedGuides.0,
+          progress:report)
+        timings["sampling"]=Date().timeIntervalSince(started)
+        timings.merge(dfrSampler.stageSeconds) { _,new in new }
+      } else if let msrSampler {
         let started=Date()
         sampled=try msrSampler.evaluate(videoContext:contexts.video,audioContext:contexts.audio,
           references:preparedGuides.2,seed:request.seed,progress:report)
@@ -396,13 +423,13 @@ public final class MLXMediaPipeline {
     }
     let videoConfig=Self.videoConfiguration(for:g,activationBytes:videoActivationBytes)
     let contextFrames=extensionContextFrames ?? 0
-    let publishedFrames=g.frames-contextFrames
+    let publishedFrames=request.dfr == nil ? g.frames-contextFrames : request.frames
     let videoStart=Date(); var written=0,videoCacheBytes:Int?
     try autoreleasepool {
       func receive(_ chunk:VideoFrameChunk) throws {
         guard chunk.startFrame == written, chunk.frameCount == 1, chunk.width == g.width,
           chunk.height == g.height, chunk.frameRate == g.fps else { throw LTXError.invalid("Decoded frame contract mismatch.") }
-        if written >= contextFrames {
+        if written >= contextFrames && written-contextFrames < publishedFrames {
           try MediaOutput.writePNG(chunk.rgb,width:g.width,height:g.height,
             to:frames.appendingPathComponent(String(format:"%06d.png",written-contextFrames)))
         }
@@ -421,7 +448,7 @@ public final class MLXMediaPipeline {
           defer { writer.cancel() }
           try decoder.decodeRGB8(latent:MLXArray(unpacked,g.videoShape),configuration:videoConfig,
             progress:{ try report("video_layers",$0,$1) }) { index,bytes in
-              if index >= contextFrames {
+              if index >= contextFrames && index-contextFrames < publishedFrames {
                 try writer.append(bytes,frame:index-contextFrames)
                 try decodedPreview?(index-contextFrames,bytes)
               }
@@ -446,7 +473,8 @@ public final class MLXMediaPipeline {
       guard wave.frameCount == admission.audioSamples, wave.channels == 2, wave.sampleRate == 48000 else {
         throw LTXError.invalid("Decoded audio timing contract mismatch.")
       }
-      let range=contextFrames==0 ? 0..<wave.frameCount
+      let range=request.dfr != nil ? 0..<min(wave.frameCount,Int((Double(request.frames)/request.fps*48000).rounded(.toNearestOrEven)))
+        : contextFrames==0 ? 0..<wave.frameCount
         : try Self.extensionAudioRange(contextFrames:contextFrames,
           additionalFrames:publishedFrames,fps:g.fps,decodedSamples:wave.frameCount)
       let published=Array(wave.samples[(range.lowerBound*wave.channels)..<(range.upperBound*wave.channels)])
@@ -465,20 +493,23 @@ public final class MLXMediaPipeline {
     guard status == KERN_SUCCESS else { throw LTXError.invalid("Cannot measure process memory.") }
     let publishedAudioSamples:Int
     if let source=preparedAudio { publishedAudioSamples=source.publicationSamples }
+    else if request.dfr != nil { publishedAudioSamples=min(admission.audioSamples,
+      Int((Double(request.frames)/request.fps*48000).rounded(.toNearestOrEven))) }
     else if contextFrames==0 { publishedAudioSamples=admission.audioSamples }
     else {
       publishedAudioSamples=try Self.extensionAudioRange(contextFrames:contextFrames,
         additionalFrames:publishedFrames,fps:g.fps,decodedSamples:admission.audioSamples).count
     }
     var metadata:[String:Any]=["status":"complete","scope":"developer Swift MLX distilled audiovisual generation",
-      "recipe":request.msr != nil ? "ltx25-msr-single-stage-v1" : request.ingredientsSheet == nil ? DistilledTwoStageRecipe.identifier : "ltx25-ingredients-single-stage-v1",
+      "recipe":request.dfr != nil ? "ltx25-dfr-spatial-distilled-v1" : request.msr != nil ? "ltx25-msr-single-stage-v1" : request.ingredientsSheet == nil ? DistilledTwoStageRecipe.identifier : "ltx25-ingredients-single-stage-v1",
       "noise_algorithm":request.noisePolicy.algorithm,"seed":request.seed,
       "text_token_ids":ids,"width":g.width,"height":g.height,"frames":publishedFrames,"fps":g.fps,
       "video_seconds":Double(publishedFrames)/g.fps,
       "audio_samples":publishedAudioSamples,
       "audio_sample_rate":48000,
       "audio_seconds":Double(publishedAudioSamples)/48000,
-      "audio_timing":contextFrames>0 ? "crop decoded causal audio to exact generated duration"
+      "audio_timing":request.dfr != nil ? "crop padded DFR canvas audio to requested video duration"
+        : contextFrames>0 ? "crop decoded causal audio to exact generated duration"
         : preparedAudio == nil ? "retain actual causal decoder samples; no stretch or shortest trim"
         : "original source waveform, trimmed and padded to output duration",
       "stage_seconds":timings,"seconds":Date().timeIntervalSince(started),"peak_mlx_bytes":Memory.peakMemory,
@@ -528,6 +559,13 @@ public final class MLXMediaPipeline {
       metadata["reference_conditioning"]="ordered VAE latent groups with learned slot embeddings, negative reference times and grouped attention"
       metadata["msr_adapter_scope"]="single_full_resolution_stage"
       metadata["msr_reference_sha256"]=msr.references.map(\.sourceSHA256)
+    } else if let dfr=request.dfr {
+      metadata["reference_conditioning"]="stage-one generated keyframe slots; stage-two clean half-resolution reference plus upscaled seeded slots"
+      metadata["dfr_adapter_scope"]="stage_two_only"
+      metadata["dfr_detailing_adapter"]=(dfr.adapterPath as NSString).lastPathComponent
+      metadata["dfr_generated_slots"]=try MLXDFRCanvas(frames:g.frames).slotFrames
+      metadata["dfr_canvas_frames"]=g.frames
+      metadata["dfr_requested_frames"]=request.frames
     } else if request.referenceImages.isEmpty && extensionContextFrames == nil {
       metadata["reference_conditioning"]="none"
     }
