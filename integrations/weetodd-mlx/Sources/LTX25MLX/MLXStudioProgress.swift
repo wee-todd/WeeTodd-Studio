@@ -8,7 +8,12 @@ import LTX25Engine
 public struct MLXStudioProgress {
   private var fraction=0.0,steps=0,sceneSteps=0
   private let sceneWindowCount:Int
-  public init(sceneWindowCount:Int=0) { self.sceneWindowCount=max(0,sceneWindowCount) }
+  private let temporalRounds:Int
+  private var temporalRound=0,temporalTiles=1,temporalTilesCompleted=0
+  public init(sceneWindowCount:Int=0,temporalRounds:Int=0) {
+    self.sceneWindowCount=max(0,sceneWindowCount)
+    self.temporalRounds=max(0,temporalRounds)
+  }
   public mutating func event(stage:String,completed:Int,total:Int) -> [String:Any] {
     let part=total > 0 ? min(1,max(0,Double(completed)/Double(total))) : 0
     var next=fraction,message=stage.replacingOccurrences(of:"_",with:" ")
@@ -54,15 +59,31 @@ public struct MLXStudioProgress {
         ? "Encoding Ingredients sheet · \(completed)/\(total)"
         : "Encoding Ripple references · \(completed)/\(total)"
     }
-    else if stage == "sampling" { steps=completed;next=0.1+0.72*part;message="Sampling · \(completed)/\(total) steps" }
+    else if stage == "sampling" {
+      steps=completed;next=0.1+(temporalRounds>0 ? 0.52 : 0.72)*part
+      message="Sampling · \(completed)/\(total) steps"
+    }
     else if stage.hasPrefix("ripple:") || stage.hasPrefix("ingredients:") || stage.hasPrefix("msr:") {
       next=0.1+0.72*min(1,(Double(steps)+part)/8)
       let name=stage.hasPrefix("ingredients:") ? "Ingredients" : stage.hasPrefix("msr:") ? "MSR" : "Ripple"
       message="Sampling \(name) · step \(min(steps+1,8))/8 · block \(completed)/\(total)"
     }
     else if stage.hasPrefix("stage1:") || stage.hasPrefix("stage2:") {
-      next=0.1+0.72*min(1,(Double(steps)+part)/11)
+      next=0.1+(temporalRounds>0 ? 0.52 : 0.72)*min(1,(Double(steps)+part)/11)
       message="Sampling · step \(min(steps+1,11))/11 · block \(completed)/\(total)"
+    } else if stage == "temporal_upscaler_weights_released" && temporalRounds>0 {
+      temporalRound=min(temporalRounds,max(1,completed))
+      next=0.62+0.2*Double(temporalRound-1)/Double(temporalRounds)
+      message="Preparing temporal round \(temporalRound)/\(temporalRounds)"
+    } else if stage == "temporal_tiles" && temporalRounds>0 {
+      temporalTiles=max(1,total);temporalTilesCompleted=0
+      message="Sampling temporal round \(temporalRound)/\(temporalRounds)"
+    } else if (stage == "temporal_sampling" || stage == "temporal_tile_complete") && temporalRounds>0 {
+      if stage == "temporal_tile_complete" { temporalTilesCompleted=min(temporalTiles,completed) }
+      let tileProgress=stage == "temporal_tile_complete" ? 0 : part
+      let roundProgress=(Double(temporalTilesCompleted)+tileProgress)/Double(temporalTiles)
+      next=0.62+0.2*(Double(max(0,temporalRound-1))+min(1,roundProgress))/Double(temporalRounds)
+      message="Sampling temporal round \(temporalRound)/\(temporalRounds) · tile \(min(temporalTiles,temporalTilesCompleted+1))/\(temporalTiles)"
     } else if stage.hasPrefix("upscale") { message="Upscaling latents for refinement" }
     else if stage == "video_layers" { next=0.83;message="Decoding video · layer \(completed)/\(total)" }
     else if stage == "video_decode" { next=0.84+0.12*part;message="Decoding video · frame \(completed)/\(total)" }
@@ -76,6 +97,10 @@ public struct MLXStudioProgress {
 
 /// One 640px preview, derived from the already-decoded frame; no second VAE execution.
 public enum MLXStudioPreview {
+  public static func shouldEmit(index:Int,total:Int,secondsSinceLast:TimeInterval) -> Bool {
+    guard total>0,index>=0,index<total else { return false }
+    return index == 0 || index == total-1 || secondsSinceLast >= 1
+  }
   public static func write(rgb:Data,width:Int,height:Int,to url:URL) throws {
     guard (1...4096).contains(width),(1...4096).contains(height),rgb.count == width*height*3 else {
       throw LTXError.invalid("Invalid decoded preview dimensions.")

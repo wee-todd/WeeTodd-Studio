@@ -118,15 +118,20 @@ import MLX
         durationSeconds:Double(request.frames)/request.fps)
       preparedAudio=try await interval.extract(ffmpeg:URL(fileURLWithPath:ffmpeg),directory:sourceDirectory)
     } else { preparedAudio=nil }
-    var progress=MLXStudioProgress(),lastPreview=Date.distantPast,revision=0
+    let previewFrames=try request.dfr.map {
+      try MLXDFRTemporalPlan.outputFrames(inputFrames:request.frames,rounds:$0.temporalRounds)
+    } ?? request.frames
+    var progress=MLXStudioProgress(temporalRounds:request.dfr?.temporalRounds ?? 0)
+    var lastPreview=Date.distantPast,revision=0
     var result:[String:Any]=[:]
     defer { try? FileManager.default.removeItem(at:preview) }
     _ = try pipeline.run(ffmpeg:URL(fileURLWithPath:ffmpeg),preparedAudio:preparedAudio,decodedPreview:{ index,bytes in
-      guard index == 0 || index == request.frames-1 || Date().timeIntervalSince(lastPreview) >= 1 else { return }
+      guard MLXStudioPreview.shouldEmit(index:index,total:previewFrames,
+        secondsSinceLast:Date().timeIntervalSince(lastPreview)) else { return }
       try Task.checkCancellation()
       try autoreleasepool { try MLXStudioPreview.write(rgb:bytes,width:request.width,height:request.height,to:preview) }
       revision += 1;lastPreview=Date()
-      var event=progress.event(stage:"video_decode",completed:index+1,total:request.frames)
+      var event=progress.event(stage:"video_decode",completed:index+1,total:previewFrames)
       event["previewPath"]=preview.path;event["previewRevision"]=revision
       try emit(event)
     },beforePublish:{ staging,report in

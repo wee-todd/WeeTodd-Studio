@@ -136,6 +136,7 @@ public final class MLXDFRSamplingRunner {
       let seams = carry.keys.sorted()
       let tiles = try MLXDFRTemporalPlan.tiles(seams:seams,frames:frames,
         maximumTiles:1 << round)
+      try progress("temporal_tiles",0,tiles.count)
       let conditionedFPS = try MLXDFRTemporalPlan.conditioningFPS(playbackFPS)
       var owned: [MLXArray] = [], newSlots: [Int: MLXArray] = [:]
       var planeAt = carry

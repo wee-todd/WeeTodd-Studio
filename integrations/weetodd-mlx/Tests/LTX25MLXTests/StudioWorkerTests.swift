@@ -117,4 +117,28 @@ final class StudioWorkerTests: XCTestCase {
     }
     XCTAssertThrowsError(try MLXStudioPreview.write(rgb:Data(),width:1920,height:1088,to:file))
   }
+  func testTemporalDFRProgressAdvancesThroughRoundsAndTiles() {
+    var progress=MLXStudioProgress(temporalRounds:2)
+    let spatial=progress.event(stage:"sampling",completed:11,total:11)["fraction"] as! Double
+    _=progress.event(stage:"temporal_upscaler_weights_released",completed:1,total:2)
+    _=progress.event(stage:"temporal_tiles",completed:0,total:2)
+    let first=progress.event(stage:"temporal_sampling",completed:2,total:4)
+    let tile=progress.event(stage:"temporal_tile_complete",completed:1,total:2)
+    _=progress.event(stage:"temporal_upscaler_weights_released",completed:2,total:2)
+    _=progress.event(stage:"temporal_tiles",completed:0,total:4)
+    let second=progress.event(stage:"temporal_sampling",completed:1,total:4)
+    let complete=progress.event(stage:"temporal_tile_complete",completed:4,total:4)
+    XCTAssertGreaterThan(first["fraction"] as! Double,spatial)
+    XCTAssertGreaterThan(tile["fraction"] as! Double,first["fraction"] as! Double)
+    XCTAssertGreaterThan(second["fraction"] as! Double,tile["fraction"] as! Double)
+    XCTAssertGreaterThan(complete["fraction"] as! Double,second["fraction"] as! Double)
+    XCTAssertTrue((second["message"] as! String).contains("round 2/2"))
+    XCTAssertLessThan(complete["fraction"] as! Double,0.83)
+  }
+  func testTemporalDFRPreviewUsesPublishedFrameCount() {
+    XCTAssertTrue(MLXStudioPreview.shouldEmit(index:0,total:193,secondsSinceLast:0))
+    XCTAssertFalse(MLXStudioPreview.shouldEmit(index:48,total:193,secondsSinceLast:0))
+    XCTAssertTrue(MLXStudioPreview.shouldEmit(index:192,total:193,secondsSinceLast:0))
+    XCTAssertFalse(MLXStudioPreview.shouldEmit(index:193,total:193,secondsSinceLast:2))
+  }
 }

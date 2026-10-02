@@ -13,9 +13,13 @@ Studio's Swift model setup now offers spatial and one-/two-round temporal DFR
 presets with bounded header discovery and linked installed weights. An imported
 or setup-created profile routes T2V/I2V/FFLF through the same Swift worker. A
 two-round Studio-style recipe passed installed-weight preflight at
-193 frames/96 fps. The dedicated Studio DFR controls, a Studio-triggered
-render, ComfyUI routing, higher-resolution memory, matched performance and
-broad audiovisual quality remain open.
+193 frames/96 fps. An isolated ComfyUI server executed a saved spatial DFR
+graph through the Swift worker. A separate one-round 49-frame Swift render
+delivered first/final decoded previews, visible temporal sampling progress,
+and staged release events; cancelling a second worker during sampling exited
+with status 130 without publishing partial media. Dedicated Studio DFR controls,
+a Studio-triggered render, broader ComfyUI route parity, higher-resolution
+memory, matched performance and broad audiovisual quality remain open.
 
 Swift LTX 2.5 spatial DFR 2026-10-02 (experimental direct-worker route): strict
 version-8 requests use the installed distilled Q8 transformer and complete
