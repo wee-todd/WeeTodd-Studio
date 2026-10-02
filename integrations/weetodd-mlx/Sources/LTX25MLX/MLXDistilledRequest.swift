@@ -72,7 +72,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     msr=version < 7 ? nil : try c.decodeIfPresent(MLXMSRRequest.self,forKey:.msr)
     dfr=version < 8 ? nil : try c.decodeIfPresent(MLXDFRRequest.self,forKey:.dfr)
     noisePolicy=version < 3 ? .native : try c.decode(MLXNoisePolicy.self,forKey:.noisePolicy)
-    let dfrCanvas=try version == 8 ? MLXDFRCanvas(frames:frames) : nil
+    let dfrCanvas=try (version == 8 || version == 9) ? MLXDFRCanvas(frames:frames) : nil
     let roles=referenceImages.map(\.role)
     guard (version == 4 && task == "a2v" && (roles.isEmpty || roles == ["first"]) && audioReference != nil) ||
       (version == 5 && task == "union_control" && roles.isEmpty &&
@@ -84,11 +84,12 @@ public struct MLXDistilledRequest:Codable,Sendable {
       (version == 7 && task == "msr" && roles.isEmpty && audioReference == nil &&
         unionControlGuide == nil && ingredientsSheet == nil && msr != nil &&
         stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX) ||
-      (version == 8 && task == "dfr" &&
+      ((version == 8 || version == 9) && task == "dfr" &&
         (roles.isEmpty || roles == ["first"] || roles == ["first","last"]) && audioReference == nil &&
         unionControlGuide == nil && ingredientsSheet == nil && msr == nil && dfr != nil &&
         stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX &&
-        dfrCanvas != nil) ||
+        dfrCanvas != nil && (version == 8 ? dfr?.temporalRounds == 0 : (1...2).contains(dfr!.temporalRounds)) &&
+        (dfr.map { fps*Double(1 << $0.temporalRounds) <= 120 } ?? false)) ||
       (version == 1 && task == "t2v") || ((version == 2 || version == 3) &&
       ((task == "t2v" && roles.isEmpty) || (task == "i2v" && roles == ["first"]) || (task == "fflf" && roles == ["first","last"] && frames>1))) else {
       throw LTXError.invalid("Request version/task must match its explicit ordered endpoint references.")
@@ -167,19 +168,38 @@ public struct MLXDistilledRequest:Codable,Sendable {
 public struct MLXDFRRequest:Codable,Sendable {
   public let adapterPath:String
   public let adapterStrength:Float
+  public let temporalUpscalerPath:String?
+  public let temporalRounds:Int
   enum CodingKeys:String,CodingKey,CaseIterable {
     case adapterPath="adapter_path",adapterStrength="adapter_strength"
+    case temporalUpscalerPath="temporal_upscaler_path",temporalRounds="temporal_rounds"
   }
   public init(from decoder:Decoder) throws {
     let c=try decoder.container(keyedBy:CodingKeys.self)
-    guard Set(c.allKeys.map(\.stringValue)) == Set(CodingKeys.allCases.map(\.rawValue)) else {
+    let fields=Set(c.allKeys.map(\.stringValue))
+    let spatial:Set<String>=[CodingKeys.adapterPath.rawValue,CodingKeys.adapterStrength.rawValue]
+    guard fields == spatial || fields == Set(CodingKeys.allCases.map(\.rawValue)) else {
       throw LTXError.invalid("DFR needs its exact detailing-adapter fields.")
     }
     adapterPath=try c.decode(String.self,forKey:.adapterPath)
     adapterStrength=try c.decode(Float.self,forKey:.adapterStrength)
+    temporalUpscalerPath=fields == spatial ? nil : try c.decode(String.self,forKey:.temporalUpscalerPath)
+    temporalRounds=fields == spatial ? 0 : try c.decode(Int.self,forKey:.temporalRounds)
     guard adapterPath.hasPrefix("/"),adapterPath.utf8.count <= 4096,!adapterPath.utf8.contains(0),
-      adapterStrength.isFinite,adapterStrength > 0,adapterStrength <= 3 else {
+      adapterStrength.isFinite,adapterStrength > 0,adapterStrength <= 3,
+      (0...2).contains(temporalRounds),
+      (temporalRounds == 0) == (temporalUpscalerPath == nil),
+      temporalUpscalerPath.map({ $0.hasPrefix("/") && $0.utf8.count <= 4096 && !$0.utf8.contains(0) }) ?? true else {
       throw LTXError.invalid("DFR detailing adapter path or strength is invalid.")
+    }
+  }
+  public func encode(to encoder:Encoder) throws {
+    var c=encoder.container(keyedBy:CodingKeys.self)
+    try c.encode(adapterPath,forKey:.adapterPath)
+    try c.encode(adapterStrength,forKey:.adapterStrength)
+    if let temporalUpscalerPath {
+      try c.encode(temporalUpscalerPath,forKey:.temporalUpscalerPath)
+      try c.encode(temporalRounds,forKey:.temporalRounds)
     }
   }
 }

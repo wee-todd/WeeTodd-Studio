@@ -4,6 +4,28 @@ import Foundation
 import LTX25Video
 
 final class MLXMediaPipelineTests:XCTestCase {
+  func testPaddedSpatialDFRDecodesCanvasWhileTemporalDecodesPublishedFrames() throws {
+    let helper=MLXDistilledRequestTests()
+    var values=helper.base()
+    values["version"]=8;values["task"]="dfr";values["frames"]=41
+    values["width"]=512;values["height"]=256
+    values["noise_policy"]="mlx_threefry_bf16_v1"
+    values["reference_images"]=[];values["audio_reference"]=NSNull()
+    values["union_control_guide"]=NSNull();values["ingredients_sheet"]=NSNull()
+    values["msr"]=NSNull()
+    values["dfr"]=["adapter_path":"/pixel-spatial.safetensors","adapter_strength":0.5]
+    let spatial=try helper.decode(values)
+    let budget=8*1024*1024*1024
+    XCTAssertEqual(try MLXMediaPipeline.admit(spatial,videoActivationBytes:budget,
+      transformerActivationBytes:budget,videoBackend:.mlx).videoFrames,49)
+    values["version"]=9
+    values["dfr"]=["adapter_path":"/pixel-spatial.safetensors","adapter_strength":0.5,
+      "temporal_upscaler_path":"/temporal.safetensors","temporal_rounds":1]
+    let temporal=try helper.decode(values)
+    XCTAssertEqual(try MLXMediaPipeline.admit(temporal,videoActivationBytes:budget,
+      transformerActivationBytes:budget,videoBackend:.mlx).videoFrames,81)
+  }
+
   func testExtensionPublishesExactGeneratedAudioInterval() throws {
     XCTAssertEqual(try MLXMediaPipeline.extensionAudioRange(contextFrames:25,
       additionalFrames:24,fps:24,decodedSamples:98400),50000..<98000)

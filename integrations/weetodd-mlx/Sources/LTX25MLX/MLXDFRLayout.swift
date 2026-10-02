@@ -44,7 +44,8 @@ public struct MLXDFRLayout: Sendable {
   private let endpoints: MLXReferenceLayout?
 
   public init(geometry: AVGeometry, slotFrames: [Int], reference: AVGeometry? = nil,
-    firstStrength: Float? = nil, lastStrength: Float? = nil) throws {
+    firstStrength: Float? = nil, lastStrength: Float? = nil,
+    lastFrame:Int?=nil) throws {
     guard !slotFrames.isEmpty, slotFrames == Array(Set(slotFrames)).sorted(),
       slotFrames.allSatisfy({ $0 > 0 && $0 <= geometry.frames - 1 && $0 % 8 == 0 }),
       reference == nil || (reference!.frames == geometry.frames && reference!.fps == geometry.fps &&
@@ -54,11 +55,12 @@ public struct MLXDFRLayout: Sendable {
     self.geometry = geometry
     self.slotFrames = slotFrames
     self.reference = reference
-    guard firstStrength != nil || lastStrength == nil else {
+    guard (firstStrength != nil || lastStrength == nil),
+      (lastFrame == nil || lastStrength != nil) else {
       throw LTXError.invalid("DFR last image needs a first image.")
     }
     endpoints = try firstStrength.map { try MLXReferenceLayout(geometry:geometry,
-      firstStrength:$0,lastStrength:lastStrength) }
+      firstStrength:$0,lastStrength:lastStrength,lastFrame:lastFrame) }
     endpointTokens = endpoints?.videoTokens ?? geometry.videoTokens
     referenceTokens = reference?.videoTokens ?? 0
     slotTokens = slotFrames.count * geometry.latentHeight * geometry.latentWidth
@@ -114,5 +116,19 @@ public struct MLXDFRLayout: Sendable {
       [Float](repeating: 0, count: referenceTokens) + [Float](repeating: 1, count: slotTokens)
     eval(latent, clean)
     return (latent, try MLXVideoDenoiseCondition(clean: clean, mask: mask))
+  }
+
+  /// Generated slots are denoised tokens. The pipeline noiser starts them at
+  /// the stage sigma, just like the main canvas; a zero/unnoised slot produces
+  /// invalid carry-forward keyframe planes even when the main video looks fine.
+  func noiseSlots(_ latent:MLXArray,noise:MLXArray,sigma:Float) throws -> MLXArray {
+    guard latent.dtype == .float32,latent.shape == [videoTokens,128],
+      noise.dtype == .float32,noise.shape == [slotTokens,128],
+      sigma.isFinite,(0...1).contains(sigma) else {
+      throw LTXError.invalid("DFR generated slot initialization differs from its stage layout.")
+    }
+    let start=videoTokens-slotTokens
+    let seeded=latent[start..<videoTokens]*(1-sigma)+noise*sigma
+    return concatenated([latent[0..<start],seeded],axis:0)
   }
 }

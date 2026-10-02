@@ -31,6 +31,25 @@ final class MLXDistilledRequestTests:XCTestCase {
     value["dfr"]=["adapter_path":"/pixel-spatial.safetensors","adapter_strength":0.5]
     value["task"]="t2v";XCTAssertThrowsError(try decode(value))
   }
+  func testTemporalDFRRequiresVersionNineAndMatchedCheckpoint() throws {
+    var value=base();value["version"]=9;value["task"]="dfr"
+    value["noise_policy"]="mlx_threefry_bf16_v1"
+    value["reference_images"]=[];value["audio_reference"]=NSNull()
+    value["union_control_guide"]=NSNull();value["ingredients_sheet"]=NSNull()
+    value["msr"]=NSNull();value["frames"]=41;value["fps"]=24
+    value["dfr"]=["adapter_path":"/pixel-spatial.safetensors","adapter_strength":1,
+      "temporal_upscaler_path":"/temporal.safetensors","temporal_rounds":1]
+    let request=try decode(value)
+    XCTAssertEqual(request.dfr?.temporalRounds,1)
+    XCTAssertEqual(try MLXDFRTemporalPlan.outputFrames(inputFrames:request.frames,rounds:1),81)
+    XCTAssertEqual(try decode(JSONSerialization.jsonObject(with:JSONEncoder().encode(request)) as! [String:Any]).dfr?.temporalRounds,1)
+    value["version"]=8;XCTAssertThrowsError(try decode(value))
+    value["version"]=9;value["dfr"]=["adapter_path":"/pixel-spatial.safetensors","adapter_strength":1]
+    XCTAssertThrowsError(try decode(value))
+    value["dfr"]=["adapter_path":"/pixel-spatial.safetensors","adapter_strength":1,
+      "temporal_upscaler_path":"/temporal.safetensors","temporal_rounds":2]
+    value["fps"]=48;XCTAssertThrowsError(try decode(value))
+  }
   func testMSRRequestKeepsOrderedOneToFiveReferencesAndRejectsOtherTasks() throws {
     var value=base();value["version"]=7;value["task"]="msr"
     value["noise_policy"]="mlx_threefry_bf16_v1"

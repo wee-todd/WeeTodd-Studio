@@ -74,7 +74,7 @@ import MLX
       ((direct["version"] as? Int == 5 && direct["task"] as? String == "union_control") ||
         (direct["version"] as? Int == 6 && direct["task"] as? String == "ingredients") ||
         (direct["version"] as? Int == 7 && direct["task"] as? String == "msr") ||
-        (direct["version"] as? Int == 8 && direct["task"] as? String == "dfr")) {
+        ((direct["version"] as? Int == 8 || direct["version"] as? Int == 9) && direct["task"] as? String == "dfr")) {
       request=try JSONDecoder().decode(MLXDistilledRequest.self,from:recipeData)
       guard URL(fileURLWithPath:request.outputDirectory).standardizedFileURL.path ==
         URL(fileURLWithPath:args[4]).standardizedFileURL.path else {
@@ -93,8 +93,12 @@ import MLX
       transformerActivationBytes:memory.transformerActivationBytes,videoBackend:.mlx,audioBackend:.mlx)
     try Task.checkCancellation()
     if args[0] == "preflight" {
+      let publishedFrames=try request.dfr.map {
+        try MLXDFRTemporalPlan.outputFrames(inputFrames:request.frames,rounds:$0.temporalRounds)
+      } ?? request.frames
+      let publishedFPS=request.fps*Double(1 << (request.dfr?.temporalRounds ?? 0))
       try emit(["status":"success","result":["nativeRuntime":"swift-mlx","jobID":envelope.jobID.uuidString,
-        "frames":request.frames,"fps":request.fps,"task":request.task,
+        "frames":publishedFrames,"fps":publishedFPS,"task":request.task,
         "transformerActivationBytes":memory.transformerActivationBytes,"videoActivationBytes":memory.videoActivationBytes,
         "activationCeilingBytes":memory.activationCeilingBytes]])
       return

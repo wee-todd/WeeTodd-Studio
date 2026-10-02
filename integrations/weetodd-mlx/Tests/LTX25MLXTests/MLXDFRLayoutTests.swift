@@ -1,7 +1,7 @@
 import XCTest
 import MLX
 import LTX25Engine
-import LTX25MLX
+@testable import LTX25MLX
 
 final class MLXDFRLayoutTests: XCTestCase {
   func testCanvasSelectsOfficialSegmentAndPadsOnlyTheTail() throws {
@@ -28,6 +28,20 @@ final class MLXDFRLayoutTests: XCTestCase {
     XCTAssertEqual(prepared.condition.mask, [Float](repeating: 1, count: layout.videoTokens))
     XCTAssertEqual(prepared.latent[g.videoTokens, 0].item(Float.self), 0)
     XCTAssertEqual(prepared.latent[0, 0].item(Float.self), 1)
+  }
+
+  func testGeneratedSlotsReceiveStageNoiseBeforeSampling() throws {
+    let geometry=try AVGeometry(width:64,height:32,frames:49,fps:24)
+    let layout=try MLXDFRLayout(geometry:geometry,slotFrames:[24,48])
+    let latent=MLXArray.ones([layout.videoTokens,128])*0.2
+    let noise=MLXArray.ones([layout.slotTokens,128])*0.8
+    let first=try layout.noiseSlots(latent,noise:noise,sigma:1)
+    XCTAssertEqual(first[0,0].item(Float.self),0.2,accuracy:0.0001)
+    XCTAssertEqual(first[geometry.videoTokens,0].item(Float.self),0.8,accuracy:0.0001)
+    let second=try layout.noiseSlots(latent,noise:noise,sigma:0.9)
+    XCTAssertEqual(second[geometry.videoTokens,0].item(Float.self),0.74,accuracy:0.0001)
+    XCTAssertThrowsError(try layout.noiseSlots(latent,
+      noise:.ones([layout.slotTokens+1,128]),sigma:0.9))
   }
 
   func testStageTwoKeepsReferenceBeforeSeededSlotsAndScalesPositions() throws {
@@ -69,5 +83,14 @@ final class MLXDFRLayoutTests: XCTestCase {
     XCTAssertEqual(prepared.latent[high.videoTokens,0].item(Float.self),0.8,accuracy:0.0001)
     XCTAssertEqual(prepared.latent[layout.endpointTokens,0].item(Float.self),0.4,accuracy:0.0001)
     XCTAssertThrowsError(try layout.prepare(generated:.zeros([high.videoTokens,128]),first:first))
+  }
+
+  func testPaddedDFRLastImageTargetsRequestedFrame() throws {
+    let geometry=try AVGeometry(width:64,height:32,frames:49,fps:24)
+    let layout=try MLXDFRLayout(geometry:geometry,slotFrames:[24,48],
+      firstStrength:1,lastStrength:0.8,lastFrame:40)
+    XCTAssertEqual(layout.positions[geometry.videoTokens*3],Float(40.5/24),accuracy:0.0001)
+    XCTAssertThrowsError(try MLXDFRLayout(geometry:geometry,slotFrames:[24,48],
+      firstStrength:1,lastStrength:0.8,lastFrame:41))
   }
 }

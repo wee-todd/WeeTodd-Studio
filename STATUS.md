@@ -1,5 +1,17 @@
 # WeeTodd Studio implementation status
 
+Swift LTX 2.5 temporal DFR 2026-10-02 (experimental direct-worker route):
+strict version-9 requests add one or two learned temporal x2 rounds to the
+spatial DFR stages. The Swift worker streams the installed BF16 temporal
+upscaler, samples disjoint seam tiles from pinned generated-keyframe planes,
+starts generated slots at the stage Gaussian noise level, and preserves
+stage-one audio. A 49-frame 512×256/24 fps source produced a 97-frame/48 fps
+clip and a 193-frame/96 fps clip. The final two-round render took 136.15 seconds
+at a 4.06 GB Swift-process peak, excluding FFmpeg. Reviewed frames across all
+four seams retained normal color. Its audio was quiet at -66.4 dBFS mean.
+Studio/ComfyUI routing, higher-resolution memory, matched performance and
+broad audiovisual quality remain open.
+
 Swift LTX 2.5 spatial DFR 2026-10-02 (experimental direct-worker route): strict
 version-8 requests use the installed distilled Q8 transformer and complete
 rank-32 Pixel-Spatial x2 LoRA at strength 0.5 in stage two. Swift generates
@@ -11,10 +23,12 @@ text and first/last requests produced 49-frame 512 × 256/24 fps MP4s, and a
 video frames with 82,000 stereo 48 kHz audio samples. The text-only job took
 48.49 seconds at a 3.55 GB Swift-process peak; first/last took 42.60 seconds
 at 3.15 GB, external FFmpeg excluded. The first/last contact sheet shows the
-cup leave the shelf and the final empty shelf. The text-only sample's quiet
+cup leave the shelf and the final empty shelf. A later padded 41-frame
+first/last job also published exactly 41 frames and landed the empty shelf
+at the requested last frame. The text-only sample's quiet
 ambient track measured -69.5 dBFS mean/-57.8 dBFS peak; broader sound and
-visual quality are not accepted. Studio/ComfyUI routing, temporal DFR rounds,
-large geometry, lifecycle and matched speed/memory remain open.
+visual quality are not accepted. Studio/ComfyUI routing, large geometry,
+lifecycle and matched speed/memory remain open.
 
 Swift native model discovery 2026-10-02 (ordinary profiles): Studio scans user-selected
 folders for H3 and LTX 2.5 components with bounded manifest and SafeTensors header reads.
@@ -1599,7 +1613,7 @@ contracts; it does not establish that every workflow has local models and select
 | H3 | T2V, endpoint/timed frames, multimodal Ref2VA, audio-driven Ref2VA, external extension, generic LoRAs, FastH3 and VDN variants | Native Ref2VA A2V and extension have real renders. Extension visual quality needs further qualification. Accelerator/task combinations are gated. A2V generates a new soundtrack. |
 | H3 Fun ControlNet | Loader, preprocessing boundary, resident/paged execution, nodes and headless transport | Synthetic and checkpoint-header checks only. No real control render qualification. Checkpoint availability and applicable terms remain separate. |
 | LTX 2.3 | T2V, keyframes, A2V, Ingredients, Union/Motion controls, generic LoRAs, Dev/distilled video extension | Conditioned renders and longer distilled extension have evidence. Generic LoRAs support resident and streamed paths; specialized control combinations remain separately gated. |
-| LTX 2.5 | T2V, keyframes, A2V, Ingredients/MSR, IC controls, external extension, refinement/upscaling, LoRAs | Full-length MSR and short extension have evidence. Temporal DFR remains diagnostic. Every adapter/precision/task combination is not qualified. |
+| LTX 2.5 | T2V, keyframes, A2V, Ingredients/MSR, IC controls, external extension, refinement/upscaling, LoRAs | Full-length MSR, short extension and direct-worker temporal DFR have route evidence. Temporal DFR is not a production default. Every adapter/precision/task combination is not qualified. |
 
 Ten saved H3/FastH3/VDN/LTX candidate pairs were rehashed on 2026-09-07: all headless MP4s
 match their ComfyUI controls byte for byte. These short fixtures establish local adapter parity,

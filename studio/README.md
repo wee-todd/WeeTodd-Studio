@@ -22,7 +22,9 @@ group as one movie and accepts all member ranges together. Specialized IC-LoRA, 
 Ingredients and DFR controls still use the explicitly selected Python route.
 An experimental direct Swift worker can execute spatial DFR from a version-8
 request with an installed Pixel-Spatial x2 adapter, including first/last images.
-This has not been wired to Studio's DFR controls or temporal refinement.
+Version-9 direct-worker requests add one or two learned temporal x2 rounds; an
+installed-weight two-round clip completed with normal color at the reviewed seams.
+Studio's DFR controls are not yet wired to this Swift path.
 The worker reuses installed paged
 weights and the shared renderer. Unsupported controls fail native preflight; turn the option
 off explicitly for advanced workflows still provided by Python.

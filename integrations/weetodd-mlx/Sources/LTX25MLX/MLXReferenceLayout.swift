@@ -10,28 +10,34 @@ public struct MLXReferenceLayout:Sendable {
   public let firstStrength:Float
   public let lastStrength:Float?
   public let firstFrame:Int
+  public let lastFrame:Int
   public var frameTokens:Int { geometry.latentHeight*geometry.latentWidth }
   public var videoTokens:Int { geometry.videoTokens+(lastStrength == nil ? 0 : frameTokens) }
   public var positions:[Float] {
     var result=geometry.videoPositions
     if lastStrength != nil {
-      let time=Float(Double(geometry.frames-1)+0.5)/Float(geometry.fps)
+      let time=Float(Double(lastFrame)+0.5)/Float(geometry.fps)
       for h in 0..<geometry.latentHeight { for w in 0..<geometry.latentWidth {
         result += [time,Float(h*32+16),Float(w*32+16)]
       } }
     }
     return result
   }
-  public init(geometry:AVGeometry,firstStrength:Float,lastStrength:Float?,firstFrame:Int=0) throws {
+  public init(geometry:AVGeometry,firstStrength:Float,lastStrength:Float?,firstFrame:Int=0,
+    lastFrame:Int?=nil) throws {
+    let finalFrame=lastFrame ?? geometry.frames-1
     guard firstStrength.isFinite,(0...1).contains(firstStrength),
       lastStrength.map({ $0.isFinite && (0...1).contains($0) }) ?? true,
       lastStrength == nil || geometry.frames>1,
       firstFrame>=0,firstFrame<geometry.frames,firstFrame%8==0,
+      lastFrame == nil || lastStrength != nil,
+      finalFrame>=0,finalFrame<geometry.frames,finalFrame%8==0,
+      lastStrength == nil || finalFrame>firstFrame,
       firstFrame == 0 || lastStrength == nil else {
       throw LTXError.invalid("Invalid aligned image frame, endpoint strengths or frame count.")
     }
     self.geometry=geometry;self.firstStrength=firstStrength;self.lastStrength=lastStrength
-    self.firstFrame=firstFrame
+    self.firstFrame=firstFrame;self.lastFrame=finalFrame
     guard videoTokens<=131072 else { throw LTXError.invalid("Reference tokens exceed video admission.") }
   }
   public func validate(first:MLXArray,last:MLXArray?) throws {

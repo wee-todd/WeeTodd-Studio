@@ -169,8 +169,11 @@ The experimental direct Swift worker also runs spatial DFR with generated keyfra
 slots, a clean half-resolution stage-two reference and the Pixel-Spatial x2 adapter
 at stage two. Text-only and first/last-image requests published 49-frame 512 × 256
 clips; a 41-frame request used a padded internal canvas and published exactly 41
-frames with matching audio duration. Studio DFR controls and temporal DFR refinement
-have not moved to Swift, and audio/visual quality needs broader review.
+frames with matching audio duration. The direct Swift worker also accepts one or two
+learned temporal x2 rounds. A two-round 512 × 256 test published 193 frames at
+96 fps with synchronized audio; reviewed seam frames retained normal color after
+generated-slot noise and tile-handoff fixes. Studio DFR controls still use Python,
+and audiovisual quality needs broader review.
 Independent H3 A2V with a bounded timeline audio driver and optional opening image is
 experimental; its source conditions generated sound and motion rather than being copied.
 
@@ -2247,7 +2250,7 @@ work. Results apply to the stated workflow and hardware conditions.
 | LTX 2.5 automatic duration | Usability | Low runtime cost | A real Q8 prompt probe spent 0.027 s in the MLX duration head after prompt encoding. | Opt-in modifier; manual duration remains authoritative unless connected. Raw predicted seconds and resolved `8k+1` frames are recorded. |
 | LTX 2.5 Diffusion VAE width tiling | Decode memory | Experimental | A 32-cell stage-four stripe reduced 512×512 peak from 8.27 GB to 7.62 GB. | Decode slowed from 61.99 s to 100.13 s and output was not pixel-identical. Select `stage4_width_tiles` only when memory is the priority. |
 | LTX 2.5 DFR | Full-resolution detail | Experimental | Exact prebaked Q8 pages completed the matched 256×256 probe in 19.41 s versus 89.91 s with live fusion. At 768×512 for five seconds, sampling took 102.36 s at a 28.91 GB MLX peak. The exact Diffusion VAE then took 966.45 s and drove complete-process peak to 164.58 GB. | Decoded video and PCM audio hashes matched the live-Q8 control at 256×256. Use prebaked pages for DFR sampling. Do not treat the exact Diffusion VAE workflow as a low-memory default. DFR changes composition and motion but preserves stage-one audio. |
-| LTX 2.5 DFR temporal refinement | Motion smoothness | Not production-ready | After correcting stage two to deterministic Euler, a 768×512 Q8-paged I2V probe produced 97 frames at 48 fps in 127.97 s and peaked at 9.65 GB. A matched control took 63.58 s and peaked at 9.46 GB. | Streams, audio preservation, first-frame landing, and evaluation counts pass. Both Q8 and BF16 temporal probes develop matching mid-clip color corruption, so quantization is not the cause. Keep this path diagnostic-only. |
+| LTX 2.5 DFR temporal refinement | Motion smoothness | Not production-ready | An older Python/MLX 768×512 Q8-paged I2V probe took 127.97 s and peaked at 9.65 GB, but developed color corruption. The direct Swift worker produced a 193-frame 512×256/96 fps two-round clip in 136.15 s at a 4.06 GB Swift-process peak, excluding FFmpeg. | Reviewed Swift seam frames retained normal color after generated-slot noise and pinned-prefix fixes. Studio and ComfyUI routing, higher-resolution memory, matched performance and broad audiovisual quality remain unqualified. |
 
 ### Remaining optimization priorities
 
