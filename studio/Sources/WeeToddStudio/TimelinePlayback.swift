@@ -21,6 +21,17 @@ struct TimelinePlaybackMedia {
 /// Loads file metadata asynchronously and references source ranges in place. A single video
 /// track decodes only the current shot, including when several shots share one generated movie.
 struct TimelinePlaybackBuilder {
+  /// Source-only cuts need no rendered soundtrack. Keep edits requiring the canonical
+  /// mixer on that route rather than silently dropping pan, overlaps or region effects.
+  static func canUseSourceAudio(_ project: StudioProject) -> Bool {
+    guard project.audio.isEmpty,
+      project.audioMixPolicy == nil || ["legacy-v1", "studio-v1"].contains(project.audioMixPolicy!) else { return false }
+    return project.clips.enumerated().allSatisfy { index, clip in
+      clip.duration.isFinite && clip.duration > 0 && clip.sourceIn.isFinite && clip.sourceIn >= 0
+        && clip.volume.isFinite && (0...2).contains(clip.volume)
+        && (clip.sourcePan ?? 0) == 0 && project.overlap(before: index) == 0
+    }
+  }
   static func time(_ seconds: Double) -> CMTime {
     guard seconds.isFinite, abs(seconds) < Double(Int64.max) / 60000 else { return .invalid }
     return CMTime(value: Int64((seconds * 60000).rounded()), timescale: 60000)
@@ -269,17 +280,25 @@ final class TimelineFallbackClock {
         // The builder runs outside the main actor; file metadata loading never blocks gestures.
         try await Task.sleep(nanoseconds: 150_000_000)
         guard let self else { return }
-        while self.audioMixBridge.busy {
+        let media: TimelinePlaybackMedia
+        let lease: AudioMixLease?
+        if TimelinePlaybackBuilder.canUseSourceAudio(snapshot) {
+          try snapshot.validateAudio()
+          lease = nil
+          media = try await TimelinePlaybackBuilder.build(plan)
+        } else {
+          while self.audioMixBridge.busy {
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: 50_000_000)
+          }
+          let mixed = try await self.audioMixBridge.invoke("audio-mix", runtime: self.runtime,
+            payload: ["project": try snapshot.object(), "purpose": "preview", "disposablePreview": true],
+            output: self.dataDirectory.appendingPathComponent("AudioPreview"))
           try Task.checkCancellation()
-          try await Task.sleep(nanoseconds: 50_000_000)
+          guard let path = mixed["path"] as? String else { throw StudioError.invalid("No audio mix was prepared.") }
+          lease = try AudioMixLease(path: path)
+          media = try await TimelinePlaybackBuilder.build(plan, canonicalAudio: path)
         }
-        let mixed = try await self.audioMixBridge.invoke("audio-mix", runtime: self.runtime,
-          payload: ["project": try snapshot.object(), "purpose": "preview", "disposablePreview": true],
-          output: self.dataDirectory.appendingPathComponent("AudioPreview"))
-        try Task.checkCancellation()
-        guard let path = mixed["path"] as? String else { throw StudioError.invalid("No audio mix was prepared.") }
-        let lease = try AudioMixLease(path: path)
-        let media = try await TimelinePlaybackBuilder.build(plan, canonicalAudio: path)
         guard !Task.isCancelled, self.timelineBuildID == request,
           self.documentSessionID == session, self.previewMode == "Timeline" else { return }
         self.preparingTimelinePlayback = false
@@ -293,6 +312,9 @@ final class TimelineFallbackClock {
           self.player.replaceCurrentItem(with: item)
           self.timelineAudioLease = lease
           self.observeTimelineItem(item)
+        } else {
+          self.player.replaceCurrentItem(with: nil)
+          self.timelineAudioLease = nil
         }
         self.seek(self.playhead)
         if self.isPlaying { self.startPlaybackClock() }

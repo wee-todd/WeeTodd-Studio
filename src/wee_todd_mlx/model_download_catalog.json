@@ -4506,5 +4506,59 @@
         "target": "LICENSE"
       }
     ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-folded-audio-vae-preconverted",
+      "name": "H3 folded audio VAE \u00b7 Preconverted (Recommended)",
+      "description": "Ready-to-use 32 kHz stereo folded-weight H3 audio encoder and decoder. Compatible with native Swift H3 text, image, audio and reference tasks. Downloads independently; matching installed weights are verified and linked in place. Transformer, video VAE, text encoder and tokenizer are separate.",
+      "downloadBytes": 605274594,
+      "requiredDiskBytes": 873710050,
+      "sourceURL": "https://huggingface.co/ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit/tree/64314cde0ac6d90f132bc94ae58e0c82f77396c6",
+      "licenseURL": "https://huggingface.co/ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit/blob/64314cde0ac6d90f132bc94ae58e0c82f77396c6/LICENSE",
+      "licenseNotice": "Retains the source MiniMax H3 model license, NOTICE and conversion modifications. Review the source terms, including territorial restrictions.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "components": [
+        "audio_vae"
+      ]
+    },
+    "kind": "h3-audio-vae",
+    "files": [
+      {
+        "repo": "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit",
+        "revision": "64314cde0ac6d90f132bc94ae58e0c82f77396c6",
+        "filename": "audio_vae.safetensors",
+        "target": "audio_vae.safetensors",
+        "size": 605254808,
+        "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48"
+      },
+      {
+        "repo": "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit",
+        "revision": "64314cde0ac6d90f132bc94ae58e0c82f77396c6",
+        "filename": "LICENSE",
+        "target": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44"
+      },
+      {
+        "repo": "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit",
+        "revision": "64314cde0ac6d90f132bc94ae58e0c82f77396c6",
+        "filename": "NOTICE",
+        "target": "NOTICE",
+        "size": 552,
+        "sha256": "3ea3c60ee64954fc0898e68b7534e3613ba74586256aec6edad557b7f217c7c6"
+      },
+      {
+        "repo": "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-8bit",
+        "revision": "64314cde0ac6d90f132bc94ae58e0c82f77396c6",
+        "filename": "MODIFICATIONS.md",
+        "target": "MODIFICATIONS.md",
+        "size": 1630,
+        "sha256": "3439a033d427a8b3225640fad4dc76787496982ee4565deafc556852a7af902a"
+      }
+    ]
   }
 ]

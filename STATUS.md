@@ -1,5 +1,26 @@
 # WeeTodd Studio implementation status
 
+Swift H3 folded audio acquisition 2026-10-02: native Model Setup now offers
+a separately pinned 32 kHz stereo audio VAE package with the source license,
+NOTICE and conversion modifications. Its exact payload matches the folded VAE
+used by the existing Swift generations. An installed-file test verified the full
+SHA-256, reused that 605 MB file through a same-inode hard link, retrieved missing
+small notices, and rediscovered the native audio component without Python. The
+shared setup validator also admitted that package. Direct transformer acquisition,
+other source conversions and complete fresh-machine distribution remain open.
+
+Swift source-audio timeline playback 2026-10-02: source-only cut timelines
+now reference their trimmed video and audio through AVFoundation without invoking
+the Python audio mixer, preserving clip volumes up to 200%. Source pan, additional
+audio regions, overlapping transitions and larger gain retain the canonical mixer.
+An actual audiovisual H3/LTX take fixture plays through both trimmed cuts with
+Python unavailable and verifies the per-clip mix volumes and timeline end. This
+also passed visible signed-app playback of the real H3 source and accepted
+extension through the complete 7.75-second timeline with Python unavailable.
+The render-review panel now reads native input counts as well as legacy contract
+arrays, so a frozen extension source is not displayed as zero media inputs.
+This does not migrate advanced audio mixing or establish all-route playback qualification.
+
 Swift H3 external extension Studio routing 2026-10-02 (experimental):
 the existing Extend → After action now prepares a 4–15-second Ref2VA request
 with a frozen visible audiovisual source tail, at most 175 frames at 24 fps

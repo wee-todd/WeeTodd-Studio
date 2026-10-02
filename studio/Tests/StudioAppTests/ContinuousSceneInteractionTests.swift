@@ -207,6 +207,14 @@ final class ContinuousSceneInteractionTests: XCTestCase {
     XCTAssertEqual(summary.sceneReport?.publicationMode, "windowed_decode_native_latent_chain")
     XCTAssertEqual(summary.sceneReport?.duration, 10)
   }
+  @MainActor func testReviewSummaryUsesPreparedNativeMediaCount() throws {
+    let clip=Clip(engine:.h3)
+    let native=RenderSettingsSummary(clip:clip,report:"{\"conditioning\":{\"inputs\":2}}")
+    XCTAssertEqual(native.mediaInputCount,2)
+    let legacy=RenderSettingsSummary(clip:clip,report:"{\"conditioning\":{\"contract\":{\"inputs\":[{},{}]}}}")
+    XCTAssertEqual(legacy.mediaInputCount,2)
+    XCTAssertEqual(RenderSettingsSummary(clip:clip,report:"{}").mediaInputCount,clip.reviewMediaCount)
+  }
   @MainActor func testPythonSceneCannotSilentlyIgnoreSavedBoundedDecodeChoice() async throws {
     let (store, bridge) = try fixture()
     store.runtime.nativeLTX25Enabled = false

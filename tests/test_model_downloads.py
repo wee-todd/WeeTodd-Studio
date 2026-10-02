@@ -355,7 +355,9 @@ def test_shipped_preconverted_catalog_pins_files_and_retains_terms():
         assert len({item.target for item in items}) == len(items)
         assert sum(item.size for item in items) == package["descriptor"]["downloadBytes"]
         assert all(
-            item.repo.startswith("Vayden/") or item.repo == "MiniMaxAI/MiniMax-H3" for item in items
+            item.repo.startswith("Vayden/")
+            or item.repo in {"MiniMaxAI/MiniMax-H3", downloads.COMPACT_REPO}
+            for item in items
         )
         assert any("LICENSE" in item.target for item in items)
         if package["kind"].startswith("h3-support-"):
@@ -373,6 +375,11 @@ def test_shipped_preconverted_catalog_pins_files_and_retains_terms():
             assert not any(item.target.endswith(".safetensors") for item in items)
         elif package["kind"] == "h3-video-vae":
             assert "video_vae_affine_q8.safetensors" in {item.target for item in items}
+        elif package["kind"] == "h3-audio-vae":
+            assert {"audio_vae.safetensors", "LICENSE", "NOTICE", "MODIFICATIONS.md"} <= {
+                item.target for item in items
+            }
+            assert package["descriptor"]["components"] == ["audio_vae"]
         else:
             assert any(item.target.endswith("manifest.json") for item in items)
         if package["kind"] != "h3-dt-tokenizer":

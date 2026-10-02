@@ -10,16 +10,7 @@ final class TimelineMediaTests: XCTestCase {
     let generated=ProcessInfo.processInfo.environment["WEETODD_H3_EXTENSION_RESULT_MOVIE"]
     let result:URL
     if let generated { result=URL(fileURLWithPath:generated) }
-    else {
-      let video=try await movie(in:folder),sound=try audio(in:folder)
-      let ffmpeg=URL(fileURLWithPath:ProcessInfo.processInfo.environment["WEETODD_TEST_FFMPEG"] ?? "/opt/homebrew/bin/ffmpeg")
-      guard FileManager.default.isExecutableFile(atPath:ffmpeg.path) else { throw XCTSkip("Audiovisual fixture needs FFmpeg") }
-      result=folder.appendingPathComponent("audiovisual.mp4")
-      let mux=Process();mux.executableURL=ffmpeg
-      mux.arguments=["-hide_banner","-loglevel","error","-i",video.path,"-i",sound.path,
-        "-c:v","copy","-c:a","aac","-shortest",result.path]
-      try mux.run();mux.waitUntilExit();XCTAssertEqual(mux.terminationStatus,0)
-    }
+    else { result=try await audiovisualMovie(in:folder) }
     let invocation:Bridge.Invocation = { command,_,_,_ in
       guard command == "h3-native-render" || command == "h3-native-describe" else {
         throw StudioError.invalid("Unexpected non-native command: \(command)")
@@ -30,9 +21,17 @@ final class TimelineMediaTests: XCTestCase {
     store.runtime.nativeH3Enabled=true;store.runtime.pythonPath="/unavailable/python"
     var source=Clip(engine:.h3);source.sourcePath=result.path;source.duration=2.5
     var target=Clip(engine:.h3);target.duration=generated == nil ? 2.5 : 4
-    target.extensionDirection="after";target.extensionSource=source.sourcePath;target.extensionClipID=source.id
-    store.project.clips=[source,target];store.selectedClipID=target.id
-    store.preparedRecipe="/tmp/prepared/native-extension.json"
+    if let original=ProcessInfo.processInfo.environment["WEETODD_H3_EXTENSION_EDITOR_PROJECT"] {
+      store.project=try ProjectStorage.read(URL(fileURLWithPath:original))
+      source=try XCTUnwrap(store.project.clips.first)
+      target=try XCTUnwrap(store.project.clips.last)
+      XCTAssertEqual(target.extensionClipID,source.id)
+    } else {
+      target.extensionDirection="after";target.extensionSource=source.sourcePath;target.extensionClipID=source.id
+      store.project.clips=[source,target]
+    }
+    store.selectedClipID=target.id
+    store.preparedRecipe=ProcessInfo.processInfo.environment["WEETODD_H3_EXTENSION_PREPARED_RECIPE"] ?? "/tmp/prepared/native-extension.json"
     store.preparedFingerprint=store.signature(for:target)
     await store.renderPrepared()
     XCTAssertNil(store.error)
@@ -53,6 +52,87 @@ final class TimelineMediaTests: XCTestCase {
         "acceptanceAndReopening":"passed"]
       try JSONSerialization.data(withJSONObject:body,options:[.prettyPrinted,.sortedKeys]).write(to:evidenceURL)
     }
+  }
+  func audiovisualMovie(in folder:URL) async throws -> URL {
+    let video=try await movie(in:folder),sound=try audio(in:folder)
+    let ffmpeg=URL(fileURLWithPath:ProcessInfo.processInfo.environment["WEETODD_TEST_FFMPEG"] ?? "/opt/homebrew/bin/ffmpeg")
+    guard FileManager.default.isExecutableFile(atPath:ffmpeg.path) else { throw XCTSkip("Audiovisual fixture needs FFmpeg") }
+    let result=folder.appendingPathComponent("audiovisual.mp4")
+    let mux=Process();mux.executableURL=ffmpeg
+    mux.arguments=["-hide_banner","-loglevel","error","-i",video.path,"-i",sound.path,
+      "-c:v","copy","-c:a","aac","-shortest",result.path]
+    try mux.run();mux.waitUntilExit();XCTAssertEqual(mux.terminationStatus,0)
+    return result
+  }
+  @MainActor func testNativeTakesPlayTheirTrimmedSoundWithoutPythonMixer() async throws {
+    let folder=try directory(),movie=try await audiovisualMovie(in:folder)
+    var mixCalls=0
+    let store=StudioStore(dataDirectory:folder,restoreSession:false,invocation: { command,_,_,_ in
+      if command == "audio-mix" { mixCalls += 1;throw StudioError.invalid("Python must not be required for source sound") }
+      return [:]
+    })
+    store.runtime.pythonPath="/unavailable/python"
+    store.runtime.nativeH3Enabled=true;store.runtime.nativeLTX25Enabled=true
+    var a=Clip(engine:.h3);a.sourcePath=movie.path;a.duration=0.4;a.volume=0.25
+    var b=Clip(engine:.ltx25);b.sourcePath=movie.path;b.sourceIn=1;b.duration=0.4;b.volume=0.5
+    store.project.clips=[a,b];store.select(a.id)
+    await store.timelineBuildTask?.value
+    XCTAssertEqual(mixCalls,0);XCTAssertNil(store.timelinePlaybackWarning)
+    let item=try XCTUnwrap(store.player.currentItem)
+    let tracks=try await item.asset.loadTracks(withMediaType:.audio)
+    XCTAssertEqual(tracks.count,1)
+    let mix=try XCTUnwrap(item.audioMix?.inputParameters.first)
+    for (time,volume) in [(0.1,Float(0.25)),(0.5,Float(0.5))] {
+      var start:Float=0,end:Float=0,range=CMTimeRange.zero
+      XCTAssertTrue(mix.getVolumeRamp(for:TimelinePlaybackBuilder.time(time),startVolume:&start,endVolume:&end,timeRange:&range))
+      XCTAssertEqual(start,volume,accuracy:0.001);XCTAssertEqual(end,volume,accuracy:0.001)
+    }
+    for _ in 0..<100 where item.status == .unknown { try await Task.sleep(nanoseconds:20_000_000) }
+    XCTAssertEqual(item.status,.readyToPlay,item.error?.localizedDescription ?? "")
+    store.togglePlayback()
+    for _ in 0..<100 where store.isPlaying { try await Task.sleep(nanoseconds:20_000_000) }
+    XCTAssertEqual(store.playhead,0.8,accuracy:0.001);XCTAssertFalse(store.isPlaying)
+  }
+  @MainActor func testSourcePanAndRegionsStillUseCanonicalMixer() async throws {
+    let folder=try directory(),movie=try await audiovisualMovie(in:folder),mixed=try audio(in:folder)
+    var mixCalls=0
+    let store=StudioStore(dataDirectory:folder,restoreSession:false,invocation: { command,_,_,_ in
+      XCTAssertEqual(command,"audio-mix");mixCalls += 1;return ["path":mixed.path]
+    })
+    var clip=Clip(engine:.h3);clip.sourcePath=movie.path;clip.duration=0.4;clip.sourcePan=0.5
+    store.project.clips=[clip]
+    store.prepareTimelinePlayback(force:true);await store.timelineBuildTask?.value
+    XCTAssertEqual(mixCalls,1);XCTAssertNotNil(store.timelineAudioLease)
+    store.project.clips[0].sourcePan=0
+    var region=AudioRegion(assetID:UUID(),path:mixed.path);region.duration=0.4
+    store.project.audio=[region]
+    store.prepareTimelinePlayback(force:true);await store.timelineBuildTask?.value
+    XCTAssertEqual(mixCalls,2);XCTAssertNotNil(store.timelineAudioLease)
+    XCTAssertNil(store.timelinePlaybackWarning)
+  }
+  @MainActor func testReplacingPlayableTimelineWithUnrenderedShotReleasesOldPlayer() async throws {
+    let folder=try directory(),movie=try await audiovisualMovie(in:folder)
+    let store=StudioStore(dataDirectory:folder,restoreSession:false,invocation: { _,_,_,_ in
+      XCTFail("No soundtrack is required for source-only cuts");return [:]
+    })
+    var clip=Clip(engine:.h3);clip.sourcePath=movie.path;clip.duration=0.4
+    store.project.clips=[clip];store.prepareTimelinePlayback(force:true);await store.timelineBuildTask?.value
+    XCTAssertNotNil(store.player.currentItem)
+    clip.sourcePath="";store.project.clips=[clip]
+    store.prepareTimelinePlayback(force:true);await store.timelineBuildTask?.value
+    XCTAssertNil(store.player.currentItem)
+    store.togglePlayback()
+    for _ in 0..<100 where store.isPlaying { try await Task.sleep(nanoseconds:20_000_000) }
+    XCTAssertEqual(store.playhead,0.4,accuracy:0.001);XCTAssertFalse(store.isPlaying)
+  }
+  func testSourceAudioPreviewRejectsOverlapsAndUnsupportedGain() {
+    var project=StudioProject(),a=Clip(),b=Clip()
+    a.duration=1;b.duration=1;project.clips=[a,b]
+    XCTAssertTrue(TimelinePlaybackBuilder.canUseSourceAudio(project))
+    project.clips[1].transition="dissolve";project.clips[1].transitionDuration=0.2
+    XCTAssertFalse(TimelinePlaybackBuilder.canUseSourceAudio(project))
+    project.clips[1].transition="cut";project.clips[0].volume=3
+    XCTAssertFalse(TimelinePlaybackBuilder.canUseSourceAudio(project))
   }
   func directory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -244,8 +324,9 @@ extension TimelineMediaTests {
 
 extension TimelineMediaTests {
   @MainActor func testClearingTimelineStopsOldPreparedItem() async throws {
-    let store = try playbackStore(in: directory())
-    var clip = Clip(); clip.duration = 2; store.project.clips = [clip]
+    let folder = try directory(), source = try await audiovisualMovie(in: folder)
+    let store = try playbackStore(in: folder)
+    var clip = Clip(); clip.duration = 2; clip.sourcePath = source.path; store.project.clips = [clip]
     store.prepareTimelinePlayback(); await store.timelineBuildTask?.value
     XCTAssertNotNil(store.player.currentItem)
     store.togglePlayback(); XCTAssertTrue(store.isPlaying)

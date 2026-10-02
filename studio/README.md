@@ -103,7 +103,7 @@ of the distilled 8 + 3 schedule. Motion Track, CrossView and other
 specialized combinations still require the explicitly selected Python route.
 Ordinary H3 and LTX 2.5 model setup now scans selected folders, links compatible
 installed components and creates native profiles without Python. Swift also downloads pinned
-LTX 2.5 packages, H3 Qwen pages, video VAE and tokenizer packages. Acquiring/converting
+LTX 2.5 packages, H3 Qwen pages, video VAE, folded audio VAE and tokenizer packages. Acquiring/converting
 the remaining H3 components, other specialized adapter setup, asset/library tools and other engines remain separate work; this is not yet a
 fully Python-free Studio release.
 The experimental Swift H3 worker has completed text-to-audiovisual, reference-conditioned
@@ -733,9 +733,10 @@ hardlinked on the same volume or linked across volumes; keep the original files 
 Cancellation preserves partial downloads without publishing an incomplete package. Progress
 and **Cancel** appear in the setup window. The native path uses a Studio Keychain token or
 `HF_TOKEN`; it never writes the token into download state, provenance or logs.
-Native choices include LTX 2.5, H3 Qwen, H3 video VAE and tokenizer. The older H3 paged
+Native choices include LTX 2.5, H3 Qwen, H3 video VAE, folded audio VAE and tokenizer. The older H3 paged
 transformer/support downloads and source conversion still belong to the optional Python
-setup route. For Swift H3, import a supported direct transformer, folded audio VAE,
+setup route. The folded audio VAE has a separate pinned download with its source license,
+notices and conversion modifications. For Swift H3, import a supported direct transformer,
 task manifest and processor alongside these downloaded components; native setup is not
 yet a complete H3 acquisition/conversion solution.
 
@@ -1141,6 +1142,12 @@ audio regions. It references existing movies in place, loads metadata asynchrono
 the preview canvas to 1280 pixels on its longest edge. Missing or unrendered shots keep their place
 and show a placeholder, so later shots do not shift. Selecting a clip reuses the loaded timeline.
 Transitions use a cut at the incoming shot's start while preserving the edited movie duration.
+
+Source-only timelines with cuts, centered source audio and clip volumes up to 200% play directly
+through AVFoundation, including accepted Swift LTX/H3 takes when Python is unavailable. Source
+trims and per-clip volume remain applied. Separate audio regions, source pan, overlapping transitions
+or larger volume settings still prepare the canonical soundtrack through the existing audio mixer;
+these edits are never silently omitted to enable native playback.
 
 **Render movie preview** builds a reduced-resolution movie with the actual transitions, titles,
 audio crossfades and finishing mix. It is the more accurate check before export. Use **Timeline

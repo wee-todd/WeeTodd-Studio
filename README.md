@@ -12,7 +12,7 @@ Swift H3 and LTX 2.5 setup can find compatible components in folders you select,
 including existing ComfyUI model libraries. Discovery reads bounded metadata and leaves
 weights in place. Compatible pinned preconverted downloads now run in Swift with
 streamed checksums, resume and cancellation. Native setup includes DFR, MSR and
-Ingredients profiles. The remaining H3 acquisition/conversion components and
+Ingredients and Union Control profiles. The remaining H3 acquisition/conversion components and
 other specialized adapters still require an explicit supported source/setup path.
 
 [Get started](#get-started) · [Studio guide](studio/README.md) ·
@@ -450,7 +450,8 @@ or the model download controls. **Create Recipe** validates the component set. O
 With the Swift worker enabled, ordinary H3 and LTX 2.5 presets can link installed components and
 create profiles without Python. Folder scanning reads bounded component metadata without copying
 weights. Text-to-video setup runs worker preflight immediately; image and reference profiles run it
-after clip media is attached. Managed downloads remain on the optional Python setup route.
+after clip media is attached. Compatible preconverted LTX/H3 downloads also run in Swift;
+source conversion and the older H3 paged-transformer/support packages retain the optional Python route.
 Native H3, LTX 2.3 and LTX 2.5 offer different conditioning and sampling controls.
 Use the [model setup guide](studio/README.md#guided-model-setup) and
 [clip generation controls](studio/README.md#clip-generation-controls) for the supported combinations.
@@ -489,7 +490,9 @@ first-frame workflow. See [Ripple setup and editing](studio/README.md#ltx-25-rip
 
 The viewport plays all timeline clips, with a draggable playhead and click-to-seek time ruler.
 Native editing playback uses cuts; **Render movie preview** includes the final transitions and
-finishing mix. See [timeline playback and scrubbing](studio/README.md#timeline-playback-and-scrubbing).
+finishing mix. Source-only cuts play trimmed movies and their per-clip audio directly in Swift,
+including native LTX/H3 takes with Python unavailable. Additional audio regions, pan and overlapping
+transitions retain the full audio mixer. See [timeline playback and scrubbing](studio/README.md#timeline-playback-and-scrubbing).
 
 In **Clip Continuity → Connection**, choose how a native shot relates to its source:
 
@@ -1050,11 +1053,12 @@ review the displayed package contents before starting.
 Accept the selected repository's access terms on Hugging Face and configure **Hugging Face access**
 in Studio, or use your existing CLI login. Download only the package needed by your chosen engine.
 
-Swift setup downloads compatible LTX 2.5, H3 Qwen/video-VAE/tokenizer packages through
+Swift setup downloads compatible LTX 2.5, H3 Qwen/video-VAE/folded-audio-VAE/tokenizer packages through
 URLSession using a Studio Keychain token or `HF_TOKEN`. The existing H3 paged-transformer
 and task-support packages below are for the Python renderer; they are excluded from native
-download choices. Swift H3 requires a compatible direct transformer and folded audio VAE
-imported separately. Source conversion and CLI-login authentication remain on the optional
+download choices. The folded audio VAE is a separate pinned package that retains its source
+license and notices and reuses matching installed weights. Swift H3 still requires a compatible
+direct transformer imported separately. Source conversion and CLI-login authentication remain on the optional
 Python setup route. See [guided native setup](studio/README.md#guided-model-setup).
 
 | Package | Download size¹ | Included | Still separate |

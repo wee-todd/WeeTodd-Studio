@@ -363,6 +363,13 @@ struct RenderSettingsSummary: View {
     }
     return durations.reduce(0, +)
   }
+  var mediaInputCount: Int {
+    let conditioning = details["conditioning"] as? [String: Any] ?? [:]
+    if let count = conditioning["inputs"] as? Int, count >= 0 { return count }
+    if let inputs = conditioning["inputs"] as? [[String: Any]] { return inputs.count }
+    let contract = conditioning["contract"] as? [String: Any]
+    return (contract?["inputs"] as? [[String: Any]])?.count ?? clip.reviewMediaCount
+  }
   var body: some View {
     let resolved = details
     let generation = resolved["generation"] as? [String: Any] ?? [:]
@@ -404,10 +411,7 @@ struct RenderSettingsSummary: View {
       if let fps = resolved["nativeFPS"] as? Double {
         LabeledContent("Generation frame rate", value: String(format: "%g fps", fps))
       }
-      let conditioning = resolved["conditioning"] as? [String: Any]
-      let contract = conditioning?["contract"] as? [String: Any]
-      let inputs = contract?["inputs"] as? [[String: Any]]
-      LabeledContent("Media inputs", value: String(inputs?.count ?? clip.reviewMediaCount))
+      LabeledContent("Media inputs", value: String(mediaInputCount))
       if clip.reviewLoRACount > 0 {
         LabeledContent("Active LoRAs", value: String(clip.reviewLoRACount))
       }

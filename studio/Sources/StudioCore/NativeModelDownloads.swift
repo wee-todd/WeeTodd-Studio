@@ -43,12 +43,12 @@ public enum NativeModelDownloads {
   public static func catalog(at url: URL) throws -> [NativeModelDownloadPackage] {
     let bytes = try bounded(url, limit: 8 * 1024 * 1024)
     var packages = try JSONDecoder().decode([NativeModelDownloadPackage].self, from: bytes)
-      .filter { ["h3-qwen", "ltx25", "h3-video-vae", "h3-dt-tokenizer"].contains($0.kind) }
+      .filter { ["h3-qwen", "ltx25", "h3-video-vae", "h3-audio-vae", "h3-dt-tokenizer"].contains($0.kind) }
     guard packages.count <= 64, Set(packages.map { $0.descriptor.id }).count == packages.count else {
       throw StudioError.invalid("Invalid native model download catalog.")
     }
     let kinds: Set<String> = ["h3-qwen", "ltx25", "h3-transformer-fl2va", "h3-transformer-ref2va",
-      "h3-video-vae", "h3-support-fl2va", "h3-support-ref2va", "h3-dt-tokenizer"]
+      "h3-video-vae", "h3-audio-vae", "h3-support-fl2va", "h3-support-ref2va", "h3-dt-tokenizer"]
     for package in packages {
       guard relative(package.descriptor.id), !package.descriptor.id.contains("/"),
         kinds.contains(package.kind), !package.files.isEmpty, package.files.count <= 512,
@@ -74,7 +74,7 @@ public enum NativeModelDownloads {
     for index in packages.indices where packages[index].kind == "h3-video-vae" {
       packages[index].descriptor.description = packages[index].descriptor.description.replacingOccurrences(
         of: "Audio VAE is included in the separate task support files.",
-        with: "Import a compatible folded-weight audio VAE separately for Swift inference.")
+        with: "Choose the separate folded-weight audio VAE download for Swift inference.")
     }
     return packages
   }

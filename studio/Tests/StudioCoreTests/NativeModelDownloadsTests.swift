@@ -138,7 +138,10 @@ final class NativeModelDownloadsTests: XCTestCase {
     let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
     let catalog = try NativeModelDownloads.catalog(at: source)
-    XCTAssertEqual(catalog.count, 4)
+    XCTAssertEqual(catalog.count, 5)
+    let audio=try XCTUnwrap(catalog.first { $0.kind == "h3-audio-vae" })
+    XCTAssertEqual(audio.descriptor.components,["audio_vae"])
+    XCTAssertTrue(audio.files.contains { $0.filename == "audio_vae.safetensors" && $0.size == 605254808 })
     XCTAssertFalse(catalog.contains { $0.kind.hasPrefix("h3-transformer") || $0.kind.hasPrefix("h3-support") })
     guard ProcessInfo.processInfo.environment["WEETODD_NATIVE_DOWNLOAD_NETWORK"] == "1" else {
       throw XCTSkip("Opt-in real pinned-file HTTP transfer")
@@ -148,5 +151,28 @@ final class NativeModelDownloadsTests: XCTestCase {
     let partial = root.appendingPathComponent("license.partial")
     try await NativeModelHTTPTransfer(file: file, partial: partial, token: nil, progress: { _, _ in }).run()
     XCTAssertTrue(try NativeModelDownloads.verified(partial, file: file))
+  }
+  func testInstalledFoldedAudioPackageReusesWeightsWhenRequested() async throws {
+    guard let installed=ProcessInfo.processInfo.environment["WEETODD_NATIVE_AUDIO_SOURCE"] else {
+      throw XCTSkip("Opt-in installed folded H3 audio package qualification")
+    }
+    let source=URL(fileURLWithPath:installed)
+    let output=ProcessInfo.processInfo.environment["WEETODD_NATIVE_AUDIO_PACKAGE_OUTPUT"]
+    let root=try output.map { URL(fileURLWithPath:$0) } ?? directory()
+    defer { if output == nil { try? FileManager.default.removeItem(at:root) } }
+    let catalog=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
+    let package=try await NativeModelDownloads.prepare(id:"h3-folded-audio-vae-preconverted",
+      catalog:catalog,destination:root,existingRoots:[source.deletingLastPathComponent().path],progress:{ _,_ in })
+    let linked=package.appendingPathComponent("audio_vae.safetensors")
+    let original=try FileManager.default.attributesOfItem(atPath:source.path)
+    let prepared=try FileManager.default.attributesOfItem(atPath:linked.path)
+    XCTAssertEqual(original[.systemFileNumber] as? NSNumber,prepared[.systemFileNumber] as? NSNumber)
+    let preset=try XCTUnwrap(NativeModelSetup.catalog().first { $0.engine == "h3" && $0.task == "t2v" })
+    let scan=try NativeModelSetup.scan(presetID:preset.id,roots:[package.path])
+    XCTAssertEqual(scan.candidates["audio_vae"],[linked.resolvingSymlinksInPath().path])
+    for notice in ["LICENSE","NOTICE","MODIFICATIONS.md"] {
+      XCTAssertTrue(FileManager.default.isReadableFile(atPath:package.appendingPathComponent(notice).path))
+    }
   }
 }

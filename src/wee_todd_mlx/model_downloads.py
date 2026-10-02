@@ -504,6 +504,10 @@ def _validate_preconverted(kind, root):
         from .model_setup import _h3_candidate
 
         _h3_candidate("tokenizer", root, "t2va")
+    elif kind == "h3-audio-vae":
+        from .model_setup import _h3_candidate
+
+        _h3_candidate("audio_vae", root / "audio_vae.safetensors", "ref2va")
     elif kind in {
         "h3-transformer-fl2va",
         "h3-transformer-ref2va",
