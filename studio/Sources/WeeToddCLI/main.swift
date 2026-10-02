@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import StudioCore
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 if arguments.isEmpty || arguments.contains("--help") {
@@ -10,7 +11,9 @@ if arguments.isEmpty || arguments.contains("--help") {
     WeeToddCLI --job Movie.weetodd-job.json --output-directory Render --preflight-only
     WeeToddCLI --job Movie.weetodd-job.json --output-directory Render --resume
 
-    Uses the native runtime recorded in the job. The graphical editor can be closed.
+    Uses the runtime recorded in the job. Native H3/LTX jobs execute without Python.
+    Override a moved worker with --h3-swift-worker PATH or --ltx25-swift-worker PATH.
+    The graphical editor can be closed.
     """)
   exit(0)
 }
@@ -22,6 +25,28 @@ do {
     )
   }
   let url = URL(fileURLWithPath: arguments[index + 1])
+  let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+  if raw?["format"] as? String == NativeHeadlessJob.format {
+    let options = try NativeHeadlessCLIArguments(arguments)
+    let job = try NativeHeadlessJob.read(from: URL(fileURLWithPath: options.jobPath),
+      workerOverrides: options.workerOverrides)
+    let cancellation = NativeHeadlessCancellation()
+    signal(SIGINT, SIG_IGN); signal(SIGTERM, SIG_IGN)
+    let interrupts = [SIGINT, SIGTERM].map { number in
+      let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+      source.setEventHandler { cancellation.cancel() }; source.resume(); return source
+    }
+    do {
+      let result = try await NativeHeadlessExecutor.run(job: job,
+        output: URL(fileURLWithPath: options.outputDirectory), resume: options.resume,
+        preflightOnly: options.preflightOnly, cancellation: cancellation)
+      FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: result) + Data([10]))
+      withExtendedLifetime(interrupts) { exit(0) }
+    } catch is CancellationError {
+      print("{\"status\":\"cancelled\",\"native_runtime\":\"swift-mlx\"}")
+      withExtendedLifetime(interrupts) { exit(130) }
+    }
+  }
   guard let job = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any],
     ["weetodd-studio-job-v1", "weetodd-studio-job-v2", "weetodd-studio-job-v3", "weetodd-studio-job-v4"].contains(
       job["format"] as? String ?? ""),

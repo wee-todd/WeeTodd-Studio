@@ -134,15 +134,43 @@ final class NativeModelDownloadsTests: XCTestCase {
     catch is CancellationError {}
     XCTAssertEqual(try Data(contentsOf: partial), bytes.prefix(4))
   }
+  func testGatedAccessFailureExplainsSourcePermissionAndPreservesPartial() async throws {
+    let root = try directory();defer { try? FileManager.default.removeItem(at:root) }
+    let (_,file) = try fixture(root), partial = root.appendingPathComponent("partial")
+    let configuration = URLSessionConfiguration.ephemeral;configuration.protocolClasses = [ModelResponseProtocol.self]
+    for status in [401,403] {
+      try bytes.prefix(4).write(to:partial)
+      ModelResponseProtocol.response = { _ in (status,[:],Data("denied".utf8)) }
+      do {
+        try await NativeModelHTTPTransfer(file:file,partial:partial,token:"fixture-read-token",
+          configuration:configuration,progress:{ _,_ in }).run()
+        XCTFail("Gated access must not publish denied response bytes")
+      } catch {
+        XCTAssertTrue(error.localizedDescription.contains("source access"))
+        XCTAssertTrue(error.localizedDescription.contains("read token"))
+      }
+      XCTAssertEqual(try Data(contentsOf:partial),bytes.prefix(4))
+    }
+  }
   func testCanonicalCatalogAndPinnedNetworkFileWhenRequested() async throws {
     let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
     let catalog = try NativeModelDownloads.catalog(at: source)
-    XCTAssertEqual(catalog.count, 5)
+    XCTAssertEqual(catalog.count, 19)
     let audio=try XCTUnwrap(catalog.first { $0.kind == "h3-audio-vae" })
     XCTAssertEqual(audio.descriptor.components,["audio_vae"])
     XCTAssertTrue(audio.files.contains { $0.filename == "audio_vae.safetensors" && $0.size == 605254808 })
     XCTAssertFalse(catalog.contains { $0.kind.hasPrefix("h3-transformer") || $0.kind.hasPrefix("h3-support") })
+    XCTAssertEqual(catalog.filter { $0.kind == "h3-direct-transformer" }.count, 2)
+    XCTAssertEqual(catalog.filter { $0.kind == "h3-native-support" }.count, 2)
+    XCTAssertEqual(catalog.filter { $0.kind == "h3-native-control" }.count, 2)
+    XCTAssertEqual(catalog.filter { $0.kind == "ltx25-adapter" }.count, 8)
+    for preset in NativeModelSetup.catalog() {
+      for component in preset.components {
+        XCTAssertTrue(catalog.contains { $0.descriptor.supports(engine:preset.engine, task:preset.task, component:component.key) },
+          "Missing Python-free download for \(preset.id): \(component.key)")
+      }
+    }
     guard ProcessInfo.processInfo.environment["WEETODD_NATIVE_DOWNLOAD_NETWORK"] == "1" else {
       throw XCTSkip("Opt-in real pinned-file HTTP transfer")
     }
@@ -151,6 +179,70 @@ final class NativeModelDownloadsTests: XCTestCase {
     let partial = root.appendingPathComponent("license.partial")
     try await NativeModelHTTPTransfer(file: file, partial: partial, token: nil, progress: { _, _ in }).run()
     XCTAssertTrue(try NativeModelDownloads.verified(partial, file: file))
+  }
+  func testRepeatedPackagePayloadIsDownloadedOnceAndLinkedToBothTargets() async throws {
+    let root = try directory(); defer { try? FileManager.default.removeItem(at:root) }
+    let (catalog, _) = try fixture(root)
+    var records = try JSONSerialization.jsonObject(with:Data(contentsOf:catalog)) as! [[String:Any]]
+    var files = records[0]["files"] as! [[String:Any]], second = files[0]
+    second["target"] = "processor/model.safetensors"; files.append(second); records[0]["files"] = files
+    var descriptor = records[0]["descriptor"] as! [String:Any]
+    descriptor["downloadBytes"] = bytes.count * 2; records[0]["descriptor"] = descriptor
+    try JSONSerialization.data(withJSONObject:records).write(to:catalog)
+    let bytes = self.bytes
+    let final = try await NativeModelDownloads.prepare(id:"test-model",catalog:catalog,
+      destination:root.appendingPathComponent("library"),existingRoots:[],token:nil,progress:{ _,_ in },
+      transfer:{ file,partial,_,_ in
+        XCTAssertEqual(file.target,"pages/model.safetensors","Duplicate content must reuse the first verified file")
+        try bytes.write(to:partial)
+      })
+    let first = try FileManager.default.attributesOfItem(atPath:final.appendingPathComponent("pages/model.safetensors").path)
+    let secondInfo = try FileManager.default.attributesOfItem(atPath:final.appendingPathComponent("processor/model.safetensors").path)
+    XCTAssertEqual(first[.systemFileNumber] as? NSNumber,secondInfo[.systemFileNumber] as? NSNumber)
+  }
+  func testPinnedSwiftTaskManifestsAndProcessorDiscoverWithoutPythonWhenRequested() async throws {
+    guard ProcessInfo.processInfo.environment["WEETODD_NATIVE_DOWNLOAD_NETWORK"] == "1" else {
+      throw XCTSkip("Opt-in pinned task/processor HTTP transfers")
+    }
+    let catalogURL = URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
+    let catalog = try NativeModelDownloads.catalog(at:catalogURL)
+    let root = try directory(); defer { try? FileManager.default.removeItem(at:root) }
+    for (id,preset) in [("h3-swift-fl2va-support","swift-h3-text"),("h3-swift-ref2va-support","swift-h3-reference")] {
+      let package = try XCTUnwrap(catalog.first { $0.descriptor.id == id })
+      let destination = root.appendingPathComponent(id)
+      for target in ["model_index.json","processor/preprocessor_config.json"] {
+        let file = try XCTUnwrap(package.files.first { $0.target == target })
+        let output = destination.appendingPathComponent(target)
+        try FileManager.default.createDirectory(at:output.deletingLastPathComponent(),withIntermediateDirectories:true)
+        try await NativeModelHTTPTransfer(file:file,partial:output,token:nil,progress:{ _,_ in }).run()
+        XCTAssertTrue(try NativeModelDownloads.verified(output,file:file))
+      }
+      let scan = try NativeModelSetup.scan(presetID:preset,roots:[destination.path])
+      XCTAssertEqual(scan.candidates["checkpoint"],[destination.path])
+      XCTAssertEqual(scan.candidates["processor"],[destination.appendingPathComponent("processor").path])
+    }
+  }
+  func testInstalledCompatibleTransformerIsVerifiedAndLinkedWithoutLargeTransferWhenRequested() async throws {
+    guard let installed = ProcessInfo.processInfo.environment["WEETODD_NATIVE_TRANSFORMER_SOURCE"] else {
+      throw XCTSkip("Opt-in installed direct H3 transformer qualification")
+    }
+    let catalogURL = URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
+    let root = try directory(); defer { try? FileManager.default.removeItem(at:root) }
+    let result = try await NativeModelDownloads.prepare(id:"h3-singularity-full-comfy-int8",catalog:catalogURL,
+      destination:root,existingRoots:[installed],token:nil,progress:{ _,_ in },transfer:{ file,partial,token,progress in
+        guard file.size < 100_000 else { XCTFail("Must reuse installed transformer"); throw CancellationError() }
+        try await NativeModelHTTPTransfer(file:file,partial:partial,token:token,progress:progress).run()
+      })
+    let linked = result.appendingPathComponent("transformer.safetensors")
+    let canonical = linked.resolvingSymlinksInPath()
+    let original = try FileManager.default.attributesOfItem(atPath:URL(fileURLWithPath:installed).resolvingSymlinksInPath().path)
+    let prepared = try FileManager.default.attributesOfItem(atPath:canonical.path)
+    XCTAssertEqual(original[.systemNumber] as? NSNumber,prepared[.systemNumber] as? NSNumber)
+    XCTAssertEqual(original[.systemFileNumber] as? NSNumber,prepared[.systemFileNumber] as? NSNumber)
+    XCTAssertEqual(try NativeModelSetup.scan(presetID:"swift-h3-reference",roots:[result.path]).candidates["transformer"],[canonical.path])
+    XCTAssertEqual(try NativeModelSetup.scan(presetID:"swift-h3-fun-control",roots:[result.path]).candidates["transformer"],[canonical.path])
   }
   func testInstalledFoldedAudioPackageReusesWeightsWhenRequested() async throws {
     guard let installed=ProcessInfo.processInfo.environment["WEETODD_NATIVE_AUDIO_SOURCE"] else {
@@ -174,5 +266,47 @@ final class NativeModelDownloadsTests: XCTestCase {
     for notice in ["LICENSE","NOTICE","MODIFICATIONS.md"] {
       XCTAssertTrue(FileManager.default.isReadableFile(atPath:package.appendingPathComponent(notice).path))
     }
+  }
+  func testInstalledPublishedFL2VACurveReusesWeightsAndSupportsImageSetupWhenRequested() async throws {
+    guard let installed=ProcessInfo.processInfo.environment["WEETODD_NATIVE_FL2VA_SOURCE"] else {
+      throw XCTSkip("Opt-in installed published FL2VA curve qualification")
+    }
+    let requestedOutput=ProcessInfo.processInfo.environment["WEETODD_NATIVE_FL2VA_PACKAGE_OUTPUT"]
+    let root=try requestedOutput.map { URL(fileURLWithPath:$0) } ?? directory()
+    defer { if requestedOutput == nil { try? FileManager.default.removeItem(at:root) } }
+    let catalog=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
+    let result=try await NativeModelDownloads.prepare(id:"h3-fl2va-deepbeep-curve64-bf16",catalog:catalog,
+      destination:root,existingRoots:[installed],token:nil,progress:{ _,_ in },transfer:{ file,partial,token,progress in
+        guard file.size<100_000 else { XCTFail("Published FL2VA weights must be reused");throw CancellationError() }
+        try await NativeModelHTTPTransfer(file:file,partial:partial,token:token,progress:progress).run()
+      })
+    let linked=result.appendingPathComponent("transformer.safetensors").resolvingSymlinksInPath()
+    let original=try FileManager.default.attributesOfItem(atPath:URL(fileURLWithPath:installed).resolvingSymlinksInPath().path)
+    let prepared=try FileManager.default.attributesOfItem(atPath:linked.path)
+    XCTAssertEqual(original[.systemNumber] as? NSNumber,prepared[.systemNumber] as? NSNumber)
+    XCTAssertEqual(original[.systemFileNumber] as? NSNumber,prepared[.systemFileNumber] as? NSNumber)
+    XCTAssertEqual(try NativeModelSetup.scan(presetID:"swift-h3-image",roots:[result.path]).candidates["transformer"],[linked.path])
+    XCTAssertTrue(try NativeModelSetup.scan(presetID:"swift-h3-reference",roots:[result.path]).candidates["transformer"]!.isEmpty)
+    for notice in ["SOURCE_README.md","LICENSE"] { XCTAssertTrue(FileManager.default.isReadableFile(atPath:result.appendingPathComponent(notice).path)) }
+  }
+  func testInstalledPublishedFL2VASupportReusesTokenizerAndMatchesTaskWhenRequested() async throws {
+    guard let support=ProcessInfo.processInfo.environment["WEETODD_NATIVE_FL2VA_SUPPORT_SOURCE"] else {
+      throw XCTSkip("Opt-in installed official FL2VA metadata qualification")
+    }
+    let requestedOutput=ProcessInfo.processInfo.environment["WEETODD_NATIVE_FL2VA_PACKAGE_OUTPUT"]
+    let root=try requestedOutput.map { URL(fileURLWithPath:$0) } ?? directory()
+    defer { if requestedOutput == nil { try? FileManager.default.removeItem(at:root) } }
+    let catalog=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
+      let metadata=try await NativeModelDownloads.prepare(id:"h3-swift-fl2va-support",catalog:catalog,
+        destination:root,existingRoots:[support],token:nil,progress:{ _,_ in },transfer:{ file,partial,token,progress in
+          guard file.size<100_000 else { XCTFail("Installed tokenizer payloads must be reused");throw CancellationError() }
+          try await NativeModelHTTPTransfer(file:file,partial:partial,token:token,progress:progress).run()
+        })
+      let scan=try NativeModelSetup.scan(presetID:"swift-h3-image",roots:[metadata.path])
+      XCTAssertEqual(scan.candidates["checkpoint"],[metadata.path])
+      XCTAssertEqual(scan.candidates["processor"],[metadata.appendingPathComponent("processor").path])
+      XCTAssertTrue(scan.candidates["tokenizer"]!.contains(metadata.appendingPathComponent("tokenizer").path))
   }
 }

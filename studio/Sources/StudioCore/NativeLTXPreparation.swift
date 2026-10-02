@@ -79,6 +79,18 @@ public enum NativeLTXPreparation {
     return result
   }
   private static func specialization(_ recipe:[String:Any]) -> String? {
+    if let condition=recipe["conditioning"] as? [String:Any],
+      condition["task"] as? String == "control",let family=condition["control_family"] as? String,
+      ["motion_track","crossview_warp","crossview_ingredients"].contains(family),
+      let config=recipe["config"] as? [String:Any],config["stage1_steps"] as? Int == 8,
+      config["stage2_steps"] as? Int == 3,config["ic_lora_single_stage"] as? Bool != true,
+      (config["dfr_enabled"] as? Bool ?? false) == false,
+      let components=recipe["components"] as? [String:Any],
+      (components["msr_lora_path"] as? String ?? "").isEmpty,
+      let adapters=components["ic_loras"] as? [[Any]],
+      adapters.count == (family == "crossview_ingredients" ? 2 : 1),
+      adapters.allSatisfy({ $0.count == 2 && ($0[0] as? String)?.hasPrefix("/") == true
+        && ($0[1] as? Double).map { $0.isFinite && $0>0 && $0<=3 } == true }) { return family }
     guard let config=recipe["config"] as? [String:Any],
       let components=recipe["components"] as? [String:Any],
       (config["pipeline_mode"] as? String ?? "distilled") == "distilled",
@@ -97,22 +109,32 @@ public enum NativeLTXPreparation {
     if task == "control",(components["msr_lora_path"] as? String ?? "").isEmpty { return "ingredients" }
     return nil
   }
-  private static func sourceSHA256(_ path:String) throws -> String {
+  private static func sourceSHA256(_ path:String,maxBytes:Int64=128*1024*1024) throws -> String {
     let fd=Darwin.open(path,O_RDONLY | O_CLOEXEC | O_NONBLOCK)
-    guard fd>=0 else { throw StudioError.invalid("Cannot read the reference image.") }
+    guard fd>=0 else { throw StudioError.invalid("Cannot read the reference media.") }
     let handle=FileHandle(fileDescriptor:fd,closeOnDealloc:true);defer { try? handle.close() }
     var status=stat()
     guard fstat(fd,&status)==0,status.st_mode & S_IFMT == S_IFREG,
-      (1...128*1024*1024).contains(status.st_size) else {
-      throw StudioError.invalid("Reference images must be regular files under 128 MiB.")
+      (1...maxBytes).contains(status.st_size) else {
+      throw StudioError.invalid("Reference media must be regular files under \(maxBytes/1024/1024) MiB.")
     }
     var digest=SHA256(),count=0
     while let bytes=try handle.read(upToCount:1024*1024),!bytes.isEmpty {
       try Task.checkCancellation();count+=bytes.count
-      guard count<=status.st_size else { throw StudioError.invalid("Reference image changed during preparation.") }
+      guard count<=status.st_size else { throw StudioError.invalid("Reference media changed during preparation.") }
       digest.update(data:bytes)
     }
-    guard count==status.st_size else { throw StudioError.invalid("Reference image changed during preparation.") }
+    var after=stat(),current=stat()
+    guard count==status.st_size,fstat(fd,&after)==0,lstat(path,&current)==0,
+      after.st_size==status.st_size,after.st_mtimespec.tv_sec==status.st_mtimespec.tv_sec,
+      after.st_mtimespec.tv_nsec==status.st_mtimespec.tv_nsec,
+      after.st_ctimespec.tv_sec==status.st_ctimespec.tv_sec,after.st_ctimespec.tv_nsec==status.st_ctimespec.tv_nsec,
+      current.st_dev==status.st_dev,current.st_ino==status.st_ino,
+      current.st_size==after.st_size,current.st_mtimespec.tv_sec==after.st_mtimespec.tv_sec,
+      current.st_mtimespec.tv_nsec==after.st_mtimespec.tv_nsec,
+      current.st_ctimespec.tv_sec==after.st_ctimespec.tv_sec,current.st_ctimespec.tv_nsec==after.st_ctimespec.tv_nsec else {
+      throw StudioError.invalid("Reference media changed during preparation.")
+    }
     return digest.finalize().map { String(format:"%02x",$0) }.joined()
   }
   private static func descriptor(_ recipe: [String: Any]) -> [String: Any] {
@@ -143,10 +165,10 @@ public enum NativeLTXPreparation {
     return ["dfrEnabled": dfrValid,"referenceFamily": specialized ?? "ordinary",
       "supportedTasks": specialized != nil ? [specialized == "msr" ? "ref2va" : "control"] : dfrValid ? ["t2v", "i2v", "fflf"] : ordinary && !dfrEnabled
       ? ["t2v", "i2v", "fflf", "a2v", "extension"] : [],
-      "controls": ["evaluations": config["stage1_steps"] ?? 8, "refinementSteps": specialized != nil && specialized != "union" ? 0 : config["stage2_steps"] ?? 3,
+      "controls": ["evaluations": config["stage1_steps"] ?? 8, "refinementSteps": ["msr","ingredients"].contains(specialized ?? "") ? 0 : config["stage2_steps"] ?? 3,
         "cfg": config["video_cfg_scale"] ?? 1, "stepsEditable": false, "refinementStepsEditable": false,
         "cfgEditable": false, "shiftEditable": false,
-        "stepsExplanation": specialized != nil && specialized != "union" ? "Swift reference sampling uses eight full-resolution evaluations." : "Swift distilled sampling uses the qualified 8 + 3 schedule.",
+        "stepsExplanation": ["msr","ingredients"].contains(specialized ?? "") ? "Swift reference sampling uses eight full-resolution evaluations." : "Swift distilled sampling uses the qualified 8 + 3 schedule.",
         "cfgExplanation": "Distilled guidance is fixed.",
         "shiftExplanation": "This native adapter does not expose a Shift override."],
       "presets": [
@@ -383,7 +405,10 @@ public enum NativeLTXPreparation {
     if task == "control",clip.profileID == "auto" {
       let controls=clip.attachments.filter { $0.role == .control }.map(\.controlType)
       if !controls.isEmpty {
-        let family=controls.allSatisfy { $0 == "ingredients_reference_sheet" } ? "ingredients"
+        let family=controls == ["motion_track"] ? "motion_track"
+          : controls.filter { $0 == "crossview_warp" }.count == 2
+            ? (controls.contains("ingredients_reference_sheet") ? "crossview_ingredients" : "crossview_warp")
+          : controls.allSatisfy { $0 == "ingredients_reference_sheet" } ? "ingredients"
           : controls.allSatisfy { ["canny_edges","depth_map","pose_skeleton"].contains($0) } ? "union" : "unsupported"
         candidates=candidates.filter { ($0["generation"] as? [String:Any])?["referenceFamily"] as? String == family }
       }
@@ -490,7 +515,7 @@ public enum NativeLTXPreparation {
     guard !prompt.isEmpty else { throw StudioError.invalid("Write a prompt before preparing the render.") }
     var content = context.recipe
     let specialized=specialization(content)
-    if specialized == "union",(clip.generationWidth%128 != 0 || clip.generationHeight%128 != 0) {
+    if ["union","motion_track"].contains(specialized ?? ""),(clip.generationWidth%128 != 0 || clip.generationHeight%128 != 0) {
       throw StudioError.invalid("Union Control requires final dimensions divisible by 128 for its quarter-canvas guide.")
     }
     // Stored profile media/context never become hidden clip dependencies.
@@ -506,7 +531,7 @@ public enum NativeLTXPreparation {
     let additionalFrames = Int(ceil(clip.duration * fps / 8 - 1e-9)) * 8
     let contextFrames = context.movieSource == nil ? 0 : clip.continuityMode == "motion" ? 49 : 25
     let frames = contextFrames + additionalFrames + (context.movieSource == nil ? 1 : 0)
-    if specialized == "ingredients",frames<121 {
+    if ["ingredients","crossview_ingredients"].contains(specialized ?? ""),frames<121 {
       throw StudioError.invalid("Ingredients needs at least 121 frames (five seconds at 24 fps).")
     }
     let duration = Double(additionalFrames) / fps
@@ -552,8 +577,12 @@ public enum NativeLTXPreparation {
     if specialized == "msr",!(1...5).contains(attachments.count) {
       throw StudioError.invalid("MSR needs one to five described still images.")
     }
-    if ["ingredients","union"].contains(specialized ?? ""),attachments.count != 1 {
+    if ["ingredients","union","motion_track"].contains(specialized ?? ""),attachments.filter({ $0.role != .lora }).count != 1 {
       throw StudioError.invalid("This control profile needs exactly one guide attachment.")
+    }
+    if let family=specialized,family.hasPrefix("crossview"),
+      attachments.filter({ $0.role != .lora }).count != (family == "crossview_ingredients" ? 3 : 2) {
+      throw StudioError.invalid("CrossView needs a warp movie, its original source movie, and a sheet when using Ingredients.")
     }
     for attachment in attachments {
       try Task.checkCancellation()
@@ -595,6 +624,26 @@ public enum NativeLTXPreparation {
           "source_duration_seconds": sourceDuration]); continue
       }
       if attachment.role == .reference || attachment.role == .control {
+        if ["motion_track","crossview_warp","crossview_ingredients"].contains(specialized ?? ""),
+          (attachment.attentionStrength ?? 1) != 1 ||
+            (attachment.referenceSizePolicy ?? "sol_auto") != "sol_auto" {
+          throw StudioError.invalid("This IC control does not expose per-reference attention or size overrides.")
+        }
+        if ["motion_track","crossview_warp","crossview_ingredients"].contains(specialized ?? ""),
+          attachment.controlType != "ingredients_reference_sheet" {
+          let crossview=specialized != "motion_track",role=attachment.referenceRole ?? ""
+          guard asset.kind == .video,attachment.role == .control,attachment.time == 0,
+            attachment.controlType == (crossview ? "crossview_warp" : "motion_track"),
+            !crossview || ["warp","source"].contains(role),
+            attachment.strength.isFinite,(0...1).contains(attachment.strength) else {
+            throw StudioError.invalid("MotionTrack needs a track movie; CrossView needs explicitly labeled warp/source movies at time zero.")
+          }
+          var input:[String:Any]=["id":attachment.id.uuidString,"kind":"video","role":"control","path":path,
+            "control_type":attachment.controlType,"strength":attachment.strength,
+            "sha256":try sourceSHA256(path,maxBytes:4*1024*1024*1024)]
+          if crossview { input["reference_role"]=role }
+          inputs.append(input);continue
+        }
         if specialized == "union" {
           guard asset.kind == .video,attachment.role == .control,
             ["canny_edges","depth_map","pose_skeleton"].contains(attachment.controlType),
@@ -602,7 +651,8 @@ public enum NativeLTXPreparation {
             throw StudioError.invalid("Union needs one preprocessed Canny, depth or pose movie at time zero, with strength from 0 to 1.")
           }
           inputs.append(["id":attachment.id.uuidString,"kind":"video","role":"control","path":path,
-            "control_type":attachment.controlType,"strength":attachment.strength]);continue
+            "control_type":attachment.controlType,"strength":attachment.strength,
+            "sha256":try sourceSHA256(path,maxBytes:4*1024*1024*1024)]);continue
         }
         guard asset.kind == .image,attachment.strength.isFinite,(0...1).contains(attachment.strength),
           !attachment.description.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else {
@@ -638,6 +688,16 @@ public enum NativeLTXPreparation {
       inputs.append(["id": attachment.id.uuidString, "kind": "image", "role": "keyframe", "path": path,
         "strength": attachment.strength, "frame_index": frame])
     }
+    if let family=specialized,family.hasPrefix("crossview") {
+      guard inputs.filter({ $0["reference_role"] as? String == "warp" }).count == 1,
+        inputs.filter({ $0["reference_role"] as? String == "source" }).count == 1,
+        inputs.filter({ $0["control_type"] as? String == "ingredients_reference_sheet" }).count == (family == "crossview_ingredients" ? 1 : 0) else {
+        throw StudioError.invalid("CrossView needs one warp and one original source movie, with a single sheet only for the combined profile.")
+      }
+      inputs=inputs.filter { $0["reference_role"] as? String == "warp" }
+        + inputs.filter { $0["reference_role"] as? String == "source" }
+        + inputs.filter { $0["control_type"] as? String == "ingredients_reference_sheet" }
+    }
     if inputs.filter({ $0["reference_role"] as? String == "background" }).count>1 {
       throw StudioError.invalid("MSR accepts at most one background image.")
     }
@@ -669,9 +729,12 @@ public enum NativeLTXPreparation {
     if !loras.isEmpty { components["loras"] = loras }
     var contract = content["conditioning"] as? [String: Any] ?? [:]
     let task = context.task == "i2v" ? "fflf" : context.task
-    for key in ["version", "task", "inputs", "extension"] { contract.removeValue(forKey: key) }
+    for key in ["version", "task", "inputs", "extension", "publication_audio"] { contract.removeValue(forKey: key) }
     if (content["conditioning"] as? [String: Any])?["task"] as? String != task { contract.removeValue(forKey: "audio_policy") }
     contract["version"] = 1; contract["task"] = task; contract["inputs"] = inputs
+    if let family=specialized,["motion_track","crossview_warp","crossview_ingredients"].contains(family) {
+      contract["control_family"]=family;contract["audio_policy"]=family == "motion_track" ? "generated" : "source"
+    }
     if task == "extension" {
       guard let moviePath, let movieSHA256, context.movieSource != nil else {
         throw StudioError.invalid("Select and prepare an LTX extension source movie.")
@@ -711,10 +774,15 @@ public enum NativeLTXPreparation {
   public static func prepareWithMedia(request: [String: Any], destination: URL) async throws -> [String: Any] {
     if try sceneRequest(request) != nil { return try prepare(request: request, destination: destination) }
     let context = try resolve(request)
-    if specialization(context.recipe) == "union" {
+    if let family=specialization(context.recipe),["union","motion_track","crossview_warp","crossview_ingredients"].contains(family) {
       var composed=try compose(context),content=composed["recipe"] as! [String:Any]
       var conditioning=content["conditioning"] as! [String:Any]
       var inputs=conditioning["inputs"] as! [[String:Any]]
+      let originalSources:[(path:String,sha256:String,maxBytes:Int64)]=inputs.map { input in
+        let sourcePath=input["path"] as! String,sourceDigest=input["sha256"] as! String
+        let maxBytes:Int64=(input["kind"] as? String == "image") ? 134_217_728 : 4_294_967_296
+        return (path:sourcePath,sha256:sourceDigest,maxBytes:maxBytes)
+      }
       let config=content["config"] as! [String:Any],fps=config["frame_rate"] as! Double
       let frames=Int(((config["duration_seconds"] as! Double)*fps/8).rounded())*8+1
       let parent=destination.deletingLastPathComponent()
@@ -722,16 +790,54 @@ public enum NativeLTXPreparation {
       let staging=parent.appendingPathComponent(".prepare-"+UUID().uuidString)
       try FileManager.default.createDirectory(at:staging,withIntermediateDirectories:false)
       defer { try? FileManager.default.removeItem(at:staging) }
-      let original=inputs[0]["path"] as! String,name="union-guide.rgb24"
-      let digest=try await NativeLTXControlGuide.prepare(source:URL(fileURLWithPath:original),
-        destination:staging.appendingPathComponent(name),width:config["width"] as! Int,height:config["height"] as! Int,
-        frames:frames,fps:fps,editorialDuration:context.clip.duration)
-      inputs[0]["path"]=destination.appendingPathComponent(name).path;inputs[0]["sha256"]=digest;inputs[0]["format"]="rgb24"
+      let downscale=["union","motion_track"].contains(family) ? 2 : 1
+      var guideReports:[[String:Any]]=[]
+      for index in inputs.indices {
+        let original=inputs[index]["path"] as! String,name=family == "union" ? "union-guide.rgb24" : "control-guide-\(index).rgb24"
+        let digest:String
+        if inputs[index]["kind"] as? String == "image" {
+          if family == "crossview_ingredients",let description=inputs[index]["description"] as? String,
+            let prompt=content["prompt"] as? String,
+            !prompt.hasPrefix("Reference sheet:") && !prompt.hasPrefix("### Reference Sheet Description") {
+            content["prompt"]="Reference sheet: "+description+"\n\nGenerated video: "+prompt
+          }
+          digest=try NativeLTXControlGuide.prepareSheet(source:URL(fileURLWithPath:original),
+            destination:staging.appendingPathComponent(name),width:(config["width"] as! Int)/2,
+            height:(config["height"] as! Int)/2,frames:frames)
+          guard try sourceSHA256(original)==originalSources[index].sha256 else {
+            throw StudioError.invalid("The Ingredients source changed after composition. Prepare the clip again.")
+          }
+          inputs[index].removeValue(forKey:"description")
+          inputs[index]["kind"]="video";inputs[index]["reference_role"]="ingredients"
+        } else {
+          digest=try await NativeLTXControlGuide.prepare(source:URL(fileURLWithPath:original),
+            destination:staging.appendingPathComponent(name),width:config["width"] as! Int,height:config["height"] as! Int,
+            frames:frames,fps:fps,editorialDuration:context.clip.duration,referenceDownscale:downscale)
+        }
+        if inputs[index]["reference_role"] as? String == "source" {
+          let audioName="crossview-source.wav"
+          let audioDigest=try await NativeLTXControlGuide.prepareAudio(source:URL(fileURLWithPath:original),
+            destination:staging.appendingPathComponent(audioName),duration:context.clip.duration)
+          conditioning["publication_audio"]=["path":destination.appendingPathComponent(audioName).path,
+            "sha256":audioDigest,"source_start_seconds":0,"source_duration_seconds":context.clip.duration]
+        }
+        inputs[index]["path"]=destination.appendingPathComponent(name).path;inputs[index]["sha256"]=digest;inputs[index]["format"]="rgb24"
+        guideReports.append(["source":original,"sha256":digest,"frames":frames,
+          "source_sha256":originalSources[index].sha256,
+          "resize_policy":inputs[index]["reference_role"] as? String == "ingredients" ? "fit_letterbox" : "cover_center_crop",
+          "width":(config["width"] as! Int)/(2*downscale),"height":(config["height"] as! Int)/(2*downscale),
+          "nativePreparation":"swift","role":inputs[index]["reference_role"] ?? "control"])
+      }
+      for source in originalSources {
+        guard try sourceSHA256(source.path,maxBytes:source.maxBytes)==source.sha256 else {
+          throw StudioError.invalid("A control source changed after composition. Prepare the clip again.")
+        }
+      }
       conditioning["inputs"]=inputs;content["conditioning"]=conditioning
       var report=composed["report"] as! [String:Any]
       report["resolvedFingerprint"]=try fingerprint(content)
-      report["controlGuide"]=["source":original,"sha256":digest,"frames":frames,
-        "width":(config["width"] as! Int)/4,"height":(config["height"] as! Int)/4,"nativePreparation":"swift"]
+      report["controlGuides"]=guideReports
+      if family == "union" { report["controlGuide"]=guideReports[0] }
       try data(content).write(to:staging.appendingPathComponent("recipe.json"),options:.withoutOverwriting)
       try data(request).write(to:staging.appendingPathComponent("editor-request.json"),options:.withoutOverwriting)
       try Task.checkCancellation();try FileManager.default.moveItem(at:staging,to:destination)

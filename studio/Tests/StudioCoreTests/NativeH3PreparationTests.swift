@@ -87,6 +87,94 @@ final class NativeH3PreparationTests: XCTestCase {
     XCTAssertEqual(generation["supportedTasks"] as? [String], ["fflf"])
   }
 
+  private func writeControlHeader(_ value: [String: Any], to url: URL) throws {
+    let header = try JSONSerialization.data(withJSONObject: value)
+    var size = UInt64(header.count).littleEndian
+    let prefix = withUnsafeBytes(of: &size) { Data($0) }
+    try (prefix + header).write(to: url)
+  }
+
+  private func controlFixture() throws -> (URL, StudioProject, [String: Any]) {
+    let (root, original, runtime) = try fixture()
+    let control = root.appendingPathComponent("fun.safetensors")
+    let transformer = root.appendingPathComponent("base.safetensors")
+    var controlHeader: [String: Any] = ["control_proj_in.weight": ["dtype": "F32", "shape": [5376, 196]]]
+    for index in 0..<5 {
+      controlHeader["control_blocks.\(index).adaln_proj.linear.weight"] = ["dtype": "BF16", "shape": [96768, 2688]]
+    }
+    try writeControlHeader(controlHeader, to: control)
+    try writeControlHeader(["diffusion_model.time_embedder.proj_out.weight": ["dtype": "BF16", "shape": [2688, 5376]],
+      "diffusion_model.blocks.0.adaln_proj.linear.weight": ["dtype": "I8", "shape": [96768, 2688]]], to: transformer)
+    let profile = root.appendingPathComponent("h3.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: profile)) as! [String: Any]
+    var components = recipe["components"] as! [String: Any]
+    components["fun_controlnet"] = control.path; components["transformer"] = transformer.path
+    recipe["components"] = components
+    recipe["conditioning"] = ["version": 1, "task": "control", "inputs": [], "audio_policy": "generated"]
+    try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
+    let video = root.appendingPathComponent("preprocessed-pose.mp4")
+    try Data([1, 2, 3, 4]).write(to: video)
+    let guide = MediaAsset(name: "Pose guide", kind: .video, path: video.path)
+    var project = original; project.assets = [guide]
+    project.clips[0].generationSelection = GenerationSelection(task: "control")
+    var attachment = Attachment(assetID: guide.id, role: .control)
+    attachment.controlType = "pose_skeleton"; attachment.strength = 0.75
+    project.clips[0].attachments = [attachment]
+    return (root, project, runtime)
+  }
+
+  func testFunControlProfileExposesControlAndPreservesOneHashedGuide() throws {
+    let (root, project, runtime) = try controlFixture()
+    let catalog = try NativeH3Preparation.catalog(directory: root.path)
+    XCTAssertEqual(catalog.count, 1)
+    XCTAssertEqual(catalog[0]["task"] as? String, "control")
+    XCTAssertEqual((catalog[0]["generation"] as? [String: Any])?["supportedTasks"] as? [String], ["control"])
+    let result = try NativeH3Preparation.compose(request: request(project, runtime))
+    let recipe = result["recipe"] as! [String: Any]
+    XCTAssertEqual((recipe["components"] as! [String: Any])["fun_controlnet"] as? String,
+      root.appendingPathComponent("fun.safetensors").path)
+    let conditioning = recipe["conditioning"] as! [String: Any]
+    XCTAssertEqual(conditioning["task"] as? String, "control")
+    let inputs = conditioning["inputs"] as! [[String: Any]]
+    XCTAssertEqual(inputs.count, 1); XCTAssertEqual(inputs[0]["strength"] as? Double, 0.75)
+    XCTAssertEqual(inputs[0]["control_type"] as? String, "pose_skeleton")
+    XCTAssertEqual((inputs[0]["sha256"] as? String)?.count, 64)
+    let target = root.appendingPathComponent("prepared")
+    let prepared = try NativeH3Preparation.prepare(request: request(project, runtime), destination: target)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: prepared["recipePath"] as! String))
+    XCTAssertEqual(project.clips[0].attachments[0].strength, 0.75)
+  }
+
+  func testFunControlRejectsChangedInjectionDeclarationsBeforePublishing() throws {
+    let (root, project, runtime) = try controlFixture()
+    let control = root.appendingPathComponent("fun.safetensors")
+    var header = try JSONSerialization.jsonObject(with: Data(contentsOf: control).dropFirst(8)) as! [String: Any]
+    for bad in ["[0,5,10,15,20]", "[false,10,20,30,40]"] {
+      header["__metadata__"] = ["control_blocks_places": bad]
+      try writeControlHeader(header, to: control)
+      XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+    }
+  }
+
+  func testFunControlRejectsPrunedAdaLNAndInvalidMediaContracts() throws {
+    let (root, original, runtime) = try controlFixture()
+    var project = original
+    project.clips[0].attachments[0].controlType = "unprocessed_video"
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+    project = original; project.clips[0].attachments[0].strength = 1.1
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+    project = original; project.clips[0].attachments += project.clips[0].attachments
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+    project = original; project.clips[0].continuity = ClipContinuity(mode: "motion")
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+    var pruned: [String: Any] = ["control_proj_in.weight": ["dtype": "F32", "shape": [5376, 196]]]
+    for index in 0..<5 {
+      pruned["control_blocks.\(index).adaln_proj.linear.weight"] = ["dtype": "F32", "shape": [96768, 8]]
+    }
+    try writeControlHeader(pruned, to: root.appendingPathComponent("fun.safetensors"))
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(original, runtime)))
+  }
+
   private func fixture() throws -> (URL, StudioProject, [String: Any]) {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

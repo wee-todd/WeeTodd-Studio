@@ -109,6 +109,9 @@ struct BridgeResponseBuffer {
   @Published var startedAt: Date?
   @Published var lastOutputAt: Date?
   @Published var livePreview: BridgeProgressEvent?
+  @Published var workerEventsPath: String?
+  @Published var workerEventsTruncated = false
+  @Published var workerEventsArchiveError: String?
   typealias Invocation = @MainActor (String, RuntimeSettings, [String: Any], URL?) async throws -> [String: Any]
   private let invocation: Invocation?
   init(invocation: Invocation? = nil) { self.invocation = invocation }
@@ -220,6 +223,9 @@ struct BridgeResponseBuffer {
     let nativeLTX = ["ltx-native-render", "ltx-native-preflight"].contains(command)
     let nativeH3 = ["h3-native-render", "h3-native-preflight"].contains(command)
     if nativeLTX || nativeH3 {
+      workerEventsPath = nil; workerEventsTruncated = false; workerEventsArchiveError = nil
+    }
+    if nativeLTX || nativeH3 {
       let workerPath = nativeH3 ? runtime.h3WorkerPath : runtime.ltx25WorkerPath
       let label = nativeH3 ? "H3" : "LTX"
       guard let worker = workerPath, FileManager.default.isExecutableFile(atPath: worker), output != nil else {
@@ -275,6 +281,12 @@ struct BridgeResponseBuffer {
     }
     try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys]).write(
       to: input, options: .atomic)
+    defer { try? FileManager.default.removeItem(at: input) }
+    // Create the archive before launching weighted work, outside its atomic output.
+    let archive = try nativeLTX || nativeH3
+      ? NativeWorkerEventArchive(output: output!, jobID: body["jobID"] as? String ?? UUID().uuidString) : nil
+    if let archive { workerEventsPath = archive.url.path }
+    defer { archive?.finish() }
     busy = true
     startedAt = Date()
     lastOutputAt = startedAt
@@ -309,13 +321,18 @@ struct BridgeResponseBuffer {
         while true {
           let part = pipe.fileHandleForReading.availableData
           if part.isEmpty { break }
+          archive?.append(part)
           responseBuffer.append(part)
           let text = String(decoding: part, as: UTF8.self)
           let events = progressStream.append(part)
+          let archiveTruncated = archive?.truncated ?? false, archiveError = archive?.errorMessage
           DispatchQueue.main.async {
             guard self.process === task else { return }
             self.log = String((self.log + text).suffix(30000))
             self.lastOutputAt = Date()
+            if archive != nil {
+              self.workerEventsTruncated = archiveTruncated; self.workerEventsArchiveError = archiveError
+            }
             for event in events {
               self.message = event.message
               self.fraction = event.fraction ?? self.fraction
@@ -328,6 +345,8 @@ struct BridgeResponseBuffer {
           }
         }
         task.waitUntilExit()
+        archive?.finish()
+        let archiveTruncated = archive?.truncated ?? false, archiveError = archive?.errorMessage
         let lines = String(decoding: responseBuffer.data, as: UTF8.self).split(separator: "\n")
         let last = lines.reversed().compactMap { line -> [String: Any]? in
           guard let data = String(line).data(using: .utf8),
@@ -336,14 +355,23 @@ struct BridgeResponseBuffer {
           else { return nil }
           return d
         }.first
-        if task.terminationStatus == 0, let result = last?["result"] as? [String: Any] {
-          continuation.resume(returning: result)
+        let failure = StudioError.invalid(last?["error"] as? String
+          ?? (last?["status"] as? String == "cancelled" ? "Job cancelled." : "The job failed. Open the log for details."))
+        if let archive {
+          DispatchQueue.main.async {
+            self.workerEventsTruncated = archiveTruncated; self.workerEventsArchiveError = archiveError
+            if task.terminationStatus == 0, var result = last?["result"] as? [String: Any] {
+              result["workerEventsPath"] = archive.url.path
+              result["workerEventsTruncated"] = archiveTruncated
+              if let archiveError { result["workerEventsArchiveError"] = archiveError }
+              continuation.resume(returning: result)
+            } else { continuation.resume(throwing: failure) }
+          }
         } else {
-          continuation.resume(
-            throwing: StudioError.invalid(
-              last?["error"] as? String
-                ?? (last?["status"] as? String == "cancelled"
-                  ? "Job cancelled." : "The job failed. Open the log for details.")))
+          // Preserve the Python host's existing response path.
+          if task.terminationStatus == 0, let result = last?["result"] as? [String: Any] {
+            continuation.resume(returning: result)
+          } else { continuation.resume(throwing: failure) }
         }
       }
     }

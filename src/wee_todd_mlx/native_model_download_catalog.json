@@ -1,0 +1,883 @@
+[
+  {
+    "descriptor": {
+      "id": "h3-swift-fl2va-support",
+      "name": "H3 text/image task + processor \u00b7 Swift",
+      "description": "Official task manifest, Qwen3-VL processor and tokenizer. No weights or conversion. Use with a compatible direct H3 transformer and the separate folded audio VAE, video VAE and paged Qwen downloads.",
+      "downloadBytes": 23008753,
+      "requiredDiskBytes": 291444209,
+      "sourceURL": "https://huggingface.co/MiniMaxAI/MiniMax-H3/tree/42ed227ee7df40d41602854ae760620d6eb651fe",
+      "licenseURL": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE",
+      "licenseNotice": "Retains the MiniMax H3 Community License and its eligibility/use restrictions. Review the source terms and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "tasks": [
+        "t2v",
+        "fflf",
+        "control"
+      ],
+      "components": [
+        "checkpoint",
+        "tokenizer",
+        "processor"
+      ]
+    },
+    "kind": "h3-native-support",
+    "files": [
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/model_index.json",
+        "size": 719,
+        "sha256": "d1113e0f123c69f79cd0de35ca1771606ebc3ec924270d257b771f96f584aa6b",
+        "target": "model_index.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/processor/chat_template.json",
+        "size": 5499,
+        "sha256": "5c72a170d2a4a1a3bc5adad2e689ae28138a9700e5b8c96c0266331e86c0acce",
+        "target": "processor/chat_template.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/processor/merges.txt",
+        "size": 1671839,
+        "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+        "target": "processor/merges.txt"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/processor/preprocessor_config.json",
+        "size": 390,
+        "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
+        "target": "processor/preprocessor_config.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/processor/tokenizer.json",
+        "size": 7032403,
+        "sha256": "a5d85b6dcc535e6b93115a9ef287e6132fdbf30270da6218194ba742261173c7",
+        "target": "processor/tokenizer.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/processor/tokenizer_config.json",
+        "size": 11003,
+        "sha256": "a07e942ac874baa13758de8d1fbdb186683cc03416b5589e1b6671c6b3057c68",
+        "target": "processor/tokenizer_config.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/processor/video_preprocessor_config.json",
+        "size": 385,
+        "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
+        "target": "processor/video_preprocessor_config.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/processor/vocab.json",
+        "size": 2776833,
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "target": "processor/vocab.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/tokenizer/merges.txt",
+        "size": 1671839,
+        "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+        "target": "tokenizer/merges.txt"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/tokenizer/tokenizer.json",
+        "size": 7032403,
+        "sha256": "a5d85b6dcc535e6b93115a9ef287e6132fdbf30270da6218194ba742261173c7",
+        "target": "tokenizer/tokenizer.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/tokenizer/tokenizer_config.json",
+        "size": 11003,
+        "sha256": "a07e942ac874baa13758de8d1fbdb186683cc03416b5589e1b6671c6b3057c68",
+        "target": "tokenizer/tokenizer_config.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "FL2VA/tokenizer/vocab.json",
+        "size": 2776833,
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "target": "tokenizer/vocab.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44",
+        "target": "LICENSE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-swift-ref2va-support",
+      "name": "H3 reference task + processor \u00b7 Swift",
+      "description": "Official task manifest, Qwen3-VL processor and tokenizer. No weights or conversion. Use with a compatible direct H3 transformer and the separate folded audio VAE, video VAE and paged Qwen downloads.",
+      "downloadBytes": 23008741,
+      "requiredDiskBytes": 291444197,
+      "sourceURL": "https://huggingface.co/MiniMaxAI/MiniMax-H3/tree/42ed227ee7df40d41602854ae760620d6eb651fe",
+      "licenseURL": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE",
+      "licenseNotice": "Retains the MiniMax H3 Community License and its eligibility/use restrictions. Review the source terms and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "tasks": [
+        "ref2va"
+      ],
+      "components": [
+        "checkpoint",
+        "tokenizer",
+        "processor"
+      ]
+    },
+    "kind": "h3-native-support",
+    "files": [
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44",
+        "target": "LICENSE"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/model_index.json",
+        "size": 707,
+        "sha256": "b160b13700bf08aea7fce1bc3dd0d3a49ea15036298c50082ec107f87843b90c",
+        "target": "model_index.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/processor/chat_template.json",
+        "size": 5499,
+        "sha256": "5c72a170d2a4a1a3bc5adad2e689ae28138a9700e5b8c96c0266331e86c0acce",
+        "target": "processor/chat_template.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/processor/merges.txt",
+        "size": 1671839,
+        "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+        "target": "processor/merges.txt"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/processor/preprocessor_config.json",
+        "size": 390,
+        "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
+        "target": "processor/preprocessor_config.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/processor/tokenizer.json",
+        "size": 7032403,
+        "sha256": "a5d85b6dcc535e6b93115a9ef287e6132fdbf30270da6218194ba742261173c7",
+        "target": "processor/tokenizer.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/processor/tokenizer_config.json",
+        "size": 11003,
+        "sha256": "a07e942ac874baa13758de8d1fbdb186683cc03416b5589e1b6671c6b3057c68",
+        "target": "processor/tokenizer_config.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/processor/video_preprocessor_config.json",
+        "size": 385,
+        "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
+        "target": "processor/video_preprocessor_config.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/processor/vocab.json",
+        "size": 2776833,
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "target": "processor/vocab.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/tokenizer/merges.txt",
+        "size": 1671839,
+        "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+        "target": "tokenizer/merges.txt"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/tokenizer/tokenizer.json",
+        "size": 7032403,
+        "sha256": "a5d85b6dcc535e6b93115a9ef287e6132fdbf30270da6218194ba742261173c7",
+        "target": "tokenizer/tokenizer.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/tokenizer/tokenizer_config.json",
+        "size": 11003,
+        "sha256": "a07e942ac874baa13758de8d1fbdb186683cc03416b5589e1b6671c6b3057c68",
+        "target": "tokenizer/tokenizer_config.json"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "Ref2VA/tokenizer/vocab.json",
+        "size": 2776833,
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "target": "tokenizer/vocab.json"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-singularity-full-comfy-int8",
+      "name": "H3 Singularity v1.3 \u00b7 Direct INT8 \u00b7 Swift",
+      "description": "Community FL/Ref fusion fine-tune with the complete 50-block Comfy INT8 layout supported by Swift text, reference and full-width Fun Control routes. Swift image and endpoint generation instead requires the separate verified FL2VA 64-curve checkpoint. Matching installed weights are verified and linked in place. This is not an official checkpoint; generation quality remains under qualification.",
+      "downloadBytes": 34004530133,
+      "requiredDiskBytes": 34272965589,
+      "sourceURL": "https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity/tree/af671d9214a6e41ab8c2f43e9f871ea56246115f",
+      "licenseURL": "https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity/blob/af671d9214a6e41ab8c2f43e9f871ea56246115f/README.md",
+      "licenseNotice": "Retains the maintainer model card and original MiniMax H3 Community License, including source eligibility and use restrictions. Review both before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "components": [
+        "transformer"
+      ],
+      "tasks": [
+        "t2v",
+        "ref2va",
+        "control"
+      ]
+    },
+    "kind": "h3-direct-transformer",
+    "files": [
+      {
+        "repo": "WarmBloodAban/Minimax-h3_Singularity",
+        "revision": "af671d9214a6e41ab8c2f43e9f871ea56246115f",
+        "filename": "Minimax-h3_Singularity_ref2va_v1.3_int8.safetensors",
+        "target": "transformer.safetensors",
+        "size": 34004507622,
+        "sha256": "551915097b8727537a82f3a2c5acec965165ec84e780b3e9a5f28ce867fddf08"
+      },
+      {
+        "repo": "WarmBloodAban/Minimax-h3_Singularity",
+        "revision": "af671d9214a6e41ab8c2f43e9f871ea56246115f",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 4907,
+        "sha256": "aba60b61d2eb15d81e503de08626d24c58209a851e0e4e4046ea97abc2f95eda"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44",
+        "target": "LICENSE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-pixel-spatial-dfr",
+      "name": "LTX 2.5 Pixel-Spatial x2 \u00b7 DFR adapter",
+      "description": "Stage-two rank-32 DFR adapter. Requires the dedicated DFR profile; applying it as an ordinary LoRA does not provide its spatial reference conditioning.",
+      "downloadBytes": 327358331,
+      "requiredDiskBytes": 595793787,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler/tree/380e63e764cad353c47a8e7c9c7ad6095d25e814",
+      "licenseURL": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler/blob/380e63e764cad353c47a8e7c9c7ad6095d25e814/README.md",
+      "licenseNotice": "Source model terms and required attribution are retained. Review the source license and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "components": [
+        "dfr_detailing_lora_path"
+      ]
+    },
+    "kind": "ltx25-adapter",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler",
+        "revision": "380e63e764cad353c47a8e7c9c7ad6095d25e814",
+        "filename": "ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+        "target": "ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+        "size": 327322640,
+        "sha256": "984851b769ea2bcb4c9e0a239a7676239e42c6a6001ddc69943b41ff0b283c1d"
+      },
+      {
+        "repo": "Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler",
+        "revision": "380e63e764cad353c47a8e7c9c7ad6095d25e814",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 5292,
+        "sha256": "8ccab293ea79777523ff1b003e615ceaba394145f371148ef213878795350509"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "LICENSE",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451",
+        "target": "LTX_BASE_LICENSE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-temporal-upscaler",
+      "name": "LTX 2.5 temporal x2 \u00b7 DFR component",
+      "description": "BF16 temporal latent upscaler for one or two DFR temporal rounds. Requires the dedicated DFR profile and Pixel-Spatial adapter.",
+      "downloadBytes": 262001476,
+      "requiredDiskBytes": 530436932,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.5/tree/2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+      "licenseURL": "https://huggingface.co/Lightricks/LTX-2.5/blob/2356ce76915d6c48d313d7e8b25900e1dd3abaa8/README.md",
+      "licenseNotice": "Source model terms and required attribution are retained. Review the source license and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "components": [
+        "dfr_temporal_upsampler_path"
+      ]
+    },
+    "kind": "ltx25-adapter",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "latent_upscale_models/ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors",
+        "target": "ltx-2.5-latent-temporal-upscaler-x2-bf16-1.0.safetensors",
+        "size": 261944000,
+        "sha256": "2bc3300f2b3c3c1834d72164fbf13a3b9fd73e5a741e8a2c3f4035f89a75c3fe"
+      },
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 27077,
+        "sha256": "934251c54a75ab81ab649177870e5dcbfe205285ad8469c9d0a2f3d36009ef1a"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "LICENSE",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451",
+        "target": "LTX_BASE_LICENSE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-union-control",
+      "name": "LTX Union Control \u00b7 Rank-64 adapter",
+      "description": "Complete rank-64 task adapter for preprocessed Canny, depth or pose guides. Requires the dedicated two-stage Union profile.",
+      "downloadBytes": 654520581,
+      "requiredDiskBytes": 922956037,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control/tree/b4d1c4d8c9e544e9bbbd6811bb4363708b6093ff",
+      "licenseURL": "https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control/blob/b4d1c4d8c9e544e9bbbd6811bb4363708b6093ff/LICENSE",
+      "licenseNotice": "Source model terms and required attribution are retained. Review the source license and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "components": [
+        "union_lora_path"
+      ]
+    },
+    "kind": "ltx25-adapter",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
+        "revision": "b4d1c4d8c9e544e9bbbd6811bb4363708b6093ff",
+        "filename": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
+        "target": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
+        "size": 654465352,
+        "sha256": "a1b888a87f661d27f08b394ae559e8e1050be33900bcc36a5cdf659e48f88d18"
+      },
+      {
+        "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
+        "revision": "b4d1c4d8c9e544e9bbbd6811bb4363708b6093ff",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 3431,
+        "sha256": "c7afc9f6ad2909f2513a714b4adccaf805185aaaa7cad81830f921326fa5c940"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "LICENSE",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451",
+        "target": "LTX_BASE_LICENSE"
+      },
+      {
+        "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
+        "revision": "b4d1c4d8c9e544e9bbbd6811bb4363708b6093ff",
+        "filename": "LICENSE",
+        "target": "LICENSE",
+        "size": 21399,
+        "sha256": "e28ef68d90e17b06308e4c5cba5c9a967b70c3d67f87ddc3dfc46a312cb6a134"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-motion-track-control",
+      "name": "LTX Motion Track \u00b7 Rank-32 adapter",
+      "description": "Complete rank-32 task adapter for movies with drawn or tracked trajectories. Requires the dedicated two-stage Motion Track profile.",
+      "downloadBytes": 327364892,
+      "requiredDiskBytes": 595800348,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Motion-Track-Control/tree/572bb9c9a1ba3d8e8724cce69783ffc2422386db",
+      "licenseURL": "https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Motion-Track-Control/blob/572bb9c9a1ba3d8e8724cce69783ffc2422386db/LICENSE",
+      "licenseNotice": "Source model terms and required attribution are retained. Review the source license and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "components": [
+        "motion_track_lora_path"
+      ]
+    },
+    "kind": "ltx25-adapter",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Motion-Track-Control",
+        "revision": "572bb9c9a1ba3d8e8724cce69783ffc2422386db",
+        "filename": "ltx-2.3-22b-ic-lora-motion-track-control-ref0.5.safetensors",
+        "target": "ltx-2.3-22b-ic-lora-motion-track-control-ref0.5.safetensors",
+        "size": 327309314,
+        "sha256": "e279807ee3aa3db1ce60188d665ff83342860367dcd6bac19f8bd5a99a9e1dca"
+      },
+      {
+        "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Motion-Track-Control",
+        "revision": "572bb9c9a1ba3d8e8724cce69783ffc2422386db",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 3780,
+        "sha256": "21074019c95ae6573e041215df5a0824ac79dbff9ec98e2cd937890843fd4f7b"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "LICENSE",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451",
+        "target": "LTX_BASE_LICENSE"
+      },
+      {
+        "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Motion-Track-Control",
+        "revision": "572bb9c9a1ba3d8e8724cce69783ffc2422386db",
+        "filename": "LICENSE",
+        "target": "LICENSE",
+        "size": 21399,
+        "sha256": "e28ef68d90e17b06308e4c5cba5c9a967b70c3d67f87ddc3dfc46a312cb6a134"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-crossview-v2",
+      "name": "LTX CrossView v2 \u00b7 Rank-32 adapter",
+      "description": "Complete rank-32 task adapter for a prepared depth warp followed by its source movie. Studio consumes the prepared guides; it does not generate the depth warp. Requires the dedicated CrossView profile.",
+      "downloadBytes": 327367227,
+      "requiredDiskBytes": 595802683,
+      "sourceURL": "https://huggingface.co/Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp_v2/tree/17a34a4664586131340d68f73c4aa3152ed27efc",
+      "licenseURL": "https://huggingface.co/Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp_v2/blob/17a34a4664586131340d68f73c4aa3152ed27efc/README.md",
+      "licenseNotice": "Source model terms and required attribution are retained. Review the source license and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "components": [
+        "crossview_lora_path"
+      ]
+    },
+    "kind": "ltx25-adapter",
+    "files": [
+      {
+        "repo": "Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp_v2",
+        "revision": "17a34a4664586131340d68f73c4aa3152ed27efc",
+        "filename": "LTX2.3-22B_IC-LoRA-CrossView-Warp_v2_6000.safetensors",
+        "target": "LTX2.3-22B_IC-LoRA-CrossView-Warp_v2_6000.safetensors",
+        "size": 327287384,
+        "sha256": "e9796a6e14a8f8fadf0eda6c0ccc6c300c02bd5457fe9a0d4b91ffec39badda3"
+      },
+      {
+        "repo": "Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp_v2",
+        "revision": "17a34a4664586131340d68f73c4aa3152ed27efc",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 7581,
+        "sha256": "f124b9cbc3400eecc7696201aa7e2c66862ca204375d75f17389e97a9893011b"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "LICENSE",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451",
+        "target": "LTX_BASE_LICENSE"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "GEMMA_APACHE_LICENSE",
+        "size": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "target": "APACHE_LICENSE"
+      },
+      {
+        "repo": "Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp_v2",
+        "revision": "17a34a4664586131340d68f73c4aa3152ed27efc",
+        "filename": "ATTRIBUTION.md",
+        "target": "ATTRIBUTION.md",
+        "size": 30505,
+        "sha256": "98a5fcc38f5b0b7bd3f2011199b1d0338eb279a3f31ef25ffc9aeb3cd3d528f2"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-msr-v1",
+      "name": "LTX 2.5 Licon MSR v1 \u00b7 Learned-slot adapter",
+      "description": "Complete rank-128 Licon v1 adapter with learned Fourier reference slots. Requires the dedicated MSR profile. V2 adds audio and cross-modal adapters with speaker-slot conditioning outside the current visual-reference contract.",
+      "downloadBytes": 1308886513,
+      "requiredDiskBytes": 1577321969,
+      "sourceURL": "https://huggingface.co/LiconStudio/LTX-2.5-Multiple-Subject-Reference/tree/aa19b48f845995525d8ace60cdc89b842e951ce6",
+      "licenseURL": "https://huggingface.co/LiconStudio/LTX-2.5-Multiple-Subject-Reference/blob/aa19b48f845995525d8ace60cdc89b842e951ce6/README.md",
+      "licenseNotice": "Source model terms and required attribution are retained. Review the source license and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "components": [
+        "msr_lora_path"
+      ]
+    },
+    "kind": "ltx25-adapter",
+    "files": [
+      {
+        "repo": "LiconStudio/LTX-2.5-Multiple-Subject-Reference",
+        "revision": "aa19b48f845995525d8ace60cdc89b842e951ce6",
+        "filename": "LTX-2.5-Licon-MSR-V1.safetensors",
+        "target": "LTX-2.5-Licon-MSR-V1.safetensors",
+        "size": 1308840536,
+        "sha256": "d45cedd720e5819ccbe200a4b0ae01f7ae0e0d2966d700a24ebd4c7739515d4f"
+      },
+      {
+        "repo": "LiconStudio/LTX-2.5-Multiple-Subject-Reference",
+        "revision": "aa19b48f845995525d8ace60cdc89b842e951ce6",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 4220,
+        "sha256": "a677c071f7f327f0af86a227e28f39991baf499fed3824a2b7e871168c4449c7"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "LICENSE",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451",
+        "target": "LTX_BASE_LICENSE"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "GEMMA_APACHE_LICENSE",
+        "size": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "target": "APACHE_LICENSE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-ingredients-reference",
+      "name": "LTX Ingredients \u00b7 Rank-128 adapter",
+      "description": "Compatible complete rank-128 LTX 2.3 reference-sheet adapter for the Swift LTX 2.5 Ingredients profile or combined CrossView + Ingredients profile. This package is the verified LTX 2.3 adapter; the newer official LTX 2.5 adapter requires separate checkpoint qualification.",
+      "downloadBytes": 1308834559,
+      "requiredDiskBytes": 1577270015,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients/tree/dcc403d92aa0f5a983c5dbc7282503ca52f73a08",
+      "licenseURL": "https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients/blob/dcc403d92aa0f5a983c5dbc7282503ca52f73a08/README.md",
+      "licenseNotice": "Source model terms and required attribution are retained. Review the source license and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "components": [
+        "ingredients_lora_path"
+      ]
+    },
+    "kind": "ltx25-adapter",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients",
+        "revision": "dcc403d92aa0f5a983c5dbc7282503ca52f73a08",
+        "filename": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
+        "target": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
+        "size": 1308778338,
+        "sha256": "515e4e139001ac6282357a5b35372e42e98b3affd5fcc886a52242abeed19559"
+      },
+      {
+        "repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients",
+        "revision": "dcc403d92aa0f5a983c5dbc7282503ca52f73a08",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 25822,
+        "sha256": "27048e06aab829cf705a855b93dd90ccf3f344382181d3e7121f26176c92fd19"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "LICENSE",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451",
+        "target": "LTX_BASE_LICENSE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-fun-union-full-v1",
+      "name": "H3 Fun Union v1 \u00b7 Full-width control branch",
+      "description": "Original five-block, 2688-wide AdaLN control branch compatible with the full-width H3 transformer. Requires the dedicated Swift control route with one prepared Canny, depth, HED, MLSD or pose movie; this download does not enable other upstream guide types. Pruned Comfy basis-8 branches are a different unsupported format.",
+      "downloadBytes": 6806869031,
+      "requiredDiskBytes": 7075304487,
+      "sourceURL": "https://huggingface.co/alibaba-pai/MiniMax-H3-Fun-Controlnet-Union/tree/9df91437f0890b20f8a0b07c1d9500648cfcbf44",
+      "licenseURL": "https://huggingface.co/alibaba-pai/MiniMax-H3-Fun-Controlnet-Union/blob/9df91437f0890b20f8a0b07c1d9500648cfcbf44/LICENSE",
+      "licenseNotice": "Retains the original MiniMax H3 Community License, NOTICE and Alibaba PAI model card. Review source eligibility and use restrictions before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "components": [
+        "fun_controlnet"
+      ]
+    },
+    "kind": "h3-native-control",
+    "files": [
+      {
+        "repo": "alibaba-pai/MiniMax-H3-Fun-Controlnet-Union",
+        "revision": "9df91437f0890b20f8a0b07c1d9500648cfcbf44",
+        "filename": "MiniMax-H3-Fun-Controlnet-Union.safetensors",
+        "target": "MiniMax-H3-Fun-Controlnet-Union.safetensors",
+        "size": 6806843904,
+        "sha256": "919a48acb525dc8fc70287fcd94ec1f5e5e289a77f1df14d01099c6ce204eb02"
+      },
+      {
+        "repo": "alibaba-pai/MiniMax-H3-Fun-Controlnet-Union",
+        "revision": "9df91437f0890b20f8a0b07c1d9500648cfcbf44",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 7402,
+        "sha256": "0d6d9491ed69cddb64c930518747a9048ef573720daa4fd99d587204f3d48312"
+      },
+      {
+        "repo": "alibaba-pai/MiniMax-H3-Fun-Controlnet-Union",
+        "revision": "9df91437f0890b20f8a0b07c1d9500648cfcbf44",
+        "filename": "LICENSE",
+        "target": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44"
+      },
+      {
+        "repo": "alibaba-pai/MiniMax-H3-Fun-Controlnet-Union",
+        "revision": "9df91437f0890b20f8a0b07c1d9500648cfcbf44",
+        "filename": "NOTICE",
+        "target": "NOTICE",
+        "size": 121,
+        "sha256": "154fe7fbdf198395d53c57d6786b2fbf7e63a083ff70843c5ef78c0c7303d91a"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-fun-union-full-v2",
+      "name": "H3 Fun Union v2 \u00b7 Full-width control branch",
+      "description": "Original ten-block, 2688-wide AdaLN control branch compatible with the full-width H3 transformer. Requires the dedicated Swift control route with one prepared Canny, depth, HED, MLSD or pose movie; this download does not enable other upstream guide types. Pruned Comfy basis-8 branches are a different unsupported format.",
+      "downloadBytes": 13551667207,
+      "requiredDiskBytes": 13820102663,
+      "sourceURL": "https://huggingface.co/alibaba-pai/MiniMax-H3-Fun-Controlnet-Union-2.0/tree/7d2c95de2e351ed6a0b360af45f62daa04c26f88",
+      "licenseURL": "https://huggingface.co/alibaba-pai/MiniMax-H3-Fun-Controlnet-Union-2.0/blob/7d2c95de2e351ed6a0b360af45f62daa04c26f88/LICENSE",
+      "licenseNotice": "Retains the original MiniMax H3 Community License, NOTICE and Alibaba PAI model card. Review source eligibility and use restrictions before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "components": [
+        "fun_controlnet"
+      ]
+    },
+    "kind": "h3-native-control",
+    "files": [
+      {
+        "repo": "alibaba-pai/MiniMax-H3-Fun-Controlnet-Union-2.0",
+        "revision": "7d2c95de2e351ed6a0b360af45f62daa04c26f88",
+        "filename": "MiniMax-H3-Fun-Controlnet-Union-2.0.safetensors",
+        "target": "MiniMax-H3-Fun-Controlnet-Union-2.0.safetensors",
+        "size": 13551637688,
+        "sha256": "ecaf457aacc18ca6ed9889a276a36722e88c09962549bcd9e153b97e35ea921e"
+      },
+      {
+        "repo": "alibaba-pai/MiniMax-H3-Fun-Controlnet-Union-2.0",
+        "revision": "7d2c95de2e351ed6a0b360af45f62daa04c26f88",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 11794,
+        "sha256": "438ec5a845ae0471bbb5427adcca5d6c22bdf6fd219f7dcebe4dbc3968fb58b4"
+      },
+      {
+        "repo": "alibaba-pai/MiniMax-H3-Fun-Controlnet-Union-2.0",
+        "revision": "7d2c95de2e351ed6a0b360af45f62daa04c26f88",
+        "filename": "LICENSE",
+        "target": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44"
+      },
+      {
+        "repo": "alibaba-pai/MiniMax-H3-Fun-Controlnet-Union-2.0",
+        "revision": "7d2c95de2e351ed6a0b360af45f62daa04c26f88",
+        "filename": "NOTICE",
+        "target": "NOTICE",
+        "size": 121,
+        "sha256": "154fe7fbdf198395d53c57d6786b2fbf7e63a083ff70843c5ef78c0c7303d91a"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-ingredients-reference-official",
+      "name": "LTX 2.5 Ingredients \u00b7 Rank-128 adapter",
+      "description": "Official full-resolution static reference-sheet adapter, described by Lightricks as rank 128 with the same video attention and feed-forward projection family. Swift requires the complete 480-pair tensor signature and full-resolution metadata before generation. Source weights need Hugging Face gated access; this release header has not been qualified here.",
+      "downloadBytes": 1308843514,
+      "requiredDiskBytes": 1577278970,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients/tree/12040e4091ac2008d3906a594e31a7fb1ab9d546",
+      "licenseURL": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients/blob/12040e4091ac2008d3906a594e31a7fb1ab9d546/README.md",
+      "licenseNotice": "Retains the LTX 2.x Community License and official model card. Review the gated source access terms and approve access on Hugging Face before downloading; a read token with that model permission is required.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "components": [
+        "ingredients_lora_path"
+      ]
+    },
+    "kind": "ltx25-adapter",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients",
+        "revision": "12040e4091ac2008d3906a594e31a7fb1ab9d546",
+        "filename": "ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors",
+        "target": "ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors",
+        "size": 1308787472,
+        "sha256": "ff873a5beada3c579a8137c7c53343916f78bcc9a529ba910143073fe8715e95"
+      },
+      {
+        "repo": "Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients",
+        "revision": "12040e4091ac2008d3906a594e31a7fb1ab9d546",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 25643,
+        "sha256": "3a7b09b2af8bd83fe6257a3b2317842a53f42358bf392971216f9962beb6db88"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "LICENSE",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451",
+        "target": "LTX_BASE_LICENSE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-fl2va-deepbeep-curve64-bf16",
+      "name": "H3 FL2VA \u00b7 Verified 64-curve BF16 \u00b7 Swift",
+      "description": "Maintainer-released FL2VA transformer with the 1001\u00d764 AdaLN curve layout required by Swift image/endpoint generation. Exact bounded source header matches the qualified installed checkpoint. Compatible with native text generation; reference and full-width Fun Control use the separate full-width transformer. No conversion or Python is required.",
+      "downloadBytes": 41399461311,
+      "requiredDiskBytes": 41667896767,
+      "sourceURL": "https://huggingface.co/DeepBeepMeep/MiniMax-H3/tree/392b4ff9381cc1108355e573a01c93e249e77c7f",
+      "licenseURL": "https://huggingface.co/DeepBeepMeep/MiniMax-H3/blob/392b4ff9381cc1108355e573a01c93e249e77c7f/README.md",
+      "licenseNotice": "Retains the maintainer model card and original MiniMax H3 Community License, including eligibility and use restrictions. This derivative curve layout differs from the newer Comfy-Org basis-8 checkpoints; review both source terms before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "tasks": [
+        "t2v",
+        "fflf"
+      ],
+      "components": [
+        "transformer"
+      ]
+    },
+    "kind": "h3-direct-transformer",
+    "files": [
+      {
+        "repo": "DeepBeepMeep/MiniMax-H3",
+        "revision": "392b4ff9381cc1108355e573a01c93e249e77c7f",
+        "filename": "MiniMax-H3-FL2VA-pruned_bf16.safetensors",
+        "target": "transformer.safetensors",
+        "size": 41399442656,
+        "sha256": "85f57a3a7a26def920999f4be786ebb91d0e677ddf327d1848b7724ca829d187"
+      },
+      {
+        "repo": "DeepBeepMeep/MiniMax-H3",
+        "revision": "392b4ff9381cc1108355e573a01c93e249e77c7f",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 1051,
+        "sha256": "860bd2c5c8bed9a3dcfc705779d5156109feaa75bd52b03fc23024f30e1abe37"
+      },
+      {
+        "repo": "MiniMaxAI/MiniMax-H3",
+        "revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "filename": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44",
+        "target": "LICENSE"
+      }
+    ]
+  }
+]

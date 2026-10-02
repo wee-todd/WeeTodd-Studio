@@ -2,6 +2,47 @@ import XCTest
 @testable import LTX25MLX
 
 final class StudioRecipeTests: XCTestCase {
+  func testMotionTrackCompilesToDedicatedNativeControlWithoutChangingPrompt() throws {
+    var recipe=fixture(),components=fixture()["components"] as! [String:Any]
+    var config=recipe["config"] as! [String:Any]
+    config["width"]=512;config["height"]=256;recipe["config"]=config
+    components["ic_loras"]=[["/models/motion.safetensors",0.8]];recipe["components"]=components
+    recipe["conditioning"]=["version":1,"task":"control","audio_policy":"generated","inputs":[
+      ["id":"motion","kind":"video","role":"control","control_type":"motion_track",
+       "path":"/motion.rgb24","sha256":String(repeating:"a",count:64),"strength":0.7,"format":"rgb24"]]]
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,10);XCTAssertEqual(request.task,"ic_control")
+    XCTAssertEqual(request.prompt,recipe["prompt"] as? String)
+    XCTAssertTrue(request.stageTwoLoras.isEmpty)
+    let validCondition=recipe["conditioning"] as! [String:Any]
+    for malformed:Any in [true,NSNull()] {
+      var condition=validCondition;condition["version"]=malformed;recipe["conditioning"]=condition
+      XCTAssertThrowsError(try compile(recipe))
+    }
+    for malformed:Any in [37,NSNull()] {
+      var condition=validCondition;condition["control_family"]=malformed;recipe["conditioning"]=condition
+      XCTAssertThrowsError(try compile(recipe))
+    }
+  }
+
+  func testCrossViewRequiresOrderedWarpSourceAndPreservedSourceAudio() throws {
+    var recipe=fixture(),components=fixture()["components"] as! [String:Any]
+    components["ic_loras"]=[["/models/crossview.safetensors",1.3]];recipe["components"]=components
+    func guide(_ role:String) -> [String:Any] {
+      ["id":role,"kind":"video","role":"control","control_type":"crossview_warp",
+       "reference_role":role,"path":"/\(role).rgb24","sha256":String(repeating:"b",count:64),
+       "strength":1.0,"format":"rgb24"]
+    }
+    var condition:[String:Any]=["version":1,"task":"control","audio_policy":"source",
+      "inputs":[guide("warp"),guide("source")],"publication_audio":["path":"/source.mp4",
+        "sha256":String(repeating:"c",count:64),"source_start_seconds":0.0,"source_duration_seconds":2.0]]
+    recipe["conditioning"]=condition
+    XCTAssertEqual(try compile(recipe).task,"ic_control")
+    condition["inputs"]=[guide("source"),guide("warp")];recipe["conditioning"]=condition
+    XCTAssertThrowsError(try compile(recipe))
+    condition["inputs"]=[guide("warp"),guide("source")];condition.removeValue(forKey:"publication_audio")
+    recipe["conditioning"]=condition;XCTAssertThrowsError(try compile(recipe))
+  }
   func testUnionStudioRecipeRetainsFrozenGuideAndStageOneAdapter() throws {
     var recipe=fixture(),components=fixture()["components"] as! [String:Any]
     var config=recipe["config"] as! [String:Any];config["width"]=512;config["height"]=256;recipe["config"]=config

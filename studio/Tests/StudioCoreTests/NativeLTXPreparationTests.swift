@@ -5,6 +5,300 @@ import CryptoKit
 @testable import StudioCore
 
 final class NativeLTXPreparationTests: XCTestCase {
+  func specializedControlProfile(_ root: URL, family: String) throws {
+    let file = root.appendingPathComponent("model.json")
+    var recipe = try JSONSerialization.jsonObject(with:Data(contentsOf:file)) as! [String:Any]
+    let adapters: [[Any]] = family == "crossview_ingredients"
+      ? [["/models/crossview.safetensors",1.0],["/models/ingredients.safetensors",1.0]]
+      : [["/models/control.safetensors",1.0]]
+    recipe["components"] = ["transformer_path":"/models/transformer","loras":[],"ic_loras":adapters]
+    recipe["conditioning"] = ["version":1,"task":"control","inputs":[],"control_family":family]
+    try JSONSerialization.data(withJSONObject:recipe).write(to:file)
+  }
+  func testMotionTrackCompositionKeepsTwoStageScheduleAndRejectsWrongGuide() throws {
+    let (root,original,runtime) = try fixture(); try specializedControlProfile(root,family:"motion_track")
+    var project = original; project.clips[0].generationSelection = GenerationSelection(task:"control")
+    project.clips[0].generationWidth = 512; project.clips[0].generationHeight = 256
+    let file = root.appendingPathComponent("track.mp4"); try Data([1,2]).write(to:file)
+    let asset = MediaAsset(name:"Trajectories",kind:.video,path:file.path); project.assets = [asset]
+    var guide = Attachment(assetID:asset.id,role:.control); guide.controlType = "motion_track"; guide.strength = 0.7
+    project.clips[0].attachments = [guide]
+    let frozen = project.clips[0].attachments
+    let result = try NativeLTXPreparation.compose(request:request(project,runtime))
+    let recipe = result["recipe"] as! [String:Any], config = recipe["config"] as! [String:Any]
+    let condition = recipe["conditioning"] as! [String:Any], inputs = condition["inputs"] as! [[String:Any]]
+    XCTAssertEqual(config["stage1_steps"] as? Int,8); XCTAssertEqual(config["stage2_steps"] as? Int,3)
+    XCTAssertEqual(condition["control_family"] as? String,"motion_track")
+    XCTAssertEqual(condition["audio_policy"] as? String,"generated")
+    XCTAssertEqual(inputs[0]["path"] as? String,file.path); XCTAssertEqual(inputs[0]["strength"] as? Double,0.7)
+    XCTAssertEqual(project.clips[0].attachments,frozen)
+    project.clips[0].attachments[0].controlType = "pose_skeleton"
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project.clips[0].attachments = [guide,guide]
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project.clips[0].attachments = [guide]; project.clips[0].generationSelection?.refinementSteps = 4
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+  }
+  func testCrossViewCompositionOrdersWarpSourceAndSheetAndRejectsMissingLabels() throws {
+    let (root,original,runtime) = try fixture()
+    for family in ["crossview_warp","crossview_ingredients"] {
+      try specializedControlProfile(root,family:family)
+      var project = original; project.clips[0].generationSelection = GenerationSelection(task:"control")
+      project.clips[0].duration = 5; project.clips[0].generationWidth = 512; project.clips[0].generationHeight = 256
+      var assets: [MediaAsset] = [], attachments: [Attachment] = []
+      for role in ["source","warp"] {
+        let file = root.appendingPathComponent(role+".mp4"); try Data(role.utf8).write(to:file)
+        let asset = MediaAsset(name:role,kind:.video,path:file.path); assets.append(asset)
+        var guide = Attachment(assetID:asset.id,role:.control); guide.controlType = "crossview_warp"; guide.referenceRole = role
+        attachments.append(guide)
+      }
+      if family == "crossview_ingredients" {
+        let file = root.appendingPathComponent("sheet.png"); try Data([1]).write(to:file)
+        let asset = MediaAsset(name:"Sheet",kind:.image,path:file.path); assets.append(asset)
+        var sheet = Attachment(assetID:asset.id,role:.control); sheet.controlType = "ingredients_reference_sheet"; sheet.description = "A hero in three views"
+        attachments.insert(sheet,at:0)
+      }
+      project.assets = assets; project.clips[0].attachments = attachments
+      let result = try NativeLTXPreparation.compose(request:request(project,runtime))
+      let recipe = result["recipe"] as! [String:Any], condition = recipe["conditioning"] as! [String:Any]
+      let inputs = condition["inputs"] as! [[String:Any]]
+      XCTAssertEqual(inputs.prefix(2).compactMap { $0["reference_role"] as? String },["warp","source"])
+      XCTAssertEqual(inputs.prefix(2).compactMap { $0["path"] as? String },[root.appendingPathComponent("warp.mp4").path,root.appendingPathComponent("source.mp4").path])
+      XCTAssertEqual(condition["audio_policy"] as? String,"source")
+      XCTAssertEqual((recipe["config"] as! [String:Any])["stage2_steps"] as? Int,3)
+      XCTAssertEqual(project.clips[0].attachments,attachments)
+      if family == "crossview_ingredients" { XCTAssertEqual(inputs.last?["control_type"] as? String,"ingredients_reference_sheet") }
+      project.clips[0].attachments.removeLast()
+      XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+      project.clips[0].attachments = attachments
+      let sourceIndex = try XCTUnwrap(project.clips[0].attachments.firstIndex { $0.referenceRole == "source" })
+      project.clips[0].attachments[sourceIndex].referenceRole = "warp"
+      XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+      project.clips[0].attachments[sourceIndex].referenceRole = nil
+      XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    }
+  }
+  func testMotionTrackAndCrossViewGuidePreparationUseTheirRespectiveCanvases() async throws {
+    let (root,_,_) = try fixture(), movie = try await continuityMovie(root)
+    for (downscale,width,height) in [(2,128,64),(1,256,128)] {
+      let output = root.appendingPathComponent("guide-\(downscale).rgb24")
+      let digest = try await NativeLTXControlGuide.prepare(source:movie,destination:output,width:512,height:256,
+        frames:33,fps:24,editorialDuration:1,referenceDownscale:downscale)
+      let bytes = try Data(contentsOf:output), frameBytes = width*height*3
+      XCTAssertEqual(bytes.count,33*frameBytes)
+      XCTAssertEqual(digest,SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined())
+      for (frame,channel) in [(0,0),(5,1),(20,2),(32,0)] {
+        let center = frame*frameBytes+((height/2)*width+width/2)*3
+        XCTAssertGreaterThan(bytes[center+channel],200)
+        XCTAssertLessThan(bytes[center+(channel+1)%3],35)
+      }
+    }
+  }
+  func testIngredientsSheetFreezesRepeatedRGBFramesAndDoesNotReplaceExistingPublication() throws {
+    let (root,_,_) = try fixture(), image = root.appendingPathComponent("sheet.png")
+    let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:32,pixelsHigh:32,
+      bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0))
+    let pixels = try XCTUnwrap(bitmap.bitmapData)
+    for y in 0..<32 { for x in 0..<32 {
+      let offset = y*bitmap.bytesPerRow+x*4
+      pixels[offset] = 255; pixels[offset+1] = 0; pixels[offset+2] = 0; pixels[offset+3] = 255
+    } }
+    try XCTUnwrap(bitmap.representation(using:.png,properties:[:])).write(to:image)
+    let output = root.appendingPathComponent("sheet.rgb24")
+    let digest = try NativeLTXControlGuide.prepareSheet(source:image,destination:output,width:64,height:32,frames:121)
+    let bytes = try Data(contentsOf:output), frameBytes = 64*32*3
+    XCTAssertEqual(bytes.count,121*frameBytes)
+    XCTAssertEqual(bytes.prefix(frameBytes),bytes.suffix(frameBytes))
+    let center=((32/2)*64+64/2)*3
+    XCTAssertGreaterThan(bytes[center],240); XCTAssertLessThan(bytes[center+1],10)
+    XCTAssertEqual(Array(bytes.prefix(3)),[0,0,0])
+    XCTAssertEqual(digest,SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined())
+    XCTAssertThrowsError(try NativeLTXControlGuide.prepareSheet(source:image,destination:output,width:64,height:32,frames:121))
+    XCTAssertEqual(try Data(contentsOf:output),bytes)
+    XCTAssertThrowsError(try NativeLTXControlGuide.prepareSheet(source:image,destination:root.appendingPathComponent("too-short.rgb24"),width:64,height:32,frames:113))
+  }
+  func testIngredientsPortraitSheetRetainsHeadAndFooterWithCenteredBlackPadding() throws {
+    let (root,_,_)=try fixture(),image=root.appendingPathComponent("portrait-sheet.png")
+    let bitmap=try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:128,pixelsHigh:384,
+      bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0))
+    let pixels=try XCTUnwrap(bitmap.bitmapData)
+    for y in 0..<384 { for x in 0..<128 {
+      let offset=y*bitmap.bytesPerRow+x*4,channel=y<64 ? 0 : y>=320 ? 2 : 1
+      for c in 0..<3 { pixels[offset+c]=c == channel ? 255 : 0 };pixels[offset+3]=255
+    } }
+    try XCTUnwrap(bitmap.representation(using:.png,properties:[:])).write(to:image)
+    let destination=root.appendingPathComponent("portrait-guide.rgb24")
+    _=try NativeLTXControlGuide.prepareSheet(source:image,destination:destination,width:256,height:128,frames:121)
+    let bytes=try Data(contentsOf:destination),frameBytes=256*128*3
+    XCTAssertEqual(bytes.count,121*frameBytes);XCTAssertEqual(bytes.prefix(frameBytes),bytes.suffix(frameBytes))
+    // The head, middle and footer bands must all survive the fit.
+    for (y,channel) in [(8,0),(64,1),(120,2)] {
+      let offset=(y*256+128)*3
+      XCTAssertGreaterThan(bytes[offset+channel],240)
+      XCTAssertLessThan(bytes[offset+(channel+1)%3],10)
+    }
+    for x in [0,64,192,255] {
+      let offset=(64*256+x)*3;XCTAssertEqual(Array(bytes[offset..<offset+3]),[0,0,0])
+    }
+  }
+  func testCrossViewPreparationFreezesOrderedMoviesAndOriginalSourceAudioWithoutMutatingEditor() async throws {
+    let ffmpeg = URL(fileURLWithPath:"/opt/homebrew/bin/ffmpeg")
+    guard FileManager.default.isExecutableFile(atPath:ffmpeg.path) else { throw XCTSkip("FFmpeg unavailable") }
+    let (root,original,runtime) = try fixture(); try specializedControlProfile(root,family:"crossview_warp")
+    let movie = root.appendingPathComponent("original-source.mp4"), process = Process()
+    process.executableURL = ffmpeg; process.arguments = ["-v","error","-f","lavfi","-i","color=c=red:size=64x64:rate=24:duration=1.5",
+      "-f","lavfi","-i","sine=frequency=440:sample_rate=48000:duration=1.5","-map","0:v:0","-map","1:a:0",
+      "-c:v","libx264","-pix_fmt","yuv420p","-c:a","aac","-shortest",movie.path]
+    try process.run(); process.waitUntilExit(); XCTAssertEqual(process.terminationStatus,0)
+    let warp = try await continuityMovie(root)
+    var project = original; project.clips[0].generationSelection = GenerationSelection(task:"control")
+    project.clips[0].duration = 1; project.clips[0].generationWidth = 512; project.clips[0].generationHeight = 256
+    var attachments: [Attachment] = []
+    for (role,file) in [("source",movie),("warp",warp)] {
+      let asset = MediaAsset(name:role,kind:.video,path:file.path); project.assets.append(asset)
+      var attachment = Attachment(assetID:asset.id,role:.control); attachment.controlType = "crossview_warp"; attachment.referenceRole = role
+      attachments.append(attachment)
+    }
+    project.clips[0].attachments = attachments
+    let body = try request(project,runtime), destination = root.appendingPathComponent("crossview-job")
+    let result = try await NativeLTXPreparation.prepareWithMedia(request:body,destination:destination)
+    let recipe = try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:result["recipePath"] as! String))) as! [String:Any]
+    let conditioning = recipe["conditioning"] as! [String:Any], inputs = conditioning["inputs"] as! [[String:Any]]
+    XCTAssertEqual(inputs.compactMap { $0["reference_role"] as? String },["warp","source"])
+    for input in inputs {
+      let file = URL(fileURLWithPath:input["path"] as! String), bytes = try Data(contentsOf:file)
+      XCTAssertEqual(bytes.count,25*256*128*3)
+      XCTAssertEqual(input["sha256"] as? String,SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined())
+      XCTAssertEqual(input["format"] as? String,"rgb24")
+    }
+    let audio = try XCTUnwrap(conditioning["publication_audio"] as? [String:Any])
+    let audioFile = URL(fileURLWithPath:audio["path"] as! String), bytes = try Data(contentsOf:audioFile)
+    XCTAssertFalse(bytes.isEmpty); XCTAssertEqual(audio["sha256"] as? String,SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined())
+    let duration = try await AVURLAsset(url:audioFile).load(.duration).seconds
+    XCTAssertEqual(duration,1,accuracy:0.025)
+    let saved = try JSONSerialization.jsonObject(with:Data(contentsOf:destination.appendingPathComponent("editor-request.json"))) as! NSDictionary
+    XCTAssertEqual(saved,body as NSDictionary); XCTAssertEqual(project.clips[0].attachments,attachments)
+  }
+  func testCrossViewAudioFreezesExactFloatPCMAndPreservesDelayedMovieTiming() async throws {
+    let ffmpeg = URL(fileURLWithPath:"/opt/homebrew/bin/ffmpeg")
+    guard FileManager.default.isExecutableFile(atPath:ffmpeg.path) else { throw XCTSkip("FFmpeg unavailable") }
+    let (root,_,_) = try fixture(), source = root.appendingPathComponent("float-source.wav")
+    let rate = 48000, channels = 2, frames = rate*3/2, frameBytes = channels*4
+    var pcm = Data()
+    for frame in 0..<frames {
+      let value = Float((frame % 201)-100)/128
+      // AVFoundation canonicalizes negative zero; use only positive zero so
+      // bit equality measures waveform preservation across its PCM decoder.
+      for sample in [value,value == 0 ? 0 : -value] {
+        var bits = sample.bitPattern.littleEndian
+        withUnsafeBytes(of:&bits) { pcm.append(contentsOf:$0) }
+      }
+    }
+    var wav = Data()
+    func text(_ value:String) { wav.append(contentsOf:value.utf8) }
+    func word<T:FixedWidthInteger>(_ value:T) { var little=value.littleEndian;withUnsafeBytes(of:&little) { wav.append(contentsOf:$0) } }
+    text("RIFF");word(UInt32(36+pcm.count));text("WAVEfmt ");word(UInt32(16));word(UInt16(3))
+    word(UInt16(channels));word(UInt32(rate));word(UInt32(rate*frameBytes));word(UInt16(frameBytes));word(UInt16(32))
+    text("data");word(UInt32(pcm.count));wav.append(pcm);try wav.write(to:source)
+    let movie = root.appendingPathComponent("delayed-float-source.mov"), process = Process()
+    process.executableURL = ffmpeg;process.arguments = ["-v","error","-f","lavfi","-i","color=c=red:size=64x64:rate=24:duration=2",
+      "-itsoffset","0.125","-i",source.path,"-map","0:v:0","-map","1:a:0","-c:v","libx264","-pix_fmt","yuv420p",
+      "-c:a","pcm_f32le",movie.path]
+    try process.run();process.waitUntilExit();XCTAssertEqual(process.terminationStatus,0)
+    func decodedPCM(_ url:URL) async throws -> Data {
+      let asset = AVURLAsset(url:url), tracks = try await asset.loadTracks(withMediaType:.audio)
+      let track = try XCTUnwrap(tracks.first)
+      let reader = try AVAssetReader(asset:asset), output = AVAssetReaderTrackOutput(track:track,outputSettings:[
+        AVFormatIDKey:kAudioFormatLinearPCM,AVLinearPCMBitDepthKey:32,AVLinearPCMIsFloatKey:true,
+        AVLinearPCMIsBigEndianKey:false,AVLinearPCMIsNonInterleaved:false])
+      reader.add(output);XCTAssertTrue(reader.startReading());var result = Data()
+      while let sample = output.copyNextSampleBuffer() {
+        let format = try XCTUnwrap(CMSampleBufferGetFormatDescription(sample))
+        let info = try XCTUnwrap(CMAudioFormatDescriptionGetStreamBasicDescription(format))
+        XCTAssertEqual(info.pointee.mSampleRate,Double(rate));XCTAssertEqual(info.pointee.mChannelsPerFrame,UInt32(channels))
+        let block = try XCTUnwrap(CMSampleBufferGetDataBuffer(sample)), count = CMBlockBufferGetDataLength(block)
+        var bytes = Data(count:count)
+        let status = bytes.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block,atOffset:0,dataLength:count,destination:$0.baseAddress!) }
+        XCTAssertEqual(status,kCMBlockBufferNoErr);result.append(bytes)
+      }
+      XCTAssertEqual(reader.status,.completed);return result
+    }
+    for (name,input,delay) in [("wav",source,0),("movie",movie,6000)] {
+      let destination = root.appendingPathComponent(name+"-frozen.wav")
+      let hash = try await NativeLTXControlGuide.prepareAudio(source:input,destination:destination,duration:1)
+      let bytes = try Data(contentsOf:destination)
+      XCTAssertEqual(hash,SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined())
+      var expected = Data(repeating:0,count:delay*frameBytes);expected.append(pcm.prefix((rate-delay)*frameBytes))
+      let actual = try await decodedPCM(destination), duration = try await AVURLAsset(url:destination).load(.duration).seconds
+      let difference = zip(actual,expected).enumerated().first { $0.element.0 != $0.element.1 }
+      XCTAssertEqual(actual,expected,"\(name) first difference: \(String(describing:difference))")
+      XCTAssertEqual(duration,1,accuracy:1.0/Double(rate))
+    }
+    let original = try await decodedPCM(source)
+    let difference = zip(original,pcm).enumerated().first { $0.element.0 != $0.element.1 }
+    XCTAssertEqual(original,pcm,"source first difference: \(String(describing:difference))")
+  }
+  func testControlPublicationRejectsSheetAndLaterMovieChangedAfterComposition() async throws {
+    let ffmpeg=URL(fileURLWithPath:"/opt/homebrew/bin/ffmpeg")
+    guard FileManager.default.isExecutableFile(atPath:ffmpeg.path) else { throw XCTSkip("FFmpeg unavailable") }
+    let (root,original,runtime)=try fixture();try specializedControlProfile(root,family:"crossview_ingredients")
+    let template=root.appendingPathComponent("template.mp4"),process=Process()
+    process.executableURL=ffmpeg;process.arguments=["-v","error","-f","lavfi","-i","color=c=red:size=64x64:rate=24:duration=5.5",
+      "-f","lavfi","-i","sine=frequency=440:sample_rate=48000:duration=5.5","-map","0:v:0","-map","1:a:0",
+      "-c:v","libx264","-pix_fmt","yuv420p","-c:a","aac","-shortest",template.path]
+    try process.run();process.waitUntilExit();XCTAssertEqual(process.terminationStatus,0)
+    let warp=root.appendingPathComponent("warp.mp4");try FileManager.default.copyItem(at:template,to:warp)
+    func png(_ channel:Int) throws -> Data {
+      let bitmap=try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:32,pixelsHigh:32,
+        bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0))
+      let pixels=try XCTUnwrap(bitmap.bitmapData)
+      for y in 0..<32 { for x in 0..<32 { let offset=y*bitmap.bytesPerRow+x*4
+        for c in 0..<3 { pixels[offset+c]=c == channel ? 255 : 0 };pixels[offset+3]=255
+      } }
+      return try XCTUnwrap(bitmap.representation(using:.png,properties:[:]))
+    }
+    let red=try png(0),green=try png(1),movieBytes=try Data(contentsOf:template)
+    for changedKind in ["sheet","movie"] {
+      let source=root.appendingPathComponent(changedKind+"-source.mp4"),sheet=root.appendingPathComponent(changedKind+"-sheet.png")
+      try movieBytes.write(to:source);try red.write(to:sheet)
+      var project=original;project.clips[0].generationSelection=GenerationSelection(task:"control")
+      project.clips[0].duration=5;project.clips[0].generationWidth=512;project.clips[0].generationHeight=256
+      var attachments:[Attachment]=[]
+      for (role,file) in [("warp",warp),("source",source),("ingredients",sheet)] {
+        let asset=MediaAsset(name:role,kind:role == "ingredients" ? .image : .video,path:file.path);project.assets.append(asset)
+        var attachment=Attachment(assetID:asset.id,role:.control)
+        attachment.controlType=role == "ingredients" ? "ingredients_reference_sheet" : "crossview_warp"
+        if role == "ingredients" { attachment.description="A red reference sheet" }
+        else { attachment.referenceRole=role };attachments.append(attachment)
+      }
+      project.clips[0].attachments=attachments
+      let body=try request(project,runtime),destination=root.appendingPathComponent(changedKind+"-job")
+      let mutation=Task.detached { () throws -> Bool in
+        for _ in 0..<2000 {
+          try Task.checkCancellation()
+          let staged=(try? FileManager.default.contentsOfDirectory(at:root,includingPropertiesForKeys:nil)) ?? []
+          if staged.contains(where:{ $0.lastPathComponent.hasPrefix(".prepare-") &&
+            FileManager.default.fileExists(atPath:$0.appendingPathComponent("control-guide-0.rgb24").path) }) {
+            if changedKind == "sheet" { try green.write(to:sheet,options:.atomic) }
+            else { var changed=movieBytes;changed.append(0);try changed.write(to:source,options:.atomic) }
+            return true
+          }
+          try await Task.sleep(nanoseconds:1_000_000)
+        }
+        return false
+      }
+      do {
+        _=try await NativeLTXPreparation.prepareWithMedia(request:body,destination:destination)
+        XCTFail("Publishing must reject source bytes changed since composition")
+      } catch { XCTAssertTrue(error.localizedDescription.contains("changed after composition"),error.localizedDescription) }
+      let mutated=try await mutation.value;XCTAssertTrue(mutated,"Mutation must occur after composition while the first guide is staged")
+      XCTAssertFalse(FileManager.default.fileExists(atPath:destination.path))
+      XCTAssertFalse(try FileManager.default.contentsOfDirectory(at:root,includingPropertiesForKeys:nil)
+        .contains { $0.lastPathComponent.hasPrefix(".prepare-") })
+      XCTAssertEqual(project.clips[0].attachments,attachments)
+    }
+  }
+
   func testUnionCompositionRetainsOneVideoAndRejectsWrongFamily() throws {
     let (root,original,runtime)=try fixture();let profile=root.appendingPathComponent("model.json")
     var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]

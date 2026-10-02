@@ -28,6 +28,7 @@ public final class H3DiTState {
     projectionMode: H3ProjectionMode = .weightDecoded,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
+    funControl: H3FunControlCondition? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     self.layout = layout
     core = try H3WeightedDiTState(checkpointURL: checkpointURL,
@@ -35,7 +36,7 @@ public final class H3DiTState {
       timestepTable: timestepTable, blockCount: blockCount,
       projectionMode: projectionMode, turboLoRAURL: turboLoRAURL,
       turboLoRAStrength: turboLoRAStrength,
-      additionalLoRAs: additionalLoRAs, progress: progress)
+      additionalLoRAs: additionalLoRAs, funControl: funControl, progress: progress)
   }
 
   public func predict(videoLatents: MLXArray, audioLatents: MLXArray,

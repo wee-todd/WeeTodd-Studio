@@ -54,6 +54,7 @@ final class H3WeightedDiTState {
   private var text: MLXArray?
   private var timeEmbeddings: MLXArray?
   private var modulations: [MLXArray]?
+  private var funControl: H3FunControlState?
 
   var isResident: Bool {
     text != nil && timeEmbeddings != nil && modulations != nil
@@ -64,6 +65,7 @@ final class H3WeightedDiTState {
   var residentActivationBytes: Int {
     (text?.nbytes ?? 0) + (timeEmbeddings?.nbytes ?? 0)
       + (modulations?.reduce(0) { $0 + $1.nbytes } ?? 0)
+      + (funControl?.residentActivationBytes ?? 0)
   }
 
   init(checkpointURL: URL, layout: Layout,
@@ -72,6 +74,7 @@ final class H3WeightedDiTState {
     projectionMode: H3ProjectionMode = .weightDecoded,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
+    funControl: H3FunControlCondition? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     let textRows = layout.textRows
     guard (1...50).contains(blockCount),
@@ -82,6 +85,17 @@ final class H3WeightedDiTState {
       zip(timestepTable, timestepTable.dropFirst()).allSatisfy({ $0 < $1 }),
       (1...40_000).contains(layout.tags.count) else {
       throw H3CheckpointError.invalid("Invalid H3 denoiser preparation request.")
+    }
+    if let funControl {
+      guard blockCount == 50, case .audiovisual(let packed) = layout,
+        packed.conditionVideoRows == 0,
+        funControl.guideRows.shape == [1, layout.videoRows, 96],
+        funControl.strength.isFinite, (0...1).contains(funControl.strength),
+        turboLoRAURL == nil, additionalLoRAs.isEmpty else {
+        throw H3CheckpointError.invalid("H3 Fun control requires an unmodified dense T2VA transformer and matching guide rows.")
+      }
+      _ = try H3FunControlLayout(url: funControl.checkpoint,
+        base: H3CheckpointLayout(url: checkpointURL))
     }
     self.checkpointURL = checkpointURL
     self.layout = layout
@@ -113,12 +127,17 @@ final class H3WeightedDiTState {
       tables.append(try H3AdaLNProjection.evaluate(
         checkpointURL: checkpointURL, blockIndex: index,
         timeEmbeddings: time, projectionMode: projectionMode))
-      progress(index + 1, blockCount)
+      if index + 1 < blockCount { progress(index + 1, blockCount) }
       try Task.checkCancellation()
     }
     text = refined
     timeEmbeddings = time
     modulations = tables
+    if let funControl {
+      self.funControl = try H3FunControlState(condition: funControl,
+        timeEmbeddings: time, base: H3CheckpointLayout(url: checkpointURL))
+    }
+    progress(blockCount, blockCount)
   }
 
   public func predict(videoLatents: MLXArray, audioLatents: MLXArray,
@@ -148,17 +167,25 @@ final class H3WeightedDiTState {
       timestepIndices: timestepIndices)
     let rotaryAngles = try H3TransformerBlock.prepareRotaryAngles(
       checkpointURL: checkpointURL, positions: packed.positions)
-    var value = packed.embeddings
-    for index in 0..<blockCount {
-      value = try H3TransformerBlock.evaluate(checkpointURL: checkpointURL,
-        index: index, input: value, modulation: modulations[index],
-        modulationIndices: packed.modulationIndices,
-        positions: packed.positions, projectionMode: projectionMode,
-        lora: lora, rotaryAngles: rotaryAngles,
-        observe: { _, _ in })
-      progress(index + 1, blockCount)
-      try Task.checkCancellation()
+    let control = try funControl?.initialize(hidden: packed.embeddings,
+      targetIndices: packed.videoIndices)
+    let controlBlock: ((Int, MLXArray) throws -> (MLXArray, MLXArray))? = funControl.map { state in
+      { index, current in
+        try state.step(index: index, control: current,
+          modulationIndices: packed.modulationIndices,
+          angles: rotaryAngles, audioIndices: packed.audioIndices)
+      }
     }
+    let value = try H3FunControlMath.runBlocks(input: packed.embeddings,
+      blockCount: blockCount, control: control,
+      injectionLayers: funControl?.injectionLayers ?? H3FunControlLayout.v1InjectionLayers,
+      baseBlock: { index, input in
+        try H3TransformerBlock.evaluate(checkpointURL: checkpointURL,
+          index: index, input: input, modulation: modulations[index],
+          modulationIndices: packed.modulationIndices,
+          positions: packed.positions, projectionMode: projectionMode,
+          lora: lora, rotaryAngles: rotaryAngles, observe: { _, _ in })
+      }, controlBlock: controlBlock, progress: progress)
     return try H3FinalLayer.evaluate(checkpointURL: checkpointURL,
       input: value, timeEmbeddings: timeEmbeddings,
       timestepIndices: packed.timestepIndices,
@@ -170,6 +197,8 @@ final class H3WeightedDiTState {
     text = nil
     timeEmbeddings = nil
     modulations = nil
+    funControl?.unload()
+    funControl = nil
     Stream.gpu.synchronize()
     Memory.clearCache()
   }

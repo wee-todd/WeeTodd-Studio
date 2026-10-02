@@ -2,6 +2,14 @@ import XCTest
 @testable import H3MLX
 
 final class H3WorkerProgressTests: XCTestCase {
+  func testControlEncodingHasItsOwnReleasedStageBoundary() {
+    XCTAssertTrue(H3WorkerStageBoundary.tracks(task: "control"))
+    XCTAssertEqual(H3WorkerStageBoundary.name(stage: "control_video_weights_released",
+      completed: 1, total: 1), "controlVideoEncode")
+    XCTAssertNil(H3WorkerStageBoundary.name(stage: "control_video_encode",
+      completed: 1, total: 5))
+  }
+
   func testFL2VAStageBoundariesAreRecorded() {
     XCTAssertTrue(H3WorkerStageBoundary.tracks(task: "fl2va"))
     XCTAssertEqual(H3WorkerStageBoundary.name(stage: "keyframe_video_weights_released",

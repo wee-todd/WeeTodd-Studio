@@ -104,9 +104,10 @@ final class ModelSetupTests: XCTestCase {
   func testNativeSetupCatalogAndRecipeWithoutPython() throws {
     let presets = NativeModelSetup.catalog()
     XCTAssertEqual(Set(presets.map(\.id)), Set(["swift-h3-text", "swift-h3-image",
-      "swift-h3-reference", "swift-ltx25-text", "swift-ltx25-image",
+      "swift-h3-reference", "swift-h3-fun-control", "swift-ltx25-text", "swift-ltx25-image",
       "swift-ltx25-dfr-spatial", "swift-ltx25-dfr-temporal-1", "swift-ltx25-dfr-temporal-2",
-      "swift-ltx25-msr", "swift-ltx25-ingredients", "swift-ltx25-union"]))
+      "swift-ltx25-msr", "swift-ltx25-ingredients", "swift-ltx25-union",
+      "swift-ltx25-motion-track", "swift-ltx25-crossview", "swift-ltx25-crossview-ingredients"]))
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -261,10 +262,12 @@ final class ModelSetupTests: XCTestCase {
     try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
     defer { try? FileManager.default.removeItem(at:root) }
     var pairs:[String:Any]=[:]
-    for block in 0..<48 { for target in 0..<10 {
-      let stem="diffusion_model.transformer_blocks.\(block).projection\(target)"
-      pairs[stem+".lora_A.weight"]=["dtype":"BF16","shape":[128,1],"data_offsets":[0,2]]
-      pairs[stem+".lora_B.weight"]=["dtype":"BF16","shape":[1,128],"data_offsets":[0,2]]
+    for block in 0..<48 { for target in ["attn1.to_k","attn1.to_out.0","attn1.to_q","attn1.to_v",
+      "attn2.to_k","attn2.to_out.0","attn2.to_q","attn2.to_v","ff.net.0.proj","ff.net.2"] {
+      let stem="diffusion_model.transformer_blocks.\(block).\(target)"
+      let input=target == "ff.net.2" ? 16384 : 4096,output=target == "ff.net.0.proj" ? 16384 : 4096
+      pairs[stem+".lora_A.weight"]=["dtype":"BF16","shape":[128,input],"data_offsets":[0,2]]
+      pairs[stem+".lora_B.weight"]=["dtype":"BF16","shape":[output,128],"data_offsets":[0,2]]
     } }
     func write(_ name:String,_ header:[String:Any]) throws -> URL {
       let bytes=try JSONSerialization.data(withJSONObject:header);var size=UInt64(bytes.count).littleEndian
@@ -338,7 +341,7 @@ final class ModelSetupTests: XCTestCase {
       throw XCTSkip("Opt-in installed-model discovery")
     }
     let roots = [root] + (ProcessInfo.processInfo.environment["WEETODD_NATIVE_VISION_ROOT"].map { [$0] } ?? [])
-    for presetID in ["swift-h3-image", "swift-h3-reference", "swift-ltx25-text",
+    for presetID in ["swift-h3-image", "swift-h3-reference", "swift-h3-fun-control", "swift-ltx25-text",
       "swift-ltx25-dfr-temporal-2"] {
       let result = try NativeModelSetup.scan(presetID: presetID, roots: roots)
       let missing = result.candidates.filter { $0.value.isEmpty }.map(\.key).sorted()

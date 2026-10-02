@@ -372,6 +372,50 @@ public enum H3StudioRecipe {
       additionalLoRAs: base.additionalLoRAs)
   }
 
+  /// Admit one already-preprocessed structure guide and validate every ordinary
+  /// execution control before media decoding or weighted stage preparation.
+  public static func compileControl(data: Data,
+    resolveVideo: (String, String, H3Geometry) throws -> H3VideoReference) throws -> H3T2VARequest {
+    guard data.count <= 1024 * 1024,
+      var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+      var components = root["components"] as? [String: Any],
+      components["task"] as? String == "t2va",
+      let checkpoint = components.removeValue(forKey: "fun_controlnet") as? String,
+      checkpoint.hasPrefix("/"), !checkpoint.utf8.contains(0),
+      let conditioning = root["conditioning"] as? [String: Any],
+      let inputs = try? ConditioningV1.inputs(conditioning,
+        task: "control", audioPolicy: "generated", count: 1...1),
+      let input = inputs.first,
+      Set(conditioning.keys).isSubset(of: ["version", "task", "inputs", "audio_policy"]),
+      Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "sha256", "strength", "control_type"]),
+      input["kind"] as? String == "video", input["role"] as? String == "control",
+      ["canny_edges", "depth_map", "hed_edges", "mlsd_lines", "pose_skeleton"]
+        .contains(input["control_type"] as? String ?? ""),
+      let path = input["path"] as? String, path.hasPrefix("/"), !path.utf8.contains(0),
+      let digest = input["sha256"] as? String, digest.count == 64,
+      digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+      let number = input["strength"] as? NSNumber,
+      CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite,
+      (0...1).contains(number.doubleValue) else {
+      throw H3CheckpointError.invalid("H3 Fun control needs one hashed preprocessed Canny, depth, HED, MLSD or pose video and strength from 0 to 1.")
+    }
+    root["components"] = components
+    root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [], "audio_policy": "generated"]
+    let base = try compile(data: JSONSerialization.data(withJSONObject: root))
+    guard base.loRAAdapters.isEmpty, base.geometry.width <= 2048,
+      base.geometry.height <= 2048,
+      base.geometry.frames * base.geometry.width * base.geometry.height * 3 <= 1024 * 1024 * 1024 else {
+      throw H3CheckpointError.invalid("H3 Fun control requires dense sampling without LoRAs and a bounded guide canvas.")
+    }
+    let control = try H3FunControlGuide(checkpoint: URL(fileURLWithPath: checkpoint),
+      strength: number.floatValue, video: resolveVideo(path, digest, base.geometry))
+    return try H3T2VARequest(prompt: base.prompt, width: base.geometry.width,
+      height: base.geometry.height, durationSeconds: base.durationSeconds,
+      seed: base.seed, requestedSteps: base.requestedSteps,
+      transformer: base.transformer, qwenPages: base.qwenPages, tokenizer: base.tokenizer,
+      videoVAE: base.videoVAE, audioVAE: base.audioVAE, funControl: control)
+  }
+
   public static func compile(data: Data) throws -> H3T2VARequest {
     func emptyArray(_ object: [String: Any], _ key: String) -> Bool {
       guard let value = object[key] else { return true }

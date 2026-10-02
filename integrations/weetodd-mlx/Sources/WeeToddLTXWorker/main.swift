@@ -3,6 +3,7 @@ import Darwin
 import LTX25MLX
 import LTX25Engine
 import InferenceContracts
+import InferenceMedia
 import MLX
 
 @main struct LTXWorker {
@@ -74,7 +75,8 @@ import MLX
       ((direct["version"] as? Int == 5 && direct["task"] as? String == "union_control") ||
         (direct["version"] as? Int == 6 && direct["task"] as? String == "ingredients") ||
         (direct["version"] as? Int == 7 && direct["task"] as? String == "msr") ||
-        ((direct["version"] as? Int == 8 || direct["version"] as? Int == 9) && direct["task"] as? String == "dfr")) {
+        ((direct["version"] as? Int == 8 || direct["version"] as? Int == 9) && direct["task"] as? String == "dfr") ||
+        (direct["version"] as? Int == 10 && direct["task"] as? String == "ic_control")) {
       request=try JSONDecoder().decode(MLXDistilledRequest.self,from:recipeData)
       guard URL(fileURLWithPath:request.outputDirectory).standardizedFileURL.path ==
         URL(fileURLWithPath:args[4]).standardizedFileURL.path else {
@@ -118,6 +120,17 @@ import MLX
         durationSeconds:Double(request.frames)/request.fps)
       preparedAudio=try await interval.extract(ffmpeg:URL(fileURLWithPath:ffmpeg),directory:sourceDirectory)
     } else { preparedAudio=nil }
+    let publicationDirectory=output.appendingPathExtension("publication-audio-"+UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at:publicationDirectory) }
+    let preparedPublicationAudio:MLXSourceAudioInterval.Prepared?
+    if let reference=request.icControl?.publicationAudio {
+      try NativeMediaSource(path:reference.path,sha256:reference.sourceSHA256).verify()
+      let interval=try MLXSourceAudioInterval(source:URL(fileURLWithPath:reference.path),
+        sourceStartSeconds:reference.sourceStartSeconds,sourceDurationSeconds:reference.sourceDurationSeconds,
+        durationSeconds:Double(request.frames)/request.fps)
+      preparedPublicationAudio=try await interval.extract(ffmpeg:URL(fileURLWithPath:ffmpeg),directory:publicationDirectory)
+      try NativeMediaSource(path:reference.path,sha256:reference.sourceSHA256).verify()
+    } else { preparedPublicationAudio=nil }
     let previewFrames=try request.dfr.map {
       try MLXDFRTemporalPlan.outputFrames(inputFrames:request.frames,rounds:$0.temporalRounds)
     } ?? request.frames
@@ -125,7 +138,7 @@ import MLX
     var lastPreview=Date.distantPast,revision=0
     var result:[String:Any]=[:]
     defer { try? FileManager.default.removeItem(at:preview) }
-    _ = try pipeline.run(ffmpeg:URL(fileURLWithPath:ffmpeg),preparedAudio:preparedAudio,decodedPreview:{ index,bytes in
+    _ = try pipeline.run(ffmpeg:URL(fileURLWithPath:ffmpeg),preparedAudio:preparedAudio,preparedPublicationAudio:preparedPublicationAudio,decodedPreview:{ index,bytes in
       guard MLXStudioPreview.shouldEmit(index:index,total:previewFrames,
         secondsSinceLast:Date().timeIntervalSince(lastPreview)) else { return }
       try Task.checkCancellation()

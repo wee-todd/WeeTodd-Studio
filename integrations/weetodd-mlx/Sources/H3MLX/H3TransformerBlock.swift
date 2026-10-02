@@ -153,65 +153,85 @@ public enum H3TransformerBlock {
     guard angles.rows == count else {
       throw H3CheckpointError.invalid("H3 rotary rows differ from packed input.")
     }
-    let mod = modulation.reshaped([modulation.shape[0] * 3, 6 * 5376])
+    let output = try evaluateKernel(input: input, modulation: modulation,
+      modulationIndices: modulationIndices, angles: angles,
+      read: { try read(prefix + $0, shape: $1) },
+      project: { try project($0, $1, rows: $2, columns: $3, qkv: $4) },
+      observe: observe)
+    try file.checkUnchanged(at: checkpointURL)
+    try Task.checkCancellation()
+    return output
+  }
+
+  /// Shared dense H3 block arithmetic. ControlNet supplies its own checked
+  /// tensor names; normalization, AdaLN, RoPE, attention and gated MLP remain
+  /// the same implementation as the base model. Smaller dimensions permit
+  /// deterministic numerical contract tests without loading model weights.
+  static func evaluateKernel(input: MLXArray, modulation: MLXArray,
+    modulationIndices: MLXArray, angles: H3RotaryAngles,
+    hiddenWidth: Int = 5376, heads: Int = 56, headWidth: Int = 128,
+    feedWidth: Int = 14336, rotaryWidth: Int = 96,
+    read: (String, [Int]) throws -> MLXArray,
+    project: (MLXArray, String, Int, Int, Bool) throws -> MLXArray,
+    observe: (String, MLXArray) throws -> Void = { _, _ in }) throws -> MLXArray {
+    let count = input.shape[1]
+    let mod = modulation.reshaped([modulation.shape[0] * 3, 6 * hiddenWidth])
     let tables = (0..<6).map { slot in
       take(mod[0..<(modulation.shape[0] * 3),
-        (slot * 5376)..<((slot + 1) * 5376)],
+        (slot * hiddenWidth)..<((slot + 1) * hiddenWidth)],
         modulationIndices, axis: 0)
     }
     func rotate(_ value: MLXArray) -> MLXArray {
-      let first = value[.ellipsis, 0..<48]
-      let second = value[.ellipsis, 48..<96]
+      let first = value[.ellipsis, 0..<(rotaryWidth / 2)]
+      let second = value[.ellipsis, (rotaryWidth / 2)..<rotaryWidth]
       let rotated = concatenated([-second, first], axis: -1)
-      let leading = value[.ellipsis, 0..<96] * angles.cosine
+      let leading = value[.ellipsis, 0..<rotaryWidth] * angles.cosine
         + rotated * angles.sine
-      return concatenated([leading, value[.ellipsis, 96..<128]], axis: -1)
+      return concatenated([leading, value[.ellipsis, rotaryWidth..<headWidth]], axis: -1)
     }
-    let firstNorm = try read(prefix + "norm1.weight", shape: [5376])
+    let firstNorm = try read("norm1.weight", [hiddenWidth])
     let first = MLXFast.rmsNorm(input, weight: firstNorm, eps: 1e-5)
       * (1 + tables[1]) + tables[0]
     try observe("norm1_adaln", first)
     let qkv = try project(first, "attn.qkv_proj",
-      rows: 21504, columns: 5376, qkv: true)
-      .reshaped([1, count, 56, 3, 128])
+      (3 * heads * headWidth), hiddenWidth, true)
+      .reshaped([1, count, heads, 3, headWidth])
     try observe("qkv", qkv)
-    let qNorm = try read(prefix + "attn.q_norm.weight", shape: [128])
-    let kNorm = try read(prefix + "attn.k_norm.weight", shape: [128])
-    let query = rotate(MLXFast.rmsNorm(qkv[.ellipsis, 0, 0..<128],
+    let qNorm = try read("attn.q_norm.weight", [headWidth])
+    let kNorm = try read("attn.k_norm.weight", [headWidth])
+    let query = rotate(MLXFast.rmsNorm(qkv[.ellipsis, 0, 0..<headWidth],
       weight: qNorm, eps: 1e-5).transposed(0, 2, 1, 3))
-    let key = rotate(MLXFast.rmsNorm(qkv[.ellipsis, 1, 0..<128],
+    let key = rotate(MLXFast.rmsNorm(qkv[.ellipsis, 1, 0..<headWidth],
       weight: kNorm, eps: 1e-5).transposed(0, 2, 1, 3))
-    let value = qkv[.ellipsis, 2, 0..<128].transposed(0, 2, 1, 3)
+    let value = qkv[.ellipsis, 2, 0..<headWidth].transposed(0, 2, 1, 3)
     try observe("query", query)
     try observe("key", key)
     let attended = MLXFast.scaledDotProductAttention(queries: query,
-      keys: key, values: value, scale: 1 / Float(128).squareRoot(),
-      mask: nil).transposed(0, 2, 1, 3).reshaped([1, count, 7168])
+      keys: key, values: value, scale: 1 / Float(headWidth).squareRoot(),
+      mask: nil).transposed(0, 2, 1, 3).reshaped([1, count, (heads * headWidth)])
     try observe("attended", attended)
     let attention = try project(attended, "attn.out_proj",
-      rows: 5376, columns: 7168)
+      hiddenWidth, (heads * headWidth), false)
     try observe("attention", attention)
     let residual = input + tables[2] * attention
     eval(residual)
     try observe("attention_residual", residual)
-    let secondNorm = try read(prefix + "norm2.weight", shape: [5376])
+    let secondNorm = try read("norm2.weight", [hiddenWidth])
     let feedInput = MLXFast.rmsNorm(residual, weight: secondNorm,
       eps: 1e-5) * (1 + tables[4]) + tables[3]
     try observe("norm2_adaln", feedInput)
     let fused = try project(feedInput, "mlp.fc1",
-      rows: 28672, columns: 5376)
+      (2 * feedWidth), hiddenWidth, false)
     try observe("fused", fused)
-    let gate = fused[.ellipsis, 0..<14336]
-    let gated = silu(gate) * fused[.ellipsis, 14336..<28672]
+    let gate = fused[.ellipsis, 0..<feedWidth]
+    let gated = silu(gate) * fused[.ellipsis, feedWidth..<(2 * feedWidth)]
     try observe("gated", gated)
     let feed = try project(gated, "mlp.fc2",
-      rows: 5376, columns: 14336)
+      hiddenWidth, feedWidth, false)
     try observe("feed", feed)
     let output = residual + tables[5] * feed
     eval(output)
     try observe("output", output)
-    try file.checkUnchanged(at: checkpointURL)
-    try Task.checkCancellation()
     return output
   }
 }

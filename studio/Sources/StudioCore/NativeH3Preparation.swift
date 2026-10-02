@@ -11,7 +11,7 @@ public enum NativeH3Preparation {
     "loras"]
   private static let componentKeys: Set<String> = ["checkpoint", "transformer", "text_encoder",
     "processor", "tokenizer", "video_vae", "audio_vae", "task", "loras",
-    "vision_encoder", "allow_fl2va_weights_for_ref2va"]
+    "vision_encoder", "allow_fl2va_weights_for_ref2va", "fun_controlnet"]
   private static let configKeys: Set<String> = ["width", "height", "duration_seconds", "steps",
     "seed", "drop_adaln", "resolution_mode", "resolution_tier", "aspect_ratio", "memory_mode",
     "attention_chunk_size", "attention_head_chunk_size", "ffn_row_chunk_size",
@@ -152,6 +152,9 @@ public enum NativeH3Preparation {
         (components["vision_encoder"] == nil ||
           (components["vision_encoder"] as? String)?.hasPrefix("/") == true)
         && components["allow_fl2va_weights_for_ref2va"] == nil),
+      (components["fun_controlnet"] == nil || (modelTask == "t2va" &&
+        (components["fun_controlnet"] as? String)?.hasPrefix("/") == true &&
+        emptyProfileLoRA(components["loras"]) && recipe["loras"] == nil)),
       supportedTurboLoRA(components["loras"]),
       (recipe["loras"] == nil || (emptyProfileLoRA(components["loras"]) &&
         rootTurboLoRA(recipe["loras"]) != nil)),
@@ -174,7 +177,8 @@ public enum NativeH3Preparation {
       Set(conditioning.keys).isSubset(of: ["version", "task", "inputs", "audio_policy"]),
       conditioning["version"] as? Int == 1,
       conditioning["task"] as? String ==
-        (modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"),
+        (components["fun_controlnet"] != nil ? "control" :
+          modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"),
       (conditioning["inputs"] as? [Any] ?? []).isEmpty,
       (conditioning["audio_policy"] as? String ?? "generated") == "generated" else { return false }
     return ["transformer", "text_encoder", "tokenizer", "video_vae", "audio_vae"]
@@ -183,7 +187,8 @@ public enum NativeH3Preparation {
   private static func descriptor(_ recipe: [String: Any]) -> [String: Any] {
     let config = recipe["config"] as? [String: Any] ?? [:]
     let modelTask = (recipe["components"] as? [String: Any])?["task"] as? String
-    let task = modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"
+    let task = (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
+      : modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"
     return ["supportedTasks": task == "ref2va" ? ["ref2va", "a2v", "extension"] : [task], "controls": [
       "evaluations": max(0, (config["steps"] as? Int ?? 20) - 1),
       "stepsEditable": true, "refinementStepsEditable": false,
@@ -205,7 +210,8 @@ public enum NativeH3Preparation {
       guard let recipe = try? profile(url.path), supported(recipe) else { return nil }
       return ["id": try canonical(url.path),
         "name": url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " "),
-        "engine": "h3", "task": (recipe["components"] as? [String: Any])?["task"] as? String == "ref2va"
+        "engine": "h3", "task": (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
+          : (recipe["components"] as? [String: Any])?["task"] as? String == "ref2va"
           ? "ref2va" : (recipe["components"] as? [String: Any])?["task"] as? String == "fl2va"
             ? "fflf" : "t2v", "generation": descriptor(recipe)]
     }
@@ -224,10 +230,11 @@ public enum NativeH3Preparation {
       clip.extensionDirection.isEmpty, clip.extensionSource.isEmpty else {
       throw unsupported("continuity, planned music and extension are not ported")
     }
-    guard ["t2v", "t2va", "i2v", "fflf", "ref2va", "a2v"].contains(task) else {
+    guard ["t2v", "t2va", "i2v", "fflf", "ref2va", "a2v", "control"].contains(task) else {
       throw unsupported("task \(clip.inferredTask) is not ported")
     }
-    let supportedRoles: Set<MediaRole> = task == "ref2va" ? [.reference, .lora]
+    let supportedRoles: Set<MediaRole> = task == "control" ? [.control]
+      : task == "ref2va" ? [.reference, .lora]
       : task == "a2v" ? [.audioDriver, .first, .lora]
       : ["i2v", "fflf"].contains(task) ? [.first, .last, .keyframe, .lora] : [.lora]
     let enabledFrames = clip.attachments.filter {
@@ -238,6 +245,8 @@ public enum NativeH3Preparation {
     let openingImages = clip.attachments.filter { $0.role == .first && $0.isEnabled }
     guard clip.attachments.allSatisfy({ supportedRoles.contains($0.role) }),
       (task != "a2v" || (audioDrivers.count == 1 && openingImages.count <= 1)),
+      (task != "control" || (clip.continuityMode == "independent" &&
+        clip.attachments.filter({ $0.role == .control && $0.isEnabled }).count == 1)),
       clip.attachments.filter({ $0.role == .lora && $0.isEnabled }).count <= 4,
       task != "ref2va" || (1...12).contains(clip.attachments.filter({ $0.role == .reference && $0.isEnabled }).count),
       !["i2v", "fflf"].contains(task) ||
@@ -256,7 +265,7 @@ public enum NativeH3Preparation {
       throw unsupported("guidance, memory, backend or negative-prompt overrides cannot be executed")
     }
     let profiles = try catalog(directory: runtime["profilesDirectory"] as? String ?? "")
-    let catalogTask = ["ref2va", "a2v"].contains(task) ? "ref2va"
+    let catalogTask = task == "control" ? "control" : ["ref2va", "a2v"].contains(task) ? "ref2va"
       : ["i2v", "fflf"].contains(task) ? "fflf" : "t2v"
     guard let chosen = profiles.first(where: {
       $0["task"] as? String == catalogTask &&
@@ -437,6 +446,18 @@ public enum NativeH3Preparation {
         components["tokenizer"] = try canonical(tokenFile.path)
       }
     }
+    if clip.inferredTask == "control" {
+      guard motion == nil, loras.isEmpty,
+        clip.generationWidth <= 2048, clip.generationHeight <= 2048,
+        clip.generationWidth * clip.generationHeight <= 768 * 1344,
+        let control = components["fun_controlnet"] as? String,
+        let transformer = components["transformer"] as? String else {
+        throw unsupported("Fun control requires a full-width adapter, dense sampling without LoRAs, and a bounded output canvas")
+      }
+      let controlPath = try canonical(control)
+      try NativeH3FunControlMetadata.validate(control: controlPath, transformer: canonical(transformer))
+      components["fun_controlnet"] = controlPath
+    }
     var referenceInputs: [[String: Any]] = []
     let endpointAttachments = clip.attachments.filter {
       $0.isEnabled && Set<MediaRole>([.first, .last, .keyframe]).contains($0.role)
@@ -449,6 +470,22 @@ public enum NativeH3Preparation {
     for attachment in orderedAttachments where attachment.isEnabled {
       guard let asset = availableAssets.last(where: { $0.id == attachment.assetID }) else {
         throw StudioError.invalid("Relink a missing H3 attachment.")
+      }
+      if attachment.role == .control {
+        guard asset.kind == .video, attachment.time == 0,
+          attachment.strength.isFinite, (0...1).contains(attachment.strength),
+          ["canny_edges", "depth_map", "hed_edges", "mlsd_lines", "pose_skeleton"].contains(attachment.controlType),
+          attachment.referenceRole == nil, attachment.referencePriority == nil,
+          attachment.referenceFrames == nil, attachment.referenceSizePolicy == nil,
+          attachment.attentionStrength == nil, attachment.audioSourceStart == nil,
+          attachment.audioSourceDuration == nil else {
+          throw unsupported("Fun control accepts one preprocessed Canny, depth, HED, MLSD or pose video at strength 0–1")
+        }
+        let controlPath = try canonical(asset.path)
+        referenceInputs.append(["id": attachment.id.uuidString, "kind": "video", "role": "control",
+          "path": controlPath, "sha256": try sourceSHA256(controlPath, maxBytes: 4 * 1024 * 1024 * 1024),
+          "strength": attachment.strength, "control_type": attachment.controlType])
+        continue
       }
       if Set<MediaRole>([.reference, .first, .last, .keyframe, .audioDriver]).contains(attachment.role) {
         let isVideoReference = attachment.role == .reference &&
@@ -536,7 +573,9 @@ public enum NativeH3Preparation {
     if !loras.isEmpty { components["loras"] = loras }
     recipe["components"] = components
     if let motion { recipe["continuation"]=motion.contract }
-    if clip.inferredTask == "a2v" {
+    if clip.inferredTask == "control" {
+      recipe["conditioning"] = ["version": 1, "task": "control", "inputs": referenceInputs, "audio_policy": "generated"]
+    } else if clip.inferredTask == "a2v" {
       recipe["conditioning"] = ["version": 1, "task": "a2v",
         "inputs": referenceInputs, "audio_policy": "generated"]
     } else if clip.inferredTask == "ref2va" {
@@ -565,7 +604,7 @@ public enum NativeH3Preparation {
     var report: [String: Any] = ["profile": URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent,
       "generation": descriptor(recipe), "resolvedFingerprint": try fingerprint(continuity == nil ? recipe : ["recipe":recipe,"continuity":continuity!]),
       "selectionFingerprint": try fingerprint(original),
-      "task": ["ref2va", "a2v"].contains(clip.inferredTask) ? clip.inferredTask
+      "task": ["ref2va", "a2v", "control"].contains(clip.inferredTask) ? clip.inferredTask
         : ["i2v", "fflf"].contains(clip.inferredTask) ? "fflf" : "t2v", "nativeFPS": 24,
       "nativePreparation": "swift", "productionQualified": false,
       "movieSettings": try JSONSerialization.jsonObject(with: JSONEncoder().encode(clip.settings(in: project))),

@@ -14,7 +14,7 @@ let package = Package(
     .target(name: "StudioCore"),
     .executableTarget(name: "WeeToddStudio", dependencies: ["StudioCore"]),
     .executableTarget(name: "StudioMetal"),
-    .executableTarget(name: "WeeToddCLI"),
+    .executableTarget(name: "WeeToddCLI", dependencies: ["StudioCore"]),
     .testTarget(name: "StudioCoreTests", dependencies: ["StudioCore"]),
     .testTarget(name: "StudioAppTests", dependencies: ["WeeToddStudio"]),
   ],

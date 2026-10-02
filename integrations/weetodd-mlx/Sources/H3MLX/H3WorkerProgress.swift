@@ -25,13 +25,14 @@ public enum H3WorkerProgress {
 /// Boundaries used by the native worker to report disjoint reference-task stage times.
 public enum H3WorkerStageBoundary {
   public static func tracks(task: String) -> Bool {
-    task == "ref2va" || task == "fl2va"
+    task == "ref2va" || task == "fl2va" || task == "control"
   }
 
   public static func name(stage: String, completed: Int,
     total: Int) -> String? {
     guard total > 0, completed == total else { return nil }
     switch stage {
+    case "control_video_weights_released": return "controlVideoEncode"
     case "text_weights_released": return "qwen"
     case "reference_video_weights_released": return "referenceVideoEncode"
     case "reference_audio_weights_released": return "referenceAudioEncode"

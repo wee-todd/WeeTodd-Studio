@@ -54,6 +54,27 @@ public enum H3VideoVAEEncoder {
       samplePosterior: false)
   }
 
+  /// Control guides use the output canvas and complete 15-second timeline,
+  /// while ordinary Ref2VA retains its existing smaller media admission.
+  /// Full-canvas temporal convolution terms are released sequentially by
+  /// default; the explicit fallback permits installed-checkpoint parity probes.
+  public static func encodeControlVideo(checkpointURL: URL, rgb8: [UInt8],
+    frameCount: Int, width: Int, height: Int,
+    progress: (Int, Int) -> Void = { _, _ in },
+    releaseTemporalConvolutionTerms: Bool = true) throws -> MLXArray {
+    guard (5...362).contains(frameCount), (frameCount - 5).isMultiple(of: 17),
+      (32...2048).contains(width), (32...2048).contains(height),
+      width.isMultiple(of: 32), height.isMultiple(of: 32),
+      width * height <= 768 * 1344,
+      rgb8.count == frameCount * width * height * 3,
+      rgb8.count <= 1024 * 1024 * 1024 else {
+      throw H3CheckpointError.invalid("H3 control video exceeds aligned output canvas or frame limits.")
+    }
+    return try encodeFrames(checkpointURL: checkpointURL, rgb8: rgb8,
+      frameCount: frameCount, width: width, height: height, samplePosterior: false,
+      progress: progress, releaseTemporalConvolutionTerms: releaseTemporalConvolutionTerms)
+  }
+
   private static func encodeStill(checkpointURL: URL, rgb8: [UInt8],
     width: Int, height: Int, samplePosterior: Bool) throws -> MLXArray {
     try encodeFrames(checkpointURL: checkpointURL, rgb8: rgb8,
@@ -63,12 +84,14 @@ public enum H3VideoVAEEncoder {
 
   private static func encodeFrames(checkpointURL: URL, rgb8: [UInt8],
     frameCount: Int, width: Int, height: Int,
-    samplePosterior: Bool) throws -> MLXArray {
+    samplePosterior: Bool,
+    progress: (Int, Int) -> Void = { _, _ in },
+    releaseTemporalConvolutionTerms: Bool = false) throws -> MLXArray {
     guard checkpointURL.isFileURL,
       (32...2048).contains(width), (32...2048).contains(height),
       width * height <= 768 * 1344,
       width.isMultiple(of: 16), height.isMultiple(of: 16),
-      frameCount > 0, frameCount <= 175,
+      frameCount > 0, frameCount <= 362,
       rgb8.count == frameCount * width * height * 3 else {
       throw H3CheckpointError.invalid("H3 video encoder requires bounded 16-pixel RGB geometry.")
     }
@@ -96,7 +119,7 @@ public enum H3VideoVAEEncoder {
       let bias = try read(name + ".bias", shape: [out])
       return try H3VideoVAEEncoderOps.causalConv(input,
         weight: weight, bias: bias, spatialPadding: spatialPadding,
-        temporalPadding: temporalPadding, stride: stride)
+        temporalPadding: temporalPadding, stride: stride, releaseTemporalTerms: releaseTemporalConvolutionTerms)
     }
     func norm(_ input: MLXArray, name: String) throws -> MLXArray {
       let count = input.shape[4]
@@ -176,6 +199,8 @@ public enum H3VideoVAEEncoder {
       moments.append(value)
       eval(value)
       Memory.clearCache()
+      progress(clipIndex + 1, clipCount)
+      try Task.checkCancellation()
     }
     let joined = moments.count == 1 ? moments[0] : concatenated(moments, axis: 1)
     let latentFrames = frameCount == 1 ? 1 : (frameCount - 5) / 17 * 5 + 2

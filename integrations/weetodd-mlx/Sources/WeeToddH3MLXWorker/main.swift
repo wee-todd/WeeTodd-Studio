@@ -172,7 +172,8 @@ import UniformTypeIdentifiers
     } else { continuation = nil }
     let reportedTask = continuation != nil ? "continuation" :
       conditioningTask == "extension" ? "extension" :
-      conditioningTask == "a2v" ? "a2v" : selectedTask
+      conditioningTask == "a2v" ? "a2v" :
+      conditioningTask == "control" ? "control" : selectedTask
     let configuredFFmpeg = envelope.ffmpegPath ?? recipe["ffmpeg"] as? String ?? ""
     guard configuredFFmpeg.hasPrefix("/"),
       FileManager.default.isExecutableFile(atPath: configuredFFmpeg) else {
@@ -182,7 +183,22 @@ import UniformTypeIdentifiers
     let stillRequest: H3Ref2VAStillRequest?
     let endpointRequest: H3FL2VARequest?
     let textRequest: H3T2VARequest?
-    if selectedTask == "ref2va" && conditioningTask == "extension" {
+    if selectedTask == "t2va" && conditioningTask == "control" {
+      textRequest = try H3StudioRecipe.compileControl(data: recipeData) {
+        path, expectedSHA256, geometry in
+        let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
+        try source.verify()
+        let video = try H3FunControlMedia.load(path: path,
+          ffmpeg: URL(fileURLWithPath: configuredFFmpeg), geometry: geometry)
+        try source.verify()
+        sourceImages.append(["path": path, "sha256": expectedSHA256,
+          "kind": "control", "preparedFrames": video.frameCount,
+          "width": video.width, "height": video.height])
+        return video
+      }
+      stillRequest = nil
+      endpointRequest = nil
+    } else if selectedTask == "ref2va" && conditioningTask == "extension" {
       stillRequest = try H3StudioRecipe.compileExtension(data: recipeData) {
         path, expectedSHA256 in
         let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
@@ -435,7 +451,7 @@ import UniformTypeIdentifiers
         channels: 2, to: staging.appendingPathComponent("audio.wav"))
     }
     let onProgress: (String, Int, Int) -> Void = { stage, completed, total in
-      if H3WorkerStageBoundary.tracks(task: selectedTask) {
+      if H3WorkerStageBoundary.tracks(task: reportedTask) {
         if let boundary = H3WorkerStageBoundary.name(stage: stage,
           completed: completed, total: total) {
           recordStage(boundary)
@@ -446,6 +462,7 @@ import UniformTypeIdentifiers
       if let sampling = H3WorkerProgress.fraction(stage: stage,
         completed: completed, total: total,
         evaluations: admission.evaluations) { next = sampling }
+      else if stage == "control_video_encode" { next = 0.01 + 0.01 * part }
       else if stage == "text" { next = 0.02 + 0.04 * part }
       else if stage == "reference_video_weights_released" { next = 0.08 }
       else if stage == "video_decode" { next = 0.84 + 0.13 * part }
@@ -507,7 +524,7 @@ import UniformTypeIdentifiers
     try writer.finish()
     try Task.checkCancellation()
     try mux(ffmpeg: URL(fileURLWithPath: configuredFFmpeg), directory: staging)
-    if H3WorkerStageBoundary.tracks(task: selectedTask) { recordStage("mux") }
+    if H3WorkerStageBoundary.tracks(task: reportedTask) { recordStage("mux") }
     let usage = try H3RenderResourceUsage.capture(peakMLXBytes: Memory.peakMemory)
     let metadata: [String: Any] = ["status": "complete",
       "nativeRuntime": "swift-mlx", "productionQualified": false,

@@ -27,6 +27,7 @@ public struct MLXStudioMemoryPlan:Sendable {
       let union=try index == 0 ? request.unionControlGuide.map {
         try MLXUnionControlLayout(geometry:geometry,strength:$0.referenceStrength)
       } : nil
+      let ic=try index == 0 ? request.icControl.map { try MLXICControlLayout(geometry:geometry,control:$0) } : nil
       let ingredients=try request.ingredientsSheet.map {
         try MLXReferenceVideoLayout(geometry:geometry,strength:$0.referenceStrength)
       }
@@ -41,9 +42,9 @@ public struct MLXStudioMemoryPlan:Sendable {
         throw LTXError.invalid("A last-frame image cannot share an LTX history guide.")
       }
       transformer=max(transformer,try MLXAVBlock.estimatedActivationBytes(configuration:
-        AVBlockConfiguration(videoTokens:dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
+        AVBlockConfiguration(videoTokens:dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ic?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
           audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
-        perTokenVideo:layout != nil || guide != nil || union != nil || ingredients != nil || msr != nil ||
+        perTokenVideo:layout != nil || guide != nil || union != nil || ic != nil || ingredients != nil || msr != nil ||
           (dfr?.referenceTokens ?? 0)>0 || (dfr != nil && !request.referenceImages.isEmpty),perTokenAudio:guide != nil))
     }
     if let dfr=request.dfr,dfr.temporalRounds>0 {
@@ -85,7 +86,12 @@ public struct MLXStudioMemoryPlan:Sendable {
         height:plan.geometry.height,maximumOwnedBufferBytes:Int.max)
         .tiles.map(\.ownedBufferBytes).max() ?? 0
     }.max() ?? 0
-    let video=max(decoder,unionGuideEncoder,ingredientsGuideEncoder,msrGuideEncoder)
+    let icGuideEncoder=try request.icControl.map { control in
+      let geometry=try control.guideGeometry(target:recipe.low)
+      return try MLXVideoEncodeTilePlan(frames:geometry.frames,width:geometry.width,
+        height:geometry.height,maximumOwnedBufferBytes:Int.max).tiles.map(\.ownedBufferBytes).max() ?? 0
+    } ?? 0
+    let video=max(decoder,unionGuideEncoder,ingredientsGuideEncoder,msrGuideEncoder,icGuideEncoder)
     for (stage,needed) in [("transformer",transformer),("video decoder",video)] {
       guard UInt64(needed) <= ceiling else {
         throw LTXError.invalid("LTX \(request.width)×\(request.height), \(request.frames) frames: \(stage) needs an estimated \(needed) activation bytes; this Mac's stage allowance is \(ceiling) bytes after memory reserves (engine maximum 32 GiB).")

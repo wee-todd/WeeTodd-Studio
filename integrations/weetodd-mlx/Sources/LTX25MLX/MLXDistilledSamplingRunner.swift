@@ -26,6 +26,7 @@ public final class MLXDistilledSamplingRunner {
   private let layouts:[MLXReferenceLayout?]
   private let guideLayouts:[MLXExtensionGuideLayout?]
   private let unionLayout:MLXUnionControlLayout?
+  private let icLayout:MLXICControlLayout?
   public private(set) var stageSeconds:[String:Double]=[:]
 
   public init(recipe:DistilledTwoStageRecipe,transformerRoot:URL,upscalerCheckpoint:URL,
@@ -34,6 +35,7 @@ public final class MLXDistilledSamplingRunner {
     extensionContextFrames:Int?=nil,
     extensionVideoGuideLatentFrames:Int?=nil,extensionAudioGuideTokens:Int?=nil,
     unionControlGuide:MLXUnionControlGuide?=nil,
+    icControl:MLXICControl?=nil,
     stageOneLoras:[LoRAAdapter]=[],stageTwoLoras:[LoRAAdapter]=[],
     noisePolicy:MLXNoisePolicy = .native,maximumActivationBytes:Int=2*1024*1024*1024) throws {
     self.recipe=recipe;self.noisePolicy=noisePolicy;self.maximumActivationBytes=maximumActivationBytes
@@ -52,6 +54,10 @@ public final class MLXDistilledSamplingRunner {
     unionLayout=try unionControlGuide.map {
       try MLXUnionControlLayout(geometry:recipe.low,strength:$0.referenceStrength)
     }
+    guard icControl == nil || (unionControlGuide == nil && firstStrength == nil && extensionContextFrames == nil) else {
+      throw LTXError.invalid("IC controls cannot combine with endpoint, history or Union guide overrides.")
+    }
+    icLayout=try icControl.map { try MLXICControlLayout(geometry:recipe.low,control:$0) }
     layouts=try [recipe.low,recipe.high].map { g in
       try firstStrength.map { try MLXReferenceLayout(geometry:g,firstStrength:$0,lastStrength:lastStrength,firstFrame:firstFrame) }
     }
@@ -62,8 +68,8 @@ public final class MLXDistilledSamplingRunner {
     }
     // Reject impossible stage-two geometry before even opening stage-one files.
     for (index,g) in [recipe.low,recipe.high].enumerated() {
-      let block=try MLXAVBlock(configuration:Self.configuration(g,layout:layouts[index],guide:guideLayouts[index],union:index == 0 ? unionLayout : nil),maximumActivationBytes:maximumActivationBytes)
-      if layouts[index] != nil || (index == 0 && unionLayout != nil) { try block.admitPerTokenVideo() }
+      let block=try MLXAVBlock(configuration:Self.configuration(g,layout:layouts[index],guide:guideLayouts[index],union:index == 0 ? unionLayout : nil,ic:index == 0 ? icLayout : nil),maximumActivationBytes:maximumActivationBytes)
+      if layouts[index] != nil || (index == 0 && (unionLayout != nil || icLayout != nil)) { try block.admitPerTokenVideo() }
       if guideLayouts[index] != nil { try block.admitPerTokenAV() }
     }
     _ = try MLXLatentUpscaler.admit(shape:[recipe.low.latentFrames,recipe.low.latentHeight,recipe.low.latentWidth,128],maximumActivationBytes:maximumActivationBytes)
@@ -72,11 +78,12 @@ public final class MLXDistilledSamplingRunner {
       let (g,adapters)=pair
       let active = adapters + (index == 0 ? unionControlGuide.map {
         [LoRAAdapter(path:$0.adapterPath,strength:$0.adapterStrength)]
-      } ?? [] : [])
+      } ?? [] : []) + (index == 0 ? icControl?.adapters.map { LoRAAdapter(path:$0.path,strength:$0.strength) } ?? [] : [])
       let source=try MLXDenoiserWeights(root:transformerRoot,
-        configuration:Self.configuration(g,layout:layouts[index],guide:guideLayouts[index],union:index == 0 ? unionLayout : nil),
+        configuration:Self.configuration(g,layout:layouts[index],guide:guideLayouts[index],union:index == 0 ? unionLayout : nil,ic:index == 0 ? icLayout : nil),
         adapters:active,unionControlAdapterPath:index == 0 ? unionControlGuide?.adapterPath : nil,
-        maximumActivationBytes:maximumActivationBytes)
+        maximumActivationBytes:maximumActivationBytes,
+        icControlFamilies:index == 0 ? Dictionary(uniqueKeysWithValues:icControl?.adapters.map { ($0.path,$0.family) } ?? []) : [:])
       guard source.sourceCheckpoint == "ltx-2.5-22b-distilled-transformer-bf16.safetensors" else {
         throw LTXError.invalid("Released two-stage sampling requires the distilled transformer provenance.")
       }
@@ -86,22 +93,22 @@ public final class MLXDistilledSamplingRunner {
     upscaler=try MLXLatentUpscaler(checkpoint:upscalerCheckpoint,statisticsCheckpoint:statisticsCheckpoint)
   }
   private static func configuration(_ g:AVGeometry,layout:MLXReferenceLayout?=nil,
-    guide:MLXExtensionGuideLayout?=nil,union:MLXUnionControlLayout?=nil) throws -> AVBlockConfiguration {
-    try AVBlockConfiguration(videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? g.videoTokens,
+    guide:MLXExtensionGuideLayout?=nil,union:MLXUnionControlLayout?=nil,ic:MLXICControlLayout?=nil) throws -> AVBlockConfiguration {
+    try AVBlockConfiguration(videoTokens:guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ic?.videoTokens ?? g.videoTokens,
       audioTokens:guide?.audioTokens ?? g.audioFrames,textTokens:1024)
   }
   public func evaluate(videoContext:MLXArray,audioContext:MLXArray,
     references:[(first:MLXArray,last:MLXArray?)]=[],frozenAudio:MLXArray?=nil,
-    extensionGuides:ExtensionGuides?=nil,unionGuide:MLXArray?=nil,
+    extensionGuides:ExtensionGuides?=nil,unionGuide:MLXArray?=nil,icGuides:[MLXArray]=[],
     progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> [String:MLXArray] {
     try evaluateWithStageOneCapture(videoContext:videoContext,audioContext:audioContext,
-      references:references,frozenAudio:frozenAudio,extensionGuides:extensionGuides,unionGuide:unionGuide,
+      references:references,frozenAudio:frozenAudio,extensionGuides:extensionGuides,unionGuide:unionGuide,icGuides:icGuides,
       stageOneVideoObserver:nil,progress:progress)
   }
 
   public func evaluateWithStageOneCapture(videoContext:MLXArray,audioContext:MLXArray,
     references:[(first:MLXArray,last:MLXArray?)]=[],frozenAudio:MLXArray?=nil,
-    extensionGuides:ExtensionGuides?=nil,unionGuide:MLXArray?=nil,
+    extensionGuides:ExtensionGuides?=nil,unionGuide:MLXArray?=nil,icGuides:[MLXArray]=[],
     stageOneVideoObserver:((MLXArray) throws -> Void)?=nil,
     progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> [String:MLXArray] {
     guard gate.try() else { throw LTXError.invalid("Two-stage MLX sampler is already active.") }
@@ -117,6 +124,9 @@ public final class MLXDistilledSamplingRunner {
     }
     guard (unionGuide != nil) == (unionLayout != nil) else {
       throw LTXError.invalid("Union Control requires exactly one encoded guide.")
+    }
+    guard icGuides.count == (icLayout?.strengths.count ?? 0) else {
+      throw LTXError.invalid("IC control requires every admitted guide in the supplied order.")
     }
     if let extensionGuides {
       for (value,count) in [(extensionGuides.stageOneVideo,guideLayouts[0]!.videoGuideTokens),
@@ -147,7 +157,8 @@ public final class MLXDistilledSamplingRunner {
         let layout=self.layouts[stage-1]
         let guideLayout=self.guideLayouts[stage-1]
         let union=stage == 1 ? self.unionLayout : nil
-        let sampler=try MLXSamplingRunner(configuration:Self.configuration(g,layout:layout,guide:guideLayout,union:union),maximumActivationBytes:self.maximumActivationBytes)
+        let ic=stage == 1 ? self.icLayout : nil
+        let sampler=try MLXSamplingRunner(configuration:Self.configuration(g,layout:layout,guide:guideLayout,union:union,ic:ic),maximumActivationBytes:self.maximumActivationBytes)
         var inputs=text
         inputs["video_latent"]=state["video"]!; inputs["audio_latent"]=state["audio"]!
         var conditioning:MLXVideoDenoiseCondition?
@@ -159,6 +170,10 @@ public final class MLXDistilledSamplingRunner {
         }
         if let union,let unionGuide {
           let prepared=try union.prepare(generated:state["video"]!,reference:unionGuide)
+          inputs["video_latent"]=prepared.latent;conditioning=prepared.condition
+        }
+        if let ic {
+          let prepared=try ic.prepare(generated:state["video"]!,references:icGuides)
           inputs["video_latent"]=prepared.latent;conditioning=prepared.condition
         }
         if let guideLayout,let extensionGuides {
@@ -177,9 +192,9 @@ public final class MLXDistilledSamplingRunner {
           inputs["video_latent"]=prepared.video;inputs["audio_latent"]=prepared.audio
           conditioning=prepared.videoCondition;audioConditioning=prepared.audioCondition
         }
-        let videoTokens=guideLayout?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? g.videoTokens
+        let videoTokens=guideLayout?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ic?.videoTokens ?? g.videoTokens
         let audioTokens=guideLayout?.audioTokens ?? g.audioFrames
-        inputs["video_positions"]=MLXArray(guideLayout?.videoPositions ?? layout?.positions ?? union?.positions ?? g.videoPositions,[videoTokens,3])
+        inputs["video_positions"]=MLXArray(guideLayout?.videoPositions ?? layout?.positions ?? union?.positions ?? ic?.positions ?? g.videoPositions,[videoTokens,3])
         inputs["audio_positions"]=MLXArray(guideLayout?.audioPositions ?? g.audioPositions,[audioTokens,1])
         let bf16:Set<String> = self.noisePolicy == .releasedMLX
           ? (frozenAudio != nil ? (stage == 1 ? ["video"] : []) : (stage == 1 ? ["video","audio"] : ["audio"])) : []

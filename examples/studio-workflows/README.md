@@ -42,6 +42,22 @@ bindings into a native image job are not yet supported. Local planning, native v
 native image execution share weighted-job admission so they cannot load competing models at once.
 See [native image controls and licensing](../../studio/README.md#native-qwen-image-21--experimental).
 
+## Native video export boundary
+
+Movie/clip export uses `weetodd-studio-native-job-v1` when all clips select native Swift H3/LTX
+or accepted movie sources. It freezes the edit and existing prepared `weetodd-headless-v2`
+recipes for WeeToddCLI, without Python or a second sampler. This format is an execution job,
+separate from planning definitions, native image v4 jobs and the legacy Python-hosted movie formats.
+It supports cut-only finishing with embedded source audio; unsupported finishing is rejected
+explicitly. Complete prepared continuous scenes retain member timing and shared take identity;
+ordinary continuity needs an accepted source before export. The saved MSR export and installed-worker
+CLI preflight passed with Python unavailable on 2026-10-02, followed by actual MSR CLI
+inference, movie assembly, accepted-project reopening and verified take reuse on resume.
+A corrected combined CrossView/Ingredients Studio job also passed native export/CLI inference
+with identical video/audio/muxed media, then resumed with zero new and one reused generation.
+Its exact frozen recipe completed as a saved, uncached ComfyUI graph with the same three media hashes.
+These checks do not qualify all native tasks. See [execution, supported finishing and qualification](../../studio/README.md#headless-movie-and-clip-jobs).
+
 ## Try the examples
 
 Use the project's configured Python environment, with project dependencies installed:

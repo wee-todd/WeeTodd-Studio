@@ -83,6 +83,7 @@ public final class MLXMediaPipeline {
       let union=try index == 0
         ? request.unionControlGuide.map { try MLXUnionControlLayout(geometry:geometry,strength:$0.referenceStrength) }
         : nil
+      let ic=try index == 0 ? request.icControl.map { try MLXICControlLayout(geometry:geometry,control:$0) } : nil
       let ingredients=try request.ingredientsSheet.map {
         try MLXReferenceVideoLayout(geometry:geometry,strength:$0.referenceStrength)
       }
@@ -95,10 +96,10 @@ public final class MLXMediaPipeline {
         lastFrame:request.referenceImages.count == 2 ? request.frames-1 : nil) }
       guard layout == nil || guide == nil else { throw LTXError.invalid("LTX extension cannot combine with endpoint references.") }
       let block=try MLXAVBlock(configuration:AVBlockConfiguration(
-        videoTokens:dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
+        videoTokens:dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ic?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
         audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
         maximumActivationBytes:transformerActivationBytes)
-      if layout != nil || union != nil || ingredients != nil || msr != nil || (dfr?.referenceTokens ?? 0) > 0 ||
+      if layout != nil || union != nil || ic != nil || ingredients != nil || msr != nil || (dfr?.referenceTokens ?? 0) > 0 ||
         (dfr != nil && !request.referenceImages.isEmpty) { try block.admitPerTokenVideo() }
       if guide != nil { try block.admitPerTokenAV() }
       _ = try MLXDenoiser.admitRotary(configuration:block.configuration,maximumActivationBytes:transformerActivationBytes)
@@ -128,6 +129,11 @@ public final class MLXMediaPipeline {
       _ = try MLXVideoEncodeTilePlan(frames:recipe.low.frames,
         width:recipe.low.width/2,height:recipe.low.height/2,
         maximumOwnedBufferBytes:videoActivationBytes)
+    }
+    if let control=request.icControl {
+      let geometry=try control.guideGeometry(target:recipe.low)
+      _ = try MLXVideoEncodeTilePlan(frames:geometry.frames,width:geometry.width,
+        height:geometry.height,maximumOwnedBufferBytes:videoActivationBytes)
     }
     if request.ingredientsSheet != nil {
       _ = try MLXVideoEncodeTilePlan(frames:recipe.high.frames,
@@ -173,6 +179,25 @@ public final class MLXMediaPipeline {
     self.videoBackend=videoBackend;self.audioBackend=audioBackend;self.saveLatents=saveLatents;self.saveFrames=saveFrames
     self.extensionContextFrames=extensionContextFrames
     self.videoActivationBytes=videoActivationBytes;self.transformerActivationBytes=transformerActivationBytes
+    if let control=request.icControl {
+      let geometry=try control.guideGeometry(target:request.recipe().low)
+      let expected=Int64(geometry.frames)*Int64(geometry.width)*Int64(geometry.height)*3
+      for guide in control.guides {
+        try NativeMediaSource(path:guide.path,sha256:guide.sourceSHA256).verify()
+        let attributes=try FileManager.default.attributesOfItem(atPath:guide.path)
+        guard attributes[.type] as? FileAttributeType == .typeRegular,
+          (attributes[.size] as? NSNumber)?.int64Value == expected else {
+          throw LTXError.invalid("IC control RGB24 guide differs from its admitted geometry.")
+        }
+      }
+      if let audio=control.publicationAudio {
+        try NativeMediaSource(path:audio.path,sha256:audio.sourceSHA256).verify()
+        _ = try MLXSourceAudioInterval(source:URL(fileURLWithPath:audio.path),
+          sourceStartSeconds:audio.sourceStartSeconds,sourceDurationSeconds:audio.sourceDurationSeconds,
+          durationSeconds:Double(request.frames)/request.fps)
+      }
+      _ = try MLXVideoEncoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint))
+    }
     if let sheet=request.ingredientsSheet {
       sampler=nil
       msrSampler=nil
@@ -211,7 +236,7 @@ public final class MLXMediaPipeline {
         upscalerCheckpoint:URL(fileURLWithPath:request.spatialUpscalerCheckpoint),statisticsCheckpoint:URL(fileURLWithPath:request.videoCheckpoint),
         firstStrength:request.referenceImages.first?.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil,
         extensionContextFrames:extensionContextFrames,
-        unionControlGuide:request.unionControlGuide,
+        unionControlGuide:request.unionControlGuide,icControl:request.icControl,
         stageOneLoras:request.stageOneLoras,stageTwoLoras:request.stageTwoLoras,noisePolicy:request.noisePolicy,maximumActivationBytes:transformerActivationBytes)
     }
     for reference in request.referenceImages { try MLXReferenceImage.inspect(URL(fileURLWithPath:reference.path)) }
@@ -257,6 +282,7 @@ public final class MLXMediaPipeline {
     try run(ffmpeg:ffmpeg,decodedPreview:nil,progress:progress)
   }
   public func run(ffmpeg:URL,preparedAudio:MLXSourceAudioInterval.Prepared?=nil,
+    preparedPublicationAudio:MLXSourceAudioInterval.Prepared?=nil,
     extensionGuideLease:ExtensionGuideLease?=nil,
     decodedPreview:((Int,Data) throws -> Void)?,beforePublish:((URL,[String:Any]) throws -> Void)? = nil,progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> URL {
     guard gate.try() else { throw LTXError.invalid("Media pipeline is already running.") }
@@ -290,6 +316,12 @@ public final class MLXMediaPipeline {
         preparedAudio!.conditioningSamples == Int((Double(g.frames)/g.fps*16000).rounded(.toNearestOrEven))) else {
       throw LTXError.invalid("A2V needs its exact prepared source interval before weighted execution.")
     }
+    guard (request.icControl?.publicationAudio != nil) == (preparedPublicationAudio != nil),
+      preparedPublicationAudio == nil || (preparedAudio == nil &&
+        preparedPublicationAudio!.publicationSamples == Int((Double(g.frames)/g.fps*48000).rounded(.toNearestOrEven))) else {
+      throw LTXError.invalid("CrossView requires its exact publication-only source waveform before weighted execution.")
+    }
+    let publicationSource=preparedAudio ?? preparedPublicationAudio
     guard (extensionGuideLease?.guides != nil) == (extensionContextFrames != nil),
       extensionGuideLease == nil || preparedAudio == nil else {
       throw LTXError.invalid("LTX extension needs its staged audiovisual source guides without an A2V driver.")
@@ -378,6 +410,23 @@ public final class MLXMediaPipeline {
           }
           return ([],encoded.reshaped([recipe.high.videoTokens,128]),[])
         }
+        if let control=request.icControl {
+          let geometry=try control.guideGeometry(target:recipe.low)
+          let plan=try MLXVideoEncodeTilePlan(frames:geometry.frames,width:geometry.width,
+            height:geometry.height,maximumOwnedBufferBytes:videoActivationBytes)
+          var encoded:[MLXArray]=[]
+          for (index,guide) in control.guides.enumerated() {
+            let latent=try MLXTiledVideoEncoder.encode(guide:URL(fileURLWithPath:guide.path),
+              checkpoint:URL(fileURLWithPath:request.videoCheckpoint),plan:plan) {
+                try report("ic_guide_encode:\(index+1)",$0,$1)
+              }
+            let tokens=latent.reshaped([geometry.videoTokens,128]).asType(.float32)
+            eval(tokens);encoded.append(tokens)
+            try NativeMediaSource(path:guide.path,sha256:guide.sourceSHA256).verify()
+            try report("ic_guide_ready",index+1,control.guides.count)
+          }
+          return ([],nil,encoded)
+        }
         if let union=request.unionControlGuide {
           let plan=try MLXVideoEncodeTilePlan(frames:recipe.low.frames,
             width:recipe.low.width/2,height:recipe.low.height/2,
@@ -438,7 +487,7 @@ public final class MLXMediaPipeline {
         guard let sampler else { throw LTXError.invalid("LTX sampler is missing.") }
         sampled=try sampler.evaluate(videoContext:contexts.video,audioContext:contexts.audio,references:preparedGuides.0,
           frozenAudio:frozenAudio,extensionGuides:extensionGuideLease?.guides,
-          unionGuide:preparedGuides.1,progress:report)
+          unionGuide:preparedGuides.1,icGuides:request.icControl != nil ? preparedGuides.2 : [],progress:report)
         timings.merge(sampler.stageSeconds) { _,new in new }
       }
       // One final evaluated download for existing native decoders. The contexts
@@ -499,7 +548,7 @@ public final class MLXMediaPipeline {
     guard written == admission.videoFrames else { throw LTXError.invalid("Incomplete video decode.") }
     timings["video_decode"]=Date().timeIntervalSince(videoStart); try report("video_weights_released")
     let audioStart=Date()
-    if let source=preparedAudio {
+    if let source=publicationSource {
       try Self.publishSourceAudio(source,to:temporary.appendingPathComponent("audio.wav"))
       try report("source_audio_published")
     } else { try autoreleasepool {
@@ -516,8 +565,8 @@ public final class MLXMediaPipeline {
       try MediaOutput.writeWAV(samples:published,sampleRate:wave.sampleRate,channels:wave.channels,
         to:temporary.appendingPathComponent("audio.wav"))
     } }
-    timings[preparedAudio == nil ? "audio_decode" : "source_audio_copy"]=Date().timeIntervalSince(audioStart)
-    if preparedAudio == nil { try report("audio_weights_released") }
+    timings[publicationSource == nil ? "audio_decode" : "source_audio_copy"]=Date().timeIntervalSince(audioStart)
+    if publicationSource == nil { try report("audio_weights_released") }
     let muxStart=Date()
     try Self.mux(ffmpeg:ffmpeg,directory:temporary,fps:outputG.fps,rawVideo:rawVideo)
     timings["mux"]=Date().timeIntervalSince(muxStart)
@@ -527,7 +576,7 @@ public final class MLXMediaPipeline {
     } }
     guard status == KERN_SUCCESS else { throw LTXError.invalid("Cannot measure process memory.") }
     let publishedAudioSamples:Int
-    if let source=preparedAudio { publishedAudioSamples=source.publicationSamples }
+    if let source=publicationSource { publishedAudioSamples=source.publicationSamples }
     else if request.dfr != nil { publishedAudioSamples=min(admission.audioSamples,
       Int((Double(publishedFrames)/outputG.fps*48000).rounded(.toNearestOrEven))) }
     else if contextFrames==0 { publishedAudioSamples=admission.audioSamples }
@@ -545,7 +594,7 @@ public final class MLXMediaPipeline {
       "audio_seconds":Double(publishedAudioSamples)/48000,
       "audio_timing":request.dfr != nil ? "crop padded DFR canvas audio to requested video duration"
         : contextFrames>0 ? "crop decoded causal audio to exact generated duration"
-        : preparedAudio == nil ? "retain actual causal decoder samples; no stretch or shortest trim"
+        : publicationSource == nil ? "retain actual causal decoder samples; no stretch or shortest trim"
         : "original source waveform, trimmed and padded to output duration",
       "stage_seconds":timings,"seconds":Date().timeIntervalSince(started),"peak_mlx_bytes":Memory.peakMemory,
       "peak_process_footprint_bytes":info.ledger_phys_footprint_peak,"current_process_footprint_bytes":info.phys_footprint,
@@ -562,11 +611,11 @@ public final class MLXMediaPipeline {
       "python_inference":false,"production_qualified":false,"task":request.task,
       "reference_count":request.referenceImages.count,"reference_preparation":MLXReferenceImage.policy,
       "reference_conditioning":"first latent replacement and appended last-frame tokens at both resolutions; no output-frame paste"]
-    if let source=preparedAudio {
+    if let source=publicationSource {
       metadata["audio_samples"]=source.publicationSamples
       metadata["audio_decoder"]="none-source-publication"
       metadata["audio_estimated_workspace_bytes"]=0
-      metadata["audio_conditioning"]="frozen source latents in both distilled stages"
+      metadata["audio_conditioning"]=preparedAudio != nil ? "frozen source latents in both distilled stages" : "none; original source waveform preserved at publication"
       metadata["audio_source_start_seconds"]=source.sourceStartSeconds
       metadata["reference_conditioning"]="none"
     }
@@ -576,7 +625,15 @@ public final class MLXMediaPipeline {
       metadata["extension_generated_frames"]=publishedFrames
       metadata["reference_conditioning"]="appended synchronized source video/audio latent guides at half strength"
     }
-    if let union=request.unionControlGuide {
+    if let control=request.icControl {
+      metadata["reference_count"]=control.guides.count
+      metadata["reference_preparation"]="ordered frozen RGB24 guides encoded sequentially with bounded VAE tiles"
+      metadata["reference_conditioning"]="trained IC guide layout appended in stage one; clean stage two"
+      metadata["ic_family"]=control.family
+      metadata["ic_adapter_scope"]="stage_one_only"
+      metadata["ic_guide_sha256"]=control.guides.map(\.sourceSHA256)
+      metadata["ic_guide_roles"]=control.guides.map(\.role)
+    } else if let union=request.unionControlGuide {
       metadata["reference_count"]=1
       metadata["reference_preparation"]="frozen preprocessed RGB24 guide, half the stage-one canvas"
       metadata["reference_conditioning"]="VAE-encoded half-resolution Union guide appended in stage one; clean stage two"

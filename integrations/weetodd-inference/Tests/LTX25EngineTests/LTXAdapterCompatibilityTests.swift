@@ -4,6 +4,30 @@ import InferenceTestSupport
 @testable import LTX25Engine
 
 final class LTXAdapterCompatibilityTests: XCTestCase {
+  func testCompleteMotionAndCrossViewAdaptersRequireTheirDistinctTrainedGrid() throws {
+    let projections=["attn1.to_k","attn1.to_out.0","attn1.to_q","attn1.to_v",
+      "attn2.to_k","attn2.to_out.0","attn2.to_q","attn2.to_v","ff.net.0.proj","ff.net.2"]
+    var tensors:[(String,[Int],String)]=[]
+    for block in 0..<48 { for target in projections {
+      let input=target == "ff.net.2" ? 16384 : 4096
+      let output=target == "ff.net.0.proj" ? 16384 : 4096
+      let name="diffusion_model.transformer_blocks.\(block).\(target)"
+      tensors += [(name+".lora_A.weight",[32,input],"BF16"),(name+".lora_B.weight",[output,32],"BF16")]
+    } }
+    for family in ["motion_track","crossview_warp"] {
+      let metadata=["reference_downscale_factor":family == "motion_track" ? "2" : "1"]
+      try withTensorFile(metadata:metadata,tensors:tensors) { url in
+        let file=try SafeTensorFile(url:url)
+        XCTAssertEqual(try LTXAdapterCompatibility.icControlPlan(file:file,strength:1,family:family).pairs.count,480)
+        XCTAssertThrowsError(try LTXAdapterCompatibility.icControlPlan(file:file,strength:1,
+          family:family == "motion_track" ? "crossview_warp" : "motion_track"))
+        XCTAssertThrowsError(try LTXAdapterCompatibility.standardPlan(file:file,strength:1))
+      }
+      try withTensorFile(metadata:metadata,tensors:Array(tensors.dropLast(2))) { url in
+        XCTAssertThrowsError(try LTXAdapterCompatibility.icControlPlan(file:SafeTensorFile(url:url),strength:1,family:family))
+      }
+    }
+  }
   func testPixelSpatialDFRRejectsIncompleteOrMisclassifiedAdapter() throws {
     let tensors: [(String, [Int], String)] = [
       ("diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.weight", [32, 4096], "BF16"),
@@ -109,6 +133,24 @@ final class LTXAdapterCompatibilityTests: XCTestCase {
     }
   }
 
+  func testIngredients25VersionStillRequiresFullTrainedProjectionSignature() throws {
+    let projections=["attn1.to_k","attn1.to_out.0","attn1.to_q","attn1.to_v",
+      "attn2.to_k","attn2.to_out.0","attn2.to_q","attn2.to_v","ff.net.0.proj","ff.net.2"]
+    var tensors:[(String,[Int],String)]=[]
+    for block in 0..<48 { for target in projections {
+      let input=target == "ff.net.2" ? 16384 : 4096,output=target == "ff.net.0.proj" ? 16384 : 4096
+      let name="diffusion_model.transformer_blocks.\(block).\(target)"
+      tensors += [(name+".lora_A.weight",[128,input],"BF16"),(name+".lora_B.weight",[output,128],"BF16")]
+    } }
+    for version in ["2.3","2.5.0"] {
+      try withTensorFile(metadata:["model_version":version,"reference_downscale_factor":"1"],tensors:tensors) { url in
+        XCTAssertEqual(try LTXAdapterCompatibility.ingredientsPlan(file:SafeTensorFile(url:url),strength:1).pairs.count,480)
+      }
+    }
+    try withTensorFile(metadata:["model_version":"2.5.0","reference_downscale_factor":"1"],tensors:Array(tensors.dropLast(2))) { url in
+      XCTAssertThrowsError(try LTXAdapterCompatibility.ingredientsPlan(file:SafeTensorFile(url:url),strength:1))
+    }
+  }
   func testMSRRejectsIncompleteSlotAndLoRASignatures() throws {
     let tensors: [(String, [Int], String)] = [
       ("diffusion_model.reference_slot_embedding.frequencies", [16], "BF16"),

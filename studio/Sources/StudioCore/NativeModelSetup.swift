@@ -110,13 +110,34 @@ public enum NativeModelSetup {
       ("ingredients","control","Ingredients sheet","ingredients_lora_path","Ingredients adapter")].map {
       family,task,label,key,adapter in
       ModelSetupPreset(id:"swift-ltx25-"+family,name:"LTX 2.5 · "+label+" · Swift",engine:"ltx25",task:task,
-        description:"Experimental single-stage reference generation. Link installed components, attach described images and prepare the clip for Swift worker preflight. Identity and audio quality remain under qualification.",
+        description: family == "ingredients"
+          ? "Experimental single-stage reference-sheet generation. LTX 2.5 adapters start at strength 1.0; legacy LTX 2.3 adapters retain 1.2. Attach a described sheet and prepare the clip for Swift worker preflight."
+          : "Experimental single-stage reference generation. Link installed components, attach described images and prepare the clip for Swift worker preflight. Identity and audio quality remain under qualification.",
         components:ltx.filter { $0.key != "spatial_upscaler_path" }+[component(key,adapter,["file"])])
     }
     let union=ModelSetupPreset(id:"swift-ltx25-union",name:"LTX 2.5 · Union Control · Swift",engine:"ltx25",task:"control",
       description:"Experimental two-stage control generation. Attach one preprocessed Canny, depth or pose movie. Studio freezes a quarter-canvas RGB guide; the Union adapter is active only in stage one.",
       components:ltx+[component("union_lora_path","LTX 2.3 Union rank-64 adapter",["file"])])
-    return ordinary + dfr + references + [union]
+    let controls = [("motion-track", "Motion Track", "motion_track_lora_path", "Motion Track rank-32 adapter"),
+      ("crossview", "CrossView", "crossview_lora_path", "CrossView v2 rank-32 adapter")].map {
+      family, label, key, adapter in
+      ModelSetupPreset(id: "swift-ltx25-" + family, name: "LTX 2.5 · " + label + " · Swift",
+        engine: "ltx25", task: "control",
+        description: family == "motion-track"
+          ? "Experimental two-stage control generation. Attach one movie with drawn or tracked trajectories. The Motion Track adapter is active only in stage one."
+          : "Experimental two-stage view generation. Attach an already prepared depth-warp movie and its source movie in that order. The CrossView adapter is active only in stage one.",
+        components: ltx + [component(key, adapter, ["file"])])
+    }
+    let crossviewIngredients = ModelSetupPreset(id: "swift-ltx25-crossview-ingredients",
+      name: "LTX 2.5 · CrossView + Ingredients · Swift", engine: "ltx25", task: "control",
+      description: "Experimental two-stage generation using a prepared depth warp, its source movie and a complete Ingredients reference sheet fitted with black padding. Both compatible adapters are active in stage one; the refinement uses a clean transformer.",
+      components: ltx + [component("crossview_lora_path", "CrossView v2 rank-32 adapter", ["file"]),
+        component("ingredients_lora_path", "Ingredients adapter", ["file"])])
+    let h3Fun = ModelSetupPreset(id: "swift-h3-fun-control", name: "MiniMax H3 · Fun Union Control · Swift",
+      engine: "h3", task: "control",
+      description: "Experimental generation using one prepared Canny, depth, HED, MLSD or pose movie. Choose the original full-width five- or ten-block Fun branch and a compatible full-width H3 transformer. Turbo LoRAs cannot be combined with this control route.",
+      components: h3 + [component("fun_controlnet", "H3 Fun Union full-width control branch", ["file"])])
+    return ordinary + [h3Fun] + dfr + references + [union] + controls + [crossviewIngredients]
   }
 
   public static func recipe(preset: ModelSetupPreset, selected: [String: String],
@@ -137,13 +158,20 @@ public enum NativeModelSetup {
         (field.accepts ?? [field.kind]).contains(directory.boolValue ? "directory" : "file") else {
         throw StudioError.invalid("\(field.label) is missing or has the wrong file type.")
       }
-      components[field.key] = path
+      if preset.engine == "h3",field.key == "tokenizer",directory.boolValue {
+        let tokenizer=URL(fileURLWithPath:path).appendingPathComponent("tokenizer.json").resolvingSymlinksInPath()
+        let info=try? tokenizer.resourceValues(forKeys:[.isRegularFileKey,.fileSizeKey])
+        guard info?.isRegularFile == true,let size=info?.fileSize,size>0,size<=32*1024*1024 else {
+          throw StudioError.invalid("Choose a Qwen tokenizer folder containing a regular tokenizer.json under 32 MiB.")
+        }
+        components[field.key]=tokenizer.path
+      } else { components[field.key] = path }
     }
     let lowMemory = memoryMode == .lowerMemory ||
       (memoryMode == .automatic && ProcessInfo.processInfo.physicalMemory <= 64 * 1_073_741_824)
     var config: [String: Any]
     if preset.engine == "h3" {
-      components["task"] = ["t2v": "t2va", "fflf": "fl2va", "ref2va": "ref2va"][preset.task]!
+      components["task"] = ["t2v": "t2va", "fflf": "fl2va", "ref2va": "ref2va", "control": "t2va"][preset.task]!
       config = ["width": 384, "height": 256, "duration_seconds": 2.5,
         "steps": 20, "seed": 0, "drop_adaln": true, "resolution_mode": "custom",
         "memory_mode": lowMemory ? "low_memory_bf16" : "normal",
@@ -153,17 +181,25 @@ public enum NativeModelSetup {
         "duration_seconds": 5.0, "frame_rate": 24.0, "seed": 0,
         "stage1_steps": 8, "stage2_steps": 3, "low_memory": true,
         "low_ram_streaming": false]
-      if preset.id == "swift-ltx25-union" {
-        guard let adapter=components.removeValue(forKey:"union_lora_path") as? String else {
-          throw StudioError.invalid("Choose the dedicated Union Control adapter.")
+      let controlKeys: [String: [String]] = [
+        "swift-ltx25-union": ["union_lora_path"],
+        "swift-ltx25-motion-track": ["motion_track_lora_path"],
+        "swift-ltx25-crossview": ["crossview_lora_path"],
+        "swift-ltx25-crossview-ingredients": ["crossview_lora_path", "ingredients_lora_path"]]
+      if let keys = controlKeys[preset.id] {
+        let adapters = try keys.map { key -> [Any] in
+          guard let adapter = components.removeValue(forKey: key) as? String else {
+            throw StudioError.invalid("Choose every dedicated control adapter.")
+          }
+          return [adapter, 1.0]
         }
-        components["ic_loras"]=[[adapter,1.0]];config["ic_lora_single_stage"]=false
+        components["ic_loras"] = adapters; config["ic_lora_single_stage"] = false
       }
       if ["swift-ltx25-msr","swift-ltx25-ingredients"].contains(preset.id) {
         let msr=preset.id == "swift-ltx25-msr",key=msr ? "msr_lora_path" : "ingredients_lora_path"
         guard let adapter=components[key] as? String else { throw StudioError.invalid("Choose the dedicated reference adapter.") }
         if !msr { components.removeValue(forKey:key) }
-        let strength=msr ? 1.0 : 1.2
+        let strength=msr ? 1.0 : NativeModelInspector.ingredientsDefaultStrength(URL(fileURLWithPath:adapter))
         components["ic_loras"]=[[adapter,strength]];components["spatial_upscaler_path"]=""
         if msr { components["msr_lora_strength"]=strength }
         config["ic_lora_single_stage"]=true
@@ -183,11 +219,14 @@ public enum NativeModelSetup {
         config["dfr_temporal_upsampler_path"] = temporal
       }
     }
+    var conditioning: [String: Any] = ["version": 1, "task": preset.task,
+      "inputs": [], "audio_policy": "generated"]
+    let controlFamilies = ["swift-ltx25-motion-track": "motion_track",
+      "swift-ltx25-crossview": "crossview_warp", "swift-ltx25-crossview-ingredients": "crossview_ingredients"]
+    if let family = controlFamilies[preset.id] { conditioning["control_family"] = family }
     return ["format": "weetodd-headless-v2", "engine": preset.engine,
       "candidate": preset.id, "components": components, "config": config,
-      "prompt": "A continuous scene with synchronized sound.",
-      "conditioning": ["version": 1, "task": preset.task,
-        "inputs": [], "audio_policy": "generated"]]
+      "prompt": "A continuous scene with synchronized sound.", "conditioning": conditioning]
   }
 
   public static func stage(_ recipe: [String: Any], directory: String) throws -> String {
@@ -202,6 +241,10 @@ public enum NativeModelSetup {
 }
 
 private enum NativeModelInspector {
+  static func ingredientsDefaultStrength(_ url: URL) -> Double {
+    let metadata = (try? header(url)["__metadata__"]) as? [String:String] ?? [:]
+    return ["2.5","2.5.0"].contains(metadata["model_version"] ?? "") ? 1.0 : 1.2
+  }
   private static func document(_ url: URL) throws -> [String: Any] {
     let size = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
     guard size > 0, size <= 2 * 1024 * 1024,
@@ -235,9 +278,68 @@ private enum NativeModelInspector {
     return nil
   }
 
+  private static func completeControlAdapter(_ tensors: [String: Any], rank: Int) -> Bool {
+    let keys = tensors.keys.filter { $0 != "__metadata__" }
+    guard keys.count == 960 else { return false }
+    var targets = Set<String>()
+    for name in keys where name.hasSuffix(".lora_A.weight") {
+      let partner = name.replacingOccurrences(of: ".lora_A.weight", with: ".lora_B.weight")
+      guard let down = tensors[name] as? [String: Any], let up = tensors[partner] as? [String: Any],
+        ["BF16", "F16", "F32"].contains(down["dtype"] as? String ?? ""),
+        ["BF16", "F16", "F32"].contains(up["dtype"] as? String ?? ""),
+        let a = down["shape"] as? [Int], let b = up["shape"] as? [Int],
+        a.count == 2, b.count == 2, a[0] == rank, b[1] == rank else { return false }
+      var stem = String(name.dropLast(".lora_A.weight".count))
+      let prefixes = ["base_model.model.model.diffusion_model.", "base_model.model.diffusion_model.",
+        "base_model.model.transformer.", "base_model.model.", "model.diffusion_model.",
+        "diffusion_model.", "transformer."]
+      if let prefix = prefixes.first(where: stem.hasPrefix) { stem.removeFirst(prefix.count) }
+      stem += "."
+      for (old, new) in [(".to_out.0.", ".to_out."), (".ff.net.0.proj.", ".ff.proj_in."),
+        (".ff.net.2.", ".ff.proj_out.")] { stem = stem.replacingOccurrences(of: old, with: new) }
+      stem.removeLast()
+      let parts = stem.split(separator: ".")
+      guard parts.count >= 4, parts[0] == "transformer_blocks", let block = Int(parts[1]),
+        (0..<48).contains(block), String(block) == parts[1] else { return false }
+      let tail = parts.dropFirst(2).joined(separator: ".")
+      let attention = ["attn1", "attn2"].flatMap { family in
+        ["to_k", "to_out", "to_q", "to_v"].map { family + "." + $0 }
+      }
+      let shape: [Int]
+      if attention.contains(tail) { shape = [4096, 4096] }
+      else if tail == "ff.proj_in" { shape = [16384, 4096] }
+      else if tail == "ff.proj_out" { shape = [4096, 16384] }
+      else { return false }
+      guard a[1] == shape[1], b[0] == shape[0], targets.insert(stem).inserted else { return false }
+    }
+    return targets.count == 480
+  }
+
   static func matches(_ url: URL, key: String, engine: String, task: String) throws -> Bool {
     let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     if engine == "h3" {
+      if key == "fun_controlnet" {
+        guard !directory else { return false }
+        let tensors = try header(url)
+        let prefixes = ["model.diffusion_model.", "diffusion_model.", "controlnet.", ""].filter {
+          tensors[$0 + "control_proj_in.weight"] != nil
+        }
+        guard prefixes.count == 1, let prefix = prefixes.first else { return false }
+        let count = tensors[prefix + "control_blocks.9.adaln_proj.linear.weight"] != nil ? 10 : 5
+        var expected: [String: [Int]] = ["control_proj_in.weight": [5376,196], "control_proj_in.bias": [5376],
+          "control_blocks.0.before_proj.weight": [5376,5376], "control_blocks.0.before_proj.bias": [5376]]
+        let shapes: [String: [Int]] = ["adaln_proj.linear.weight": [96768,2688], "adaln_proj.linear.bias": [96768],
+          "norm1.weight": [5376], "norm2.weight": [5376], "attn.norm_q.weight": [128], "attn.norm_k.weight": [128],
+          "attn.to_q.weight": [7168,5376], "attn.to_k.weight": [7168,5376], "attn.to_v.weight": [7168,5376],
+          "attn.to_out.0.weight": [5376,7168], "ff.net.0.proj.weight": [28672,5376], "ff.net.2.weight": [5376,14336],
+          "after_proj.weight": [5376,5376], "after_proj.bias": [5376]]
+        for block in 0..<count { for (name, shape) in shapes { expected["control_blocks.\(block)." + name] = shape } }
+        guard Set(tensors.keys.filter { $0 != "__metadata__" }) == Set(expected.keys.map { prefix + $0 }) else { return false }
+        return expected.allSatisfy { name, shape in
+          guard let info = tensors[prefix + name] as? [String: Any] else { return false }
+          return info["shape"] as? [Int] == shape && ["BF16", "F16", "F32"].contains(info["dtype"] as? String ?? "")
+        }
+      }
       if key == "vision_encoder" {
         var file=url
         if directory {
@@ -257,7 +359,7 @@ private enum NativeModelInspector {
         guard directory, let info = try? document(url.appendingPathComponent("model_index.json"))["_minimax_h3"] as? [String: Any],
           let partition = info["partition"] as? String, let tasks = info["tasks"] as? [String] else { return false }
         let expected = task == "ref2va" ? "ref2va" : "fl2va"
-        return partition == expected && tasks.contains(task == "t2v" ? "t2va" : task == "fflf" ? "fl2va" : task)
+        return partition == expected && tasks.contains(["t2v", "control"].contains(task) ? "t2va" : task == "fflf" ? "fl2va" : task)
       }
       if directory {
         switch key {
@@ -280,11 +382,35 @@ private enum NativeModelInspector {
       let tensors = try header(url)
       if key == "transformer" {
         func shape(_ name:String) -> [Int]? { (tensors[name] as? [String:Any])?["shape"] as? [Int] }
-        return ["model.diffusion_model.", "diffusion_model.", ""].contains { prefix in
-          shape(prefix+"video_patch_proj.weight") == [5376,96]
-            && shape(prefix+"audio_patch_proj.weight") == [5376,32]
-            && shape(prefix+"condition_proj.weight") == [5376,5120]
+        let prefixes = ["model.diffusion_model.", "diffusion_model.", ""].filter {
+          shape($0 + "video_patch_proj.weight") != nil
         }
+        guard prefixes.count == 1, let prefix = prefixes.first,
+          shape(prefix + "video_patch_proj.weight") == [5376,96],
+          shape(prefix + "audio_patch_proj.weight") == [5376,32],
+          shape(prefix + "condition_proj.weight") == [5376,5120] else { return false }
+        func dtype(_ name: String) -> String? { (tensors[prefix + name] as? [String: Any])?["dtype"] as? String }
+        if task == "fflf" && !prefix.isEmpty { return false }
+        if task == "ref2va" && prefix.isEmpty { return false }
+        if task == "control" && (prefix.isEmpty
+          || shape(prefix + "time_embedder.proj_out.weight") != [2688,5376]
+          || shape(prefix + "blocks.0.adaln_proj.linear.weight") != [96768,2688]
+          || shape(prefix + "final_layer.adaln_proj.linear.weight") != [10752,2688]) {
+          return false
+        }
+        if !prefix.isEmpty {
+          return ["BF16", "F16"].contains(dtype("video_patch_proj.weight") ?? "")
+            && ["BF16", "F16"].contains(dtype("audio_patch_proj.weight") ?? "")
+            && ["BF16", "F16"].contains(dtype("condition_proj.weight") ?? "")
+        }
+        let metadata = tensors["__metadata__"] as? [String: String] ?? [:]
+        return shape("adaln_t_table") == [1001,64]
+          && (tensors["adaln_t_table"] as? [String: Any])?["dtype"] as? String == "F32"
+          && metadata["partition"]?.uppercased() == "FL2VA"
+          && metadata["adaln_curve_grid"] == "1001" && metadata["adaln_curve_rank"] == "64"
+          && metadata["adaln_curve_centered"] == "true"
+          && dtype("video_patch_proj.weight") == "F32" && dtype("audio_patch_proj.weight") == "F32"
+          && ["BF16", "F16"].contains(dtype("condition_proj.weight") ?? "")
       }
       guard ["video_vae", "audio_vae"].contains(key) else { return false }
       let metadata = tensors["__metadata__"] as? [String: String] ?? [:]
@@ -310,6 +436,15 @@ private enum NativeModelInspector {
     let metadata = tensors["__metadata__"] as? [String: String] ?? [:]
     let config = embedded(metadata["config"]) ?? [:]
     switch key {
+    case "motion_track_lora_path", "crossview_lora_path":
+      let motion = key == "motion_track_lora_path"
+      guard metadata["reference_downscale_factor"] == (motion ? "2" : "1"),
+        metadata["reference_spatial_scale_factor"] == nil,
+        (metadata["reference_temporal_scale_factor"] ?? "1") == "1",
+        !metadata.keys.contains(where: { $0.hasPrefix("reference_slot_") }),
+        metadata["adapter_family"] == nil || metadata["adapter_family"] == (motion ? "motion_track" : "crossview"),
+        metadata["model_version"].map({ ["2.3", "2.3.0", "2.5"].contains($0) }) ?? !motion else { return false }
+      return completeControlAdapter(tensors, rank: 32)
     case "union_lora_path":
       let keys=tensors.keys.filter { $0.hasSuffix(".lora_A.weight") || $0.hasSuffix(".lora_B.weight") }
       let a=keys.filter { $0.hasSuffix(".lora_A.weight") }
@@ -330,11 +465,12 @@ private enum NativeModelInspector {
         return down[0] == 128 && up[1] == 128
       }) else { return false }
       if key == "ingredients_lora_path" {
-        return ["2.3","2.3.0"].contains(metadata["model_version"] ?? "")
+        return ["2.3","2.3.0","2.5","2.5.0"].contains(metadata["model_version"] ?? "")
           && metadata["reference_downscale_factor"] == "1"
           && metadata["reference_spatial_scale_factor"] == nil
           && (metadata["reference_temporal_scale_factor"] ?? "1") == "1"
           && (metadata["adapter_family"] ?? "ingredients_reference_sheet") == "ingredients_reference_sheet"
+          && completeControlAdapter(tensors,rank:128)
       }
       guard metadata["reference_slot_embedding_type"] == "fourier_mlp",
         metadata["reference_token_order"] == "prepend",

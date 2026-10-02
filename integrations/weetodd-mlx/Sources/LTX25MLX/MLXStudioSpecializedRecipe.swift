@@ -6,6 +6,12 @@ import LTX25Engine
 /// single-stage engines. Every task control is validated before media loading.
 enum MLXStudioSpecializedRecipe {
   static func compile(data:Data,outputDirectory:String) throws -> MLXDistilledRequest {
+    if let root=try JSONSerialization.jsonObject(with:data) as? [String:Any],
+      let condition=root["conditioning"] as? [String:Any],
+      let inputs=condition["inputs"] as? [[String:Any]],
+      inputs.contains(where:{ ["motion_track","crossview_warp"].contains($0["control_type"] as? String ?? "") }) {
+      return try compileIC(root:root,outputDirectory:outputDirectory)
+    }
     func invalid(_ text:String) -> LTXError { .invalid("Swift LTX reference recipe: "+text) }
     guard data.count<=1024*1024,
       var root=try JSONSerialization.jsonObject(with:data) as? [String:Any],
@@ -120,4 +126,74 @@ enum MLXStudioSpecializedRecipe {
     }
     return try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONSerialization.data(withJSONObject:request))
   }
+  private static func compileIC(root original:[String:Any],outputDirectory:String) throws -> MLXDistilledRequest {
+    func invalid(_ message:String)->LTXError { .invalid("Swift LTX IC control: "+message) }
+    guard var components=original["components"] as? [String:Any],
+      let config=original["config"] as? [String:Any],
+      let condition=original["conditioning"] as? [String:Any],
+      Set(condition.keys).isSubset(of:["version","task","audio_policy","inputs","control_family","publication_audio"]),
+      let version=condition["version"] as? NSNumber,
+      CFGetTypeID(version) != CFBooleanGetTypeID(),version.doubleValue == 1,
+      condition["task"] as? String == "control",
+      let inputs=condition["inputs"] as? [[String:Any]],
+      let pairs=components["ic_loras"] as? [[Any]],
+      config["ic_lora_single_stage"] as? Bool != true,
+      (config["dfr_enabled"] as? Bool ?? false) == false,
+      (components["msr_lora_path"] as? String ?? "").isEmpty else {
+      throw invalid("requires a two-stage control recipe with explicit ordered guides")
+    }
+    let family:String,roles:[String],families:[String]
+    if inputs.count == 1,inputs[0]["control_type"] as? String == "motion_track" {
+      family="motion_track";roles=["control"];families=["motion_track"]
+    } else if inputs.count == 2 || inputs.count == 3 {
+      family=inputs.count == 2 ? "crossview_warp" : "crossview_ingredients"
+      roles=inputs.count == 2 ? ["warp","source"] : ["warp","source","ingredients"]
+      families=inputs.count == 2 ? ["crossview_warp"] : ["crossview_warp","ingredients_reference_sheet"]
+    } else { throw invalid("MotionTrack needs one guide; CrossView needs ordered warp/source guides and an optional Ingredients guide") }
+    if let declared=condition["control_family"] {
+      guard let value=declared as? String,value == family else {
+        throw invalid("declared control family must match the attached guides")
+      }
+    }
+    guard pairs.count == families.count,
+      condition["audio_policy"] as? String == (family == "motion_track" ? "generated" : "source") else {
+      throw invalid("adapter count and audio policy must match the selected control family")
+    }
+    var ids=Set<String>()
+    let guides=try inputs.enumerated().map { index,input->[String:Any] in
+      guard Set(input.keys).isSubset(of:["id","kind","role","path","sha256","strength","control_type","format","reference_role"]),
+        let id=input["id"] as? String,!id.isEmpty,ids.insert(id).inserted,
+        input["kind"] as? String == "video",input["role"] as? String == "control",
+        input["format"] as? String == "rgb24",
+        input["control_type"] as? String == (roles[index] == "ingredients" ? "ingredients_reference_sheet" : family == "motion_track" ? "motion_track" : "crossview_warp"),
+        (input["reference_role"] as? String ?? "control") == roles[index],
+        let path=input["path"] as? String,let digest=input["sha256"] as? String else {
+        throw invalid("guide roles, format or ordering differ from the trained layout")
+      }
+      return ["path":path,"source_sha256":digest,"role":roles[index],"strength":input["strength"] ?? 1]
+    }
+    let adapters=try pairs.enumerated().map { index,pair->[String:Any] in
+      guard pair.count == 2,let path=pair[0] as? String,
+        let value=pair[1] as? NSNumber,CFGetTypeID(value) != CFBooleanGetTypeID() else {
+        throw invalid("IC adapters require path/strength pairs")
+      }
+      return ["path":path,"family":families[index],"strength":value]
+    }
+    var root=original
+    components["ic_loras"]=[];root["components"]=components
+    root["conditioning"]=["version":1,"task":"t2v","audio_policy":"generated","inputs":[]]
+    var request=try MLXStudioRecipe.compileFields(data:JSONSerialization.data(withJSONObject:root),outputDirectory:outputDirectory)
+    request["version"]=10;request["task"]="ic_control"
+    for key in ["audio_reference","union_control_guide","ingredients_sheet","msr","dfr"] { request[key]=NSNull() }
+    var audio:Any=NSNull()
+    if var source=condition["publication_audio"] as? [String:Any] {
+      guard Set(source.keys) == ["path","sha256","source_start_seconds","source_duration_seconds"] else {
+        throw invalid("source audio requires a frozen path, checksum and explicit interval")
+      }
+      source["source_sha256"]=source.removeValue(forKey:"sha256");audio=source
+    }
+    request["ic_control"]=["family":family,"adapters":adapters,"guides":guides,"publication_audio":audio]
+    return try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONSerialization.data(withJSONObject:request))
+  }
+
 }

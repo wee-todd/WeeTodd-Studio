@@ -373,6 +373,14 @@ struct AttachmentRow: View {
           }
           ForEach(guideTypes, id: \.1) { type in Text(type.0).tag(type.1) }
         }.labelsHidden()
+        if attachment.controlType == "crossview_warp" {
+          Picker("CrossView input",selection:Binding(get:{ attachment.referenceRole ?? "" },set:{ value in edit { $0.referenceRole=value } })) {
+            Text("Choose input purpose").tag("")
+            Text("Warped camera guide").tag("warp")
+            Text("Original source and audio").tag("source")
+          }
+          Text("Add both movies. The original source supplies the output audio.").font(.caption2).foregroundStyle(.secondary)
+        }
       }
       if let clip = store.selectedClip,
         let asset = store.allAssets.first(where: { $0.id == attachment.assetID }) {

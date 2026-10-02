@@ -10,6 +10,7 @@ final class NativeModelSetupTests: XCTestCase {
     }
     let bundle = URL(fileURLWithPath: app)
     let catalog = bundle.appendingPathComponent("Contents/Resources/RendererSource/src/wee_todd_mlx/model_download_catalog.json")
+    XCTAssertEqual(try NativeModelDownloads.catalog(at:catalog).count,19)
     let worker = bundle.appendingPathComponent("Contents/MacOS/WeeToddH3MLXWorker")
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -103,7 +104,8 @@ final class NativeModelSetupTests: XCTestCase {
     let engine = try XCTUnwrap(original["engine"] as? String)
     let sourceConfig = original["config"] as? [String: Any] ?? [:]
     let rounds = sourceConfig["dfr_temporal_rounds"] as? Int ?? 0
-    let id = engine == "h3" ? "swift-h3-text" : sourceConfig["dfr_enabled"] as? Bool == true
+    let sourceTask=(original["conditioning"] as? [String:Any])?["task"] as? String
+    let id = engine == "h3" ? (sourceTask == "fflf" ? "swift-h3-image" : "swift-h3-text") : sourceConfig["dfr_enabled"] as? Bool == true
       ? (rounds == 0 ? "swift-ltx25-dfr-spatial" : "swift-ltx25-dfr-temporal-\(rounds)")
       : "swift-ltx25-text"
     let preset = try XCTUnwrap(NativeModelSetup.catalog().first { $0.id == id })
@@ -124,12 +126,35 @@ final class NativeModelSetupTests: XCTestCase {
       store.runtime.ltx25WorkerPath = worker; store.runtime.nativeLTX25Enabled = true
     }
     let state = ModelSetupState()
+    if let app=environment["WEETODD_NATIVE_DOWNLOAD_APP"] {
+      state.nativeDownloadCatalogURL=URL(fileURLWithPath:app)
+        .appendingPathComponent("Contents/Resources/RendererSource/src/wee_todd_mlx/model_download_catalog.json")
+    }
     await state.loadCatalog(runtime: store.runtime)
+    if environment["WEETODD_NATIVE_DOWNLOAD_APP"] != nil {
+      XCTAssertTrue(state.catalogError.isEmpty,state.catalogError)
+      XCTAssertTrue(state.presets.contains { $0.id == id })
+    }
     state.begin(preset)
     state.selection.components = selected
     await state.createRecipe(store: store)
     XCTAssertTrue(state.error.isEmpty, state.error)
     XCTAssertTrue(store.profiles.contains { $0.id == state.resultPath })
+    if id == "swift-h3-image" {
+      var created=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:state.resultPath))) as! [String:Any]
+      XCTAssertEqual((created["components"] as! [String:Any])["task"] as? String,"fl2va")
+      XCTAssertEqual((created["conditioning"] as! [String:Any])["task"] as? String,"fflf")
+      // Attach the previously qualified real endpoints and clip settings only
+      // after setup has created the native image profile without Python.
+      created["conditioning"]=original["conditioning"];created["config"]=sourceConfig
+      created["prompt"]=original["prompt"];created["ffmpeg"]=ffmpeg
+      let recipe=root.appendingPathComponent("image-preflight.json")
+      try JSONSerialization.data(withJSONObject:created).write(to:recipe)
+      let result=try await store.bridge.invoke("h3-native-preflight",runtime:store.runtime,
+        payload:["recipePath":recipe.path],output:root.appendingPathComponent("native-preflight"))
+      XCTAssertEqual(result["nativeRuntime"] as? String,"swift-mlx")
+      XCTAssertFalse(store.bridge.busy)
+    }
   }
 
   @MainActor func testLTXSetupCreatesDiscoverableProfileWithoutPython() async throws {

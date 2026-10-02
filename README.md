@@ -12,8 +12,9 @@ Swift H3 and LTX 2.5 setup can find compatible components in folders you select,
 including existing ComfyUI model libraries. Discovery reads bounded metadata and leaves
 weights in place. Compatible pinned preconverted downloads now run in Swift with
 streamed checksums, resume and cancellation. Native setup includes DFR, MSR and
-Ingredients and Union Control profiles. The remaining H3 acquisition/conversion components and
-other specialized adapters still require an explicit supported source/setup path.
+Ingredients, Union, Motion Track and CrossView profiles. The merged catalog has 19 pinned packages supplying mandatory component fields for ordinary H3/LTX profiles;
+checkpoint/task admission and complete clean-machine installation remain separately qualified.
+Source conversion and unsupported specialized adapters still need their explicit setup paths.
 
 [Get started](#get-started) · [Studio guide](studio/README.md) ·
 [Make a movie with Director](#make-a-movie-with-director) ·
@@ -158,8 +159,8 @@ A full Studio preparation, render, grouped acceptance and project reopening also
 with Python unavailable. Planned music-video A2V clips can retain their source interval,
 and a prepared timeline audio mix can feed an independent Swift LTX A2V clip. A developer
 Swift Union Control route now accepts a frozen half-resolution RGB24 guide and the installed
-LTX 2.3 Union IC-LoRA, with the task adapter active only in stage one. Other IC-LoRA
-control attachments remain outside the qualified Swift paths. Studio's Swift model setup now offers LTX 2.5 DFR spatial and one- or
+LTX 2.3 Union IC-LoRA, with the task adapter active only in stage one. Specialized IC-LoRA
+combinations retain task-specific admission and qualification limits. Studio's Swift model setup now offers LTX 2.5 DFR spatial and one- or
 two-round temporal presets. It scans installed Pixel-Spatial and temporal adapter
 headers, links their weights in place and preflights the resulting profile. Such a
 profile supports Swift T2V, I2V or FFLF; ordinary LoRAs, A2V, extension and
@@ -187,7 +188,20 @@ previews, acceptance and reopening with Python unavailable, taking 33.49 seconds
 render and acceptance at a 3.21 GB peak Swift-worker footprint, excluding FFmpeg. Its saved
 ComfyUI graph produced byte-identical video. This small route test is not a matched
 production-size performance comparison.
-This does not enable Motion Track, CrossView or combined task adapters through Swift.
+Experimental Swift preparation and worker contracts now also admit Motion Track,
+CrossView warp/source pairs and CrossView plus one described Ingredients sheet. They use
+frozen ordered guides and stage-one task adapters. Direct Motion Track/CrossView
+worker checks completed with previews and stage releases; CrossView retained exact source
+PCM. Direct and saved-Comfy CrossView video, audio and muxed movies matched byte for byte.
+Saved recipe-backed CrossView and combined CrossView/Ingredients ComfyUI graphs also completed
+real inference. A separate corrected CrossView/Ingredients Studio recipe also passed preparation,
+two previews, acceptance and project reopening with Python unavailable. Its native exported CLI
+job produced byte-identical video, audio and muxed media and resumed with zero new generations.
+The exact corrected frozen recipe also completed as a saved, uncached ComfyUI graph; all three
+media files matched Studio and CLI byte for byte.
+Broader camera/identity quality remains pending; camera guides were identical in the earlier
+direct execution fixture.
+See the [Studio controls qualification](studio/README.md#start-here).
 The experimental direct Swift worker also runs spatial DFR with generated keyframe
 slots, a clean half-resolution stage-two reference and the Pixel-Spatial x2 adapter
 at stage two. Text-only and first/last-image requests published 49-frame 512 × 256
@@ -322,6 +336,18 @@ With the same endpoints, seed and four-evaluation settings, a prompt explicitly 
 chainmail rattles and a breath kept the front-to-profile visual turn coherent but produced
 audio at about -65 dBFS mean and -47 dBFS peak. That is stronger than the quiet-room control
 yet still too quiet for normal playback; FL2VA generated-sound quality remains unqualified.
+
+An experimental native H3 Fun ControlNet route accepts one preprocessed Canny, depth, HED,
+MLSD or pose guide with the supported T2VA branch, using the existing video VAE and shared
+transformer sampler. A direct 384 × 256/73-frame Canny check completed with synchronized
+32 kHz stereo audio in 663.45 seconds, four decoded previews and staged release. It used four
+Euler evaluations without a Turbo adapter, so this proves execution rather than approved
+control quality. Peak Swift-worker footprint was 11.80 GB, excluding FFmpeg. Studio lifecycle,
+matched performance and broader control quality remain unqualified.
+A separate same-guide/checkpoint encoder comparison reduced MLX stage peak from 10.71 to
+5.48 GB with byte-identical raw latents and zero residual allocations; encoding took 14.17
+versus 11.13 seconds. This control-guide-only optimization does not establish a new
+whole-generation speed or memory result; the full render above predates it.
 
 Ripple also has an opt-in **Use Swift MLX for Ripple (experimental)** route in its Runtime
 Settings. It freezes edited images, streams the source guide, runs the pinned author LoRA
@@ -628,7 +654,7 @@ can run in the native renderer.
 | **Build reusable assets** | Characters, environments, sets, props, clothing and outfits; reference sheets; a versioned Production Library with linked media. [Library guide](studio/README.md#production-library-and-object-relationships) |
 | **Generate images and clips** | Draw Things canvas/mood-board inputs, config import, model-compatible LoRAs; native H3/LTX recipes and task-specific conditioning. [Image workspace](studio/README.md#images-clips-and-loras) |
 | **Edit and finish** | Generated/imported clips, render versions, titles, transitions, multiple audio tracks and configured interpolation/upscaling. [Studio guide](studio/README.md) |
-| **Run repeatable jobs** | Resumable movie/clip jobs, portable Draw Things requests and shared headless execution. [Headless guide](examples/headless/README.md) |
+| **Run repeatable jobs** | Resumable movie/clip jobs, Python-free native H3/LTX cut exports, and portable Draw Things requests. [Studio export guide](studio/README.md#headless-movie-and-clip-jobs), [headless recipes](examples/headless/README.md) |
 
 Planning workflows produce reviewed documents and prompt drafts. Apply approved shots from the
 Shot List to the timeline, prepare and review their reference images, then use **Produce movie**
@@ -1057,8 +1083,9 @@ Swift setup downloads compatible LTX 2.5, H3 Qwen/video-VAE/folded-audio-VAE/tok
 URLSession using a Studio Keychain token or `HF_TOKEN`. The existing H3 paged-transformer
 and task-support packages below are for the Python renderer; they are excluded from native
 download choices. The folded audio VAE is a separate pinned package that retains its source
-license and notices and reuses matching installed weights. Swift H3 still requires a compatible
-direct transformer imported separately. Source conversion and CLI-login authentication remain on the optional
+license and notices and reuses matching installed weights. Compatible direct H3 transformers
+can now be imported or selected from the pinned native catalog: full-width text/reference/Fun
+Control and verified 64-curve FL2VA image/endpoint packages have separate task admission. Source conversion and CLI-login authentication remain on the optional
 Python setup route. See [guided native setup](studio/README.md#guided-model-setup).
 
 | Package | Download size¹ | Included | Still separate |
@@ -1583,14 +1610,21 @@ Task-specific LTX adapters are classified from explicit metadata and complete st
 fingerprints rather than filenames. The released CrossView, Ingredients, Union, Motion Track,
 Pixel-Spatial, and MSR layouts remain recognizable after arbitrary file renaming. A partial or
 unknown reference adapter reports `unclassified_reference_conditioning` and cannot silently enter
-a task-specific pipeline.
+a task-specific pipeline. Guarded Ingredients admission also accepts compatible LTX 2.5
+rank-128 full-resolution sheet adapters after complete tensor/header checks; the pinned official
+2.5 package's gated header is not yet qualified with the available access. Licon MSR V2 is
+structurally different: its actual header has 1,152 rank-128 pairs across 48 blocks, additional
+audio attention/feed-forward and video-to-audio targets, and five audio-slot embedding tensors.
+The current V1 route supports 480 video pairs and five visual-slot tensors, without V2's
+sparse-speaker, absolute audio-slot or reference-audio conditioning. V2 is explicitly excluded
+until those contracts are implemented; its version label alone is not the reason.
 
 **LTX 2.5 Media Conditioning** provides one composable typed stack. Image keyframes execute through
 the current Generate node. Audio-driven input freezes the encoded audio during both visual stages
 and publishes the original source track. General video-reference input requires the dedicated
 **LTX 2.5 IC-LoRA Loader**, which scopes the task adapter to stage one and reloads a clean stage-two
 transformer. Lightricks' official LTX 2.5 workflows use selected LTX 2.3 22B IC-LoRAs. The loader
-therefore accepts an older adapter only when every target and tensor shape matches the LTX 2.5 22B
+therefore accepts a compatible older adapter only when every target and tensor shape matches the LTX 2.5 22B
 block layout. The loader still rejects the specialized Pixel-Spatial upscaler from this path.
 
 The experimental Swift headless Union Control route uses a strict version-5
@@ -1600,8 +1634,8 @@ The guide is preprocessed RGB24 at half the stage-one canvas width and height, c
 the complete `8n+1` frame timeline. The worker verifies its SHA-256 and exact byte count
 before inference, encodes it with the video VAE, applies the structurally checked rank-64
 Union adapter during stage one, then refines with a clean stage-two transformer. This
-route has one short real Swift result and worker preflight; Studio's control attachment
-and ComfyUI export still use their existing Python route. Visual control quality and
+route has installed Studio preparation, rendering, previews, acceptance and reopening evidence,
+plus a saved recipe-backed ComfyUI graph with byte-identical video. Visual control quality and
 production-size speed and memory are not qualified.
 
 The experimental Swift headless Ingredients route uses a strict version-6 request with
@@ -1618,7 +1652,9 @@ Swift route now accepts one described Ingredients sheet, preserves its strength 
 identity, and passed installed-worker generation, previews, acceptance and reopening without
 Python. Its dedicated setup preset uses one adapter at strength 1.2, eight full-resolution
 evaluations and no spatial upscaler. A saved recipe-backed ComfyUI graph produced the same
-movie bytes as Studio; exported Studio movie jobs remain unqualified for this task.
+movie bytes as Studio. Native job export and CLI contract fixtures are available;
+real exported-job inference remains unqualified for Ingredients. See the
+[export qualification boundary](studio/README.md#headless-movie-and-clip-jobs).
 Existing composable nodes retain their Python sampler.
 
 Use **LTX 2.5 IC-LoRA Control Guide** for Canny edges, depth maps, pose skeletons, Motion Track, or
@@ -2093,13 +2129,18 @@ existing generic/task-specific stacks. LTX 2.3 exposes resident and low-RAM stre
 standard-LoRA stacks across T2V, FFLF, A2V, and extension; accepting a local path does not imply
 every trainer format or checkpoint is visually qualified.
 An opt-in `--swift-worker` flag hands an H3 or LTX 2.5 recipe to its versioned
-native Swift worker without Python model inference. Exported movie jobs have
+native Swift worker without Python model inference. Legacy Python-hosted movie jobs have
 per-engine `--h3-swift-worker` and `--ltx25-swift-worker` overrides. A job exported
 with Studio's Swift setting uses its saved worker path by default and fails if
 that worker is unavailable. A five-second LTX 2.5 T2V clip from an exported
 Studio job completed in Swift and assembled into a 1920×1080 movie; a verified
-resume reused the take. One LTX 2.5 FFLF headless recipe also completed with
-synchronized audio. The H3 and LTX workers acquire the same
+resume reused the take. The new `weetodd-studio-native-job-v1` export executes
+through WeeToddCLI without Python; its saved MSR export and actual CLI worker
+preflight passed, followed by real MSR inference and movie assembly without Python.
+The accepted project reopened and verified resume reused its take. See the
+[Studio native export contract](studio/README.md#headless-movie-and-clip-jobs).
+One LTX 2.5 FFLF headless recipe also completed with synchronized audio.
+The H3 and LTX workers acquire the same
 cross-process inference lock used by the Python host before loading weights.
 The experimental **Generate H3 / LTX 2.5 (Swift MLX Recipe)** ComfyUI node accepts the
 same resolved `weetodd-headless-v2` recipe and an explicit worker executable path. It

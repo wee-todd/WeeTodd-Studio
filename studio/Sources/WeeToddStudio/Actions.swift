@@ -333,8 +333,13 @@ enum ClipState: String {
             && ((!$0.hasReviewedReusedTake && $0.renderedSignature != signature(for: $0))
               || !FileManager.default.fileExists(atPath: $0.sourcePath))
         }.map { $0.id.uuidString }
-        _ = try await bridge.invoke("export-job", runtime: runtime, payload: body, output: url)
-        notice = "Exported resumable headless job. Run it with render_headless.py --job."
+        if nativeHeadlessEligible {
+          try await exportNativeHeadlessJob(body: body, to: url, clipOnly: clipOnly)
+          notice = "Exported native headless job. Run it with WeeToddCLI --job; Python is not required."
+        } else {
+          _ = try await bridge.invoke("export-job", runtime: runtime, payload: body, output: url)
+          notice = "Exported resumable headless job. Run it with render_headless.py --job."
+        }
         NSWorkspace.shared.activateFileViewerSelecting([url])
       } catch { self.error = error.localizedDescription }
     }

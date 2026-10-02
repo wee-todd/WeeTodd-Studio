@@ -11,6 +11,7 @@ public final class MLXLoRAStack {
   public init(adapters:[LoRAAdapter],unionControlAdapterPath:String?=nil,
     ingredientsAdapterPath:String?=nil,
     msrAdapterPath:String?=nil,pixelSpatialDFRAdapterPath:String?=nil,
+    icControlFamilies:[String:String]=[:],
     maximumFactorBytes:Int=512*1024*1024) throws {
     guard adapters.count <= 16, maximumFactorBytes > 0 else { throw LTXError.invalid("Invalid adapter count or factor budget.") }
     var result:[Entry]=[], bytes:[String:UInt64]=[:]
@@ -18,7 +19,9 @@ public final class MLXLoRAStack {
       try Task.checkCancellation(); try adapter.validate()
       guard adapter.enabled else { continue }
       let file=try SafeTensorFile(url:URL(fileURLWithPath:adapter.path),maximumHeaderBytes:4*1024*1024)
-      let plan=try adapter.path == msrAdapterPath
+      let plan=try icControlFamilies[adapter.path].map {
+        try LTXAdapterCompatibility.icControlPlan(file:file,strength:adapter.strength,family:$0)
+      } ?? (adapter.path == msrAdapterPath
         ? LTXAdapterCompatibility.msrPlan(file:file,strength:adapter.strength)
         : adapter.path == pixelSpatialDFRAdapterPath
         ? LTXAdapterCompatibility.pixelSpatialDFRPlan(file:file,strength:adapter.strength)
@@ -26,7 +29,7 @@ public final class MLXLoRAStack {
         ? LTXAdapterCompatibility.ingredientsPlan(file:file,strength:adapter.strength)
         : adapter.path == unionControlAdapterPath
         ? LTXAdapterCompatibility.unionControlPlan(file:file,strength:adapter.strength)
-        : LTXAdapterCompatibility.standardPlan(file:file,strength:adapter.strength)
+        : LTXAdapterCompatibility.standardPlan(file:file,strength:adapter.strength))
       for pair in plan.pairs {
         guard [pair.downTensor,pair.upTensor].allSatisfy({ ["BF16","F16","F32"].contains(file.tensors[$0]!.dtype) }) else {
           throw LTXError.invalid("Swift MLX adapters require BF16/F16/F32 factors.")

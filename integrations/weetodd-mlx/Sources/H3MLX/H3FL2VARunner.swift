@@ -12,7 +12,7 @@ public struct H3FL2VARequest: Sendable {
 
   public init(base: H3T2VARequest, vision: URL,
     images: [H3StillReference], anchors: [H3PackedLayout.Anchor]) throws {
-    guard vision.isFileURL, vision.path.hasPrefix("/"),
+    guard base.funControl == nil, vision.isFileURL, vision.path.hasPrefix("/"),
       (1...8).contains(images.count), images.count == anchors.count,
       anchors.enumerated().allSatisfy({ index, anchor in
         let frame: Int
@@ -34,7 +34,7 @@ public struct H3FL2VARequest: Sendable {
       images.allSatisfy({ $0.width == base.geometry.width &&
         $0.height == base.geometry.height &&
         $0.rgb8.count == $0.width * $0.height * 3 }) else {
-      throw H3CheckpointError.invalid("H3 FL2VA requires one to eight prepared canvas images at unique ascending frame positions.")
+      throw H3CheckpointError.invalid("H3 FL2VA requires one to eight prepared canvas images at unique ascending frame positions, without a Fun control branch.")
     }
     self.base = base
     self.vision = vision

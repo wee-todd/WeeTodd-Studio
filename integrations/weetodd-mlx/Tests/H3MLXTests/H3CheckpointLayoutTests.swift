@@ -86,6 +86,16 @@ final class H3CheckpointLayoutTests: XCTestCase {
     XCTAssertThrowsError(try H3CheckpointLayout(tensors: tensors))
   }
 
+  func testInstalledFL2VACurveCheckpointHeaderWithoutReadingWeightsWhenProvided() throws {
+    guard let path = ProcessInfo.processInfo.environment["WEETODD_H3_FL2VA_CHECKPOINT"] else {
+      throw XCTSkip("Set WEETODD_H3_FL2VA_CHECKPOINT for released FL2VA curve header admission.")
+    }
+    let layout = try H3CheckpointLayout(url: URL(fileURLWithPath: path))
+    XCTAssertEqual(layout.curveRank, 64)
+    XCTAssertEqual(layout.quantizedProjections, 0)
+    XCTAssertEqual(layout.blockCount, 50)
+  }
+
   func testInstalledDirectComfyCheckpointHeaderWithoutReadingWeights() throws {
     guard let path = ProcessInfo.processInfo.environment["WEETODD_H3_TEST_CHECKPOINT"] else {
       throw XCTSkip("Set WEETODD_H3_TEST_CHECKPOINT to inspect an installed direct checkpoint.")

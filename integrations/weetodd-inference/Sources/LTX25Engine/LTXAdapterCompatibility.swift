@@ -53,12 +53,12 @@ public enum LTXAdapterCompatibility {
   /// Ingredients uses a full-resolution static reference sheet. Its complete
   /// rank-128 signature is distinct from the half-resolution Union guide.
   public static func ingredientsPlan(file: SafeTensorFile, strength: Float) throws -> LoRAPlan {
-    guard ["2.3", "2.3.0"].contains(file.metadata["model_version"] ?? ""),
+    guard ["2.3", "2.3.0", "2.5", "2.5.0"].contains(file.metadata["model_version"] ?? ""),
       file.metadata["reference_downscale_factor"] == "1",
       file.metadata["reference_temporal_scale_factor"].map({ $0 == "1" }) ?? true,
       file.metadata["reference_spatial_scale_factor"] == nil,
       file.metadata["adapter_family"].map({ $0 == "ingredients_reference_sheet" }) ?? true else {
-      throw LTXError.invalid("Ingredients needs compatible full-resolution LTX 2.3 reference metadata.")
+      throw LTXError.invalid("Ingredients needs compatible full-resolution LTX 2.3 or 2.5 reference metadata.")
     }
     let plan = try LoRAPlan(file: file, strength: strength,
       targetShapes: targetShapes, normalize: normalize)
@@ -70,6 +70,36 @@ public enum LTXAdapterCompatibility {
     guard plan.pairs.count == 480, Set(plan.pairs.map(\.target)) == expected,
       plan.pairs.allSatisfy({ $0.rank == 128 }) else {
       throw LTXError.invalid("Ingredients needs its complete 48-block, rank-128 task adapter.")
+    }
+    return plan
+  }
+
+  /// Motion Track and CrossView use rank 32 but different trained spatial grids.
+  /// Complete projection signatures admit metadata-poor CrossView checkpoints.
+  public static func icControlPlan(file: SafeTensorFile, strength: Float, family: String) throws -> LoRAPlan {
+    if family == "ingredients_reference_sheet" { return try ingredientsPlan(file:file,strength:strength) }
+    if family == "union_control" { return try unionControlPlan(file:file,strength:strength) }
+    guard ["motion_track","crossview_warp"].contains(family),
+      file.metadata["reference_downscale_factor"] == (family == "motion_track" ? "2" : "1"),
+      file.metadata["reference_temporal_scale_factor"].map({ $0 == "1" }) ?? true,
+      file.metadata["reference_spatial_scale_factor"] == nil,
+      file.metadata["adapter_family"].map({ $0 == family }) ?? true,
+      file.metadata["weetodd_adapter_family"].map({ $0 == family }) ?? true else {
+      throw LTXError.invalid("IC task family does not match its trained reference grid.")
+    }
+    if let version=file.metadata["model_version"],
+      !["2.3","2.3.0","2.5","2.5.0"].contains(version) {
+      throw LTXError.invalid("IC control requires compatible LTX 2.3 or 2.5 weights.")
+    }
+    let plan=try LoRAPlan(file:file,strength:strength,targetShapes:targetShapes,normalize:normalize)
+    let expected=Set((0..<48).flatMap { block in
+      ["attn1.to_k","attn1.to_out","attn1.to_q","attn1.to_v",
+       "attn2.to_k","attn2.to_out","attn2.to_q","attn2.to_v",
+       "ff.proj_in","ff.proj_out"].map { "transformer_blocks.\(block).\($0)" }
+    })
+    guard plan.pairs.count == 480,Set(plan.pairs.map(\.target)) == expected,
+      plan.pairs.allSatisfy({ $0.rank == 32 }) else {
+      throw LTXError.invalid("Motion Track and CrossView require their complete 48-block rank-32 task signature.")
     }
     return plan
   }

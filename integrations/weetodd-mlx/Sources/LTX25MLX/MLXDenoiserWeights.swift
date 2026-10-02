@@ -90,7 +90,7 @@ public final class MLXDenoiserWeights {
     ingredientsAdapterPath:String?=nil,
     msrAdapterPath:String?=nil,
     maximumActivationBytes:Int=2*1024*1024*1024,requireKeyframeMarker:Bool=false,
-    pixelSpatialDFRAdapterPath:String?=nil) throws {
+    pixelSpatialDFRAdapterPath:String?=nil,icControlFamilies:[String:String]=[:]) throws {
     try configuration.validate()
     guard root.isFileURL else { throw LTXError.invalid("Paged transformer must be local.") }
     let root=root.resolvingSymlinksInPath().standardizedFileURL
@@ -139,7 +139,8 @@ public final class MLXDenoiserWeights {
     }
     let stack=try MLXLoRAStack(adapters:adapters,
       unionControlAdapterPath:unionControlAdapterPath,ingredientsAdapterPath:ingredientsAdapterPath,
-      msrAdapterPath:msrAdapterPath,pixelSpatialDFRAdapterPath:pixelSpatialDFRAdapterPath)
+      msrAdapterPath:msrAdapterPath,pixelSpatialDFRAdapterPath:pixelSpatialDFRAdapterPath,
+      icControlFamilies:icControlFamilies)
     var targets=Dictionary(uniqueKeysWithValues:DenoiserLayout.weightShapes(configuration)
       .filter { $0.key.hasSuffix(".weight") }.map { (String($0.key.dropLast(7)),$0.value) })
     for index in 0..<48 {

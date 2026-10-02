@@ -1,13 +1,86 @@
 # WeeTodd Studio implementation status
 
+Swift native worker diagnostics 2026-10-02: H3/LTX render and preflight events now stream
+to unique disk archives outside atomic worker outputs while the UI retains its 30,000-character
+tail. Archives and diagnostic paths survive success, failure and cancellation. A 64 MiB limit
+or disk-write failure explicitly flags truncation without stopping pipe drainage. Large-output,
+cancellation, limit and simulated disk-failure fixtures qualify this observability fix; earlier
+Studio logs that lost early stages remain historical evidence gaps.
+
+Swift native exported video jobs 2026-10-02 (experimental): Studio now freezes
+native H3/LTX recipes into `weetodd-studio-native-job-v1`, and WeeToddCLI executes
+them with the existing shared Swift workers without a Python precondition or
+inference fallback. Cut-only FFmpeg finishing preserves source intervals, gain,
+fit/fill and movie format; unsupported titles/audio/transitions/enhancements fail
+explicitly. Full/windowed scene receipts retain shared take identity and ranges;
+dependent continuity requires an already accepted source. Pending Ripple generation is explicitly
+rejected; applied Ripple movie sources remain reusable. Deterministic worker
+and audiovisual fixtures passed immutable recipe transport, all-pending admission,
+cancellation, receipt acceptance, finishing, reopening and hash-verified resume.
+A saved MSR Studio export and actual CLI installed-worker preflight passed with
+Python unavailable, then the same immutable job completed actual native CLI MSR
+inference with two decoded previews, complete staged release and movie assembly.
+The accepted project reopened and verified resume reported zero new generations and one reused
+generation; full worker logs and media hashes were unchanged. This real run
+predates optional take-statistics/Clip Assets metadata enrichment; the final path
+has separate audiovisual fixture checks. Receipts now distinguish newly generated
+takes from resumed generations. Existing Studio/Comfy renders and the older
+Python-hosted export qualify separate routes. See the [native export contract](studio/README.md#headless-movie-and-clip-jobs).
+
+Swift LTX Motion Track/CrossView control execution 2026-10-02 (experimental):
+native preparation freezes ordered RGB24 guides; dedicated adapters run only in
+stage one, followed by clean stage two. Combined CrossView plus Ingredients keeps
+the sheet description in the prompt. Unsupported per-reference attention/size
+controls fail explicitly. Direct installed-worker 512 × 256, 33-frame/24-fps tests
+completed Motion Track/CrossView in 41.92/31.60 seconds with two decoded previews
+and complete staged release. Swift-process peaks were 3.09/2.95 GB, excluding
+FFmpeg. Native CrossView audio preparation streams float32 PCM; published source
+PCM matched all 66,000 stereo 48 kHz sample frames. Warp/source guides were the
+same movie for this execution test, so it does not qualify camera-view quality.
+Saved recipe-backed CrossView and combined CrossView/Ingredients ComfyUI graphs also
+completed real inference. Their published PCM independently matched the true source at
+528,000/1,936,000 bytes. Direct/Comfy CrossView video, audio and muxed movies were all
+byte-identical. A separate corrected combined CrossView/Ingredients recipe passed Studio
+preparation, two previews, acceptance and reopening with Python unavailable at 512 × 256/121
+frames (86.45 seconds through render/acceptance, 4.11 GB worker footprint, FFmpeg excluded).
+Its native exported CLI job reproduced all three media files byte for byte and resumed with
+zero new/one reused generation. The exact corrected frozen recipe also completed as a saved,
+uncached ComfyUI graph with all three media files byte-identical across Studio/CLI/ComfyUI.
+These are route checks, not a matched performance benchmark. This Studio run preceded durable archival; missing early
+UI-log stages remain historical. Other Studio control routes and broad quality remain pending.
+A separate actual combined-worker SIGTERM after the first stage-one transformer block produced
+exit 130/cancelled in 0.08 seconds after the signal and no published output. Direct allocator-zero
+instrumentation was not collected for that cancellation.
+
+Swift H3 Fun ControlNet execution 2026-10-02 (experimental): the native T2VA
+branch accepts one preprocessed Canny/depth/HED/MLSD/pose video. A direct 384 × 256,
+73-frame/24-fps Canny test produced synchronized 32 kHz stereo audio, four decoded
+previews and staged release in 663.45 seconds at an 11.80 GB Swift-worker peak,
+excluding FFmpeg. Four Euler evaluations without Turbo establish route execution;
+the output is not quality-approved. Studio lifecycle and broad control quality remain open.
+A separate same-guide/checkpoint encoder comparison reduced MLX stage peak from 10.71 to
+5.48 GB with byte-identical raw latents and zero residual allocations; encoding took 14.17
+versus 11.13 seconds. This control-guide-only optimization does not establish a new
+whole-generation speed or memory result; the full render above predates it.
+
+Native adapter admission 2026-10-02: compatible LTX 2.5 Ingredients full-resolution
+rank-128 sheet adapters now have guarded structural admission and a pinned gated
+package; actual official 2.5 tensor-header qualification is blocked by current access.
+The inspected MSR V2 header contains 1,152 rank-128 pairs and audio attention/feed-forward,
+video-to-audio targets plus five audio-slot tensors. Current V1 supports 480 video
+pairs and five visual-slot tensors without V2 sparse-speaker/absolute audio-slot/
+reference-audio conditioning, so V2 is structurally excluded rather than rejected by name.
+
 Swift H3 folded audio acquisition 2026-10-02: native Model Setup now offers
 a separately pinned 32 kHz stereo audio VAE package with the source license,
 NOTICE and conversion modifications. Its exact payload matches the folded VAE
 used by the existing Swift generations. An installed-file test verified the full
 SHA-256, reused that 605 MB file through a same-inode hard link, retrieved missing
 small notices, and rediscovered the native audio component without Python. The
-shared setup validator also admitted that package. Direct transformer acquisition,
-other source conversions and complete fresh-machine distribution remain open.
+shared setup validator also admitted that package. The merged native catalog supplies
+19 pinned packages with mandatory component fields for ordinary H3/LTX profiles, including direct transformer/support
+and supported task adapters. Field coverage does not qualify every checkpoint/task combination. Full clean-machine weight installation, other source
+conversions and complete distribution qualification remain open.
 
 Swift source-audio timeline playback 2026-10-02: source-only cut timelines
 now reference their trimmed video and audio through AVFoundation without invoking
@@ -1708,7 +1781,7 @@ contracts; it does not establish that every workflow has local models and select
 | Engine | Implemented | Qualification limits |
 | --- | --- | --- |
 | H3 | T2V, endpoint/timed frames, multimodal Ref2VA, audio-driven Ref2VA, external extension, generic LoRAs, FastH3 and VDN variants | Native Ref2VA A2V and extension have real renders. Extension visual quality needs further qualification. Accelerator/task combinations are gated. A2V generates a new soundtrack. |
-| H3 Fun ControlNet | Loader, preprocessing boundary, resident/paged execution, nodes and headless transport | Synthetic and checkpoint-header checks only. No real control render qualification. Checkpoint availability and applicable terms remain separate. |
+| H3 Fun ControlNet | Loader, preprocessing boundary, native Swift control execution, nodes and headless transport | One direct 384×256/73-frame Canny native render completed with audio, previews and stage release. Four evaluations without Turbo qualify execution only; visual/control quality and Studio lifecycle remain open. Checkpoint terms remain separate. |
 | LTX 2.3 | T2V, keyframes, A2V, Ingredients, Union/Motion controls, generic LoRAs, Dev/distilled video extension | Conditioned renders and longer distilled extension have evidence. Generic LoRAs support resident and streamed paths; specialized control combinations remain separately gated. |
 | LTX 2.5 | T2V, keyframes, A2V, Ingredients/MSR, IC controls, external extension, refinement/upscaling, LoRAs | Full-length MSR, short extension and direct-worker temporal DFR have route evidence. Temporal DFR is not a production default. Every adapter/precision/task combination is not qualified. |
 

@@ -19,13 +19,15 @@ public struct H3T2VARequest: Sendable {
   public let turboLoRAStrength: Float
   public let additionalLoRAs: [H3LoRAAdapter]
   public let loRAAdapters: [H3LoRAAdapter]
+  public let funControl: H3FunControlGuide?
 
   public init(prompt: String, width: Int, height: Int,
     durationSeconds: Double, seed: UInt64, requestedSteps: Int,
     transformer: URL, qwenPages: URL, tokenizer: URL,
     videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
     turboLoRAStrength: Float = 1,
-    additionalLoRAs: [H3LoRAAdapter] = []) throws {
+    additionalLoRAs: [H3LoRAAdapter] = [],
+    funControl: H3FunControlGuide? = nil) throws {
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
       [transformer, qwenPages, tokenizer, videoVAE, audioVAE]
@@ -48,6 +50,13 @@ public struct H3T2VARequest: Sendable {
       conditionVideoRows: 0, conditionAudioRows: 0) <= 40_000 else {
       throw H3CheckpointError.invalid("H3 packed rows exceed the current Swift engine limit.")
     }
+    if let funControl {
+      try funControl.validate(geometry: geometry)
+      guard turboLoRA == nil, additionalLoRAs.isEmpty else {
+        throw H3CheckpointError.invalid("H3 Fun control with LoRAs is not qualified; select the base dense T2VA checkpoint.")
+      }
+    }
+    self.funControl = funControl
     self.prompt = prompt
     self.geometry = geometry
     self.durationSeconds = durationSeconds
@@ -101,7 +110,11 @@ public enum H3T2VARunner {
       throw H3CheckpointError.invalid("H3 timestep table or packed rows exceed engine admission.")
     }
     _ = try H3QwenCheckpointLayout.inspect(root: request.qwenPages)
-    _ = try H3CheckpointLayout(url: request.transformer)
+    let transformer = try H3CheckpointLayout(url: request.transformer)
+    if let control = request.funControl {
+      try control.validate(geometry: request.geometry)
+      _ = try H3FunControlLayout(url: control.checkpoint, base: transformer)
+    }
     _ = try H3VideoVAELayout(url: request.videoVAE)
     _ = try H3AudioVAELayout(url: request.audioVAE)
     for adapter in request.loRAAdapters {
@@ -123,6 +136,15 @@ public enum H3T2VARunner {
     progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
     let admission = try preflight(request)
     let geometry = admission.geometry
+    // Guide VAE weights are released before Qwen or the transformer loads.
+    defer { Stream.gpu.synchronize(); Memory.clearCache() }
+    var controlCondition = try autoreleasepool {
+      try request.funControl?.encode(videoVAE: request.videoVAE, geometry: geometry) {
+        progress("control_video_encode", $0, $1)
+      }
+    }
+    Stream.gpu.synchronize(); Memory.clearCache()
+    if controlCondition != nil { progress("control_video_weights_released", 1, 1) }
     let rawRows = try autoreleasepool { () throws -> ([Float], [Float]) in
       try Task.checkCancellation()
       let conditioned = try H3QwenTextEncoder.encode(prompt: request.prompt,
@@ -133,18 +155,20 @@ public enum H3T2VARunner {
       guard conditioned.tags == Array(admission.layout.tags.prefix(admission.textRows)) else {
         throw H3CheckpointError.invalid("H3 conditioner changed its admitted text rows.")
       }
+      progress("text_weights_released", 1, 1)
       let state = try H3DiTState(checkpointURL: request.transformer,
         layout: admission.layout,
         textEmbeddings: conditioned.hidden
           .reshaped([1, admission.textRows, 5120]),
         timestepTable: admission.rowSchedule.table,
+        blockCount: 50,
         turboLoRAURL: request.turboLoRA,
         turboLoRAStrength: request.turboLoRAStrength,
-        additionalLoRAs: request.additionalLoRAs) { completed, total in
+        additionalLoRAs: request.additionalLoRAs,
+        funControl: controlCondition) { completed, total in
         progress("transformer_prepare", completed, total)
       }
       defer { state.unload() }
-      progress("text_weights_released", 1, 1)
       let noise = try H3Noise.make(seed: request.seed,
         videoLatentFrames: geometry.videoLatentFrames,
         latentHeight: geometry.height / 16,
@@ -163,6 +187,7 @@ public enum H3T2VARunner {
       let audio = sampled.audio.asType(.float32).asArray(Float.self)
       return (video, audio)
     }
+    controlCondition = nil
     Stream.gpu.synchronize()
     Memory.clearCache()
     progress("transformer_weights_released", 1, 1)

@@ -19,7 +19,11 @@ two to six shots with identical effective components and sampling settings also 
 Any scene shot may use one first-frame image. One consecutive interval of the same
 audio source can drive every shot, including shots with an image. Studio renders the
 group as one movie and accepts all member ranges together. Experimental native setup profiles
-now expose MSR, Ingredients and Union Control through Swift. Other specialized IC-LoRAs
+now expose MSR, Ingredients and Union Control through Swift. Experimental Swift
+Motion Track, CrossView and combined Ingredients control contracts are also implemented;
+direct installed-worker and saved ComfyUI graph checks are recorded below. A corrected combined
+CrossView/Ingredients Studio lifecycle and native exported CLI route passed; broader control
+quality and the other Studio control routes remain pending. Other specialized IC-LoRAs
 and dedicated DFR editor controls still use the explicitly selected Python route.
 An experimental direct Swift worker can execute spatial DFR from a version-8
 request with an installed Pixel-Spatial x2 adapter, including first/last images.
@@ -99,12 +103,41 @@ resamples presentation timestamps to the target cadence and freezes its checksum
 shorter than the editorial clip fails before inference; the last source frame can fill rounded
 model-grid padding. Union requires final width and height divisible by 128. The compatible
 LTX 2.3 rank-64 Union adapter is active only in stage one
-of the distilled 8 + 3 schedule. Motion Track, CrossView and other
-specialized combinations still require the explicitly selected Python route.
+of the distilled 8 + 3 schedule. Experimental Swift Motion Track accepts one preprocessed
+colored-trajectory movie with its dedicated adapter. CrossView accepts ordered, explicitly
+labeled warp/source movies and requires publication audio from the original source; it can
+also use one described Ingredients sheet after those guides. These controls freeze RGB24
+inputs and keep task adapters in stage one, followed by a clean stage two. Nondefault
+per-reference attention and size overrides are rejected. Source-audio preparation streams native float32 PCM without an additional lossy encode.
+Direct installed-worker Motion Track and CrossView tests at 512 × 256, 33 frames and 24 fps
+completed in 41.92/31.60 seconds with two decoded previews and complete stage-release events.
+Peak Swift-process footprints were 3.09/2.95 GB, excluding FFmpeg. CrossView publication
+matched all 66,000 stereo 48 kHz source sample frames by PCM bytes. Its warp and source guides
+were intentionally identical for this execution check. Saved recipe-backed CrossView and
+combined CrossView/Ingredients ComfyUI graphs completed real inference as well. Their published
+PCM independently matched the true source (528,000/1,936,000 bytes), and direct/Comfy CrossView
+video, audio and muxed movies were all byte-identical. These are
+execution checks, not approved camera/identity quality. A separate corrected combined recipe
+using a fitted described sheet passed Studio preparation, two previews, acceptance and reopening
+with Python unavailable at 512 × 256/121 frames. Render and acceptance took 86.45 seconds
+at a 4.11 GB Swift-worker footprint, excluding FFmpeg. Its exported native CLI job reproduced
+all three media files byte for byte and resumed with zero new/one reused generation. The same
+corrected frozen recipe completed as a saved, uncached ComfyUI graph, again matching all three
+media files. These individual executions do not constitute a matched performance benchmark. That
+Studio run preceded durable event archival; its lost early UI-log events remain a historical gap.
+A separate real combined-worker cancellation sent SIGTERM after stage one’s first transformer
+block. It returned cancelled/exit 130 in 0.08 seconds after the signal and published no output;
+this checks worker cancellation, without a direct allocator-zero measurement.
+Other specialized combinations require their explicitly selected supported route.
+Native H3/LTX worker renders and preflights now archive events on disk beside the job in
+`NativeWorkerLogs`, with unique job IDs and filenames. The UI keeps its 30,000-character tail.
+Archives survive success, failure and cancellation; worker results expose `workerEventsPath`
+and `workerEventsTruncated`. A 64 MiB cap or disk-write failure marks the archive incomplete
+and keeps draining worker output. Older bounded-display logs cannot recover discarded events.
 Ordinary H3 and LTX 2.5 model setup now scans selected folders, links compatible
 installed components and creates native profiles without Python. Swift also downloads pinned
-LTX 2.5 packages, H3 Qwen pages, video VAE, folded audio VAE and tokenizer packages. Acquiring/converting
-the remaining H3 components, other specialized adapter setup, asset/library tools and other engines remain separate work; this is not yet a
+LTX 2.5 packages, direct H3 transformers/support, Qwen pages, video VAE, folded audio VAE
+and tokenizer packages. Other source conversions, asset/library tools and other engines remain separate work; this is not yet a
 fully Python-free Studio release.
 The experimental Swift H3 worker has completed text-to-audiovisual, reference-conditioned
 and independent audio-driven takes.
@@ -687,8 +720,9 @@ configure the native MLX engines.
 1. Open **Studio Settings → Model setup**. Built-in presets appear independently of installed recipe
    count once a native worker or the optional renderer is configured. Choose H3 text/image/reference
    or LTX 2.3/2.5 text/image. Swift LTX 2.5 also offers spatial DFR and one- or two-round
-   temporal DFR presets, MSR images and Ingredients sheets when its worker is enabled. These presets reuse installed adapters;
-   they do not download them.
+   temporal DFR presets, MSR images, Ingredients sheets, Union, Motion Track and CrossView
+   controls when its worker is enabled. H3 also offers a native Fun ControlNet guide preset.
+   Compatible installed adapters can be reused or acquired through pinned native catalog entries.
 2. Choose **Set Up… → Use Existing Models**, select model folders (including an existing ComfyUI
    `models` folder), then scan. Inspection reads bounded headers and manifests, never model tensors.
    A single candidate is selected automatically; multiple candidates require your choice. Missing
@@ -733,12 +767,16 @@ hardlinked on the same volume or linked across volumes; keep the original files 
 Cancellation preserves partial downloads without publishing an incomplete package. Progress
 and **Cancel** appear in the setup window. The native path uses a Studio Keychain token or
 `HF_TOKEN`; it never writes the token into download state, provenance or logs.
-Native choices include LTX 2.5, H3 Qwen, H3 video VAE, folded audio VAE and tokenizer. The older H3 paged
-transformer/support downloads and source conversion still belong to the optional Python
-setup route. The folded audio VAE has a separate pinned download with its source license,
-notices and conversion modifications. For Swift H3, import a supported direct transformer,
-task manifest and processor alongside these downloaded components; native setup is not
-yet a complete H3 acquisition/conversion solution.
+The merged native catalog has 19 pinned packages supplying mandatory component fields for ordinary H3/LTX profiles,
+including direct H3 transformer/support, Qwen, video VAE, folded audio VAE and tokenizer, plus
+supported task adapters. This field coverage does not establish every checkpoint/task combination;
+source terms, gating and structural admission still apply to every file. H3 image/endpoint tasks
+use the verified 64-curve BF16 FL2VA package; the full-width Singularity package serves its
+supported text/reference/Fun Control tasks and is rejected for native image/endpoint generation.
+The older Python paged-transformer/support packs and source conversion remain separate. The
+folded audio VAE retains its source license, notices and conversion modifications. Installed-file
+checks verify exact hashes, shared-file reuse and package discovery; they do not establish a
+complete clean-machine download/install of all weights or universal adapter compatibility.
 
 For the optional Python H3 setup, choose four downloads in the same library: the **text/image or reference Q8 transformer**,
 its matching **support files**, the **Q8 vision encoder**, and the **Q8 video VAE**. The support files
@@ -939,12 +977,20 @@ with one optional background last, and maps role, priority, frame count, sizing,
 strength and attention strength. Ingredients uses one described sheet and at least 121 frames.
 Both run eight full-resolution evaluations; there is no second stage or spatial upscaler.
 Ordinary LoRAs, DFR and audio drivers cannot be combined with these single-adapter profiles.
+Ingredients setup admits compatible 2.5 full-resolution rank-128 sheet adapters after complete
+header/shape checks and starts them at strength 1.0; legacy 2.3 starts at 1.2. The pinned official
+2.5 download is gated, and actual header qualification with the available access remains pending.
+The current MSR V1 contract has 480 video pairs and five visual-slot tensors. The actual MSR V2
+header has 1,152 pairs, extra audio/video-to-audio targets and five audio-slot tensors; V2's
+sparse-speaker/reference-audio contracts are not implemented and its files are explicitly rejected.
 Installed-app five-second 512 × 256 jobs passed generation, two decoded previews, acceptance
 and reopening with Python unavailable. Their render-plus-acceptance times were 83.49 seconds
 for two-image MSR and 99.38 seconds for Ingredients; worker process peaks were 4.03/4.00 GB,
 excluding FFmpeg. The Ingredients result still duplicated subjects, so broad identity and
 audio quality remain unqualified. Saved recipe-backed ComfyUI MSR and Ingredients graphs
-produced byte-identical movies to these Studio takes; exported Studio movie jobs remain unqualified.
+produced byte-identical movies to these Studio takes. MSR additionally completed the new
+native exported-job CLI route, assembled its movie, reopened its accepted project and reused
+its take on resume; Ingredients native exported-job inference remains unqualified.
 
 - **Control:** attach a preprocessed guide video as Control and choose its matching guide type
   (such as depth, pose, motion tracks or crossview). The recipe's adapter must support that type.
@@ -1228,6 +1274,22 @@ source snapshot when upgrading; existing private runtimes retain their installed
 Validation covers model filtering, mixed groups, independent clip strengths, serialization, duplicate
 rejection, split asset ownership and movie/clip recipe export. The native app was exercised with
 small synthetic header fixtures; these checks do not qualify LoRA visual quality or every adapter.
+
+### Native H3 Fun ControlNet
+
+With Swift H3 enabled, use the dedicated Fun ControlNet setup preset and attach one preprocessed
+Canny, depth, HED, MLSD or pose movie as Control. The route uses the supported T2VA branch and
+shared native video VAE/sampler and freezes the guide and checksum. It requires the supported
+dense full-width T2VA checkpoint, no LoRAs or motion context, strength from 0 to 1, each output
+side at most 2,048 and total canvas pixels at most 768 × 1,344. Task controls are validated. A direct 384 × 256, 73-frame test at 24 fps completed in 663.45 seconds with 32 kHz
+stereo audio, four decoded previews and staged release. Peak Swift-worker footprint was 11.80 GB,
+excluding FFmpeg. It used four Euler evaluations without a Turbo adapter; the result has not
+received visual/control-quality approval. Installed Studio lifecycle and broader quality remain
+unqualified. Follow the checkpoint's source terms in Model Setup.
+A separate same-guide/checkpoint encoder comparison reduced MLX stage peak from 10.71 to
+5.48 GB with byte-identical raw latents and zero residual allocations; encoding took 14.17
+versus 11.13 seconds. This control-guide-only optimization does not establish a new
+whole-generation speed or memory result; the full render above predates it.
 
 ### Native H3 Turbo
 
@@ -1516,12 +1578,25 @@ processed clip's resolution and timing. Set depth and motion folders in the clip
 
 ## Headless movie and clip jobs
 
-Use **Movie → Export Movie Headless Job** or **Export Clip Headless Job**. A single
-`.weetodd-job.json` embeds the edit, resolved generation recipes, runtime paths and finishing settings.
-A companion text file describes execution. Files reference local media/models; collect the project
-first if media needs to travel. A job still needs its recorded runtime and model locations.
+Use **Movie → Export Movie Headless Job** or **Export Clip Headless Job**. The job retains
+local media/model paths; collect the project first if media needs to travel. Keep its prepared-input
+folder beside the job, and retain the recorded workers, models and FFmpeg installation.
 
-The app contains a CLI launcher that finds the job's native Python automatically:
+When every clip uses the selected native Swift H3/LTX route or an accepted movie take, Studio exports
+`weetodd-studio-native-job-v1`. It freezes the original edit, exact prepared `weetodd-headless-v2`
+recipes, preparation reports and input observations. Export and execution use the same native
+preparation and workers as Studio, with no Python prerequisite or inference fallback. This host
+supports cut movies with embedded source audio, trims, per-clip gain from 0–200%, fit/fill, output
+frame rate, and MP4, MOV or ProRes finishing through FFmpeg. It explicitly rejects titles, added
+audio, source pan, transitions, PNG sequences, upscaling/interpolation, differing per-clip finishing
+overrides and Motion Fidelity rather
+than omitting those settings. Native continuous-scene export retains the complete scene group and
+its prepared member ranges, including full and windowed publication; export the whole scene rather
+than one member. A dependent continuity clip needs its source take rendered and accepted before export.
+Pending Ripple generation is rejected by this exporter. Generate, review and apply the Ripple take
+in Studio first; its accepted movie source can then be exported without replacing the edit request.
+
+Run the app's CLI with the editor closed:
 
 ```bash
 "/Applications/WeeTodd Studio.app/Contents/MacOS/WeeToddCLI" \
@@ -1530,37 +1605,49 @@ The app contains a CLI launcher that finds the job's native Python automatically
   --job Movie.weetodd-job.json --output-directory Render --resume
 ```
 
-Developers can also use the existing Python client directly:
+If the app moved, add `--h3-swift-worker /path/to/WeeToddH3MLXWorker` and/or
+`--ltx25-swift-worker /path/to/WeeToddLTXWorker`. All pending recipes and reused source intervals
+preflight before the first generation. FFmpeg encoder, filter and muxer availability is also
+checked before worker admission; unsupported CLI options are rejected rather than ignored. Workers run sequentially and retain decoded previews,
+progress and release events in full JSONL logs. The host accepts takes into `result.weetodd`,
+preserving scene identity and continuation metadata, then assembles the movie. Cancellation passes
+to the active worker or FFmpeg process. Resume verifies the frozen job, selected worker hashes,
+source observations, completed takes and finished movie; changed jobs or inputs require a new
+export/output directory. Each output folder is locked against concurrent execution. The model's
+minimum working memory still applies. Result receipts retain `generations` as the total job
+count and distinguish `newlyGenerated` from `resumedGenerations`; a completed resume reports
+zero newly generated takes.
+
+Qualification on 2026-10-02: deterministic worker/AV fixtures passed byte preservation, admission
+before inference, cancellation, finishing, acceptance, reopening and resume checks. A saved MSR
+Studio job exported through native preparation and passed the actual CLI's installed-worker preflight
+with Python unavailable. The same immutable exported job subsequently completed real Swift
+MSR inference, delivered two decoded previews and complete stage-release events, retained its
+accepted project and assembled the movie without Python. The accepted project reopened and
+verified resume reported zero newly generated takes and one reused generation. Both full worker
+logs and the take hash remained unchanged. That real run predates optional take-statistics and Clip Assets
+metadata enrichment; the final metadata path has separate audiovisual fixture checks. This does
+not establish all-task exported-job qualification. A corrected CrossView/Ingredients Studio
+job also completed native CLI inference with all video/audio/muxed media byte-identical to
+Studio, then resumed with zero new and one reused generation.
+
+Other backend selections retain the existing `weetodd-studio-job-v1`–`v4` Python-hosted export and
+companion instructions. Those jobs support their existing titles, transitions, added audio and
+configured enhancement finishing. Their CLI finds the recorded Python runtime automatically;
+selected Swift H3/LTX clips still infer in the recorded Swift workers. A previously qualified
+five-second LTX 2.5 T2V export used that Python host, rendered in Swift, assembled a 1920×1080 stereo
+movie and reused its take on resume. This is separate evidence from the new native host.
+Developers can run **legacy jobs only** through the existing Python client:
 
 ```bash
 .venv/bin/python scripts/render_headless.py \
   --job Movie.weetodd-job.json --output-directory Render --resume
 ```
 
-An exported job retains Studio's Swift H3/LTX 2.5 selection and worker paths.
-If the app moved, add `--h3-swift-worker /path/to/WeeToddH3MLXWorker` and/or
-`--ltx25-swift-worker /path/to/WeeToddLTXWorker` to override those paths. The
-selected H3/LTX 2.5 clips preflight and render in the Swift worker; the Python
-process only orchestrates the job and movie assembly. Once a Swift worker is
-selected, every H3/LTX 2.5 clip in the job needs its corresponding worker or
-preflight fails. Resume pins each selected executable's path and SHA-256. This
-route has passed worker preflight and transport tests. A five-second LTX 2.5
-T2V clip from a Studio export completed in Swift and assembled into a 1920×1080
-movie with stereo audio; verified resume reused its take. Swift H3/LTX workers share the
-cross-process inference lock with Python/MLX jobs. Existing composable ComfyUI nodes
-still use Python samplers; the recipe-backed Swift MLX node uses these workers.
-
-The editor can be closed. Jobs preflight all clips and finishing dependencies before generation,
-run one generation process at a time, finish clips serially, and assemble the result with titles,
-transitions and audio. Each model process exits before the next clip loads. The selected model's
-minimum working memory still applies; headless execution cannot make an oversized model fit.
-FFmpeg assembly can use additional memory for long edits with many transitions/audio inputs.
-
-`--resume` verifies source observations and completed-artifact hashes, preserving completed renders
-and finished clips. Changed jobs, renderer source or inputs require re-export/new output directories.
-The output folder is locked against concurrent execution. Interruptions record job state; cancelling
-passes through to the active child process. Existing unverified final exports are preserved.
-A clip job retains only that clip's intersecting titles/audio, shifted into clip-local time.
+Legacy clip jobs retain intersecting titles/audio shifted into clip-local time. Native clip jobs
+reject added timeline titles/audio and preserve the selected clip's source interval and settings.
+Swift H3/LTX workers share the cross-process inference lock with Python/MLX jobs. Existing
+composable ComfyUI nodes retain their Python samplers; recipe-backed Swift MLX nodes use these workers.
 
 ## Validation and next release work
 
@@ -1670,7 +1757,8 @@ including a clip's resolved prompt override. The bridge's read-only `motion-prep
 the resolved prompt, original recipe prompt and whether the clip uses an override; it validates the
 recipe without writing preparation files or loading model weights. Whitespace-only or non-string
 overrides are rejected before enhancement starts.
-The current `WeeToddCLI` runs generation, enhancement, upscaling/interpolation and assembly serially.
+For these legacy Python-hosted jobs, `WeeToddCLI` runs generation, enhancement,
+upscaling/interpolation and assembly serially.
 Completed enhancements are hash-checked on resume; an interrupted enhancement restarts that clip's
 refinement. It does not resume inside transformer sampling. The app-managed native runtime needs
 this renderer revision; install a fresh runtime when adopting it and export a fresh job. Jobs with
