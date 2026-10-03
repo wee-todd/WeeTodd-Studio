@@ -197,7 +197,9 @@ public struct H3CheckpointLayout: Sendable {
     let headers = file.tensors.mapValues { H3TensorInfo(dtype: $0.dtype, shape: $0.shape) }
     try self.init(tensors: headers)
     for base in quantizedBases {
-      let marker: Data = try file.withTensorBytes(named: base + ".comfy_quant") { Data($0) }
+      let name = base + ".comfy_quant"
+      let marker: Data = try file.withTensorBytes(named: name,
+        range: 0..<file.tensors[name]!.byteCount, access: .buffered) { Data($0) }
       guard let object = try JSONSerialization.jsonObject(with: marker) as? [String: Any],
         object["format"] as? String == "int8_tensorwise",
         Set(object.keys).isSubset(of: ["format", "convrot", "convrot_groupsize"]) else {

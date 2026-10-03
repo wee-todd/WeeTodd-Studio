@@ -7,8 +7,21 @@ reads. Quantized projection windows assemble at most 88,080,384 bytes through th
 identity checks remain active between spans. A release probe with the real LightX adapter
 preserved every checked BF16 tensor and complete block output: two warm full-block passes
 took 2.30–2.41 seconds with mapped reads and 0.449 seconds with the bounded reads. Peak
-MLX allocation was identical at 2.131 GB. This is a block measurement, not a whole-clip
-speed or process-memory claim; installed-app generation qualification remains pending.
+MLX allocation was identical at 2.131 GB. A subsequent installed-app CLI run preserved
+the frozen 608 × 352, 73-frame, four-evaluation recipe and all three original media hashes.
+Worker time fell from 680.09 to 167.06 seconds; sampling fell from 516.00 to 95.43 seconds.
+Peak worker footprint changed from 4.868 to 5.009 GB, while peak MLX allocation changed
+from 4.267 to 4.208 GB. CLI wall time was 191.93 seconds and includes its separate
+preflight. These are raw observations on the same generation contract, not a matched
+machine-load claim or production-resolution quality approval.
+
+The remaining checkpoint-admission marker reads now use the existing bounded buffered
+API, preserving all schema and file-identity checks. An actual CPU-only comparison of
+all 250 markers preserved every byte and JSON validation: mapped acquisition took
+23.412 seconds versus 0.003689 seconds buffered. A separate decoder small-tensor
+comparison saved less than one second and was rejected; decoder acquisition is unchanged.
+The installed-app result above predates this admission-only change; final-worker checks
+remain pending.
 
 Swift H3 canvas admission 2026-10-03: the 1 MP 16:9 canvas is 1376 × 768 on the
 32-pixel grid. Text/reference request checks, endpoint image loading, native keyframe/control

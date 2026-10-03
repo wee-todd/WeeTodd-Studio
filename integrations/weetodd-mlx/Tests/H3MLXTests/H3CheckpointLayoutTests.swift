@@ -86,6 +86,26 @@ final class H3CheckpointLayoutTests: XCTestCase {
     XCTAssertThrowsError(try H3CheckpointLayout(tensors: tensors))
   }
 
+  func testComfyMarkerHeaderBoundsRemainStrictBeforeBufferedAcquisition() throws {
+    let name = prefix + "blocks.17.attn.qkv_proj.comfy_quant"
+    for count: UInt64 in [1, 4096] {
+      var tensors = fixture()
+      tensors[name] = .init(dtype: "U8", shape: [count])
+      XCTAssertEqual(try H3CheckpointLayout(tensors: tensors).quantizedProjections, 250)
+    }
+    for invalid: H3TensorInfo in [
+      .init(dtype: "U8", shape: [0]), .init(dtype: "U8", shape: [4097]),
+      .init(dtype: "F32", shape: [72]), .init(dtype: "U8", shape: [1, 72]),
+    ] {
+      var tensors = fixture()
+      tensors[name] = invalid
+      XCTAssertThrowsError(try H3CheckpointLayout(tensors: tensors)) { error in
+        XCTAssertEqual(error as? H3CheckpointError,
+          .invalid("Incomplete Comfy INT8 metadata: \(self.prefix)blocks.17.attn.qkv_proj"))
+      }
+    }
+  }
+
   func testInstalledFL2VACurveCheckpointHeaderWithoutReadingWeightsWhenProvided() throws {
     guard let path = ProcessInfo.processInfo.environment["WEETODD_H3_FL2VA_CHECKPOINT"] else {
       throw XCTSkip("Set WEETODD_H3_FL2VA_CHECKPOINT for released FL2VA curve header admission.")
