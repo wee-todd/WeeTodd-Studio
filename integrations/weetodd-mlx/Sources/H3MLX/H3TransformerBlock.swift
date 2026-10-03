@@ -36,7 +36,7 @@ public enum H3TransformerBlock {
     // Python constructs rotary frequencies and angles in FP32, then casts
     // sine/cosine to the BF16 query dtype. Rounding frequencies first can
     // amplify phase error at later video positions.
-    let inverse = MLXArray(try file.readFloat32(named: name))
+    let inverse = MLXArray(try file.readFloat32(named: name, access: .buffered))
     let rows = positions.shape[0]
     let axisAngles = (0..<3).map { axis in
       positions[0..<rows, axis].asType(.float32).expandedDimensions(axis: 1)
@@ -101,7 +101,8 @@ public enum H3TransformerBlock {
         descriptor.shape == shape.map(UInt64.init) else {
         throw H3CheckpointError.invalid("Missing H3 block tensor: \(name)")
       }
-      let value = try file.withTensorBytes(named: name) { bytes in
+      let value = try H3TensorPayload.withTensorBytes(file: file, name: name,
+        maximumBufferedBytes: 4 * 1024 * 1024) { bytes in
         dtype == "F32"
           ? MLXArray(bytes, shape, type: Float.self)
           : MLXArray(bytes, shape, type: UInt16.self).view(dtype: .bfloat16)

@@ -139,7 +139,8 @@ final class H3LoRAFile: H3LoRAApplying {
             descriptor.dtype == "F32", descriptor.shape.isEmpty else {
             throw H3CheckpointError.invalid("Incomplete H3 LoRA target: \(target)")
           }
-          alpha = try file.withTensorBytes(named: alphaName) {
+          alpha = try H3TensorPayload.withTensorBytes(file: file, name: alphaName,
+            maximumBufferedBytes: 4 * 1024 * 1024) {
             $0.loadUnaligned(as: Float.self)
           }
         case .bakedIntoB:
@@ -228,10 +229,12 @@ final class H3LoRAFile: H3LoRAApplying {
     let bName = target + ".lora_B.weight"
     let aShape = [info.rank, input.shape.last!]
     let bShape = [base.shape.last!, info.rank]
-    let a = try file.withTensorBytes(named: aName) { bytes in
+    let a = try H3TensorPayload.withTensorBytes(file: file, name: aName,
+      maximumBufferedBytes: 16 * 1024 * 1024) { bytes in
       MLXArray(bytes, aShape, type: UInt16.self).view(dtype: .bfloat16)
     }
-    let b = try file.withTensorBytes(named: bName) { bytes in
+    let b = try H3TensorPayload.withTensorBytes(file: file, name: bName,
+      maximumBufferedBytes: 16 * 1024 * 1024) { bytes in
       MLXArray(bytes, bShape, type: UInt16.self).view(dtype: .bfloat16)
     }
     let output = H3LoRAProjection.apply(base: base, input: input,

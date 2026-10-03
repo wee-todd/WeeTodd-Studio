@@ -109,6 +109,32 @@ final class FloatDecodingTests: XCTestCase {
 }
 
 extension FloatDecodingTests {
+  func testSmallBufferedMetadataPreservesLittleEndianFloatBitsAndBounds() throws {
+    let bits: [UInt32] = [0, 0x80000000, 0x3f800001, 1, 0x7fc12345]
+    let payload = bits.map(\.littleEndian).withUnsafeBytes { Data($0) }
+    try withTensorFile(tensors: [("scales", [bits.count, 1], "F32")],
+      payloads: ["scales": payload]) { url in
+      let file = try SafeTensorFile(url: url)
+      for access: TensorAccess in [.mapped, .buffered] {
+        XCTAssertEqual(try file.readFloat32(named: "scales", access: access).map(\.bitPattern), bits)
+        XCTAssertEqual(try file.readFloat32(named: "scales", elements: 1..<4,
+          access: access).map(\.bitPattern), Array(bits[1..<4]))
+        XCTAssertEqual(try file.readFloat32(named: "scales", elements: 1..<1, access: access), [])
+        XCTAssertThrowsError(try file.readFloat32(named: "scales", maximumBytes: 16, access: access))
+        XCTAssertThrowsError(try file.readFloat32(named: "scales", elements: 4..<6, access: access))
+        XCTAssertThrowsError(try file.readFloat32(named: "missing", access: access))
+        let raw = try file.withTensorBytes(named: "scales", range: 0..<UInt64(payload.count),
+          access: access) { Data($0) }
+        XCTAssertEqual(raw, payload)
+      }
+      let handle = try FileHandle(forWritingTo: url)
+      try handle.seekToEnd(); try handle.write(contentsOf: Data([0])); try handle.close()
+      for access: TensorAccess in [.mapped, .buffered] {
+        XCTAssertThrowsError(try file.readFloat32(named: "scales", access: access))
+      }
+    }
+  }
+
   func testBufferedWeightReadsMatchMappedSlicesAcrossWindowsAndRejectMutation() throws {
     let count = 2*1024*1024+7
     let payload = (0..<count).map { UInt16($0 % 2 == 0 ? 0x3f80 : 0xc000).littleEndian }.withUnsafeBytes { Data($0) }

@@ -78,8 +78,9 @@ Ref2VA, independent A2V, external-after and Fun have separate typed preparation/
 checks. The conditioning/decoder qualification worker has now passed FFLF, single-image
 Ref2VA, soundtrack Ref2VA, independent A2V, external-after, movie Ref2VA and Fun through
 Studio, native CLI and saved uncached ComfyUI execution, including cancellation recovery
-and accepted-take reopening. Standalone audio Ref2VA and the remaining range/finishing
-checks are still pending. These route checks do not approve the prior continuation seam
+and accepted-take reopening. Standalone audio Ref2VA also passed all three hosts and
+cancellation recovery; remaining range/finishing checks are still pending. These route
+checks do not approve the prior continuation seam
 or Fun visual quality; the corrected unletterboxed continuation preparation still needs
 a weighted quality check.
 Matched useful-size speed/memory and broad identity, seam and audio quality remain open.

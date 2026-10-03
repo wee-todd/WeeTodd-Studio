@@ -28,7 +28,10 @@ public enum H3ComfyDecodedProjection {
       marker.byteCount > 0, marker.byteCount <= 4096 else {
       throw H3CheckpointError.invalid("Incomplete Comfy H3 quantization metadata: \(name)")
     }
-    let markerData: Data = try file.withTensorBytes(named: markerName) { Data($0) }
+    // These small metadata reads avoid transient mappings. Projection payloads
+    // use a separate bounded row buffer without changing the decode math.
+    let markerData: Data = try file.withTensorBytes(named: markerName,
+      range: 0..<marker.byteCount, access: .buffered) { Data($0) }
     guard let value = try JSONSerialization.jsonObject(with: markerData) as? [String: Any],
       value["format"] as? String == "int8_tensorwise",
       Set(value.keys).isSubset(of: ["format", "convrot", "convrot_groupsize"]),
@@ -39,7 +42,9 @@ public enum H3ComfyDecodedProjection {
     guard !rotated || ([4, 16, 64, 256, 1024].contains(group) && columns.isMultiple(of: group)) else {
       throw H3CheckpointError.invalid("Unsupported Comfy H3 ConvRot group: \(name)")
     }
-    let scales = try file.readFloat32(named: scaleName)
+    let scaleAccess: TensorAccess = file.tensors[scaleName]!.byteCount <= 4 * 1024 * 1024
+      ? .buffered : .mapped
+    let scales = try file.readFloat32(named: scaleName, access: scaleAccess)
     guard scales.count == rows, scales.allSatisfy({ $0.isFinite && $0 > 0 }) else {
       throw H3CheckpointError.invalid("Invalid Comfy H3 row scales: \(name)")
     }
@@ -163,8 +168,8 @@ public enum H3ComfyDecodedProjection {
         rotation: rotation)
       let biasStart = UInt64(start) * 2
       let biasStop = UInt64(stop) * 2
-      let biasChunk = try file.withTensorBytes(named: biasName,
-        range: biasStart..<biasStop) { bytes in
+      let biasChunk = try H3TensorPayload.withTensorBytes(file: file, name: biasName,
+        range: biasStart..<biasStop, maximumBufferedBytes: 4 * 1024 * 1024) { bytes in
         MLXArray(bytes, [stop - start], type: UInt16.self).view(dtype: .bfloat16)
       }
       let output = addMM(biasChunk, input, weight.T)
@@ -189,7 +194,8 @@ public enum H3ComfyDecodedProjection {
     try Task.checkCancellation()
     let lower = UInt64(range.lowerBound) * UInt64(columns)
     let upper = UInt64(range.upperBound) * UInt64(columns)
-    let quantized = try file.withTensorBytes(named: name, range: lower..<upper) { bytes in
+    let quantized = try H3TensorPayload.withTensorBytes(file: file, name: name,
+      range: lower..<upper) { bytes in
       MLXArray(bytes, [range.count, columns], type: Int8.self)
     }
     let scales = MLXArray(Array(metadata.scales[range]), [range.count, 1])

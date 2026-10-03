@@ -1690,7 +1690,12 @@ frame 119 rather than the older Studio take's 123. Its media differs, and visibl
 review, exact old parity and matched speed remain open. All six other typed H3 routes have
 preparation/export checks; A2V, external-after, movie and standalone-audio Ref2VA also passed
 actual typed Studio generation, previews, acceptance and save/reopen with the earlier worker.
-Corrected H3 conditioning and decoder changes still require fresh packaged execution.
+The corrected conditioning/decoder worker subsequently passed FFLF, still, movie,
+audio and soundtrack Ref2VA, independent A2V, external-after and Fun through Studio,
+native CLI and saved uncached ComfyUI graphs. All eight cases passed sampling
+cancellation, weighted recovery and accepted-project reopening. These results qualify
+that worker; the newer bounded weight-read optimization still needs a complete
+installed-app comparison before inheriting generation or performance qualification.
 These checks leave broad identity, seam and audio quality
 and matched useful-size performance open.
 

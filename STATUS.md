@@ -1,5 +1,15 @@
 # WeeTodd Studio implementation status
 
+Swift H3 bounded weight reads 2026-10-03: small quantization metadata, normalization
+weights, rotary frequencies, streamed biases and admitted LoRA factors now use buffered
+reads. Quantized projection windows assemble at most 88,080,384 bytes through the existing
+4 MiB read API; larger optional factors retain their mapped path. Cancellation and file
+identity checks remain active between spans. A release probe with the real LightX adapter
+preserved every checked BF16 tensor and complete block output: two warm full-block passes
+took 2.30–2.41 seconds with mapped reads and 0.449 seconds with the bounded reads. Peak
+MLX allocation was identical at 2.131 GB. This is a block measurement, not a whole-clip
+speed or process-memory claim; installed-app generation qualification remains pending.
+
 Swift H3 canvas admission 2026-10-03: the 1 MP 16:9 canvas is 1376 × 768 on the
 32-pixel grid. Text/reference request checks, endpoint image loading, native keyframe/control
 VAE entry points and Studio Fun preparation now accept that area consistently. The separate
@@ -50,8 +60,10 @@ CLI and saved, uncached ComfyUI runs matched all three current Studio media file
 sampling cancellation, subsequent weighted retry and zero-new-inference resume also
 passed. The same conditioning/decoder worker also passed FFLF, single-image Ref2VA,
 independent A2V, external-after and movie Ref2VA across all three hosts, including
-cancellation recovery and accepted-take reopening. Standalone audio Ref2VA and the
-remaining extreme-range and finishing checks are still pending. These functional checks
+cancellation recovery and accepted-take reopening. Standalone audio Ref2VA also passed
+these three hosts, sampling cancellation, weighted retry and accepted-take reopening;
+its explicit-dialogue take transcribed as the requested “I stand guard.” Remaining
+extreme-range and finishing checks are still pending. These functional checks
 do not establish voice likeness, intelligibility, Fun control/visual quality or matched
 useful-size performance; the broad release gates remain unchanged.
 

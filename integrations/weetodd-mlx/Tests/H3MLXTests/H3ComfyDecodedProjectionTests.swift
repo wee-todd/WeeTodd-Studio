@@ -5,6 +5,92 @@ import XCTest
 @testable import H3MLX
 
 final class H3ComfyDecodedProjectionTests: XCTestCase {
+  func testStreamingProjectionPreservesBF16BiasAcrossRowWindows() throws {
+    let rows = 1025, columns = 4
+    let marker = try JSONSerialization.data(withJSONObject: [
+      "format": "int8_tensorwise", "convrot": false])
+    let scaleBytes = [Float](repeating: 1, count: rows)
+      .map { $0.bitPattern.littleEndian }.withUnsafeBytes { Data($0) }
+    let biasBits: [UInt16] = [0x3e80, 0xbf00, 0x3f40] // 0.25, -0.5, 0.75
+    let biasBytes = (0..<rows).map { biasBits[$0 % 3].littleEndian }
+      .withUnsafeBytes { Data($0) }
+    var payload = Data((0..<(rows * columns)).map { UInt8($0 % columns + 1) })
+    let scaleStart = payload.count; payload.append(scaleBytes)
+    let markerStart = payload.count; payload.append(marker)
+    let biasStart = payload.count; payload.append(biasBytes)
+    let header: [String: Any] = [
+      "projection.weight": ["dtype": "I8", "shape": [rows, columns], "data_offsets": [0, scaleStart]],
+      "projection.weight_scale": ["dtype": "F32", "shape": [rows, 1], "data_offsets": [scaleStart, markerStart]],
+      "projection.comfy_quant": ["dtype": "U8", "shape": [marker.count], "data_offsets": [markerStart, biasStart]],
+      "projection.bias": ["dtype": "BF16", "shape": [rows], "data_offsets": [biasStart, payload.count]],
+    ]
+    let json = try JSONSerialization.data(withJSONObject: header)
+    var size = UInt64(json.count).littleEndian
+    var bytes = withUnsafeBytes(of: &size) { Data($0) }; bytes.append(json); bytes.append(payload)
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".safetensors")
+    try bytes.write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let input = MLXArray([Float(2), 1, -1, 0.5], [1, columns]).asType(.bfloat16)
+    let output = try H3ComfyDecodedProjection.projectStreaming(checkpointURL: url,
+      name: "projection.weight", rows: rows, columns: columns, input: input, rowWindow: 1024)
+    XCTAssertEqual(output.dtype, .bfloat16); XCTAssertEqual(output.shape, [1, rows])
+    let expected: [Float] = [3.25, 2.5, 3.75]
+    XCTAssertEqual(output.asArray(Float.self), (0..<rows).map { expected[$0 % 3] })
+  }
+
+  /// Metadata and invalid-range admission stop before any MLX tensor is created.
+  func testSmallMetadataAdmissionRejectsMalformedInputsBeforeTensorCreation() throws {
+    let validMarker: [String: Any] = ["format": "int8_tensorwise", "convrot": false]
+    try withSmallMetadata(marker: validMarker, scales: [0.5, 1]) { url in
+      XCTAssertThrowsError(try H3ComfyDecodedProjection.decodeRows(checkpointURL: url,
+        name: "projection.weight", rows: 2, columns: 4, range: -1..<0)) { error in
+        XCTAssertTrue(String(describing: error).contains("decode rows exceed"))
+      }
+    }
+    for badScale: Float in [0, -1, .infinity, .nan] {
+      try withSmallMetadata(marker: validMarker, scales: [0.5, badScale]) { url in
+        XCTAssertThrowsError(try H3ComfyDecodedProjection.decodeRows(checkpointURL: url,
+          name: "projection.weight", rows: 2, columns: 4, range: -1..<0)) { error in
+          XCTAssertTrue(String(describing: error).contains("Invalid Comfy H3 row scales"))
+        }
+      }
+    }
+    for marker: [String: Any] in [[:], ["format": "other", "convrot": false],
+      ["format": "int8_tensorwise", "convrot": false, "unknown": 1],
+      ["format": "int8_tensorwise", "convrot": true, "convrot_groupsize": 64]] {
+      try withSmallMetadata(marker: marker, scales: [0.5, 1]) { url in
+        XCTAssertThrowsError(try H3ComfyDecodedProjection.decodeRows(checkpointURL: url,
+          name: "projection.weight", rows: 2, columns: 4, range: -1..<0)) { error in
+          XCTAssertTrue(String(describing: error).contains("Unsupported Comfy H3"))
+        }
+      }
+    }
+  }
+
+  private func withSmallMetadata(marker: [String: Any], scales: [Float],
+    _ body: (URL) throws -> Void) throws {
+    let markerData = try JSONSerialization.data(withJSONObject: marker)
+    let scaleData = scales.map { $0.bitPattern.littleEndian }.withUnsafeBytes { Data($0) }
+    var payload = Data(repeating: 0, count: 8)
+    payload.append(scaleData); payload.append(markerData)
+    let header: [String: Any] = [
+      "projection.weight": ["dtype": "I8", "shape": [2, 4], "data_offsets": [0, 8]],
+      "projection.weight_scale": ["dtype": "F32", "shape": [2, 1],
+        "data_offsets": [8, 8 + scaleData.count]],
+      "projection.comfy_quant": ["dtype": "U8", "shape": [markerData.count],
+        "data_offsets": [8 + scaleData.count, payload.count]],
+    ]
+    let json = try JSONSerialization.data(withJSONObject: header)
+    var size = UInt64(json.count).littleEndian
+    var bytes = withUnsafeBytes(of: &size) { Data($0) }
+    bytes.append(json); bytes.append(payload)
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString + ".safetensors")
+    try bytes.write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    try body(url)
+  }
+
   func testInstalledQKVDecodeMatmulAndTurboSplitProfile() throws {
     let environment = ProcessInfo.processInfo.environment
     guard environment["WEETODD_H3_QKV_SPLIT_PROBE"] == "1",
