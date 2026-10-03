@@ -1,6 +1,8 @@
 import CryptoKit
+import CoreGraphics
 import AVFoundation
 import Foundation
+import ImageIO
 import XCTest
 @testable import StudioCore
 
@@ -398,6 +400,104 @@ final class NativeH3PreparationTests: XCTestCase {
     XCTAssertEqual(config["seed"] as? Int, 42)
     XCTAssertEqual(config["duration_seconds"] as? Double, 5)
     XCTAssertEqual((result["report"] as? [String: Any])?["nativePreparation"] as? String, "swift")
+  }
+
+  private var referenceDialoguePrompt: String {
+    """
+    subject_definitions:
+    <Subject 1> is Beowulf from <Picture 1>, the sole speaker (S1). <Audio 1> guides his warm male voice.
+
+    summary:
+    [reference generation + audio reference] Beowulf addresses the camera in a quiet room.
+
+    retention_analysis:
+    <Subject 1>: fully_preserved - retain his identity. <Audio 1>: reference - generate new speech without copying the source waveform.
+
+    detailed_description:
+    [Shot 1] <Subject 1> (S1) faces a locked camera and says, <d>[English] I stand guard.</d>
+
+    overall_soundscape:
+    Quiet room tone beneath the single speaking voice.
+
+    non_diegetic_music:
+    A soft instrumental cello, without voices.
+    """
+  }
+
+  func testCompleteReferenceDialoguePromptSurvivesNativePreparationVerbatimWithoutDefaultNoDialogue() throws {
+    for task in ["ref2va", "a2v"] {
+      let (root, original, runtime) = try fixture()
+      let profileURL = root.appendingPathComponent("h3.json")
+      var profile = try JSONSerialization.jsonObject(with: Data(contentsOf: profileURL)) as! [String: Any]
+      var components = profile["components"] as! [String: Any]
+      components["task"] = "ref2va"; components["vision_encoder"] = "/unloaded/vision.safetensors"
+      profile["components"] = components
+      profile["conditioning"] = ["version": 1, "task": "ref2va", "inputs": [], "audio_policy": "generated"]
+      try JSONSerialization.data(withJSONObject: profile).write(to: profileURL)
+      let audioURL = root.appendingPathComponent("voice.wav")
+      try Data([1, 2, 3]).write(to: audioURL) // Composition hashes sources; media decoding is a later stage.
+      var audio = MediaAsset(name: "Voice reference", kind: .audio, path: audioURL.path); audio.duration = 6
+      var project = original; project.assets = [audio]
+      var attachment = Attachment(assetID: audio.id, role: task == "a2v" ? .audioDriver : .reference)
+      if task == "a2v" { attachment.audioSourceStart = 0.3; attachment.audioSourceDuration = 5 }
+      project.clips[0].attachments = [attachment]
+      if task == "ref2va" {
+        let imageURL = root.appendingPathComponent("beowulf.png")
+        let context = try XCTUnwrap(CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8,
+          bytesPerRow: 64 * 4, space: CGColorSpaceCreateDeviceRGB(),
+          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 0.2, green: 0.3, blue: 0.4, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(imageURL as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let image = MediaAsset(name: "Beowulf identity", kind: .image, path: imageURL.path)
+        project.assets.append(image)
+        project.clips[0].attachments.insert(Attachment(assetID: image.id, role: .reference), at: 0)
+      }
+      project.clips[0].generationSelection = GenerationSelection(task: task)
+      project.clips[0].prompt = " \n\t" + referenceDialoguePrompt + "\n "
+      XCTAssertEqual(project.clips[0].soundscape, "Natural location sound. No dialogue.")
+      let prepared = try NativeH3Preparation.prepare(request: request(project, runtime), destination: root.appendingPathComponent("prepared"))
+      let recipeURL = URL(fileURLWithPath: try XCTUnwrap(prepared["recipePath"] as? String))
+      let recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: recipeURL)) as! [String: Any]
+      XCTAssertEqual(recipe["prompt"] as? String, referenceDialoguePrompt)
+      XCTAssertFalse((recipe["prompt"] as! String).contains("No dialogue."))
+      XCTAssertEqual((recipe["conditioning"] as! [String: Any])["task"] as? String, task)
+      XCTAssertEqual((recipe["conditioning"] as! [String: Any])["audio_policy"] as? String, "generated")
+      XCTAssertEqual((recipe["config"] as! [String: Any])["seed"] as? Int, 42)
+      XCTAssertEqual(project.clips[0].prompt, " \n\t" + referenceDialoguePrompt + "\n ")
+    }
+  }
+
+  func testPartialQuotedAndMisorderedReferenceHeadingsStillUseSimplePromptComposer() throws {
+    let (_, original, runtime) = try fixture()
+    let malformed = [
+      referenceDialoguePrompt.replacingOccurrences(of: "summary:\n", with: ""),
+      "A sign quotes \"" + referenceDialoguePrompt.replacingOccurrences(of: "\n", with: " ") + "\".",
+      "Show the following text on a sign:\n" + referenceDialoguePrompt,
+      referenceDialoguePrompt.replacingOccurrences(of: "summary:", with: "retention_analysis:")
+        .replacingOccurrences(of: "retention_analysis:\n<Subject", with: "summary:\n<Subject"),
+      referenceDialoguePrompt.replacingOccurrences(of: "non_diegetic_music:\nA soft instrumental cello, without voices.", with: "non_diegetic_music:"),
+      referenceDialoguePrompt.uppercased()
+    ]
+    for text in malformed {
+      var project = original; project.clips[0].prompt = text
+      let recipe = try NativeH3Preparation.compose(request: request(project, runtime))["recipe"] as! [String: Any]
+      let prompt = try XCTUnwrap(recipe["prompt"] as? String)
+      XCTAssertTrue(prompt.hasPrefix("integrated_multimodal_description: [Shot 1] "), text)
+      XCTAssertTrue(prompt.hasSuffix("overall_soundscape: Natural location sound. No dialogue.\n\nnon_diegetic_music: N/A"), text)
+    }
+  }
+
+  func testExistingIntegratedAndContinuationPromptPassThroughRemainUnchanged() throws {
+    let (_, original, runtime) = try fixture()
+    for text in ["integrated_multimodal_description: [Shot 1] Beowulf speaks.\n\noverall_soundscape: His voice.\n\nnon_diegetic_music: N/A",
+      "[video continuation] Continue the existing action and sound."] {
+      var project = original; project.clips[0].prompt = "\n " + text + " \n"
+      let recipe = try NativeH3Preparation.compose(request: request(project, runtime))["recipe"] as! [String: Any]
+      XCTAssertEqual(recipe["prompt"] as? String, text)
+    }
   }
 
   func testComposesTimedAudioDriverFromPreparedMix() throws {

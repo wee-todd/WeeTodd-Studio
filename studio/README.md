@@ -263,7 +263,9 @@ matched speed improvement has been established.
 Still-image asset import uses ImageIO metadata inspection without decoding full-resolution pixels
 or invoking Python. MOV/MP4/M4V movies and MP3/M4A/WAV/AIFF/CAF audio now load track metadata
 through AVFoundation, so these H3 reference assets can also be linked when Python is unavailable.
-Other formats, text and LoRA files still use the existing inspection bridge. Importing a linked
+Supported native H3/LTX SafeTensors LoRAs use bounded header inspection without Python.
+Other formats, text and adapters outside that native path still use the existing inspection bridge.
+Importing a linked
 asset does not establish that its codec or duration is valid for a specific generation task;
 the selected worker checks that during preparation.
 To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import up to nine
@@ -1298,8 +1300,10 @@ dense full-width T2VA checkpoint, no LoRAs or motion context, strength from 0 to
 side at most 2,048 and total canvas pixels at most 768 × 1,344. Task controls are validated. A direct 384 × 256, 73-frame test at 24 fps completed in 663.45 seconds with 32 kHz
 stereo audio, four decoded previews and staged release. Peak Swift-worker footprint was 11.80 GB,
 excluding FFmpeg. It used four Euler evaluations without a Turbo adapter; the result has not
-received visual/control-quality approval. Installed Studio lifecycle and broader quality remain
-unqualified. Follow the checkpoint's source terms in Model Setup.
+received visual/control-quality approval. That earlier direct run did not qualify Studio lifecycle.
+Current corrected packaged
+Studio/CLI/ComfyUI execution and lifecycle checks are recorded in [implementation status](../STATUS.md);
+broad control/visual quality remains unqualified. Follow the checkpoint's source terms in Model Setup.
 A separate same-guide/checkpoint encoder comparison reduced MLX stage peak from 10.71 to
 5.48 GB with byte-identical raw latents and zero residual allocations; encoding took 14.17
 versus 11.13 seconds. This control-guide-only optimization does not establish a new

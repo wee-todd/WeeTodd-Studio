@@ -28,7 +28,13 @@ The stage retained 2.582 GB of packed weights; active MLX bytes returned to the 
 after close. This is one debug-test decoder comparison, not a release-worker or whole-render
 speedup. A batch-one experiment also preserved exact output but ran alongside another GPU
 application; its timing is unqualified and the production spatial batch remains four.
-Fresh packaged generation with these changes is pending.
+The corrected packaged worker now passed Soundtrack Ref2VA and Fun ControlNet Studio
+generation, previews, acceptance and save/reopen with Python unavailable. Their native
+CLI and saved, uncached ComfyUI runs matched all three current Studio media files;
+sampling cancellation, subsequent weighted retry and zero-new-inference resume also
+passed. Other corrected H3 route qualifications remain pending. These functional checks
+do not establish voice likeness, intelligibility, Fun control/visual quality or matched
+useful-size performance; the broad release gates remain unchanged.
 
 Swift native route qualification 2026-10-02 (experimental): the final packaged MLX
 workers completed Studio-exported CLI generation for LTX T2V, I2V, FFLF, A2V,
@@ -75,8 +81,9 @@ All six typed H3 movie/audio/soundtrack Ref2VA, independent A2V, external-after 
 cases passed preparation/export checks. A2V, external-after, movie and standalone-audio
 Ref2VA additionally passed actual typed Studio generation, previews, acceptance and
 save/reopen with Python unavailable. These four runs used the earlier worker; they do not
-qualify the subsequent conditioning or decoder changes. Soundtrack and Fun remain
-preparation-only in this typed batch; their older direct runs remain separate evidence.
+qualify the subsequent conditioning or decoder changes. Soundtrack and Fun were
+preparation-only at that typed-batch checkpoint; the corrected packaged execution checks
+at the top now qualify their host/lifecycle routes. Their older direct runs remain separate evidence.
 
 The final packaged one-still H3 Ref2VA CLI run used the installed LightX four-step
 adapter at 608 × 352/73 frames, retained four decoded previews and all weighted release
@@ -159,7 +166,9 @@ branch accepts one preprocessed Canny/depth/HED/MLSD/pose video. A direct 384 ×
 73-frame/24-fps Canny test produced synchronized 32 kHz stereo audio, four decoded
 previews and staged release in 663.45 seconds at an 11.80 GB Swift-worker peak,
 excluding FFmpeg. Four Euler evaluations without Turbo establish route execution;
-the output is not quality-approved. Studio lifecycle and broad control quality remain open.
+the output is not quality-approved. Studio lifecycle was open at this direct-worker
+checkpoint; the corrected packaged host/lifecycle checks are recorded at the top. Broad
+control quality remains open.
 A separate same-guide/checkpoint encoder comparison reduced MLX stage peak from 10.71 to
 5.48 GB with byte-identical raw latents and zero residual allocations; encoding took 14.17
 versus 11.13 seconds. This control-guide-only optimization does not establish a new
@@ -1912,7 +1921,7 @@ contracts; it does not establish that every workflow has local models and select
 | Engine | Implemented | Qualification limits |
 | --- | --- | --- |
 | H3 | T2V, endpoint/timed frames, multimodal Ref2VA, audio-driven Ref2VA, external extension, generic LoRAs, FastH3 and VDN variants | Native Ref2VA A2V and extension have real renders. Extension visual quality needs further qualification. Accelerator/task combinations are gated. A2V generates a new soundtrack. |
-| H3 Fun ControlNet | Loader, preprocessing boundary, native Swift control execution, nodes and headless transport | One direct 384×256/73-frame Canny native render completed with audio, previews and stage release. Four evaluations without Turbo qualify execution only; visual/control quality and Studio lifecycle remain open. Checkpoint terms remain separate. |
+| H3 Fun ControlNet | Loader, preprocessing boundary, native Swift control execution, nodes and headless transport | One direct 384×256/73-frame Canny native render completed with audio, previews and stage release. Four evaluations without Turbo qualify execution only; corrected packaged Studio/CLI/ComfyUI lifecycle checks are recorded at the top. Visual/control quality remains open. Checkpoint terms remain separate. |
 | LTX 2.3 | T2V, keyframes, A2V, Ingredients, Union/Motion controls, generic LoRAs, Dev/distilled video extension | Conditioned renders and longer distilled extension have evidence. Generic LoRAs support resident and streamed paths; specialized control combinations remain separately gated. |
 | LTX 2.5 | T2V, keyframes, A2V, Ingredients/MSR, IC controls, external extension, refinement/upscaling, LoRAs | Full-length MSR, short extension and direct-worker temporal DFR have route evidence. Temporal DFR is not a production default. Every adapter/precision/task combination is not qualified. |
 

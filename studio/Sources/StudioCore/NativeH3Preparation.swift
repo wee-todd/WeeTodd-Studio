@@ -383,6 +383,27 @@ public enum NativeH3Preparation {
     report["resolvedFingerprint"]=try fingerprint(["recipe":recipe,"continuity":dependency])
     return ["recipe":recipe,"report":report]
   }
+  private static func isCompleteReferencePrompt(_ text: String) -> Bool {
+    let headings = ["subject_definitions:", "summary:", "retention_analysis:",
+      "detailed_description:", "overall_soundscape:", "non_diegetic_music:"]
+    var nextHeading = 0, hasBody = false
+    for rawLine in text.components(separatedBy: .newlines) {
+      let line = rawLine.trimmingCharacters(in: .whitespaces)
+      if line.isEmpty { continue }
+      if let index = headings.firstIndex(where: { line.hasPrefix($0) }) {
+        // Complete reference sections start at line boundaries, in the official order.
+        // A quoted heading substring or an empty/partial section is ordinary prompt text.
+        guard index == nextHeading, nextHeading == 0 || hasBody else { return false }
+        nextHeading += 1
+        hasBody = !String(line.dropFirst(headings[index].count))
+          .trimmingCharacters(in: .whitespaces).isEmpty
+      } else {
+        guard nextHeading > 0 else { return false }
+        hasBody = true
+      }
+    }
+    return nextHeading == headings.count && hasBody
+  }
   public static func compose(request: [String: Any]) throws -> [String: Any] {
     guard try frameRequest(request) == nil,try extensionRequest(request) == nil else {
       throw StudioError.invalid("Frame continuity and extension require native media preparation before composing a runnable recipe.")
@@ -400,7 +421,8 @@ public enum NativeH3Preparation {
     let text = clip.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { throw StudioError.invalid("Write a prompt before preparing the render.") }
     let prompt: String
-    if text.hasPrefix("integrated_multimodal_description:") || text.contains("[video continuation") {
+    if isCompleteReferencePrompt(text) || text.hasPrefix("integrated_multimodal_description:")
+      || text.contains("[video continuation") {
       prompt = text
     } else if ["integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:"]
       .allSatisfy({ text.contains($0) }) {
