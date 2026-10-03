@@ -17,10 +17,10 @@ struct RuntimeSettings: Codable {
   var drawThingsHelperPath: String?
   var ltx25WorkerPath: String?
   var nativeLTX25Enabled: Bool?
-  var usesNativeLTX25: Bool { nativeLTX25Enabled ?? (ltx25WorkerPath != nil) }
+  var usesNativeLTX25: Bool { nativeLTX25Enabled ?? true }
   var h3WorkerPath: String?
   var nativeH3Enabled: Bool?
-  var usesNativeH3: Bool { nativeH3Enabled == true }
+  var usesNativeH3: Bool { nativeH3Enabled ?? true }
   var acceleration: AccelerationSettings?
   var loraFolders: [LoRAFolder]?
   var voiceModels: VoiceModelSettings?
@@ -29,6 +29,10 @@ struct RuntimeSettings: Codable {
   var nativeRippleEnabled: Bool?
   var generationSettings: Self {
     var value = self
+    // Freeze the resolved backend in execution identity while keeping an
+    // absent saved preference distinct from an explicit legacy opt-out.
+    value.nativeH3Enabled = usesNativeH3
+    value.nativeLTX25Enabled = usesNativeLTX25
     value.loraFolders = nil
     value.voiceModels = nil
     value.rippleAdapterPath = nil
@@ -837,6 +841,10 @@ extension Encodable {
           info = still
         } else if let media = try await NativeAssetInspection.inspectAVMedia(url) {
           info = media
+        } else if url.pathExtension.lowercased() == "safetensors",
+          NativeLoRAImport.usesNative(runtime: runtime, modelHint: loraModel, selectedEngine: selectedClip?.engine) {
+          info = try await NativeLoRAImport.inspect(url, modelHint: loraModel,
+            profile: loraProfile)
         } else {
           info = try await bridge.invoke("inspect", runtime: runtime, payload: inspection)
         }

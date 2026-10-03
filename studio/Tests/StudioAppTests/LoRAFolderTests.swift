@@ -40,6 +40,9 @@ final class LoRAFolderTests: XCTestCase {
         return ["entries": [["name": "Style", "path": "/tmp/style.safetensors",
           "sourceFolder": "/tmp", "status": "ready", "loraModel": "ltx25"]], "warnings": []]
       })
+    // This fixture exercises the explicit legacy bridge, not the native index.
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
+    store.runtime.pythonPath = "/usr/bin/python3"
     store.project.clips = [Clip(engine: .ltx25)]
     store.selectedClipID = store.project.clips[0].id
     let before = store.project
@@ -64,6 +67,8 @@ final class LoRAFolderTests: XCTestCase {
         return ["entries": [["name": "Stale", "path": "/tmp/stale.safetensors",
           "sourceFolder": "/tmp", "status": "ready", "loraModel": "h3"]], "warnings": []]
       })
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
+    store.runtime.pythonPath = "/usr/bin/python3"
     await store.refreshLoRAFolders()
     XCTAssertTrue(store.folderLoRAEntries.isEmpty)
   }

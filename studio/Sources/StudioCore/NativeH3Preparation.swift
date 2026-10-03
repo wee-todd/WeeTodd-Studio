@@ -101,7 +101,7 @@ public enum NativeH3Preparation {
     }
     return recipe
   }
-  private static func supportedTurboLoRA(_ value: Any?) -> Bool {
+  private static func supportedLoRA(_ value: Any?) -> Bool {
     guard let entries = value as? [[Any]], entries.count <= 4 else { return value == nil }
     var paths = Set<String>()
     for pair in entries {
@@ -155,7 +155,7 @@ public enum NativeH3Preparation {
       (components["fun_controlnet"] == nil || (modelTask == "t2va" &&
         (components["fun_controlnet"] as? String)?.hasPrefix("/") == true &&
         emptyProfileLoRA(components["loras"]) && recipe["loras"] == nil)),
-      supportedTurboLoRA(components["loras"]),
+      supportedLoRA(components["loras"]),
       (recipe["loras"] == nil || (emptyProfileLoRA(components["loras"]) &&
         rootTurboLoRA(recipe["loras"]) != nil)),
       let config = recipe["config"] as? [String: Any],
@@ -417,7 +417,7 @@ public enum NativeH3Preparation {
       throw unsupported("duration, dimensions or seed are outside the H3 contract")
     }
     var config = recipe["config"] as! [String: Any]
-    let steps: Int
+    var steps: Int
     if let evaluations = clip.generationSelection?.steps {
       guard (1...99).contains(evaluations) else {
         throw unsupported("model evaluations must be between 1 and 99")
@@ -434,11 +434,13 @@ public enum NativeH3Preparation {
     recipe["config"] = config; recipe["prompt"] = prompt
     var components = recipe["components"] as! [String: Any]
     var loras = components["loras"] as? [[Any]] ?? []
+    var selectedLoRAProfiles: [String: String] = [:]
     if let legacyStack = recipe.removeValue(forKey: "loras") {
       guard loras.isEmpty, let adapter = rootTurboLoRA(legacyStack) else {
         throw unsupported("the profile adapter cannot be mapped to the Swift Turbo reader")
       }
       loras.append(adapter)
+      selectedLoRAProfiles[try canonical(adapter[0] as! String)] = "turbo"
     }
     if let tokenizer = components["tokenizer"] as? String {
       let tokenFile = URL(fileURLWithPath: tokenizer).appendingPathComponent("tokenizer.json")
@@ -549,17 +551,17 @@ public enum NativeH3Preparation {
         continue
       }
       guard loras.count < 4 else {
-        throw unsupported("select at most four Turbo LoRAs, including profile adapters")
+        throw unsupported("select at most four H3 LoRAs, including profile adapters")
       }
       try LoRAMember(asset: asset, strength: attachment.strength).validate(for: .h3)
       guard asset.loraAdalnInputGrid == nil,
         asset.loraLayout == nil || asset.loraLayout == "contiguous_qkv",
-        asset.loraProfile == nil || asset.loraProfile == "turbo" else {
+        asset.loraProfile == nil || ["standard", "turbo"].contains(asset.loraProfile!) else {
         throw unsupported("this H3 LoRA requires a different layout or adapter profile")
       }
       let adapterPath = try canonical(asset.path)
       guard FileManager.default.isReadableFile(atPath: adapterPath) else {
-        throw StudioError.invalid("Relink the H3 Turbo LoRA: \(asset.name)")
+        throw StudioError.invalid("Relink the H3 LoRA: \(asset.name)")
       }
       let normalizedPath = URL(fileURLWithPath: adapterPath).standardizedFileURL.path
       guard !loras.contains(where: {
@@ -569,8 +571,38 @@ public enum NativeH3Preparation {
         throw unsupported("the same H3 LoRA is attached more than once")
       }
       loras.append([adapterPath, attachment.strength])
+      selectedLoRAProfiles[adapterPath] = asset.loraProfile
     }
-    if !loras.isEmpty { components["loras"] = loras }
+    if !loras.isEmpty {
+      var paths = Set<String>()
+      var hasTurbo = false
+      for index in loras.indices {
+        let path = try canonical(loras[index][0] as! String)
+        guard paths.insert(path).inserted else {
+          throw unsupported("the same H3 LoRA is attached more than once")
+        }
+        loras[index][0] = path
+        let selectedProfile = selectedLoRAProfiles[path]
+        let metadata = try NativeLoRAInspection.inspect(URL(fileURLWithPath: path),
+          modelHint: .h3, selectedH3Profile: selectedProfile)
+        hasTurbo = hasTurbo || selectedProfile == "turbo" || metadata["loraProfile"] as? String == "turbo"
+      }
+      // Studio Steps are evaluations; the native recipe stores one extra sigma point.
+      // An ordinary profile default is not an explicit user override of Turbo's schedule.
+      if hasTurbo, clip.generationSelection?.steps == nil { steps = 5 }
+      for pair in loras {
+        let path = pair[0] as! String
+        let metadata = try NativeLoRAInspection.validateH3Sampling(path: path,
+          selectedProfile: selectedLoRAProfiles[path], schedulePoints: steps)
+        guard metadata["loraModel"] as? String == "h3",
+          metadata["loraRequiresAdalnGrid"] as? Bool != true,
+          metadata["loraLayout"] == nil || metadata["loraLayout"] as? String == "contiguous_qkv" else {
+          throw unsupported("this H3 LoRA requires a different training model, layout or AdaLN grid")
+        }
+      }
+      config["steps"] = steps; recipe["config"] = config
+      components["loras"] = loras
+    }
     recipe["components"] = components
     if let motion { recipe["continuation"]=motion.contract }
     if clip.inferredTask == "control" {

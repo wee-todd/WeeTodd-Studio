@@ -229,7 +229,12 @@ import UniformTypeIdentifiers
             throw invalid("An H3 A2V opening image changed after preparation.")
           }
           sourceImages.append(["path": path, "sha256": expectedSHA256,
-            "kind": "image", "anchor": 0])
+            "kind": "image", "anchor": 0,
+            "preparedWidth": loaded.reference.width,
+            "preparedHeight": loaded.reference.height,
+            "preparedRGBSHA256": loaded.preparedSHA256,
+            "preparationPolicy": H3StillReferenceMedia.preparationPolicy,
+            "sourceOrientation": loaded.sourceOrientation])
           return .image(loaded.reference)
         }
         let audio = try H3AudioReferenceMedia.load(path: path,
@@ -262,7 +267,12 @@ import UniformTypeIdentifiers
           }
           sourceImages.append(["path": path, "sha256": image.sourceSHA256,
             "kind": "image", "width": image.sourceWidth,
-            "height": image.sourceHeight])
+            "height": image.sourceHeight,
+            "preparedWidth": image.reference.width,
+            "preparedHeight": image.reference.height,
+            "preparedRGBSHA256": image.preparedSHA256,
+            "preparationPolicy": H3StillReferenceMedia.preparationPolicy,
+            "sourceOrientation": image.sourceOrientation])
           return .image(image.reference)
         }
         if kind == "audio" {

@@ -1,5 +1,35 @@
 # WeeTodd Studio implementation status
 
+Swift native defaults and H3 corrections 2026-10-02: absent H3/LTX 2.5 backend
+preferences now select Swift; saved explicit false preferences retain legacy Python.
+Missing workers and incompatible native tasks fail without fallback. Native LoRA import
+and folder scans inspect bounded SafeTensors headers in place without Python or weight
+copies. The installed 1.96 GB LightX adapter passed actual Studio import/scan/save tests
+using its 73 KB header. Native scene frame-match conversion freezes the last frame strictly
+inside the visible source trim and retains source/image hashes. Real-media trim, mutation,
+cancellation, no-overwrite and save/reopen tests pass without Python.
+H3 standard adapters retain their sampling count. Explicit or metadata-declared Turbo
+resolves four evaluations/five sigma points when no editor override exists; incompatible
+explicit settings or declared counts fail before weighted work. Studio import/preparation
+and all four H3 runner preflights have focused header-admission regressions.
+
+H3 Qwen still normalization now uses mean/std 0.5. Orientation-aware preparation chooses
+a 32-pixel canvas close to the source aspect within the existing 65,536-pixel budget.
+Ref2VA applies 0.999 visual noise augmentation and restores the owned Python MLX
+condition-video/target-video/target-audio draw order; seeded PyTorch parity is not claimed.
+Audio-only target initialization and clean saved-latent continuation remain unchanged.
+Focused CPU golden tests pass; earlier Ref2VA media do not qualify these corrected algorithms.
+
+H3 video decode now retains packed Q8 weights for one decode stage and releases them before
+audio decode, including throwing/cancelled exits. An installed decoder-only comparison on
+the same saved 124-frame 768 × 448 latents produced identical float32 chunks and RGB24 bytes.
+Legacy/resident decode took 180.705/69.738 seconds, with per-pass MLX peaks 1.832/4.455 GB.
+The stage retained 2.582 GB of packed weights; active MLX bytes returned to the prior baseline
+after close. This is one debug-test decoder comparison, not a release-worker or whole-render
+speedup. A batch-one experiment also preserved exact output but ran alongside another GPU
+application; its timing is unqualified and the production spatial batch remains four.
+Fresh packaged generation with these changes is pending.
+
 Swift native route qualification 2026-10-02 (experimental): the final packaged MLX
 workers completed Studio-exported CLI generation for LTX T2V, I2V, FFLF, A2V,
 Ingredients, Union, after-extension, motion continuation, Motion Track, CrossView,
@@ -10,8 +40,9 @@ audio and muxed-media hashes. Spatial DFR matches its new Studio execution, whil
 its older direct baseline differs despite matching request fields; that discrepancy
 remains unqualified. Spatial and two-round temporal DFR also passed actual Studio
 previews, acceptance, saving and reopening. The six-shot windowed CLI scene retains
-one shared take and all five-second shot ranges over 30 seconds; this is not a new
-weighted Studio execution of that long scene. Saved I2V, A2V, after/motion and Motion
+one shared take and all five-second shot ranges over 30 seconds. A fresh typed Studio
+execution also passed 720 frames, stereo audio, four previews, acceptance and save/reopen,
+with all three media files matching the current CLI and saved ComfyUI outputs. Saved I2V, A2V, after/motion and Motion
 Track ComfyUI graphs ran uncached and matched their respective frozen media.
 Ingredients, Union and LTX after/motion first-block sampling cancellation exited 130
 without published output or staging residue; allocator-zero was not measured.
@@ -40,8 +71,12 @@ four full evaluations and all five applicable releases, then passed accepted-pro
 and zero-new-inference resume. Worker execution took 562.18 seconds at a 5.76 GB process peak,
 excluding FFmpeg. Its three media files differ from the older Studio take anchored at frame 123;
 exact old parity and matched speed are not established. Visible endpoint review remains open.
-Six typed H3 movie/audio/soundtrack Ref2VA, independent A2V, external-after and Fun cases now
-have preparation-only Studio/export checks; those checks do not establish weighted execution.
+All six typed H3 movie/audio/soundtrack Ref2VA, independent A2V, external-after and Fun
+cases passed preparation/export checks. A2V, external-after, movie and standalone-audio
+Ref2VA additionally passed actual typed Studio generation, previews, acceptance and
+save/reopen with Python unavailable. These four runs used the earlier worker; they do not
+qualify the subsequent conditioning or decoder changes. Soundtrack and Fun remain
+preparation-only in this typed batch; their older direct runs remain separate evidence.
 
 The final packaged one-still H3 Ref2VA CLI run used the installed LightX four-step
 adapter at 608 × 352/73 frames, retained four decoded previews and all weighted release

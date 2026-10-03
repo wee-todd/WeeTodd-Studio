@@ -83,7 +83,8 @@ public enum H3FL2VARunner {
     try H3VideoVAEEncoder.preflight(checkpointURL: base.videoVAE)
     _ = try H3AudioVAELayout(url: base.audioVAE)
     for adapter in base.loRAAdapters {
-      _ = try H3LoRAFile(url: adapter.url, strength: adapter.strength)
+      _ = try H3LoRAFile(url: adapter.url, strength: adapter.strength,
+        requestedSteps: base.requestedSteps)
     }
     return Admission(geometry: base.geometry, packedRows: layout.tags.count,
       evaluations: video.timesteps.count, textRows: qwen.tags.count,

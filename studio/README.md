@@ -11,8 +11,10 @@ direction and backend choices. This is a source-build preview, not a notarized c
 
 ## Start here
 
-Source builds include a Swift MLX LTX 2.5 worker. In Runtime Settings, **Use Swift MLX for
-LTX 2.5** selects native distilled 8 + 3 step T2V, first-image, first/last-frame and
+Source builds include Swift MLX H3 and LTX 2.5 workers, selected by default for supported
+jobs. Runtime Settings retains explicit legacy Python selections. Missing native workers
+and unsupported native tasks fail without automatic Python fallback. The LTX 2.5 worker
+supports native distilled 8 + 3 step T2V, first-image, first/last-frame and
 single-audio-driver A2V rendering with an optional first-frame image and compatible
 standard LoRAs, including LTX 2.3 adapters. Continuous scenes of
 two to six shots with identical effective components and sampling settings also use Swift.
@@ -60,6 +62,12 @@ Native movie inspection uses AVFoundation. Supported LTX profile discovery and p
 also run in Swift without a Python installation. Imported distilled recipes and already linked
 assets can be prepared, rendered and accepted directly. Standard LoRA headers are inspected
 without loading weights; compatible LTX 2.3 adapters retain their order and strength.
+Native H3/LTX LoRA import and folder scanning use bounded SafeTensors headers without
+Python or weight copies. H3 standard adapters retain the selected sampling count;
+Turbo requires four evaluations (five sigma points). Applying Turbo supplies that default
+when no explicit Steps override exists; incompatible overrides fail before model loading.
+Preserving Match previous frame when connecting LTX 2.5 shots freezes the accepted source's
+last visible frame through Swift media APIs, retaining its source trim, timestamp and hashes.
 Final isolated-app checks completed T2V, first-image I2V and first/last-frame FFLF through
 prepare, decoded previews, render, acceptance, project save and reopen with Python unavailable.
 For each checked recipe, the raw movie matched its headless and recipe-backed ComfyUI Swift run
@@ -162,9 +170,9 @@ anchors the new shot to its final frame and generates a new soundtrack. This rou
 only new frames, starting at source offset zero; the source take remains unchanged. Extra media,
 saved motion context and before-extension are rejected. Extension quality and matched speed
 and memory remain under qualification.
-The off-by-default Swift preparation path validates clip inputs, ordered references and profile
-settings, then requires worker preflight before a take can render. Enable **Use Swift MLX for H3
-(experimental)** in Runtime Settings to try text-to-AV, timed keyframes, or ordered Ref2VA with
+The default Swift preparation path validates clip inputs, ordered references and profile
+settings, then requires worker preflight before a take can render. **Use Swift MLX for H3
+(default)** in Runtime Settings selects text-to-AV, timed keyframes, or ordered Ref2VA with
 up to nine still images, three movies and three audio-bearing references. A movie
 contributes its first 7.3 seconds, resampled to 24 fps and trimmed to the VAE clip grid;
 an embedded soundtrack from that interval contributes sound-reference latents.
@@ -1662,13 +1670,17 @@ motion continuation, Motion Track, CrossView, spatial DFR, both temporal DFR rou
 full/windowed scenes, with accepted-project reopening and zero-new-generation resume.
 Current matching baselines retained media hashes; spatial DFR matches its new Studio take,
 while its older direct baseline differs despite matching request fields. The 30-second,
-six-shot windowed scene preserves one shared take and all member ranges; it is not a new
-weighted Studio execution of that long scene. Ordinary H3 T2VA and motion-continuation CLI
+six-shot windowed scene passed fresh Studio generation, four previews, acceptance and
+save/reopen, preserving one shared take and all member ranges. Its three media files match
+current CLI and saved ComfyUI outputs. Ordinary H3 T2VA and motion-continuation CLI
 matched accepted Studio media and passed reopening/resume. H3 FFLF CLI also completed with
 seven previews and all applicable releases, then reopened/resumed, but its last anchor is
 frame 119 rather than the older Studio take's 123. Its media differs, and visible endpoint
-review, exact old parity and matched speed remain open. Six other typed H3 routes have
-preparation/export checks only. These checks leave broad identity, seam and audio quality
+review, exact old parity and matched speed remain open. All six other typed H3 routes have
+preparation/export checks; A2V, external-after, movie and standalone-audio Ref2VA also passed
+actual typed Studio generation, previews, acceptance and save/reopen with the earlier worker.
+Corrected H3 conditioning and decoder changes still require fresh packaged execution.
+These checks leave broad identity, seam and audio quality
 and matched useful-size performance open.
 
 Other backend selections retain the existing `weetodd-studio-job-v1`–`v4` Python-hosted export and

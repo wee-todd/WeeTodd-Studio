@@ -146,7 +146,7 @@ public enum H3Ref2VAStillRunner {
     }
     for adapter in request.loRAAdapters {
       _ = try H3LoRAFile(url: adapter.url,
-        strength: adapter.strength)
+        strength: adapter.strength, requestedSteps: request.requestedSteps)
     }
     return Admission(geometry: request.geometry,
       textRows: prepared.qwenRequest.tags.count,
@@ -221,30 +221,22 @@ public enum H3Ref2VAStillRunner {
           progress("transformer_prepare", completed, total)
         }
       defer { state.unload() }
-      let noise = try H3Noise.make(seed: request.seed,
+      let initial = try H3Noise.makeReference(seed: request.seed,
+        conditionVideo: conditionVideoRows, conditionAudio: conditionAudioRows,
         videoLatentFrames: geometry.videoLatentFrames,
-        latentHeight: geometry.height / 16,
-        latentWidth: geometry.width / 16,
+        latentHeight: geometry.height / 16, latentWidth: geometry.width / 16,
         audioLatentFrames: geometry.audioLatentFrames)
-      let conditionCount = admission.layout.conditionVideoIndices.count
-      let video = concatenated([
-        MLXArray(conditionVideoRows, [1, conditionCount, 96]), noise.video
-      ], axis: 1)
-      let audio = conditionAudioRows.isEmpty ? noise.audio : concatenated([
-        MLXArray(conditionAudioRows,
-          [1, admission.layout.conditionAudioIndices.count, 32]), noise.audio
-      ], axis: 1)
       let sampled = try H3ReferenceSampler.run(predictor: state,
         videoSchedule: admission.videoSchedule,
         audioSchedule: admission.audioSchedule,
         rowSchedule: admission.rowSchedule,
-        videoLatents: video, audioLatents: audio,
+        videoLatents: initial.video, audioLatents: initial.audio,
         progress: { completed, total in progress("sampling", completed, total) },
         blockProgress: { step, completed, total in
           progress("sampling_block_\(step)", completed, total)
         })
       let targetVideo = sampled.video[0..<1,
-        conditionCount..<admission.layout.videoIndices.count, 0..<96]
+        admission.layout.conditionVideoIndices.count..<admission.layout.videoIndices.count, 0..<96]
       let targetAudio = sampled.audio[0..<1,
         admission.layout.conditionAudioIndices.count..<admission.layout.audioIndices.count,
         0..<32]

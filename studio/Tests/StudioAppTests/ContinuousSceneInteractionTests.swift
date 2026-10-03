@@ -233,6 +233,7 @@ final class ContinuousSceneInteractionTests: XCTestCase {
     bridge.video = folder.appendingPathComponent("scene.mp4").path
     try Data("test-artifact".utf8).write(to: URL(fileURLWithPath: bridge.video))
     let store = StudioStore(dataDirectory: folder, restoreSession: false, invocation: bridge.invoke)
+    store.runtime.nativeLTX25Enabled = false
     var first = Clip(name: "Start", engine: .ltx25)
     first.prompt = "Robot raises the lantern."
     first.sourcePath = "/tmp/prior-start.mp4"

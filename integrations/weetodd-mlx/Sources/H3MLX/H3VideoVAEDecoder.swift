@@ -64,7 +64,8 @@ public enum H3VideoVAEDecoder {
     return count == current.shape[axis] ? leading : concatenated([leading, rest], axis: axis)
   }
 
-  private static func decodeClip(checkpointURL: URL, latent: MLXArray) throws -> MLXArray {
+  private static func decodeClip(checkpointURL: URL, latent: MLXArray,
+    session: H3VideoVAEDecodeSession?, spatialBatchSize: Int) throws -> MLXArray {
     let y = splitTiles(latent.shape[2] * 16)
     let x = splitTiles(latent.shape[3] * 16)
     let count = y.starts.count * x.starts.count
@@ -72,7 +73,8 @@ public enum H3VideoVAEDecoder {
       throw H3CheckpointError.invalid("H3 video VAE needs more than 64 spatial tiles.")
     }
     if count == 1 {
-      return try H3VideoVAETileDecoder.decode(checkpointURL: checkpointURL, latent: latent)
+      return try H3VideoVAETileDecoder.decode(checkpointURL: checkpointURL,
+        latent: latent, session: session, observe: { _, _ in })
     }
     var inputs: [MLXArray] = []
     for row in y.starts.indices {
@@ -84,12 +86,13 @@ public enum H3VideoVAEDecoder {
       }
     }
     var outputs: [MLXArray] = []
-    for start in stride(from: 0, to: count, by: 4) {
+    for start in stride(from: 0, to: count, by: spatialBatchSize) {
       try Task.checkCancellation()
-      let end = min(start + 4, count)
+      let end = min(start + spatialBatchSize, count)
       let batch = concatenated(Array(inputs[start..<end]), axis: 0)
       let decoded = try H3VideoVAETileDecoder.decode(
-        checkpointURL: checkpointURL, latent: batch)
+        checkpointURL: checkpointURL, latent: batch, session: session,
+        observe: { _, _ in })
       for index in 0..<(end - start) {
         let tile = decoded[index..<(index + 1), 0..<decoded.shape[1],
           0..<decoded.shape[2], 0..<decoded.shape[3], 0..<3]
@@ -139,14 +142,40 @@ public enum H3VideoVAEDecoder {
 
   public static func decodeChunks(checkpointURL: URL, latent: MLXArray,
     onChunk: (MLXArray) throws -> Void) throws {
-    guard latent.ndim == 5, latent.shape[0] == 1,
+    try decodeChunks(checkpointURL: checkpointURL, latent: latent,
+      retainWeights: true, onChunk: onChunk)
+  }
+
+  /// The legacy streamed-weight path remains available internally for exact
+  /// decoder-only qualification against the same saved latent input.
+  static func decodeChunks(checkpointURL: URL, latent: MLXArray,
+    retainWeights: Bool,
+    spatialBatchSize: Int = 4,
+    onSessionClosed: (H3VideoVAEDecodeSession.Statistics) -> Void = { _ in },
+    onChunk: (MLXArray) throws -> Void) throws {
+    guard (1...4).contains(spatialBatchSize), latent.ndim == 5, latent.shape[0] == 1,
       (7...128).contains(latent.shape[1]),
       (1...256).contains(latent.shape[2]),
       (1...256).contains(latent.shape[3]),
       latent.shape[4] == 24, latent.dtype == .float32 else {
       throw H3CheckpointError.invalid("Invalid H3 video VAE temporal decode geometry.")
     }
-    _ = try H3VideoVAELayout(url: checkpointURL)
+    if retainWeights {
+      try H3VideoVAEDecodeSession.withSession(checkpointURL: checkpointURL,
+        onClose: onSessionClosed) { session in
+        try decodeChunks(checkpointURL: checkpointURL, latent: latent,
+          session: session, spatialBatchSize: spatialBatchSize, onChunk: onChunk)
+      }
+    } else {
+      _ = try H3VideoVAELayout(url: checkpointURL)
+      try decodeChunks(checkpointURL: checkpointURL, latent: latent,
+        session: nil, spatialBatchSize: spatialBatchSize, onChunk: onChunk)
+    }
+  }
+
+  private static func decodeChunks(checkpointURL: URL, latent: MLXArray,
+    session: H3VideoVAEDecodeSession?, spatialBatchSize: Int,
+    onChunk: (MLXArray) throws -> Void) throws {
     let originalTokens = latent.shape[1]
     let chunkTokens = 5
     let tokenDrop = 3
@@ -190,6 +219,7 @@ public enum H3VideoVAEDecoder {
     var overlap: MLXArray?
     for index in 0..<chunkCount {
       try Task.checkCancellation()
+      try session?.checkUnchanged()
       let start = index * chunkTokens
       let end = start + chunkTokens + tokenOverlap
       guard end <= totalTokens else {
@@ -197,7 +227,8 @@ public enum H3VideoVAEDecoder {
       }
       let clip = try decodeClip(checkpointURL: checkpointURL,
         latent: padded[0..<1, start..<end,
-          0..<latent.shape[2], 0..<latent.shape[3], 0..<24])
+          0..<latent.shape[2], 0..<latent.shape[3], 0..<24], session: session,
+        spatialBatchSize: spatialBatchSize)
       for part in 0..<2 {
         let frameStart = part * chunkFrames
         let frameEnd = min(frameStart + chunkFrames, clip.shape[1])
@@ -231,5 +262,7 @@ public enum H3VideoVAEDecoder {
     }
     eval(last)
     try onChunk(last)
+    try session?.checkUnchanged()
+    try Task.checkCancellation()
   }
 }

@@ -67,14 +67,18 @@ Ingredients, Union, after-extension, motion continuation, Motion Track, CrossVie
 both temporal DFR round counts and full/windowed scenes, with accepted-project reopening
 and no-inference resume. Spatial DFR matches its new Studio take; its older direct baseline
 differs despite matching request fields. The 30-second windowed scene preserves one shared
-take and every member range; this is not a new weighted Studio execution of that long scene.
+take and every member range. Fresh Studio generation also passed four previews, acceptance
+and save/reopen, with all three media matching current CLI and saved ComfyUI outputs.
 Ordinary H3 T2VA and motion-continuation CLI runs matched their accepted Studio media,
 reopened the projects and resumed without inference. H3 FFLF CLI also completed and passed
 reopening/resume with anchors at frames 0/119, seven previews and complete release logs.
 Its media differs from the older Studio take anchored at frame 123; exact old parity,
 matched speed and visible endpoint approval are not established. Movie/audio/soundtrack
 Ref2VA, independent A2V, external-after and Fun have
-separate typed preparation/export checks; those checks do not establish execution.
+separate typed preparation/export checks. A2V, external-after, movie and standalone-audio
+Ref2VA also passed actual typed Studio generation, previews, acceptance and save/reopen
+through the earlier worker. Corrected conditioning and decoder changes require fresh
+packaged execution.
 Matched useful-size speed/memory and broad identity, seam and audio quality remain open.
 These checks do not qualify all native tasks. See [execution, supported finishing and qualification](../../studio/README.md#headless-movie-and-clip-jobs).
 

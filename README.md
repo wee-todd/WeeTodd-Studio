@@ -227,8 +227,10 @@ this checks one compatible adapter and recipe, not every LTX 2.3 LoRA.
 
 An experimental Swift MLX H3 worker now runs text-to-audiovisual, timed FL2VA keyframes,
 ordered image/video/audio Ref2VA and independent A2V through the installed Qwen, H3
-transformer and separate video/audio VAE components. Studio has a guarded, off-by-default
-Swift preparation and worker handoff for these tasks. It admits up to four distinct,
+transformer and separate video/audio VAE components. Studio defaults to guarded Swift
+preparation and worker execution for supported H3 and LTX 2.5 jobs. Saved explicit Python
+opt-outs remain available; missing workers and incompatible native tasks fail without
+automatic backend switching. It admits up to four distinct,
 ordered ComfyUI-format H3 LoRAs with
 independent strengths and supported projection/QKV layouts; sparse target sets and variable
 ranks are accepted. Installed converted Lightx FL2V four-step LoRAs with baked scaling
@@ -254,9 +256,10 @@ Qwen TTS voice-reference take completed 73 frames and stereo audio in 822.33 sec
 4.29 GB peak Swift process footprint. A distinct image plus audio-bearing-movie take also
 completed 73 frames with stereo audio in 841.25 seconds at an 8.10 GB peak process
 footprint; its sampled frames were stable, while speech and lip-sync quality need review.
-These differently conditioned takes are not a matched performance comparison. Enable **Use Swift
-MLX for H3 (experimental)** in Studio Runtime Settings to try it; the normal H3 route remains
-unchanged by default. A 768 × 768, five-second,
+These differently conditioned takes are not a matched performance comparison. Swift H3 is
+selected by default in Runtime Settings; turn **Use Swift MLX for H3 (default)** off only
+to select the legacy Python backend explicitly. Corrected Ref2VA output, broad audiovisual
+quality and matched useful-size performance still require fresh qualification. A 768 × 768, five-second,
 one-evaluation text-only wiring run completed in 407.7 seconds,
 with 124 decoded video frames, stereo audio within 8.3 ms of video duration, 6.98 GB peak MLX
 allocation and 7.99 GB peak worker footprint (FFmpeg excluded). Its dark output is not a
@@ -2157,13 +2160,17 @@ motion continuation, Motion Track, CrossView, spatial DFR, both temporal DFR rou
 full/windowed scenes, with accepted-project reopening and zero-new-generation resume.
 Current matching baselines retained media hashes; spatial DFR matches its new Studio take,
 while its older direct baseline differs despite matching request fields. The 30-second,
-six-shot windowed scene preserves one shared take and all member ranges; it is not a new
-weighted Studio execution of that long scene. Ordinary H3 T2VA and motion-continuation CLI
+six-shot windowed scene passed fresh Studio generation, four previews, acceptance and
+save/reopen, preserving one shared take and all member ranges. Its three media files match
+current CLI and saved ComfyUI outputs. Ordinary H3 T2VA and motion-continuation CLI
 matched accepted Studio media and passed reopening/resume. H3 FFLF CLI also completed with
 seven previews and all applicable releases, then reopened/resumed, but its last anchor is
 frame 119 rather than the older Studio take's 123. Its media differs, and visible endpoint
-review, exact old parity and matched speed remain open. Six other typed H3 routes have
-preparation/export checks only. These checks leave broad identity, seam and audio quality
+review, exact old parity and matched speed remain open. All six other typed H3 routes have
+preparation/export checks; A2V, external-after, movie and standalone-audio Ref2VA also passed
+actual typed Studio generation, previews, acceptance and save/reopen with the earlier worker.
+Corrected H3 conditioning and decoder changes still require fresh packaged execution.
+These checks leave broad identity, seam and audio quality
 and matched useful-size performance open.
 One LTX 2.5 FFLF headless recipe also completed with synchronized audio.
 The H3 and LTX workers acquire the same

@@ -19,6 +19,7 @@ public enum H3VideoVAEBlock {
 
   static func evaluate(checkpointURL: URL, index: Int,
     input: MLXArray, positions: MLXArray,
+    session: H3VideoVAEDecodeSession? = nil,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard (0..<36).contains(index), input.ndim == 3,
       (1...4).contains(input.shape[0]),
@@ -29,18 +30,31 @@ public enum H3VideoVAEBlock {
       positions.dtype == .float32 else {
       throw H3CheckpointError.invalid("Invalid H3 video VAE block input.")
     }
-    _ = try H3VideoVAELayout(url: checkpointURL)
-    let file = try SafeTensorFile(url: checkpointURL)
+    let file: SafeTensorFile?
+    if let session {
+      guard session.checkpointURL == checkpointURL else {
+        throw H3CheckpointError.invalid("H3 video decoder session checkpoint differs.")
+      }
+      try session.checkUnchanged()
+      file = nil
+    } else {
+      _ = try H3VideoVAELayout(url: checkpointURL)
+      file = try SafeTensorFile(url: checkpointURL)
+    }
     let prefix = "decoder.transformer_blocks.\(index)."
     let previousCacheLimit = Memory.cacheLimit
-    Memory.cacheLimit = 128 * 1024 * 1024
+    if session == nil { Memory.cacheLimit = 128 * 1024 * 1024 }
     defer {
-      Stream.gpu.synchronize()
-      Memory.clearCache()
-      Memory.cacheLimit = previousCacheLimit
+      if session == nil {
+        Stream.gpu.synchronize()
+        Memory.clearCache()
+        Memory.cacheLimit = previousCacheLimit
+      }
     }
     func read(_ suffix: String, shape: [Int]) throws -> MLXArray {
       let name = prefix + suffix
+      if let session { return try session.read(name, shape: shape) }
+      guard let file else { throw H3CheckpointError.invalid("Missing H3 video decoder reader.") }
       guard let descriptor = file.tensors[name], descriptor.dtype == "F16",
         descriptor.shape == shape.map(UInt64.init) else {
         throw H3CheckpointError.invalid("Missing H3 video decoder tensor: \(suffix)")
@@ -53,15 +67,20 @@ public enum H3VideoVAEBlock {
     }
     func project(_ value: MLXArray, _ suffix: String,
       rows: Int) throws -> MLXArray {
-      let projection = try H3QwenQ8Projection(file: file,
-        name: prefix + suffix + ".weight")
+      let projection: H3QwenQ8Projection
+      if let session {
+        projection = try session.projection(prefix + suffix + ".weight")
+      } else if let file {
+        projection = try H3QwenQ8Projection(file: file,
+          name: prefix + suffix + ".weight")
+      } else { throw H3CheckpointError.invalid("Missing H3 video decoder reader.") }
       guard projection.rows == rows else {
         throw H3CheckpointError.invalid("H3 video decoder projection rows changed.")
       }
       let bias = try read(suffix + ".bias", shape: [rows])
       let result = try projection.project(value) + bias
       eval(result)
-      Memory.clearCache()
+      if session == nil { Memory.clearCache() }
       try Task.checkCancellation()
       return result
     }
@@ -119,7 +138,8 @@ public enum H3VideoVAEBlock {
     let output = residual + feed * secondScale
     eval(output)
     try observe("output", output)
-    try file.checkUnchanged(at: checkpointURL)
+    if let session { try session.checkUnchanged() }
+    else { try file?.checkUnchanged(at: checkpointURL) }
     try Task.checkCancellation()
     return output
   }

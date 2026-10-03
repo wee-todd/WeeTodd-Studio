@@ -1,29 +1,36 @@
 import AVFoundation
 import Combine
 import Foundation
+import ImageIO
 import StudioCore
 import XCTest
 @testable import WeeToddStudio
 
 final class NativeH3TypedLifecycleTests: XCTestCase {
   private enum Route: String, Codable, CaseIterable {
-    case movieReference, audioReference, soundtrackReference, audioToVideo, afterExtension, funControl
-    var componentTask: String { self == .funControl ? "t2va" : "ref2va" }
+    case stillReference, movieReference, audioReference, soundtrackReference, audioToVideo, afterExtension, funControl, firstLastFrames
+    var componentTask: String {
+      self == .firstLastFrames ? "fl2va" : self == .funControl ? "t2va" : "ref2va"
+    }
+    var reportedTask: String { self == .firstLastFrames ? "fl2va" : task }
     var task: String {
       switch self {
       case .audioToVideo: return "a2v"
       case .afterExtension: return "extension"
       case .funControl: return "control"
+      case .firstLastFrames: return "fflf"
       default: return "ref2va"
       }
     }
     var kinds: [AssetKind] {
       switch self {
+      case .stillReference: return [.image]
       case .movieReference, .soundtrackReference: return [.image, .video]
       case .audioReference: return [.image, .audio]
       case .audioToVideo: return [.audio]
       case .funControl: return [.video]
       case .afterExtension: return []
+      case .firstLastFrames: return [.image, .image]
       }
     }
     var roles: [MediaRole] {
@@ -31,6 +38,8 @@ final class NativeH3TypedLifecycleTests: XCTestCase {
       case .audioToVideo: return [.audioDriver]
       case .funControl: return [.control]
       case .afterExtension: return []
+      case .stillReference: return [.reference]
+      case .firstLastFrames: return [.first, .last]
       default: return [.reference, .reference]
       }
     }
@@ -111,10 +120,63 @@ final class NativeH3TypedLifecycleTests: XCTestCase {
       var changed = clip; changed.seed += 1
       XCTAssertThrowsError(try admit(route: route, task: route.task, profile: profile, clip: changed, assets: assets))
       if !assets.isEmpty {
-        var wrong = assets; wrong[wrong.count - 1].kind = .image
+        var wrong = assets
+        wrong[wrong.count - 1].kind = wrong.last!.kind == .image ? .video : .image
         XCTAssertThrowsError(try admit(route: route, task: route.task, profile: profile, clip: clip, assets: wrong))
       }
     }
+  }
+
+  func testSingleStillNativePreparationPinsOneImageAndRejectsChangedSource() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let imageURL = root.appendingPathComponent("portrait.png")
+    let context = try XCTUnwrap(CGContext(data: nil, width: 96, height: 192, bitsPerComponent: 8,
+      bytesPerRow: 96 * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    context.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 96, height: 192))
+    let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(imageURL as CFURL, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+    try require(CGImageDestinationFinalize(destination), "CPU still fixture could not be saved.")
+    let sourceSHA = try NativeHeadlessJob.fileHash(imageURL)
+    let source = MediaAsset(name: "One still", kind: .image, path: imageURL.path)
+    var clip = Clip(engine: .h3); clip.prompt = "One frozen reference"; clip.seed = 20261002
+    clip.duration = 3; clip.generationWidth = 608; clip.generationHeight = 352
+    clip.generationSelection = GenerationSelection(task: "ref2va")
+    clip.attachments = [Attachment(assetID: source.id, role: .reference)]
+    let profile: [String: Any] = ["format": "weetodd-headless-v2", "engine": "h3", "prompt": clip.prompt,
+      "components": ["task": "ref2va", "transformer": "/unloaded/transformer.safetensors",
+        "text_encoder": "/unloaded/text", "tokenizer": "/unloaded/tokenizer.json", "vision_encoder": "/unloaded/vision.safetensors",
+        "video_vae": "/unloaded/video.safetensors", "audio_vae": "/unloaded/audio.safetensors", "loras": []],
+      "config": ["width": 608, "height": 352, "duration_seconds": 3.0, "seed": clip.seed,
+        "steps": 5, "drop_adaln": true, "sampling_method": "euler", "projection_backend": "mlx"],
+      "conditioning": ["version": 1, "task": "ref2va", "inputs": [], "audio_policy": "generated"]]
+    let profileURL = root.appendingPathComponent("profile.json")
+    try JSONSerialization.data(withJSONObject: profile).write(to: profileURL)
+    clip.profileID = profileURL.path
+    try admit(route: .stillReference, task: "ref2va", profile: profile, clip: clip, assets: [source])
+    var changed = clip; changed.attachments.append(changed.attachments[0])
+    XCTAssertThrowsError(try admit(route: .stillReference, task: "ref2va", profile: profile, clip: changed, assets: [source]))
+    changed = clip; changed.attachments[0].role = .first
+    XCTAssertThrowsError(try admit(route: .stillReference, task: "ref2va", profile: profile, clip: changed, assets: [source]))
+    var foreign = source; foreign.kind = .video
+    XCTAssertThrowsError(try admit(route: .stillReference, task: "ref2va", profile: profile, clip: clip, assets: [foreign]))
+    var project = StudioProject(); project.clips = [clip]; project.assets = [source]
+    let before = project
+    let request: [String: Any] = ["clipID": clip.id.uuidString,
+      "project": try JSONSerialization.jsonObject(with: JSONEncoder().encode(project)),
+      "runtime": ["profilesDirectory": root.path, "ffmpegPath": "/usr/bin/true"]]
+    let prepared = try NativeH3Preparation.prepare(request: request, destination: root.appendingPathComponent("prepared"))
+    let recipe = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: try XCTUnwrap(prepared["recipePath"] as? String)))) as? [String: Any])
+    let inputs = try XCTUnwrap((recipe["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]])
+    XCTAssertEqual(inputs.count, 1); XCTAssertEqual(inputs[0]["kind"] as? String, "image")
+    XCTAssertEqual(inputs[0]["role"] as? String, "reference"); XCTAssertEqual(inputs[0]["path"] as? String, imageURL.path)
+    XCTAssertEqual(inputs[0]["sha256"] as? String, sourceSHA)
+    XCTAssertEqual((recipe["config"] as? [String: Any])?["seed"] as? Int, clip.seed)
+    XCTAssertEqual(project, before)
+    try verifySources([Source(path: imageURL.path, sha256: sourceSHA)])
+    try Data([1, 2, 3]).write(to: imageURL)
+    XCTAssertThrowsError(try verifySources([Source(path: imageURL.path, sha256: sourceSHA)]))
   }
 
   private func verifySources(_ sources: [Source]) throws {
@@ -166,16 +228,39 @@ final class NativeH3TypedLifecycleTests: XCTestCase {
     let conditioning = try XCTUnwrap(expected["conditioning"] as? [String: Any])
     try require(conditioning["task"] as? String == manifest.task && conditioning["audio_policy"] as? String == "generated",
       "Preserve the frozen prepared task and generated-audio policy.")
-    let mediaPath = manifest.route == .afterExtension ? original.extensionSource
-      : try XCTUnwrap((project.assets + global).first(where: { $0.id == original.attachments.last?.assetID })).path
-    let sourceAsset = AVURLAsset(url: URL(fileURLWithPath: mediaPath))
-    let sourceVideos = try await sourceAsset.loadTracks(withMediaType: .video)
-    let sourceAudio = try await sourceAsset.loadTracks(withMediaType: .audio)
+    var sourceVideos: [AVAssetTrack] = [], sourceAudio: [AVAssetTrack] = []
+    if manifest.route == .firstLastFrames {
+      for attachment in original.attachments {
+        let imagePath = try XCTUnwrap((project.assets + global).first(where: { $0.id == attachment.assetID })).path
+        let image = try XCTUnwrap(CGImageSourceCreateWithURL(URL(fileURLWithPath: imagePath) as CFURL, nil))
+        let pixels = try XCTUnwrap(CGImageSourceCreateImageAtIndex(image, 0, nil))
+        try require(CGImageSourceGetCount(image) == 1 && pixels.width == original.generationWidth
+          && pixels.height == original.generationHeight, "Retain both frozen single-image endpoint canvases.")
+      }
+      let inputs = try XCTUnwrap(conditioning["inputs"] as? [[String: Any]])
+      try require(inputs.count == 2 && inputs[0]["frame_index"] as? Int == 0
+        && inputs[1]["frame_index"] as? Int == Int(original.duration * 24) - 1,
+        "The first/last fixture must retain frame zero and the final visible editorial endpoint.")
+    } else if manifest.route == .stillReference {
+      let path = try XCTUnwrap((project.assets + global).first(where: { $0.id == original.attachments[0].assetID })).path
+      let image = try XCTUnwrap(CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil))
+      let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(image, 0, nil) as? [CFString: Any])
+      try require(CGImageSourceGetCount(image) == 1 && (properties[kCGImagePropertyPixelWidth] as? Int ?? 0) > 0
+        && (properties[kCGImagePropertyPixelHeight] as? Int ?? 0) > 0,
+        "A still reference must remain one real image; the worker preflights its bounded oriented geometry before weights.")
+    } else {
+      let mediaPath = manifest.route == .afterExtension ? original.extensionSource
+        : try XCTUnwrap((project.assets + global).first(where: { $0.id == original.attachments.last?.assetID })).path
+      let sourceAsset = AVURLAsset(url: URL(fileURLWithPath: mediaPath))
+      sourceVideos = try await sourceAsset.loadTracks(withMediaType: .video)
+      sourceAudio = try await sourceAsset.loadTracks(withMediaType: .audio)
+    }
     switch manifest.route {
     case .movieReference: try require(!sourceVideos.isEmpty && sourceAudio.isEmpty, "The movie fixture must retain its silent source.")
     case .soundtrackReference: try require(!sourceVideos.isEmpty && !sourceAudio.isEmpty, "The soundtrack fixture must retain its actual movie/audio tracks.")
     case .audioReference, .audioToVideo: try require(sourceVideos.isEmpty && !sourceAudio.isEmpty, "The standalone audio fixture must remain audio.")
     case .afterExtension, .funControl: try require(!sourceVideos.isEmpty, "The route requires its actual source movie/guide.")
+    case .stillReference, .firstLastFrames: break // ImageIO checked still sources above; no AV substitution.
     }
     let root = URL(fileURLWithPath: manifest.output)
     try require(!FileManager.default.fileExists(atPath: root.path), "Use a fresh typed lifecycle output directory.")
@@ -187,7 +272,9 @@ final class NativeH3TypedLifecycleTests: XCTestCase {
     store.project.clips[try XCTUnwrap(store.project.clips.firstIndex(where: { $0.id == clipID }))].profileID = copied.path
     let others = store.project.clips.filter { $0.id != clipID }, originalAssets = store.project.assets
     store.runtime = RuntimeSettings(root: "/unavailable", pythonPath: "/unavailable/python", profilesDirectory: profiles.path)
-    store.runtime.nativeH3Enabled = true; store.runtime.h3WorkerPath = manifest.worker; store.runtime.ffmpegPath = manifest.ffmpeg
+    try require(store.runtime.nativeH3Enabled == nil && store.runtime.usesNativeH3,
+      "Fresh ordinary Studio settings must select native H3 without an opt-in toggle.")
+    store.runtime.h3WorkerPath = manifest.worker; store.runtime.ffmpegPath = manifest.ffmpeg
     await store.reloadProfiles(); await store.prepareSelected()
     try require(store.error == nil, store.error ?? "Preparation failed.")
     let prepared = URL(fileURLWithPath: try XCTUnwrap(store.preparedRecipe))
@@ -249,7 +336,7 @@ final class NativeH3TypedLifecycleTests: XCTestCase {
       "Published media differs from frozen geometry/aligned duration.")
     let take = URL(fileURLWithPath: version.path).deletingLastPathComponent(), receiptURL = take.appendingPathComponent("result.json")
     let receipt = try JSONSerialization.jsonObject(with: Data(contentsOf: receiptURL)) as! [String: Any]
-    try require(receipt["status"] as? String == "complete" && receipt["task"] as? String == manifest.task
+    try require(receipt["status"] as? String == "complete" && receipt["task"] as? String == manifest.route.reportedTask
       && receipt["nativeRuntime"] as? String == "swift-mlx" && receipt["frames"] as? Int == frames,
       "The published worker receipt must prove this typed execution.")
     for (url, hash) in [(prepared, preparedSHA), (take.appendingPathComponent("studio-recipe.json"), preparedSHA),

@@ -16,8 +16,8 @@ public struct H3StillReference: Sendable {
 }
 
 /// Preserves the same still order in Qwen presentation and packed H3 rows.
-/// Its current 256-pixel bound is the admitted encoder slice, not a claim
-/// that full-size Ref2VA media preparation or worker execution is complete.
+/// Each prepared still retains at most 64 visual pads on an aspect-preserving
+/// 32-pixel grid; the media adapter owns the bounded source decode.
 public enum H3StillReferencePreparation {
   public struct Prepared {
     public let qwenRequest: H3QwenRequest
@@ -75,11 +75,9 @@ public enum H3StillReferencePreparation {
     specs.reserveCapacity(references.count)
     for reference in references {
       try Task.checkCancellation()
-      guard (64...256).contains(reference.width),
-        (64...256).contains(reference.height),
-        reference.width.isMultiple(of: 32),
-        reference.height.isMultiple(of: 32),
-        reference.rgb8.count == reference.width * reference.height * 3 else {
+      try H3StillReferenceMedia.validateCanvas(width: reference.width,
+        height: reference.height)
+      guard reference.rgb8.count == reference.width * reference.height * 3 else {
         throw H3CheckpointError.invalid("Still reference must be bounded, prepared RGB8 on a 32-pixel grid.")
       }
       let packed = try H3QwenImageProcessor.packRGB8(image: reference.rgb8,

@@ -119,7 +119,7 @@ public enum H3T2VARunner {
     _ = try H3AudioVAELayout(url: request.audioVAE)
     for adapter in request.loRAAdapters {
       _ = try H3LoRAFile(url: adapter.url,
-        strength: adapter.strength)
+        strength: adapter.strength, requestedSteps: request.requestedSteps)
     }
     return Admission(geometry: request.geometry,
       textRows: qwen.tags.count, packedRows: layout.tags.count,

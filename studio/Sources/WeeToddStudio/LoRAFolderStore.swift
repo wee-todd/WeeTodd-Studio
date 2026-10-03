@@ -28,9 +28,14 @@ import StudioCore
       if folders.contains(where: { $0.enabled && $0.path == defaultLoRAFolder.path }) {
         try FileManager.default.createDirectory(at: defaultLoRAFolder, withIntermediateDirectories: true)
       }
-      let payload = try folders.map { try $0.object() }
-      let result = try await descriptionBridge.independent().invoke("lora-scan", runtime: settings,
-        payload: ["folders": payload], output: dataDirectory.appendingPathComponent("Cache/lora-index.json"))
+      let result: [String: Any]
+      if NativeLoRAImport.usesNativeScan(runtime: settings) {
+        result = try await NativeLoRAImport.scan(folders)
+      } else {
+        let payload = try folders.map { try $0.object() }
+        result = try await descriptionBridge.independent().invoke("lora-scan", runtime: settings,
+          payload: ["folders": payload], output: dataDirectory.appendingPathComponent("Cache/lora-index.json"))
+      }
       guard key == loraFolderConfigurationKey else { return }
       let entries = try JSONDecoder().decode([LoRAFolderEntry].self,
         from: JSONSerialization.data(withJSONObject: result["entries"] ?? []))

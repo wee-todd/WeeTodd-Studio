@@ -81,9 +81,8 @@ public enum H3VideoReferencePreparation {
     for reference in references {
       switch reference {
       case .image(let image), .timedImage(let image, _):
-        guard (64...256).contains(image.width), (64...256).contains(image.height),
-          image.width.isMultiple(of: 32), image.height.isMultiple(of: 32),
-          image.rgb8.count == image.width * image.height * 3 else {
+        try H3StillReferenceMedia.validateCanvas(width: image.width, height: image.height)
+        guard image.rgb8.count == image.width * image.height * 3 else {
           throw H3CheckpointError.invalid("H3 reference image needs bounded RGB8 pixels on the 32-pixel grid.")
         }
       case .video(let video):

@@ -11,6 +11,13 @@ final class LoRAInteractionTests: XCTestCase {
     return directory
   }
 
+  @MainActor private func useLegacyImportBridge(_ store: StudioStore) {
+    // These injected responses test bridge payloads/library snapshots. Real native
+    // header inspection is exercised separately with actual SafeTensors fixtures.
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
+    store.runtime.pythonPath = "/usr/bin/python3"
+  }
+
   @MainActor func testNativeGroupReplaceAndToggleSupportUndoWithoutChangingAcceptedTake() throws {
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false)
     var clip = Clip(engine: .h3)
@@ -69,6 +76,7 @@ final class LoRAInteractionTests: XCTestCase {
       inspection = payload
       return ["kind": "lora", "loraModel": "h3", "loraProfile": "turbo", "loraLayout": "contiguous_qkv"]
     })
+    useLegacyImportBridge(store)
     await store.importURLs([URL(fileURLWithPath: "/tmp/turbo.safetensors")], scope: .global,
       loraModel: .h3, loraProfile: "turbo", loraLayout: "auto", loraAdalnInputGrid: "/tmp/grid.safetensors")
     XCTAssertEqual(inspection["loraProfile"] as? String, "turbo")
@@ -91,7 +99,8 @@ final class LoRAInteractionTests: XCTestCase {
         inspection = payload
         return ["kind": "lora", "loraModel": model.rawValue]
       })
-      await store.importURLs([URL(fileURLWithPath: "/tmp/style.safetensors")], scope: .global,
+      useLegacyImportBridge(store)
+    await store.importURLs([URL(fileURLWithPath: "/tmp/style.safetensors")], scope: .global,
         loraModel: model, loraProfile: "standard", loraLayout: "auto", loraAdalnInputGrid: "/tmp/grid.safetensors")
       XCTAssertEqual(inspection["loraModel"] as? String, model.rawValue)
       for field in ["loraProfile", "loraLayout", "loraAdalnInputGrid"] { XCTAssertNil(inspection[field]) }
@@ -111,6 +120,7 @@ final class LoRAInteractionTests: XCTestCase {
       for field in ["loraProfile", "loraLayout", "loraAdalnInputGrid"] { XCTAssertNil(payload[field]) }
       return ["kind": "lora", "loraModel": "ltx25"]
     })
+    useLegacyImportBridge(store)
     await store.importURLs([URL(fileURLWithPath: "/tmp/style.safetensors")], scope: .global, loraModel: .ltx25)
     let imported = try XCTUnwrap(store.globalAssets.first)
     XCTAssertNil(imported.loraProfile)
@@ -122,6 +132,7 @@ final class LoRAInteractionTests: XCTestCase {
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: { _, _, _, _ in
       return ["kind": "lora", "loraModel": "ltx23"]
     })
+    useLegacyImportBridge(store)
     await store.importURLs([URL(fileURLWithPath: "/tmp/style.safetensors")], scope: .global,
       loraModel: .h3, loraProfile: "turbo", loraLayout: "auto", loraAdalnInputGrid: "/tmp/grid.safetensors")
     let imported = try XCTUnwrap(store.globalAssets.first)
@@ -137,11 +148,13 @@ final class LoRAInteractionTests: XCTestCase {
     })
     let clip = Clip(engine: .h3)
     store.project.clips = [clip]; store.selectedClipID = clip.id
+    useLegacyImportBridge(store)
     await store.importURLs([URL(fileURLWithPath: "/tmp/style.safetensors")], scope: .global,
       loraModel: .h3, loraProfile: "standard", loraLayout: "auto")
     let original = try XCTUnwrap(store.globalAssets.first)
     store.applyLoRAMembers([LoRAMember(asset: original, strength: 0.6)])
     let applied = store.project
+    useLegacyImportBridge(store)
     await store.importURLs([URL(fileURLWithPath: "/tmp/./style.safetensors")], scope: .global,
       loraModel: .h3, loraProfile: "turbo", loraLayout: "contiguous_qkv", loraAdalnInputGrid: "/tmp/grid.safetensors")
     let candidates = store.compatibleLoRAs(for: .h3)

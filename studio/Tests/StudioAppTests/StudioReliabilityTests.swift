@@ -457,6 +457,8 @@ final class StudioReliabilityTests: XCTestCase {
     store.runtime.nativeLTX25Enabled = false
     XCTAssertTrue(store.actionItems.contains { $0.id == "runtime" })
     store.runtime.nativeLTX25Enabled = true; store.editClip { $0.engine = .h3 }
+    XCTAssertFalse(store.actionItems.contains { $0.id == "runtime" })
+    store.runtime.nativeH3Enabled = false
     XCTAssertTrue(store.actionItems.contains { $0.id == "runtime" })
   }
 
@@ -883,6 +885,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testSuspendedPreflightNeverPreparesAnotherSelection() async throws {
     let fake = SuspendedBridge("describe-generation")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip(); store.addClip()
     let first = store.project.clips[0].id
     let entered = expectation(description: "description suspended")
@@ -900,6 +903,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testLateNativeRenderDoesNotPromoteOverEdits() async throws {
     let fake = SuspendedBridge("render")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip(); store.editClip { $0.prompt = "Original"; $0.sourcePath = "/tmp/original.mov" }
     store.preparedRecipe = "/tmp/job/prepared/recipe.json"
     store.preparedFingerprint = store.signature(for: store.selectedClip!)
@@ -920,6 +924,7 @@ final class StudioReliabilityTests: XCTestCase {
     let directory = try temporaryDirectory()
     let fake = SuspendedBridge("render")
     let store = StudioStore(dataDirectory: directory, restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip()
     let url = directory.appendingPathComponent("copy.weetodd")
     try ProjectStorage.write(store.project, to: url)
@@ -1021,6 +1026,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testDeletedPreflightDestinationReturnsSafelyAndBlocksDuplicateRequest() async throws {
     let fake = SuspendedBridge("describe-generation")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip()
     let entered = expectation(description: "description suspended")
     fake.entered = { entered.fulfill() }
@@ -1039,6 +1045,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testDeletedRenderDestinationReportsCompletedOutput() async throws {
     let fake = SuspendedBridge("render")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip()
     store.preparedRecipe = "/tmp/job/prepared/recipe.json"
     store.preparedFingerprint = store.signature(for: store.selectedClip!)
@@ -1056,6 +1063,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testPreflightCanStartWhileBackgroundDescriptionIsPending() async throws {
     let fake = SuspendedBridge("describe-generation"); fake.suspendLimit = 1
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip()
     let entered = expectation(description: "background description suspended")
     fake.entered = { entered.fulfill() }
@@ -1070,6 +1078,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testSuccessfulAppendRenderPersistsUsableSegment() async throws {
     let fake = SuspendedBridge("render")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip()
     store.editClip { $0.extensionSource = "/tmp/context.mov"; $0.extensionDirection = "after" }
     store.preparedRecipe = "/tmp/job/prepared/recipe.json"
@@ -1089,6 +1098,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testNativeDurationRoundingKeepsAcceptedRenderCurrent() async throws {
     let fake = SuspendedBridge("render")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip(.h3)
     store.editClip { $0.duration = 5.17; $0.prompt = "A robot lifts a lantern." }
     await store.prepareSelected()
@@ -1108,6 +1118,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testDurationRefreshCannotMarkAReplacedTakeCurrent() async throws {
     let fake = SuspendedBridge("render")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip(.h3)
     store.editClip { $0.duration = 5.17; $0.prompt = "A robot lifts a lantern." }
     await store.prepareSelected()
@@ -1131,6 +1142,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testLateNativeRenderUsesSubmittedRuntimeToInspectOutput() async throws {
     let fake = SuspendedBridge("render"); fake.inspectRuntimeRoot = "/runtime/submitted"
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.runtime.root = "/runtime/submitted"
     store.addClip()
     store.preparedRecipe = "/tmp/job/prepared/recipe.json"
@@ -1179,6 +1191,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testGenerateUsesAlreadyReviewedPreparedRecipe() async throws {
     let fake = SuspendedBridge("render")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip()
     store.preparedRecipe = "/tmp/reviewed/recipe.json"
     store.preparedPrompt = "The reviewed prompt."
@@ -1197,6 +1210,7 @@ final class StudioReliabilityTests: XCTestCase {
   @MainActor func testGenerateRepreparesStaleRecipe() async throws {
     let fake = SuspendedBridge("render")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip()
     store.preparedRecipe = "/tmp/reviewed/recipe.json"
     store.preparedFingerprint = store.signature(for: store.selectedClip!)
@@ -1217,6 +1231,7 @@ extension StudioReliabilityTests {
   @MainActor func testPredecessorTrimInvalidatesSuspendedContinuityPreparation() async throws {
     let fake = SuspendedBridge("prepare")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip(); store.editClip { $0.sourcePath = "/tmp/source.mov" }
     store.addClip(); store.editClip { $0.continuity = ClipContinuity(mode: "frame") }
     let oldKey = store.generationRequestKey(for: store.selectedClip!)
@@ -1234,6 +1249,7 @@ extension StudioReliabilityTests {
   @MainActor func testPredecessorTakeChangeRetainsLateContinuityRenderAsInactiveVersion() async throws {
     let fake = SuspendedBridge("render")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false, invocation: fake.invoke)
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     store.addClip(); store.editClip { $0.sourcePath = "/tmp/source.mov" }
     store.addClip(); store.editClip { $0.continuity = ClipContinuity(mode: "frame") }
     store.preparedRecipe = "/tmp/job/prepared/recipe.json"

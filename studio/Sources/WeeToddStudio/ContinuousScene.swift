@@ -57,11 +57,26 @@ struct PendingContinuousSceneTake: Identifiable {
       let settings = runtime
       let dependency = project.continuityDependencyFingerprint(for: clip)
       var anchor: MediaAsset?
+      var nativeAnchorDirectory: URL?
+      var attached = false
+      defer { if !attached, let nativeAnchorDirectory { try? FileManager.default.removeItem(at: nativeAnchorDirectory) } }
       if preserveFrameMatch {
         guard clip.continuityMode == "frame" else { throw StudioError.invalid("Select Match previous frame before freezing its effective image.") }
-        var body = try payload(); body["clipID"] = clipID.uuidString
         let destination = dataDirectory.appendingPathComponent("Anchors/\(UUID().uuidString)")
-        let result = try await bridge.invoke("freeze-continuity-frame", runtime: settings, payload: body, output: destination)
+        let result: [String: Any]
+        if settings.usesNativeLTX25 {
+          let freezing = Task.detached(priority: .userInitiated) {
+            try await NativeContinuityFrame.freeze(project: snapshot, clip: clip, destination: destination)
+          }
+          result = try await withTaskCancellationHandler {
+            try await freezing.value
+          } onCancel: { freezing.cancel() }
+          nativeAnchorDirectory = destination
+          try Task.checkCancellation()
+        } else {
+          var body = try payload(); body["clipID"] = clipID.uuidString
+          result = try await bridge.invoke("freeze-continuity-frame", runtime: settings, payload: body, output: destination)
+        }
         guard let filename = result["path"] as? String, FileManager.default.fileExists(atPath: filename) else {
           throw StudioError.invalid("The previous take did not produce a frozen first image.")
         }
@@ -84,6 +99,7 @@ struct PendingContinuousSceneTake: Identifiable {
         }
         project.clips[index].continuity = ClipContinuity(mode: "scene", sourceClipID: predecessor)
       }
+      attached = true
       notice = preserveFrameMatch
         ? "Connected the shot and froze its previous frame match. The original image remains in Assets."
         : "Connected the shot using its attached images. Generate any member to render the complete scene."

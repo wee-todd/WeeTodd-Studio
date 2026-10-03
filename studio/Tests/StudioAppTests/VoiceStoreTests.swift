@@ -161,6 +161,8 @@ extension VoiceStoreTests {
       }
       return [:]
     })
+    // This fixture exercises the legacy bridge's asynchronous driver boundary.
+    store.runtime.nativeH3Enabled = false; store.runtime.nativeLTX25Enabled = false
     var a = Clip(); a.audioDriverSelection = AudioDriverSelection(mode: .voice)
     let b = Clip(); store.project.clips = [a,b]; store.selectedClipID = a.id
     let task = Task { await store.generateSelected() }

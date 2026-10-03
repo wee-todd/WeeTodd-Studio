@@ -204,6 +204,112 @@ final class NativeH3PreparationTests: XCTestCase {
       "clipID": project.clips[0].id.uuidString, "runtime": runtime]
   }
 
+  // Tiny, valid paired SafeTensors files exercise admission without reading model weights.
+  private func loraFile(_ root: URL, name: String = "adapter", metadata: [String: String] = [:],
+    target: String = "diffusion_model.blocks.0.attn.qkv_proj") throws -> URL {
+    let header: [String: Any] = ["__metadata__": metadata,
+      target + ".lora_A.weight": ["dtype": "BF16", "shape": [1, 2], "data_offsets": [0, 4]],
+      target + ".lora_B.weight": ["dtype": "BF16", "shape": [2, 1], "data_offsets": [4, 8]]]
+    let bytes = try JSONSerialization.data(withJSONObject: header, options: [.sortedKeys])
+    var length = UInt64(bytes.count).littleEndian
+    var data = withUnsafeBytes(of: &length) { Data($0) }
+    data.append(bytes); data.append(Data(repeating: 0, count: 8))
+    let url = root.appendingPathComponent(name + ".safetensors")
+    try data.write(to: url); return url
+  }
+
+  private func setProfile(_ root: URL, steps: Int = 20, pairs: [[Any]] = [],
+    rootTurbo: String? = nil) throws {
+    let url = root.appendingPathComponent("h3.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    var config = recipe["config"] as! [String: Any]; config["steps"] = steps
+    var components = recipe["components"] as! [String: Any]; components["loras"] = pairs
+    recipe["config"] = config; recipe["components"] = components
+    if let rootTurbo { recipe["loras"] = ["adapters": [["path": rootTurbo,
+      "strength": 1.0, "profile": "turbo", "qkv_layout": "contiguous_qkv"]]] }
+    try JSONSerialization.data(withJSONObject: recipe).write(to: url)
+  }
+
+  private func attachLoRA(_ url: URL, profile: String?, to project: inout StudioProject) {
+    var asset = MediaAsset(name: "Adapter", kind: .lora, path: url.path)
+    asset.loraModel = .h3; asset.loraProfile = profile; asset.loraLayout = "contiguous_qkv"
+    project.assets.append(asset)
+    project.clips[0].attachments.append(Attachment(assetID: asset.id, role: .lora))
+  }
+
+  private func preparedSteps(_ project: StudioProject, _ runtime: [String: Any]) throws -> Int {
+    let result = try NativeH3Preparation.compose(request: request(project, runtime))
+    let recipe = result["recipe"] as! [String: Any]
+    let steps = (recipe["config"] as! [String: Any])["steps"] as! Int
+    let controls = ((result["report"] as! [String: Any])["generation"] as! [String: Any])["controls"] as! [String: Any]
+    XCTAssertEqual(controls["evaluations"] as? Int, steps - 1)
+    return steps
+  }
+
+  func testStandardLoRAAttachmentPreservesUserEvaluationsAndEditor() throws {
+    let (root, original, runtime) = try fixture()
+    let url = try loraFile(root, metadata: ["adapter_profile": "standard", "inference_steps": "19"])
+    var project = original; attachLoRA(url, profile: "standard", to: &project)
+    project.clips[0].generationSelection?.steps = 19
+    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    let before = try encoder.encode(project)
+    XCTAssertEqual(try preparedSteps(project, runtime), 20)
+    XCTAssertEqual(try encoder.encode(project), before)
+  }
+
+  func testTurboAttachmentResolvesDefaultButRejectsExplicitWrongEvaluations() throws {
+    let (root, original, runtime) = try fixture(); try setProfile(root)
+    let url = try loraFile(root)
+    var project = original; attachLoRA(url, profile: "turbo", to: &project)
+    XCTAssertEqual(try preparedSteps(project, runtime), 5)
+    project.clips[0].generationSelection?.steps = 4
+    XCTAssertEqual(try preparedSteps(project, runtime), 5)
+    for evaluations in [3, 5, 8, 19] {
+      project.clips[0].generationSelection?.steps = evaluations
+      XCTAssertThrowsError(try preparedSteps(project, runtime)) { error in
+        XCTAssertTrue(error.localizedDescription.contains("4 evaluations"), error.localizedDescription)
+        XCTAssertTrue(error.localizedDescription.contains("5"), error.localizedDescription)
+      }
+    }
+    project.clips[0].attachments[0].enabled = false
+    XCTAssertEqual(try preparedSteps(project, runtime), 20)
+  }
+
+  func testDeclaredTurboAndUnknownComponentPairsUseDistinctSamplingContracts() throws {
+    let (root, original, runtime) = try fixture()
+    let unknown = try loraFile(root, name: "unknown")
+    try setProfile(root, pairs: [[unknown.path, 0.8]])
+    XCTAssertEqual(try preparedSteps(original, runtime), 20)
+    let turbo = try loraFile(root, name: "declared", metadata: ["schedule_points": "5"])
+    try setProfile(root, pairs: [[unknown.path, 0.8], [turbo.path, 1.0]])
+    XCTAssertEqual(try preparedSteps(original, runtime), 5)
+    var project = original; project.clips[0].generationSelection?.steps = 19
+    XCTAssertThrowsError(try preparedSteps(project, runtime))
+    try setProfile(root, rootTurbo: unknown.path)
+    XCTAssertEqual(try preparedSteps(original, runtime), 5)
+    XCTAssertThrowsError(try preparedSteps(project, runtime))
+  }
+
+  func testTurboHeaderSamplingCountsAndLayoutAreAdmittedBeforePublication() throws {
+    let (root, original, runtime) = try fixture()
+    let badCount = try loraFile(root, name: "count", metadata: ["inference_steps": "12"])
+    var project = original; attachLoRA(badCount, profile: "turbo", to: &project)
+    let destination = root.appendingPathComponent("not-published")
+    XCTAssertThrowsError(try NativeH3Preparation.prepare(request: request(project, runtime), destination: destination))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    let conflict = try loraFile(root, name: "conflict", metadata: ["adapter_profile": "turbo",
+      "inference_steps": "4", "schedule_points": "6"])
+    try setProfile(root, pairs: [[conflict.path, 1.0]])
+    XCTAssertThrowsError(try preparedSteps(original, runtime))
+    for (name, metadata, target) in [
+      ("layout", ["adapter_profile": "standard", "qkv_layout": "native_interleaved"], "diffusion_model.blocks.0.attn.qkv_proj"),
+      ("adaln", ["adapter_profile": "standard"], "diffusion_model.blocks.0.adaln_proj.linear")] {
+      let url = try loraFile(root, name: name, metadata: metadata, target: target)
+      try setProfile(root, pairs: [[url.path, 1.0]])
+      XCTAssertThrowsError(try preparedSteps(original, runtime))
+    }
+  }
+
   func testFrameContinuityUsesVisibleVFRFrameWithoutMutatingStoredInputs() async throws {
     let (root,original,runtime)=try fixture()
     let profile=root.appendingPathComponent("h3.json")
@@ -373,22 +479,23 @@ final class NativeH3PreparationTests: XCTestCase {
     let profile = root.appendingPathComponent("h3.json")
     var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: profile)) as! [String: Any]
     var components = recipe["components"] as! [String: Any]
-    components["loras"] = [["/model/turbo.safetensors", 0.8]]
+    let first = try loraFile(root, name: "profile-first")
+    let second = try loraFile(root, name: "profile-second")
+    components["loras"] = [[first.path, 0.8]]
     recipe["components"] = components
     try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
     let prepared = try NativeH3Preparation.compose(request: request(project, runtime))
     let selected = (prepared["recipe"] as! [String: Any])["components"] as! [String: Any]
     XCTAssertEqual((selected["loras"] as! [[Any]])[0][0] as? String,
-      "/model/turbo.safetensors")
-    components["loras"] = [["/model/turbo.safetensors", 0.8],
-      ["/model/second.safetensors", 1.0]]
+      first.path)
+    components["loras"] = [[first.path, 0.8], [second.path, 1.0]]
     recipe["components"] = components
     try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
     let stacked = try NativeH3Preparation.compose(request: request(project, runtime))
     let stackedComponents = (stacked["recipe"] as! [String: Any])["components"] as! [String: Any]
     let entries = stackedComponents["loras"] as! [[Any]]
     XCTAssertEqual(entries.map { $0[0] as! String },
-      ["/model/turbo.safetensors", "/model/second.safetensors"])
+      [first.path, second.path])
     XCTAssertEqual(entries.map { ($0[1] as! NSNumber).doubleValue }, [0.8, 1.0])
   }
 
@@ -410,8 +517,7 @@ final class NativeH3PreparationTests: XCTestCase {
   func testEnabledTurboAttachmentIsIncludedAndDuplicateProfileAdapterFails() throws {
     let (root, original, runtime) = try fixture()
     var project = original
-    let path = root.appendingPathComponent("turbo.safetensors")
-    try Data([0]).write(to: path)
+    let path = try loraFile(root, name: "turbo")
     var asset = MediaAsset(name: "Turbo", kind: .lora, path: path.path)
     asset.loraModel = .h3
     asset.loraProfile = "turbo"
@@ -425,8 +531,7 @@ final class NativeH3PreparationTests: XCTestCase {
     let pair = (components["loras"] as! [[Any]])[0]
     XCTAssertEqual(pair[0] as? String, path.path)
     XCTAssertEqual(pair[1] as? Double, 0.8)
-    let secondPath = root.appendingPathComponent("second.safetensors")
-    try Data([0]).write(to: secondPath)
+    let secondPath = try loraFile(root, name: "second")
     var secondAsset = MediaAsset(name: "Second Turbo", kind: .lora,
       path: secondPath.path)
     secondAsset.loraModel = .h3
@@ -622,7 +727,8 @@ final class NativeH3PreparationTests: XCTestCase {
     try Data("{}".utf8).write(to: tokenizer.appendingPathComponent("tokenizer.json"))
     components["tokenizer"] = tokenizer.path
     recipe["components"] = components
-    recipe["loras"] = ["adapters": [["path": "/model/turbo.safetensors",
+    let turbo = try loraFile(root, name: "root-turbo")
+    recipe["loras"] = ["adapters": [["path": turbo.path,
       "strength": 1.0, "profile": "turbo", "qkv_layout": "contiguous_qkv"]]]
     var config = recipe["config"] as! [String: Any]
     config["memory_mode"] = "low_memory_bf16"
@@ -646,6 +752,6 @@ final class NativeH3PreparationTests: XCTestCase {
     XCTAssertEqual(mapped["tokenizer"] as? String,
       tokenizer.appendingPathComponent("tokenizer.json").path)
     XCTAssertEqual((mapped["loras"] as! [[Any]])[0][0] as? String,
-      "/model/turbo.safetensors")
+      turbo.path)
   }
 }

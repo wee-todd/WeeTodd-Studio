@@ -13,6 +13,7 @@ public enum H3VideoVAETileDecoder {
 
   static func decode(checkpointURL: URL, latent: MLXArray,
     progress: (Int, Int) -> Void = { _, _ in },
+    session: H3VideoVAEDecodeSession? = nil,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard latent.ndim == 5, (1...4).contains(latent.shape[0]),
       (1...16).contains(latent.shape[1]),
@@ -22,13 +23,26 @@ public enum H3VideoVAETileDecoder {
       latent.shape[1] * latent.shape[2] * latent.shape[3] <= 4096 else {
       throw H3CheckpointError.invalid("H3 video VAE tile exceeds bounded latent geometry.")
     }
-    _ = try H3VideoVAELayout(url: checkpointURL)
-    let file = try SafeTensorFile(url: checkpointURL)
+    let file: SafeTensorFile?
+    if let session {
+      guard session.checkpointURL == checkpointURL else {
+        throw H3CheckpointError.invalid("H3 video decoder session checkpoint differs.")
+      }
+      try session.checkUnchanged()
+      file = nil
+    } else {
+      _ = try H3VideoVAELayout(url: checkpointURL)
+      file = try SafeTensorFile(url: checkpointURL)
+    }
     defer {
-      Stream.gpu.synchronize()
-      Memory.clearCache()
+      if session == nil {
+        Stream.gpu.synchronize()
+        Memory.clearCache()
+      }
     }
     func read(_ name: String, shape: [Int]) throws -> MLXArray {
+      if let session { return try session.read(name, shape: shape) }
+      guard let file else { throw H3CheckpointError.invalid("Missing H3 video decoder reader.") }
       guard let descriptor = file.tensors[name], descriptor.dtype == "F16",
         descriptor.shape == shape.map(UInt64.init) else {
         throw H3CheckpointError.invalid("Missing H3 video VAE tile tensor: \(name)")
@@ -79,7 +93,8 @@ public enum H3VideoVAETileDecoder {
     try observe("positions", positions)
     for index in 0..<36 {
       tokens = try H3VideoVAEBlock.evaluate(checkpointURL: checkpointURL,
-        index: index, input: tokens, positions: positions)
+        index: index, input: tokens, positions: positions, session: session,
+        observe: { _, _ in })
       if index == 0 || index == 1 || index == 35 {
         try observe("vit\(index)", tokens)
       }
@@ -102,7 +117,8 @@ public enum H3VideoVAETileDecoder {
       .reshaped([batch, depth * 4, height * 16, width * 16, 3])
     eval(pixels)
     try observe("pixels", pixels)
-    try file.checkUnchanged(at: checkpointURL)
+    if let session { try session.checkUnchanged() }
+    else { try file?.checkUnchanged(at: checkpointURL) }
     try Task.checkCancellation()
     return pixels
   }

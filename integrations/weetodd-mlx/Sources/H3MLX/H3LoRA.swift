@@ -82,11 +82,12 @@ final class H3LoRAFile: H3LoRAApplying {
   private let file: SafeTensorFile
   private let targets: [String: (rank: Int, alpha: Float)]
 
-  init(url: URL, strength: Float) throws {
+  init(url: URL, strength: Float, requestedSteps: Int? = nil) throws {
     guard url.isFileURL, strength.isFinite, (0...2).contains(strength) else {
       throw H3CheckpointError.invalid("Invalid H3 LoRA path or strength.")
     }
     let file = try SafeTensorFile(url: url)
+    try Self.validateSampling(metadata: file.metadata, requestedSteps: requestedSteps)
     let explicitAlpha = file.metadata["target_format"] == "ComfyUI generic LoRA"
       && file.metadata["qkv_fusion"]?.contains("block diagonal B") == true
     let conversion = file.metadata["conversion"] ?? ""
@@ -164,6 +165,60 @@ final class H3LoRAFile: H3LoRAApplying {
     self.file = file
     self.targets = targets
     try file.checkUnchanged(at: url)
+  }
+
+  /// Sampling declarations belong to the adapter header, not its filename or
+  /// the historical `turboLoRA` argument name. Request steps count grid points;
+  /// adapter inference-step declarations count actual transformer evaluations.
+  private static func validateSampling(metadata: [String: String],
+    requestedSteps: Int?) throws {
+    func normalized(_ key: String) -> String? {
+      metadata[key]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+    var profiles = Set<String>()
+    for key in ["adapter_profile", "profile", "distillation_profile"] {
+      guard let value = normalized(key) else { continue }
+      switch value {
+      case "standard", "base", "quality": profiles.insert("standard")
+      case "turbo": profiles.insert("turbo")
+      default: throw H3CheckpointError.invalid("Unsupported H3 LoRA profile metadata: \(key)")
+      }
+    }
+    if let role = normalized("adapter_role") {
+      guard ["standard", "transformer_lora", "style", "character", "turbo"].contains(role) else {
+        throw H3CheckpointError.invalid("Unsupported H3 LoRA role metadata.")
+      }
+      if role == "turbo" { profiles.insert("turbo") }
+    }
+    var evaluations = Set<Int>()
+    for key in ["inference_steps", "num_inference_steps", "steps",
+      "transformer_evaluations", "schedule_points"] {
+      guard let value = normalized(key) else { continue }
+      guard value.range(of: "^[1-9][0-9]*$", options: .regularExpression) != nil,
+        let count = Int(value) else {
+        throw H3CheckpointError.invalid("Invalid H3 LoRA sampling metadata: \(key)")
+      }
+      let actual = count - (key == "schedule_points" ? 1 : 0)
+      guard actual > 0 else {
+        throw H3CheckpointError.invalid("H3 LoRA schedule needs at least one evaluation.")
+      }
+      evaluations.insert(actual)
+    }
+    guard evaluations.count <= 1 else {
+      throw H3CheckpointError.invalid("Conflicting H3 LoRA sampling-count metadata.")
+    }
+    if let count = evaluations.first, count <= 8 { profiles.insert("turbo") }
+    guard profiles.count <= 1 else {
+      throw H3CheckpointError.invalid("Conflicting H3 LoRA profile metadata.")
+    }
+    if profiles.first == "turbo" {
+      guard evaluations.first == nil || evaluations.first == 4 else {
+        throw H3CheckpointError.invalid("H3 Turbo LoRA supports four evaluations (five schedule points).")
+      }
+      if let requestedSteps, requestedSteps != 5 {
+        throw H3CheckpointError.invalid("H3 Turbo LoRA requires five requested schedule points for four evaluations.")
+      }
+    }
   }
 
   func apply(base: MLXArray, input: MLXArray,

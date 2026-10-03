@@ -46,7 +46,8 @@ public enum H3ContinuationRunner {
     _ = try H3VideoVAELayout(url: request.videoVAE)
     _ = try H3AudioVAELayout(url: request.audioVAE)
     for adapter in request.loRAAdapters {
-      _ = try H3LoRAFile(url: adapter.url, strength: adapter.strength)
+      _ = try H3LoRAFile(url: adapter.url, strength: adapter.strength,
+        requestedSteps: request.requestedSteps)
     }
     return Admission(geometry: request.geometry, packedRows: layout.tags.count,
       evaluations: video.timesteps.count, textRows: qwen.tags.count,

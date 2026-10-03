@@ -14,6 +14,7 @@ final class NativeEditorialDurationTests: XCTestCase {
       if command == "inspect" { return ["duration": seconds, "fps": 24.0] }
       return [:]
     })
+    store.runtime.nativeLTX25Enabled = false
     store.addClip(.ltx25)
     store.editClip { $0.duration = 4.8; $0.sourcePath = "/tmp/previous-take.mp4" }
     store.preparedRecipe = "/tmp/job/prepared/recipe.json"

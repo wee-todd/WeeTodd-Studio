@@ -46,6 +46,10 @@ public struct H3VideoVAELayout: Sendable {
 
   public init(url: URL) throws {
     let file = try SafeTensorFile(url: url)
+    try self.init(file: file, url: url)
+  }
+
+  init(file: SafeTensorFile, url: URL) throws {
     guard let raw = file.metadata["minimax_h3_video_vae"],
       let data = raw.data(using: .utf8),
       let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
