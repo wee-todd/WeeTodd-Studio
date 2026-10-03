@@ -17,7 +17,7 @@ public enum H3FL2VAMedia {
   public static func load(path: String, width: Int, height: Int,
     first: Bool) throws -> Loaded {
     guard path.hasPrefix("/"), !path.utf8.contains(0),
-      width > 0, height > 0, width * height <= 768 * 1344 else {
+      width > 0, height > 0, width * height <= H3Geometry.maximumCanvasPixels else {
       throw H3CheckpointError.invalid("Invalid H3 FL2VA source or canvas.")
     }
     let fd = Darwin.open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK)

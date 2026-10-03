@@ -7,6 +7,10 @@ public enum H3GeometryError: Error, Equatable {
 /// H3's fixed 24 fps / 40 Hz audiovisual grid. This describes shapes only;
 /// memory admission and model loading happen after the complete request passes.
 public struct H3Geometry: Sendable {
+  /// Include the released 1 MP, 16:9 canvas on H3's 32-pixel grid.
+  /// Packed-row admission separately bounds duration and conditioning.
+  public static let maximumCanvasPixels = 1376 * 768
+
   public let width: Int
   public let height: Int
   public let frames: Int

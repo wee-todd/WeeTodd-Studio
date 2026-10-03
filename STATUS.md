@@ -1,5 +1,21 @@
 # WeeTodd Studio implementation status
 
+Swift H3 canvas admission 2026-10-03: the 1 MP 16:9 canvas is 1376 × 768 on the
+32-pixel grid. Text/reference request checks, endpoint image loading, native keyframe/control
+VAE entry points and Studio Fun preparation now accept that area consistently. The separate
+40,000 packed-row guard remains. Focused request/media and Studio preparation tests cover
+the admitted canvas and rejection beyond the current implementation budget. These header/media
+checks do not constitute a production-resolution generation or quality qualification.
+
+Swift H3 external-after seam preparation 2026-10-03: the timed opening image now
+comes from the true final source frame on the same 24 fps grid, before temporal clone
+padding. It uses an aspect-preserving 32-pixel grid bounded to a 256-pixel edge;
+the square video-reference buffer remains separate. A real non-square CPU media
+regression reproduces the former gray-border contamination and now passes, together
+with independent seam-image admission and malformed-input checks (11 focused tests).
+The prior robot continuation has a visible framing discontinuity and remains rejected
+for seamless quality. No corrected weighted continuation has been rendered yet.
+
 Swift native defaults and H3 corrections 2026-10-02: absent H3/LTX 2.5 backend
 preferences now select Swift; saved explicit false preferences retain legacy Python.
 Missing workers and incompatible native tasks fail without fallback. Native LoRA import
@@ -32,7 +48,10 @@ The corrected packaged worker now passed Soundtrack Ref2VA and Fun ControlNet St
 generation, previews, acceptance and save/reopen with Python unavailable. Their native
 CLI and saved, uncached ComfyUI runs matched all three current Studio media files;
 sampling cancellation, subsequent weighted retry and zero-new-inference resume also
-passed. Other corrected H3 route qualifications remain pending. These functional checks
+passed. The same conditioning/decoder worker also passed FFLF, single-image Ref2VA,
+independent A2V, external-after and movie Ref2VA across all three hosts, including
+cancellation recovery and accepted-take reopening. Standalone audio Ref2VA and the
+remaining extreme-range and finishing checks are still pending. These functional checks
 do not establish voice likeness, intelligibility, Fun control/visual quality or matched
 useful-size performance; the broad release gates remain unchanged.
 

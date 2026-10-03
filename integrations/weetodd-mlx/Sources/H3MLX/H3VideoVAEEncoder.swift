@@ -65,7 +65,7 @@ public enum H3VideoVAEEncoder {
     guard (5...362).contains(frameCount), (frameCount - 5).isMultiple(of: 17),
       (32...2048).contains(width), (32...2048).contains(height),
       width.isMultiple(of: 32), height.isMultiple(of: 32),
-      width * height <= 768 * 1344,
+      width * height <= H3Geometry.maximumCanvasPixels,
       rgb8.count == frameCount * width * height * 3,
       rgb8.count <= 1024 * 1024 * 1024 else {
       throw H3CheckpointError.invalid("H3 control video exceeds aligned output canvas or frame limits.")
@@ -89,7 +89,7 @@ public enum H3VideoVAEEncoder {
     releaseTemporalConvolutionTerms: Bool = false) throws -> MLXArray {
     guard checkpointURL.isFileURL,
       (32...2048).contains(width), (32...2048).contains(height),
-      width * height <= 768 * 1344,
+      width * height <= H3Geometry.maximumCanvasPixels,
       width.isMultiple(of: 16), height.isMultiple(of: 16),
       frameCount > 0, frameCount <= 362,
       rgb8.count == frameCount * width * height * 3 else {

@@ -19,6 +19,7 @@ final class H3StudioRecipeTests: XCTestCase {
         "role": "reference", "path": "/tmp/source.mp4", "sha256": digest,
         "strength": 1.0]]]
     var resolved = false
+    var anchorWidth = 128
     func compile() throws -> H3Ref2VAStillRequest {
       try H3StudioRecipe.compileExtension(
         data: JSONSerialization.data(withJSONObject: root)) { path, hash in
@@ -30,7 +31,7 @@ final class H3StudioRecipeTests: XCTestCase {
             audio: H3AudioReference(samples: [Float](repeating: 0,
               count: 2 * 32_000), frames: 32_000))
           let last = H3StillReference(rgb8: Data(repeating: 17,
-            count: 64 * 64 * 3), width: 64, height: 64)
+            count: 128 * 64 * 3), width: anchorWidth, height: 64)
           return (movie, last)
         }
     }
@@ -45,7 +46,13 @@ final class H3StudioRecipeTests: XCTestCase {
     if case .timedImage(let anchor, let frame) = request.references[1] {
       XCTAssertEqual(frame, 0)
       XCTAssertEqual(anchor.rgb8.first, 17)
+      XCTAssertEqual(anchor.width, 128)
+      XCTAssertEqual(anchor.height, 64)
     } else { XCTFail("External extension did not preserve the seam anchor") }
+    anchorWidth = Int.max
+    XCTAssertThrowsError(try compile(), "Validate the canvas before RGB byte-count arithmetic")
+    anchorWidth = 160
+    XCTAssertThrowsError(try compile(), "An anchor must contain every admitted RGB pixel")
   }
 
   private func recipe(controls: [String: Any] = [:],

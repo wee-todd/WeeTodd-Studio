@@ -11,12 +11,13 @@ final class H3FL2VAMediaTests: XCTestCase {
       .appendingPathComponent(UUID().uuidString + ".png")
     try png.write(to: file)
     defer { try? FileManager.default.removeItem(at: file) }
-    for first in [true, false] {
+    for (width, height, first) in [(32, 32, true), (32, 32, false),
+      (1376, 768, true), (1376, 768, false)] {
       let loaded = try H3FL2VAMedia.load(path: file.path,
-        width: 32, height: 32, first: first)
+        width: width, height: height, first: first)
       let bytes = Array(loaded.image.rgb8)
       XCTAssertGreaterThan(Int(bytes[0]), Int(bytes[2]) + 100)
-      let lower = (31 * 32 + 0) * 3
+      let lower = ((height - 1) * width) * 3
       XCTAssertGreaterThan(Int(bytes[lower + 2]), Int(bytes[lower]) + 100)
     }
   }

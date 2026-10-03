@@ -78,7 +78,7 @@ public struct H3Ref2VAStillRequest: Sendable {
       }
       return rows
     }
-    guard width * height <= 768 * 1344,
+    guard width * height <= H3Geometry.maximumCanvasPixels,
       try geometry.packedRows(textRows: 1,
         conditionVideoRows: conditionRows,
         conditionAudioRows: conditionAudioRows) <= 40_000 else {

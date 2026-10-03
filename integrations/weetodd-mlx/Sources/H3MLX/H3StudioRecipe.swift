@@ -51,10 +51,12 @@ public enum H3StudioRecipe {
       "audio_policy": "generated"]
     let base = try compile(data: JSONSerialization.data(withJSONObject: root))
     let (source, last) = try resolveVideo(path, digest)
-    guard source.audio != nil, source.frameCount >= 5,
-      last.width == source.width, last.height == source.height,
-      last.rgb8.count == source.width * source.height * 3 else {
+    guard source.audio != nil, source.frameCount >= 5 else {
       throw H3CheckpointError.invalid("H3 external extension requires a movie with soundtrack.")
+    }
+    try H3StillReferenceMedia.validateCanvas(width: last.width, height: last.height)
+    guard last.rgb8.count == last.width * last.height * 3 else {
+      throw H3CheckpointError.invalid("H3 extension seam needs complete bounded RGB8 pixels.")
     }
     return try H3Ref2VAStillRequest(prompt: base.prompt,
       mediaReferences: [.video(source), .timedImage(last, frame: 0)],

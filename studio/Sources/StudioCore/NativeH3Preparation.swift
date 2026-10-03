@@ -473,7 +473,7 @@ public enum NativeH3Preparation {
     if clip.inferredTask == "control" {
       guard motion == nil, loras.isEmpty,
         clip.generationWidth <= 2048, clip.generationHeight <= 2048,
-        clip.generationWidth * clip.generationHeight <= 768 * 1344,
+        clip.generationWidth * clip.generationHeight <= 768 * 1376,
         let control = components["fun_controlnet"] as? String,
         let transformer = components["transformer"] as? String else {
         throw unsupported("Fun control requires a full-width adapter, dense sampling without LoRAs, and a bounded output canvas")

@@ -147,6 +147,20 @@ final class NativeH3PreparationTests: XCTestCase {
     XCTAssertEqual(project.clips[0].attachments[0].strength, 0.75)
   }
 
+  func testFunControlPreservesReleasedOneMegapixelCanvasAndRejectsLargerArea() throws {
+    let (_, original, runtime) = try controlFixture()
+    var project = original
+    project.clips[0].generationWidth = 1376
+    project.clips[0].generationHeight = 768
+    let result = try NativeH3Preparation.compose(request: request(project, runtime))
+    let recipe = result["recipe"] as! [String: Any]
+    let config = recipe["config"] as! [String: Any]
+    XCTAssertEqual(config["width"] as? Int, 1376)
+    XCTAssertEqual(config["height"] as? Int, 768)
+    project.clips[0].generationWidth = 1408
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime)))
+  }
+
   func testFunControlRejectsChangedInjectionDeclarationsBeforePublishing() throws {
     let (root, project, runtime) = try controlFixture()
     let control = root.appendingPathComponent("fun.safetensors")

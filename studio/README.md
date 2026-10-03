@@ -156,6 +156,11 @@ The experimental Swift H3 worker has completed text-to-audiovisual, reference-co
 and independent audio-driven takes.
 Direct worker tests now also cover a Swift-only version-2 latent continuation
 pair and a Ref2VA external movie extension with a final-frame seam anchor.
+External-after preparation now keeps that seam image separate from the square
+video-reference buffer, retaining the final source frame's aspect on a bounded
+32-pixel grid instead of copying its gray letterbox. Focused CPU media tests pass;
+the earlier robot output has a framing discontinuity, and corrected weighted
+continuation quality remains unverified.
 Studio's **Match previous frame** now freezes the accepted source's last visible frame
 for Swift H3. **Save motion context** and **Continue scene** use native version-2
 context for text-only H3 clips. Installed-app frame and motion jobs passed live previews,
@@ -1297,7 +1302,9 @@ With Swift H3 enabled, use the dedicated Fun ControlNet setup preset and attach 
 Canny, depth, HED, MLSD or pose movie as Control. The route uses the supported T2VA branch and
 shared native video VAE/sampler and freezes the guide and checksum. It requires the supported
 dense full-width T2VA checkpoint, no LoRAs or motion context, strength from 0 to 1, each output
-side at most 2,048 and total canvas pixels at most 768 × 1,344. Task controls are validated. A direct 384 × 256, 73-frame test at 24 fps completed in 663.45 seconds with 32 kHz
+side at most 2,048 and total canvas pixels at most 768 × 1,376. The separate packed-row
+admission still bounds duration and references; this is the current Swift limit, not a limit
+of the H3 model. Task controls are validated. A direct 384 × 256, 73-frame test at 24 fps completed in 663.45 seconds with 32 kHz
 stereo audio, four decoded previews and staged release. Peak Swift-worker footprint was 11.80 GB,
 excluding FFmpeg. It used four Euler evaluations without a Turbo adapter; the result has not
 received visual/control-quality approval. That earlier direct run did not qualify Studio lifecycle.

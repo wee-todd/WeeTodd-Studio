@@ -74,11 +74,14 @@ reopened the projects and resumed without inference. H3 FFLF CLI also completed 
 reopening/resume with anchors at frames 0/119, seven previews and complete release logs.
 Its media differs from the older Studio take anchored at frame 123; exact old parity,
 matched speed and visible endpoint approval are not established. Movie/audio/soundtrack
-Ref2VA, independent A2V, external-after and Fun have
-separate typed preparation/export checks. A2V, external-after, movie and standalone-audio
-Ref2VA also passed actual typed Studio generation, previews, acceptance and save/reopen
-through the earlier worker. Corrected conditioning and decoder changes require fresh
-packaged execution.
+Ref2VA, independent A2V, external-after and Fun have separate typed preparation/export
+checks. The conditioning/decoder qualification worker has now passed FFLF, single-image
+Ref2VA, soundtrack Ref2VA, independent A2V, external-after, movie Ref2VA and Fun through
+Studio, native CLI and saved uncached ComfyUI execution, including cancellation recovery
+and accepted-take reopening. Standalone audio Ref2VA and the remaining range/finishing
+checks are still pending. These route checks do not approve the prior continuation seam
+or Fun visual quality; the corrected unletterboxed continuation preparation still needs
+a weighted quality check.
 Matched useful-size speed/memory and broad identity, seam and audio quality remain open.
 These checks do not qualify all native tasks. See [execution, supported finishing and qualification](../../studio/README.md#headless-movie-and-clip-jobs).
 

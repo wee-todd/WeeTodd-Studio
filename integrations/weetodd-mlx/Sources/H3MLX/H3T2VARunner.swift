@@ -43,8 +43,8 @@ public struct H3T2VARequest: Sendable {
     }
     let geometry = try H3Geometry(width: width, height: height,
       durationSeconds: durationSeconds)
-    guard width * height <= 768 * 1344 else {
-      throw H3CheckpointError.invalid("H3 video area exceeds the released canvas budget.")
+    guard width * height <= H3Geometry.maximumCanvasPixels else {
+      throw H3CheckpointError.invalid("H3 video area exceeds the current Swift canvas budget (1376 × 768 pixels).")
     }
     guard try geometry.packedRows(textRows: 1,
       conditionVideoRows: 0, conditionAudioRows: 0) <= 40_000 else {
