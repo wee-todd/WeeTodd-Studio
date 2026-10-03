@@ -79,7 +79,8 @@ public enum H3VideoVAEBlock {
       }
       let bias = try read(suffix + ".bias", shape: [rows])
       let result = try projection.project(value) + bias
-      eval(result)
+      if let session { session.materializeProjection(result) }
+      else { eval(result) }
       if session == nil { Memory.clearCache() }
       try Task.checkCancellation()
       return result
@@ -123,7 +124,8 @@ public enum H3VideoVAEBlock {
     try observe("attention", attention)
     let firstScale = try read("scale1", shape: [2048])
     let residual = input + attention * firstScale
-    eval(residual)
+    if let session { session.materializeFirstResidual(residual) }
+    else { eval(residual) }
     try observe("residual", residual)
     let secondNorm = try read("norm2.weight", shape: [2048])
     let feedInput = MLXFast.rmsNorm(residual.asType(.float32),

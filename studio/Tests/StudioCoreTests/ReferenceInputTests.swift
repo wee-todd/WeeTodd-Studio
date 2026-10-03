@@ -30,6 +30,20 @@ final class ReferenceInputTests: XCTestCase {
     }
   }
 
+  func testLTX25IngredientsShowsItsSceneQualityLimitBeforeAttachment() throws {
+    let image = MediaAsset(name: "Cast sheet", kind: .image)
+    let action = try XCTUnwrap(Clip(name: "Shot", engine: .ltx25)
+      .referenceActions(for: image).first { $0.id == "ingredients" })
+    XCTAssertTrue(action.label.contains("Experimental"))
+    XCTAssertTrue(action.detail.contains("results may reproduce the sheet layout"))
+    XCTAssertEqual(action.role, .control)
+    XCTAssertEqual(action.controlType, "ingredients_reference_sheet")
+    let legacy = try XCTUnwrap(Clip(name: "Legacy", engine: .ltx23)
+      .referenceActions(for: image).first { $0.id == "ingredients" })
+    XCTAssertFalse(legacy.label.contains("Experimental"))
+    XCTAssertTrue(legacy.detail.contains("768 × 448"))
+  }
+
   func testDrawThingsReferencesRequireH3ReferenceModelAndStayImageOnly() throws {
     var clip = Clip(name: "DT", engine: .drawThings)
     clip.drawThings = DrawThingsSelection(profileID: "local", modelID: "h3", modelFamily: "minimaxH3")

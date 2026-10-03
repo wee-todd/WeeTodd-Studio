@@ -18,10 +18,10 @@ public final class MLXSamplingRunner {
   public var residentWeightBytes:Int { denoiser.residentWeightBytes }
   public init(configuration:AVBlockConfiguration,blockCount:Int=48,cacheBytes:Int=128*1024*1024,
     maximumActivationBytes:Int=2*1024*1024*1024,videoAttentionGroups:[Int]=[],
-    keyframeMarkerRows:Int=0) throws {
+    keyframeMarkerRows:Int=0,leadingKeyframeMarkerRows:Int=0) throws {
     denoiser=try MLXDenoiser(configuration:configuration,blockCount:blockCount,cacheBytes:cacheBytes,
       maximumActivationBytes:maximumActivationBytes,videoAttentionGroups:videoAttentionGroups,
-      keyframeMarkerRows:keyframeMarkerRows)
+      keyframeMarkerRows:keyframeMarkerRows,leadingKeyframeMarkerRows:leadingKeyframeMarkerRows)
   }
   func preflightWithoutText(_ inputs:[String:MLXArray],schedule:SamplingSchedule) throws -> [String:MLXArray] {
     try denoiser.preflightWithoutText(inputs,schedule:schedule)

@@ -67,7 +67,8 @@ public enum H3StudioRecipe {
       tokenizer: base.tokenizer, videoVAE: base.videoVAE,
       audioVAE: base.audioVAE, turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
-      additionalLoRAs: base.additionalLoRAs)
+      additionalLoRAs: base.additionalLoRAs,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
   }
 
   /// Admit FL2VA's timed keyframe contract before reading any image.
@@ -206,7 +207,8 @@ public enum H3StudioRecipe {
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
-      additionalLoRAs: base.additionalLoRAs)
+      additionalLoRAs: base.additionalLoRAs,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
   }
 
   /// Admit ordered still, video and standalone audio Ref2VA media.
@@ -276,7 +278,8 @@ public enum H3StudioRecipe {
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
-      additionalLoRAs: base.additionalLoRAs)
+      additionalLoRAs: base.additionalLoRAs,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
   }
 
   /// An A2V driver is placed at frame zero of the target packed timeline.
@@ -371,7 +374,8 @@ public enum H3StudioRecipe {
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
-      additionalLoRAs: base.additionalLoRAs)
+      additionalLoRAs: base.additionalLoRAs,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
   }
 
   /// Admit one already-preprocessed structure guide and validate every ordinary
@@ -415,7 +419,8 @@ public enum H3StudioRecipe {
       height: base.geometry.height, durationSeconds: base.durationSeconds,
       seed: base.seed, requestedSteps: base.requestedSteps,
       transformer: base.transformer, qwenPages: base.qwenPages, tokenizer: base.tokenizer,
-      videoVAE: base.videoVAE, audioVAE: base.audioVAE, funControl: control)
+      videoVAE: base.videoVAE, audioVAE: base.audioVAE, funControl: control,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
   }
 
   public static func compile(data: Data) throws -> H3T2VARequest {
@@ -530,6 +535,8 @@ public enum H3StudioRecipe {
       audioVAE: URL(fileURLWithPath: audio),
       turboLoRA: adapters.first?.0,
       turboLoRAStrength: adapters.first?.1 ?? 1,
-      additionalLoRAs: additional)
+      additionalLoRAs: additional,
+      videoDecodeMemoryMode: H3VideoDecodeMemoryMode(rawValue:
+        config["memory_mode"] as? String ?? "normal"))
   }
 }

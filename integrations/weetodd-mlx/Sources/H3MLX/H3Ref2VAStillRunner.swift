@@ -13,6 +13,7 @@ public struct H3Ref2VAStillRequest: Sendable {
   public let qwenPages: URL
   public let qwenVision: URL
   public let tokenizer: URL
+  public let videoDecodeMemoryMode: H3VideoDecodeMemoryMode?
   public let videoVAE: URL
   public let audioVAE: URL
   public let turboLoRA: URL?
@@ -25,14 +26,16 @@ public struct H3Ref2VAStillRequest: Sendable {
     transformer: URL, qwenPages: URL, qwenVision: URL, tokenizer: URL,
     videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
     turboLoRAStrength: Float = 1,
-    additionalLoRAs: [H3LoRAAdapter] = []) throws {
+    additionalLoRAs: [H3LoRAAdapter] = [],
+    videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil) throws {
     try self.init(prompt: prompt, mediaReferences: references.map { .image($0) },
       width: width, height: height, durationSeconds: durationSeconds,
       seed: seed, requestedSteps: requestedSteps, transformer: transformer,
       qwenPages: qwenPages, qwenVision: qwenVision, tokenizer: tokenizer,
       videoVAE: videoVAE, audioVAE: audioVAE, turboLoRA: turboLoRA,
       turboLoRAStrength: turboLoRAStrength,
-      additionalLoRAs: additionalLoRAs)
+      additionalLoRAs: additionalLoRAs,
+      videoDecodeMemoryMode: videoDecodeMemoryMode)
   }
 
   public init(prompt: String, mediaReferences: [H3Ref2VAReference], width: Int,
@@ -40,7 +43,8 @@ public struct H3Ref2VAStillRequest: Sendable {
     transformer: URL, qwenPages: URL, qwenVision: URL, tokenizer: URL,
     videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
     turboLoRAStrength: Float = 1,
-    additionalLoRAs: [H3LoRAAdapter] = []) throws {
+    additionalLoRAs: [H3LoRAAdapter] = [],
+    videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil) throws {
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
       [transformer, qwenPages, qwenVision, tokenizer, videoVAE, audioVAE]
@@ -93,6 +97,7 @@ public struct H3Ref2VAStillRequest: Sendable {
     self.qwenPages = qwenPages
     self.qwenVision = qwenVision
     self.tokenizer = tokenizer
+    self.videoDecodeMemoryMode = videoDecodeMemoryMode
     self.videoVAE = videoVAE
     self.audioVAE = audioVAE
     self.turboLoRA = turboLoRA
@@ -248,7 +253,8 @@ public enum H3Ref2VAStillRunner {
     progress("transformer_weights_released", 1, 1)
     return try H3AVOutputDecoder.decode(videoRows: rawRows.0,
       audioRows: rawRows.1, geometry: geometry, videoVAE: request.videoVAE,
-      audioVAE: request.audioVAE, onFrame: onFrame, onAudio: onAudio,
+      audioVAE: request.audioVAE, videoDecodeMemoryMode: request.videoDecodeMemoryMode,
+      onFrame: onFrame, onAudio: onAudio,
       progress: progress)
   }
 }

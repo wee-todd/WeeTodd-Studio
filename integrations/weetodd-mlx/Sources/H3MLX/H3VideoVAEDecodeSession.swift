@@ -12,6 +12,7 @@ final class H3VideoVAEDecodeSession {
     let closed: Bool
     let remainingResidentBytes: Int
   }
+  let memoryMode: H3VideoDecodeMemoryMode?
   let checkpointURL: URL
   private let file: SafeTensorFile
   private var tensors: [String: MLXArray] = [:]
@@ -23,7 +24,8 @@ final class H3VideoVAEDecodeSession {
   private var maximumResidentBytes = 0
   private(set) var isClosed = false
 
-  init(checkpointURL: URL) throws {
+  init(checkpointURL: URL, memoryMode: H3VideoDecodeMemoryMode? = nil) throws {
+    self.memoryMode = memoryMode
     self.checkpointURL = checkpointURL
     previousCacheLimit = Memory.cacheLimit
     file = try SafeTensorFile(url: checkpointURL)
@@ -36,9 +38,10 @@ final class H3VideoVAEDecodeSession {
   deinit { close() }
 
   static func withSession<T>(checkpointURL: URL,
+    memoryMode: H3VideoDecodeMemoryMode? = nil,
     onClose: (Statistics) -> Void = { _ in },
     _ body: (H3VideoVAEDecodeSession) throws -> T) throws -> T {
-    let session = try H3VideoVAEDecodeSession(checkpointURL: checkpointURL)
+    let session = try H3VideoVAEDecodeSession(checkpointURL: checkpointURL, memoryMode: memoryMode)
     defer {
       session.close()
       onClose(Statistics(projectionLoads: session.projectionLoads,
@@ -87,6 +90,14 @@ final class H3VideoVAEDecodeSession {
     residentBytes += value.storageBytes
     maximumResidentBytes = max(maximumResidentBytes, residentBytes)
     return value
+  }
+
+  func materializeProjection(_ value: MLXArray) {
+    if H3VideoDecodeMemoryMode.materializesProjection(for: memoryMode) { eval(value) }
+  }
+
+  func materializeFirstResidual(_ value: MLXArray) {
+    if H3VideoDecodeMemoryMode.materializesFirstResidual(for: memoryMode) { eval(value) }
   }
 
   func close() {

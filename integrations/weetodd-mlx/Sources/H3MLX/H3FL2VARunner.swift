@@ -198,6 +198,7 @@ public enum H3FL2VARunner {
     return try H3AVOutputDecoder.decode(videoRows: rawRows.0,
       audioRows: rawRows.1, geometry: geometry,
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
       onFrame: onFrame, onAudio: onAudio, progress: progress)
   }
 }

@@ -86,10 +86,12 @@ through verified-output stopwatch, Swift's median was 171.85 seconds versus 182.
 for one fresh Python control. That control is a single observation, not a repeated median.
 Peak Swift-process physical footprint was 8.854 GB (FFmpeg excluded), with no swap.
 Those September 24 developer-binary observations passed that historical fixed-recipe check.
-The current packaged-worker check on the same 1344 × 768, 89-frame, seed-43 recipe took
-203.39 worker seconds and peaked at 8.828 GB process footprint, excluding FFmpeg.
-Its video, audio and muxed files remain byte-identical to the accepted Swift take. Current
-speed parity remains open; the historical median is not a current installed-app claim.
+An earlier packaged-worker check on the same recipe took 203.39 worker seconds.
+The latest isolated default-path regression with the authored-sampler app took 172.76 worker
+seconds (172.90 through verified publication), at an 8.844 GB process peak excluding FFmpeg.
+Its video, audio and muxed files are byte-identical to the accepted Swift take. This verifies
+backward compatibility and records current recipe performance; it does not establish a causal
+speedup or a new contemporary Python comparison. The historical median remains separately dated.
 This uses MLX core 0.32.2, compiled blocks, native sampling/text/fixed-parameter reads,
 compressed per-token conditioning, an MLX upscaler, BF16 video decoding and bounded RGB
 streaming. Independent component oracles pass. All final audiovisual files are byte-identical
@@ -121,8 +123,8 @@ Mac’s memory, retaining host reserves and the engine’s per-stage limits. Oth
 workflows, library/setup tools and complete Python-free distribution remain separate work.
 The first packaged-worker qualification produced the identical accepted Beowulf video at an
 8.810 GB Swift physical peak (FFmpeg excluded). It took 186.60 seconds externally versus
-180.06 seconds for one fresh developer-path control. This single pair leaves packaged speed
-parity open; the earlier 171.85-second developer median is not a packaged-app timing claim.
+180.06 seconds for one fresh developer-path control. That earlier single pair did not establish packaged speed
+parity; the latest 172.76-second packaged default-path regression is recorded above.
 In the final isolated-app regression, supported T2V, first-image I2V and first/last-frame FFLF
 recipes each prepared, rendered, delivered decoded previews, accepted a take, saved a project and
 reopened it with Python unavailable. Each raw take was byte-identical across that app, the
@@ -176,8 +178,12 @@ rank-128 task adapter in one full-resolution stage. Saved Ingredients recipes re
 eight-evaluation deterministic sampler. An explicit experimental Ingredients recipe option,
 `single_stage_sampler: "euler_ancestral_cfg_pp"`, selects eight updates and sixteen serial
 conditional/unconditional evaluations with Float32 sampler state and BF16 model inputs.
+It marks the first generated latent frame without marking the reference guide or audio.
 It requires full-strength sheet conditioning; its native seeded noise does not claim ComfyUI
 pixel parity. Mathematical and contract tests pass; visual qualification remains separate.
+Two controlled five-second tests, including a balanced black reference board and the
+showcased prompt headings, animated the sheet layout instead of composing the requested
+shared scene. Ingredients is experimental and these results are not quality-approved.
 With the experimental Swift LTX worker
 selected, Studio now prepares described Ingredients sheets and MSR images without Python;
 Model Setup includes dedicated Swift presets and bounded adapter discovery. An experimental direct Swift worker MSR route also accepts one to five
@@ -365,6 +371,17 @@ A separate same-guide/checkpoint encoder comparison reduced MLX stage peak from 
 5.48 GB with byte-identical raw latents and zero residual allocations; encoding took 14.17
 versus 11.13 seconds. This control-guide-only optimization does not establish a new
 whole-generation speed or memory result; the full render above predates it.
+
+Swift H3 now carries the saved recipe's `memory_mode` into video decoding. `normal`
+defers projection and first-residual evaluations; `low_memory_bf16` defers projections
+while retaining the residual boundary. Both release packed weights before audio decoding.
+On one saved 124-frame, 768 × 448 latent, separate isolated ABBA comparisons preserved
+every Float32 chunk and RGB8 hash: normal reduced decoder time by 25.1% with about
+345 MB more peak MLX allocation; lower-memory mode reduced time by 15.4% with about
+4 MB more allocation. These are decoder-only measurements. Direct Swift APIs without
+a specified mode retain eager decoding. A separate 22-frame, 768 × 768 control-encoder
+witness retained exact latent bytes while reducing peak MLX allocation by 5.134 GB;
+that is an encoder-stage result, not a full-generation memory figure.
 
 Ripple also has an opt-in **Use Swift MLX for Ripple (experimental)** route in its Runtime
 Settings. It freezes edited images, streams the source guide, runs the pinned author LoRA

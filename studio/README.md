@@ -765,6 +765,10 @@ configure the native MLX engines.
    request supported memory-saving settings, or **Custom** to retain the preset policy for later
    advanced adjustment. Memory information is advisory and does not promise fit, allocate RAM, or
    enforce a hard limit. Clip size/duration and other resident applications still matter.
+   Swift H3 preserves this saved policy during video decoding: normal mode defers projection
+   and first-residual evaluations; lower-memory mode keeps the residual boundary. Both release
+   packed video weights before audio decoding. The worker reports the actual policy and cache
+   limit; the allocation cache limit is not a bound on total process memory.
 4. **Create Recipe** runs the shared component/configuration preflight and writes a new recipe.
    Image/reference presets still need media attached to a clip before full render preflight can pass.
    For a Swift text-to-video preset, the selected worker runs preflight before the profile is kept;

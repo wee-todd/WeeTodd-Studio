@@ -141,18 +141,23 @@ public enum H3VideoVAEDecoder {
   }
 
   public static func decodeChunks(checkpointURL: URL, latent: MLXArray,
+    memoryMode: H3VideoDecodeMemoryMode? = nil,
     onChunk: (MLXArray) throws -> Void) throws {
     try decodeChunks(checkpointURL: checkpointURL, latent: latent,
-      retainWeights: true, onChunk: onChunk)
+      retainWeights: true, memoryMode: memoryMode, onChunk: onChunk)
   }
 
   /// The legacy streamed-weight path remains available internally for exact
   /// decoder-only qualification against the same saved latent input.
   static func decodeChunks(checkpointURL: URL, latent: MLXArray,
     retainWeights: Bool,
+    memoryMode: H3VideoDecodeMemoryMode? = nil,
     spatialBatchSize: Int = 4,
     onSessionClosed: (H3VideoVAEDecodeSession.Statistics) -> Void = { _ in },
     onChunk: (MLXArray) throws -> Void) throws {
+    guard memoryMode == nil || retainWeights else {
+      throw H3CheckpointError.invalid("Selected video memory mode requires a resident decoder session.")
+    }
     guard (1...4).contains(spatialBatchSize), latent.ndim == 5, latent.shape[0] == 1,
       (7...128).contains(latent.shape[1]),
       (1...256).contains(latent.shape[2]),
@@ -162,7 +167,7 @@ public enum H3VideoVAEDecoder {
     }
     if retainWeights {
       try H3VideoVAEDecodeSession.withSession(checkpointURL: checkpointURL,
-        onClose: onSessionClosed) { session in
+        memoryMode: memoryMode, onClose: onSessionClosed) { session in
         try decodeChunks(checkpointURL: checkpointURL, latent: latent,
           session: session, spatialBatchSize: spatialBatchSize, onChunk: onChunk)
       }

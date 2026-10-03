@@ -128,17 +128,10 @@ public enum H3VideoVAEEncoder {
         bias: read(name + ".bias", shape: [count]))
     }
     func block(_ input: MLXArray, name: String, out: Int) throws -> MLXArray {
-      let first = try norm(input, name: name + ".norm1")
-      let hidden = try conv(silu(first), name: name + ".conv1",
-        out: out, kernel: 3, spatialPadding: 1, temporalPadding: 2)
-      let second = try norm(hidden, name: name + ".norm2")
-      let projected = try conv(silu(second), name: name + ".conv2",
-        out: out, kernel: 3, spatialPadding: 1, temporalPadding: 2)
-      let residual = input.shape[4] == out ? input
-        : try conv(input, name: name + ".nin_shortcut", out: out, kernel: 1)
-      let result = residual + projected
-      eval(result)
-      return result
+      try residualBlock(input, name: name, out: out,
+        normalize: { try norm($0, name: $1) },
+        convolve: { try conv($0, name: $1, out: $2, kernel: $3,
+          spatialPadding: $4, temporalPadding: $5) })
     }
 
     let mean = MLXArray([Float(0.485), 0.456, 0.406]).reshaped([1, 1, 1, 1, 3])
@@ -222,6 +215,30 @@ public enum H3VideoVAEEncoder {
     try file.checkUnchanged(at: checkpointURL)
     try Task.checkCancellation()
     return latent
+  }
+
+  /// Each evaluated projection leaves its normalization scope before the next
+  /// convolution. Keep the full temporal batch and operation order unchanged.
+  static func residualBlock(_ input: MLXArray, name: String, out: Int,
+    normalize: (MLXArray, String) throws -> MLXArray,
+    convolve: (MLXArray, String, Int, Int, Int, Int) throws -> MLXArray) throws -> MLXArray {
+    func firstProjection(_ input: MLXArray) throws -> MLXArray {
+      let first = try normalize(input, name + ".norm1")
+      return try convolve(silu(first), name + ".conv1", out, 3, 1, 2)
+    }
+    func secondProjection(_ input: MLXArray) throws -> MLXArray {
+      let second = try { () throws -> MLXArray in
+        let hidden = try firstProjection(input)
+        return try normalize(hidden, name + ".norm2")
+      }()
+      return try convolve(silu(second), name + ".conv2", out, 3, 1, 2)
+    }
+    let projected = try secondProjection(input)
+    let residual = input.shape[4] == out ? input
+      : try convolve(input, name + ".nin_shortcut", out, 1, 0, 0)
+    let result = residual + projected
+    eval(result)
+    return result
   }
 
   private static func validateEncoderHeader(_ file: SafeTensorFile) throws {

@@ -3,6 +3,7 @@ import XCTest
 @testable import H3MLX
 
 final class H3StudioRecipeTests: XCTestCase {
+  private var recipeMemoryMode = "normal"
   func testExternalExtensionRequiresPromptAndAnchorsTheTrueLastFrame() throws {
     var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
     var components = try XCTUnwrap(root["components"] as? [String: Any])
@@ -42,6 +43,7 @@ final class H3StudioRecipeTests: XCTestCase {
       "overall_soundscape: non_diegetic_music:"
     let request = try compile()
     XCTAssertTrue(resolved)
+    XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
     XCTAssertEqual(request.references.count, 2)
     if case .timedImage(let anchor, let frame) = request.references[1] {
       XCTAssertEqual(frame, 0)
@@ -64,7 +66,8 @@ final class H3StudioRecipeTests: XCTestCase {
       "video_vae": "/tmp/video.safetensors",
       "audio_vae": "/tmp/audio.safetensors", "task": "t2va"]
     let config: [String: Any] = ["width": 32, "height": 32,
-      "duration_seconds": 2.5, "steps": 5, "seed": 123]
+      "duration_seconds": 2.5, "steps": 5, "seed": 123,
+      "memory_mode": recipeMemoryMode]
       .merging(controls) { _, new in new }
     return try JSONSerialization.data(withJSONObject: ["format": "weetodd-headless-v2",
       "engine": "h3", "prompt": "A person walks", "components": paths,
@@ -73,6 +76,7 @@ final class H3StudioRecipeTests: XCTestCase {
 
   func testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs() throws {
     let request = try H3StudioRecipe.compile(data: recipe())
+    XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
     XCTAssertEqual(request.seed, 123)
     XCTAssertEqual(request.requestedSteps, 5)
     XCTAssertEqual(request.geometry.frames, 73)
@@ -146,6 +150,7 @@ final class H3StudioRecipeTests: XCTestCase {
     }
     let request = try compile(root)
     XCTAssertEqual(paths, ["/tmp/a.png", "/tmp/b.png"])
+    XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
     XCTAssertEqual(request.references.count, 2)
     XCTAssertEqual(request.qwenVision.path, "/tmp/qwen-vision.safetensors")
     var rejected = root
@@ -195,6 +200,7 @@ final class H3StudioRecipeTests: XCTestCase {
     }
     let result = try compile(root)
     XCTAssertEqual(result.references.count, 3)
+    XCTAssertEqual(result.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
     XCTAssertEqual(seen, ["image:/tmp/face.png", "video:/tmp/motion.mp4",
       "audio:/tmp/voice.wav"])
     var invalid = root
@@ -229,6 +235,7 @@ final class H3StudioRecipeTests: XCTestCase {
       }
     }
     let audioOnly = try compile(root)
+    XCTAssertEqual(audioOnly.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
     XCTAssertEqual(loaded.map(\.0), ["/tmp/voice.wav"])
     XCTAssertEqual(loaded[0].1, 2)
     XCTAssertEqual(loaded[0].2, 2.5)
@@ -253,6 +260,7 @@ final class H3StudioRecipeTests: XCTestCase {
         return .audio(H3AudioReference(samples: [Float](repeating: 0,
           count: 2 * 80_000), frames: 80_000))
       }
+    XCTAssertEqual(imageAndSound.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
     XCTAssertEqual(imageAndSound.references.count, 2)
     if case .timedImage(_, let frame) = imageAndSound.references[0] {
       XCTAssertEqual(frame, 0)
@@ -290,6 +298,7 @@ final class H3StudioRecipeTests: XCTestCase {
       }
     }
     let admitted = try compile(root)
+    XCTAssertEqual(admitted.base.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
     XCTAssertEqual(admitted.anchors, [.first, .last])
     XCTAssertEqual(loaded, ["/tmp/first.png", "/tmp/last.png"])
     var visibleLast = root
@@ -339,4 +348,43 @@ final class H3StudioRecipeTests: XCTestCase {
     XCTAssertThrowsError(try compile([input("a", 0), input("z", 999)]))
     XCTAssertEqual(loaded.count, 3)
   }
+  func testLowerMemoryModePropagatesThroughAllExistingTaskFixtures() throws {
+    recipeMemoryMode = "low_memory_bf16"
+    try testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs()
+    try testExternalExtensionRequiresPromptAndAnchorsTheTrueLastFrame()
+    try testStillReferenceRecipePreservesInputOrderAndRejectsDroppedControls()
+    try testMixedMediaRecipeRetainsInputOrderAndRequiresVisualForAudio()
+    try testA2VRecipePlacesDriverAtTargetStartAndRetainsSourceInterval()
+    try testFL2VARecipeKeepsOrderedEndpointRolesAndRejectsUnportedInputs()
+  }
+
+  func testMemoryModePolicyDiagnosticsAndDirectConstructorDefault() throws {
+    let legacy = try H3T2VARequest(prompt: "A person walks", width: 32, height: 32,
+      durationSeconds: 2.5, seed: 123, requestedSteps: 5,
+      transformer: URL(fileURLWithPath: "/tmp/h3.safetensors"),
+      qwenPages: URL(fileURLWithPath: "/tmp/qwen-pages"),
+      tokenizer: URL(fileURLWithPath: "/tmp/tokenizer.json"),
+      videoVAE: URL(fileURLWithPath: "/tmp/video.safetensors"),
+      audioVAE: URL(fileURLWithPath: "/tmp/audio.safetensors"))
+    XCTAssertNil(legacy.videoDecodeMemoryMode)
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: nil)["materializationPolicy"] as? String, "eager")
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: .normal)["materializationPolicy"] as? String, "defer_projections_and_residual")
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: .lowMemoryBF16)["materializationPolicy"] as? String, "defer_projections")
+    XCTAssertTrue(H3VideoDecodeMemoryMode.materializesProjection(for: nil))
+    XCTAssertTrue(H3VideoDecodeMemoryMode.materializesFirstResidual(for: nil))
+    XCTAssertFalse(H3VideoDecodeMemoryMode.materializesProjection(for: .normal))
+    XCTAssertFalse(H3VideoDecodeMemoryMode.materializesFirstResidual(for: .normal))
+    XCTAssertFalse(H3VideoDecodeMemoryMode.materializesProjection(for: .lowMemoryBF16))
+    XCTAssertTrue(H3VideoDecodeMemoryMode.materializesFirstResidual(for: .lowMemoryBF16))
+    var implicit = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
+    var config = try XCTUnwrap(implicit["config"] as? [String: Any])
+    config.removeValue(forKey: "memory_mode")
+    implicit["config"] = config
+    XCTAssertEqual(try H3StudioRecipe.compile(data: JSONSerialization.data(withJSONObject: implicit))
+      .videoDecodeMemoryMode, .normal)
+    for invalid: Any in ["resident", true, 1] {
+      XCTAssertThrowsError(try H3StudioRecipe.compile(data: recipe(controls: ["memory_mode": invalid])))
+    }
+  }
+
 }

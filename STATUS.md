@@ -15,12 +15,45 @@ seconds at a 6.294 GB physical peak, excluding FFmpeg. All sixteen predictions, 
 unloading, accepted-project reopening and no-inference resume passed. All 121 reviewed
 frames retained the white reference-board layout and invented text instead of the requested
 shared hall scene. This is a failed scene-quality result, not a release qualification.
+A second 768 × 448, 121-frame test used balanced character/location references on a black
+board, the showcased prompt headings and adapter strength 1.3. Accepted-project reopening,
+staged unloading and no-inference resume passed, but all 121 reviewed frames still animated
+the board layout instead of composing the requested scene. Its 551.95-second worker time
+and 5.572 GB physical peak were observed with another GPU application active and are not
+an isolated performance comparison. Ingredients remains experimental and not quality-approved.
+The authored sampler now applies the checkpoint's learned marker to the first generated
+latent frame, excluding the guide tail and audio. Three focused CPU tests verify row selection,
+legacy defaults and trailing-slot arithmetic. This corrects a primary-code discrepancy;
+its effect on the failed scene-quality result still requires a real-model check.
 
-Current LTX performance reconciliation 2026-10-03: the packaged 1344 × 768, 89-frame,
-seed-43 FFLF worker took 203.39 seconds, with an 8.828 GB physical peak excluding FFmpeg.
-Its three media files remain byte-identical to the accepted Swift baseline. The historical
-September 24 developer median of 171.85 seconds used a different binary; it cannot be
-presented as current packaged performance. Current speed parity remains open.
+Latest LTX default regression 2026-10-03: the authored-sampler app's worker reproduced
+the frozen 1344 × 768, 89-frame, seed-43, eight-plus-three-evaluation FFLF take with all
+three media files byte-identical to the accepted Swift baseline. It took 172.76 worker
+seconds (172.90 through verified publication), with an 8.844 GB physical peak and 5.903 GB
+MLX peak, excluding FFmpeg from the physical counter. The earlier current-worker observation
+was 203.39 seconds; no cause is established for that difference. The September 24 developer
+median of 171.85 seconds and Python controls remain historical, not fresh contemporary controls.
+
+H3 control encoder buffer lifetime 2026-10-03: evaluated normalization/intermediate arrays
+now leave their scopes before the following convolution. On the actual 22-frame, 768 × 768
+guide witness, the full Float32 latent bytes were unchanged. Peak MLX allocation changed
+from 32.698 to 27.564 GB and process-lifetime physical peak from 37.806 to 32.672 GB.
+Encoder time changed from 23.35 to 22.80 seconds in one fresh-process pair. This is a
+stage-only measurement, not a new full 124-frame or nineteen-step generation benchmark.
+The proposed convolution batching changed latent bytes and was rejected.
+
+H3 video decoder materialization 2026-10-03: saved `normal` mode defers projection and
+first-residual evaluations within each block; `low_memory_bf16` defers only projections.
+Final block, tile and chunk boundaries remain evaluated. Direct Swift APIs with no mode
+retain eager behavior. Two separate fresh-process ABBA comparisons on the same saved
+124-frame, 768 × 448 latent matched every Float32 chunk and RGB8 hash. Normal mode reduced
+mean decoder time from 51.976 to 38.930 seconds (25.10%); peak MLX allocation increased
+from 4.455 to 4.801 GB. Projection-only reduced its paired mean from 50.892 to 43.058
+seconds (15.39%), with a 4.459 GB MLX peak. These are decoder-only results, not whole-render
+gains or qualification of higher-resolution peak memory. Packed weights remain resident only
+inside the video stage and release before audio decoding. Worker metadata reports the mode,
+evaluation policy, spatial batch and allocation-cache limit; the cache limit is not a total
+memory cap. Final integrated-worker qualification is still pending.
 
 Swift H3 bounded weight reads 2026-10-03: small quantization metadata, normalization
 weights, rotary frequencies, streamed biases and admitted LoRA factors now use buffered

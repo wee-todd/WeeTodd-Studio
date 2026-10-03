@@ -358,6 +358,9 @@ import UniformTypeIdentifiers
     } else {
       throw invalid("The H3 task was not admitted.")
     }
+    let videoDecodeMemoryMode = stillRequest?.videoDecodeMemoryMode
+      ?? endpointRequest?.base.videoDecodeMemoryMode ?? textRequest?.videoDecodeMemoryMode
+    let videoDecodeDiagnostics = H3VideoDecodeMemoryMode.diagnostics(for: videoDecodeMemoryMode)
     let preflightSeconds = Date().timeIntervalSince(started)
     if arguments[0] == "preflight" {
       try emit(["status": "success", "result": [
@@ -368,7 +371,7 @@ import UniformTypeIdentifiers
         "packedRows": admission.packedRows,
         "evaluations": admission.evaluations,
         "referenceImages": sourceImages,
-        "productionQualified": false]])
+        "productionQualified": false, "videoDecode": videoDecodeDiagnostics]])
       return
     }
 
@@ -540,7 +543,7 @@ import UniformTypeIdentifiers
       "nativeRuntime": "swift-mlx", "productionQualified": false,
       "jobID": envelope.jobID.uuidString,
       "task": reportedTask, "referenceImages": sourceImages,
-      "stageTimings": stageTimings,
+      "stageTimings": stageTimings, "videoDecode": videoDecodeDiagnostics,
       "frames": publishedFrames, "fps": 24,
       "sampledFrames": result.videoFrames,
       "overlapFrames": overlapFrames,

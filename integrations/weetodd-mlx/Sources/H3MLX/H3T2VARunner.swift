@@ -13,6 +13,7 @@ public struct H3T2VARequest: Sendable {
   public let transformer: URL
   public let qwenPages: URL
   public let tokenizer: URL
+  public let videoDecodeMemoryMode: H3VideoDecodeMemoryMode?
   public let videoVAE: URL
   public let audioVAE: URL
   public let turboLoRA: URL?
@@ -27,7 +28,8 @@ public struct H3T2VARequest: Sendable {
     videoVAE: URL, audioVAE: URL, turboLoRA: URL? = nil,
     turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
-    funControl: H3FunControlGuide? = nil) throws {
+    funControl: H3FunControlGuide? = nil,
+    videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil) throws {
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
       [transformer, qwenPages, tokenizer, videoVAE, audioVAE]
@@ -65,6 +67,7 @@ public struct H3T2VARequest: Sendable {
     self.transformer = transformer
     self.qwenPages = qwenPages
     self.tokenizer = tokenizer
+    self.videoDecodeMemoryMode = videoDecodeMemoryMode
     self.videoVAE = videoVAE
     self.audioVAE = audioVAE
     self.turboLoRA = turboLoRA
@@ -196,7 +199,8 @@ public enum H3T2VARunner {
 
     let result = try H3AVOutputDecoder.decode(videoRows: rawRows.0,
       audioRows: rawRows.1, geometry: geometry, videoVAE: request.videoVAE,
-      audioVAE: request.audioVAE, onFrame: onFrame, onAudio: onAudio,
+      audioVAE: request.audioVAE, videoDecodeMemoryMode: request.videoDecodeMemoryMode,
+      onFrame: onFrame, onAudio: onAudio,
       progress: progress)
     return Result(videoFrames: result.videoFrames,
       audioSamplesPerChannel: result.audioSamplesPerChannel,

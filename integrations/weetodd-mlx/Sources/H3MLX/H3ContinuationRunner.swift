@@ -124,6 +124,7 @@ public enum H3ContinuationRunner {
     return try H3AVOutputDecoder.decode(videoRows: raw.0,
       audioRows: raw.1, geometry: request.geometry,
       videoVAE: request.videoVAE, audioVAE: request.audioVAE,
+      videoDecodeMemoryMode: request.videoDecodeMemoryMode,
       onFrame: onFrame, onAudio: onAudio, progress: progress)
   }
 }

@@ -25,6 +25,7 @@ public final class MLXDenoiser {
   private let cacheBytes:Int
   private let maximumRotaryBytes:Int
   private let keyframeMarkerRows:Int
+  private let leadingKeyframeMarkerRows:Int
   private var fixedResidentBytes=0
   private var active=false
 
@@ -43,11 +44,14 @@ public final class MLXDenoiser {
 
   public init(configuration:AVBlockConfiguration,blockCount:Int=48,cacheBytes:Int=128*1024*1024,
     maximumActivationBytes:Int=2*1024*1024*1024,videoAttentionGroups:[Int]=[],
-    keyframeMarkerRows:Int=0) throws {
-    guard keyframeMarkerRows>=0,keyframeMarkerRows<=configuration.videoTokens else {
+    keyframeMarkerRows:Int=0,leadingKeyframeMarkerRows:Int=0) throws {
+    guard keyframeMarkerRows>=0,keyframeMarkerRows<=configuration.videoTokens,
+      leadingKeyframeMarkerRows>=0,
+      leadingKeyframeMarkerRows<=configuration.videoTokens-keyframeMarkerRows else {
       throw LTXError.invalid("Generated keyframe marker rows exceed the video token layout.")
     }
     self.keyframeMarkerRows=keyframeMarkerRows
+    self.leadingKeyframeMarkerRows=leadingKeyframeMarkerRows
     maximumRotaryBytes=try Self.admitRotary(configuration:configuration,maximumActivationBytes:maximumActivationBytes)
     stack=try MLXAVStack(configuration:configuration,blockCount:blockCount,cacheBytes:cacheBytes,
       maximumActivationBytes:maximumActivationBytes,videoAttentionGroups:videoAttentionGroups)
@@ -57,6 +61,28 @@ public final class MLXDenoiser {
       admitted["video_attention_templates"]=[videoAttentionGroups.count,configuration.videoTokens]
     }
     inputShapes=admitted;shapes=DenoiserLayout.weightShapes(configuration)
+  }
+
+  /// Leading rows represent the first generated latent frame. Trailing rows
+  /// retain the separate generated-keyframe slot contract; IC guide rows are
+  /// never selected merely because their temporal positions also start at zero.
+  static func applyKeyframeMarkers(_ projection:MLXArray,marker:MLXArray,
+    leadingRows:Int,trailingRows:Int) throws -> MLXArray {
+    guard projection.ndim == 2,marker.shape == [1,projection.shape[1]],
+      leadingRows>=0,trailingRows>=0,trailingRows<=projection.shape[0],
+      leadingRows<=projection.shape[0]-trailingRows else {
+      throw LTXError.invalid("Generated keyframe marker spans overlap or exceed video rows.")
+    }
+    if leadingRows == 0 && trailingRows == 0 { return projection }
+    let split=projection.shape[0]-trailingRows
+    if leadingRows == 0 {
+      // Preserve the existing trailing-slot arithmetic and concatenation.
+      return concatenated([projection[0..<split],projection[split..<projection.shape[0]]+marker],axis:0)
+    }
+    var parts=[projection[0..<leadingRows]+marker]
+    if leadingRows<split { parts.append(projection[leadingRows..<split]) }
+    if trailingRows>0 { parts.append(projection[split..<projection.shape[0]]+marker) }
+    return parts.count == 1 ? parts[0] : concatenated(parts,axis:0)
   }
 
   /// The four grids live together. Account for all of them within the already
@@ -168,14 +194,14 @@ public final class MLXDenoiser {
     for (name,prefix) in [("video",""),("audio","audio_")] {
       let rounded=current[name+"_latent"]!.asType(.bfloat16).asType(.float32)
       var projection=try linear(prefix+"patchify_proj",rounded,weights:fixedWeights,adapters:fixedAdapters)
-      if name == "video" && keyframeMarkerRows > 0 {
+      if name == "video" && (keyframeMarkerRows > 0 || leadingKeyframeMarkerRows > 0) {
         let marker=try fixedWeights("keyframes_abs_pos_embedding",[1,configuration.videoDimension])
         guard marker.shape == [1,configuration.videoDimension] else {
           throw LTXError.invalid("Generated keyframe marker shape differs from the checkpoint.")
         }
         let value=try marker.tensor().asType(.float32)
-        let split=configuration.videoTokens-keyframeMarkerRows
-        projection=concatenated([projection[0..<split],projection[split..<configuration.videoTokens]+value],axis:0)
+        projection=try Self.applyKeyframeMarkers(projection,marker:value,
+          leadingRows:leadingKeyframeMarkerRows,trailingRows:keyframeMarkerRows)
         eval(projection)
         try report("keyframe_marker")
       }

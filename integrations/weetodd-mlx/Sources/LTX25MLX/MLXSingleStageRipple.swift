@@ -10,6 +10,11 @@ public final class MLXSingleStageRipple {
     (geometry.videoTokens*2+geometry.audioFrames)*128*4*8+1024*6144*4
   }
   public enum AdapterTask:Sendable,Equatable { case ripple, ingredients }
+  static func leadingMarkerRows(geometry:AVGeometry,task:AdapterTask,
+    sampling:MLXIngredientsSampling) -> Int {
+    task == .ingredients && sampling == .ancestralCFGPP
+      ? geometry.latentHeight*geometry.latentWidth : 0
+  }
   public struct Plan: Sendable {
     public let layout: MLXReferenceVideoLayout
     public let configuration: AVBlockConfiguration
@@ -80,7 +85,8 @@ public final class MLXSingleStageRipple {
       configuration: plan.configuration,
       adapters: [LoRAAdapter(path: adapterURL.path, strength: adapters[0].strength)],
       ingredientsAdapterPath:task == .ingredients ? adapterURL.path : nil,
-      maximumActivationBytes: blockBudget)
+      maximumActivationBytes: blockBudget,requireKeyframeMarker:Self.leadingMarkerRows(geometry:geometry,task:task,
+        sampling:ingredientsSampling)>0)
     guard weights.sourceCheckpoint == "ltx-2.5-22b-distilled-transformer-bf16.safetensors" else {
       throw LTXError.invalid("Single-stage reference sampling requires the released distilled LTX 2.5 transformer.")
     }
@@ -103,7 +109,9 @@ public final class MLXSingleStageRipple {
     let prepared = try plan.layout.prepare(generated: videoNoise, reference: referenceVideo,
       anchors: imageAnchors)
     let sampler = try MLXSamplingRunner(configuration: plan.configuration,
-      maximumActivationBytes: maximumActivationBytes)
+      maximumActivationBytes: maximumActivationBytes,
+      leadingKeyframeMarkerRows:Self.leadingMarkerRows(geometry:geometry,task:task,
+        sampling:ingredientsSampling))
     let inputs: [String: MLXArray] = [
       "video_text": videoContext, "audio_text": audioContext,
       "video_latent": prepared.latent, "audio_latent": audioNoise,

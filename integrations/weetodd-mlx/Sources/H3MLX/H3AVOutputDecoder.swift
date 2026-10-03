@@ -12,6 +12,7 @@ public enum H3AVOutputDecoder {
 
   public static func decode(videoRows: [Float], audioRows: [Float],
     geometry: H3Geometry, videoVAE: URL, audioVAE: URL,
+    videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil,
     onFrame: (Int, Data) throws -> Void,
     onAudio: ([Float], Int) throws -> Void,
     progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
@@ -31,7 +32,7 @@ public enum H3AVOutputDecoder {
     let frameBytes = geometry.width * geometry.height * 3
     var written = 0
     try H3VideoVAEDecoder.decodeChunks(checkpointURL: videoVAE,
-      latent: video) { chunk in
+      latent: video, memoryMode: videoDecodeMemoryMode) { chunk in
       try Task.checkCancellation()
       let bytes = try H3LatentCodec.videoPixelsRGB8(chunk).asArray(UInt8.self)
       guard bytes.count == chunk.shape[1] * frameBytes else {
