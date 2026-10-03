@@ -5,6 +5,7 @@ public struct SamplingSchedule: Sendable {
   public let sigmas: [Double]
   public let steps: [EulerStep]
   public let eta: Double
+  public let noiseStrength: Double
   let predictionSigmas: [Float]
   public init(sigmas: [Double], eta: Double = 1, noiseStrength: Double = 1) throws {
     guard (2...257).contains(sigmas.count), sigmas.last == 0 else {
@@ -23,6 +24,7 @@ public struct SamplingSchedule: Sendable {
     }
     self.sigmas = sigmas
     self.eta = eta
+    self.noiseStrength = noiseStrength
   }
 }
 

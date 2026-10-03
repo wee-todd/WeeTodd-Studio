@@ -1,5 +1,27 @@
 # WeeTodd Studio implementation status
 
+LTX Ingredients authored sampling 2026-10-03: the explicit recipe option
+`config.single_stage_sampler: "euler_ancestral_cfg_pp"` compiles to a separate version-11
+Ingredients request. It implements rectified-flow CFG++ at CFG 1/eta 1 with eight updates
+and sixteen serial conditional/unconditional transformer evaluations. Learned empty-text
+contexts unload with the positive encoder before transformer execution; sampler state stays
+Float32 while model input/time features use BF16. Reference restoration, raw unconditional
+residuals, maximum-sigma limits, terminal behavior, cancellation/retry and extra activation
+admission have focused tests. Saved version-6 recipes retain their previous mathematics.
+Native seeded noise does not establish Torch/ComfyUI pixel parity. Real-model identity/scene
+quality and matched performance remain open; this option is not enabled by default.
+The controlled 768 × 512, 121-frame, seed-20260816 run completed in 559.29 worker
+seconds at a 6.294 GB physical peak, excluding FFmpeg. All sixteen predictions, staged
+unloading, accepted-project reopening and no-inference resume passed. All 121 reviewed
+frames retained the white reference-board layout and invented text instead of the requested
+shared hall scene. This is a failed scene-quality result, not a release qualification.
+
+Current LTX performance reconciliation 2026-10-03: the packaged 1344 × 768, 89-frame,
+seed-43 FFLF worker took 203.39 seconds, with an 8.828 GB physical peak excluding FFmpeg.
+Its three media files remain byte-identical to the accepted Swift baseline. The historical
+September 24 developer median of 171.85 seconds used a different binary; it cannot be
+presented as current packaged performance. Current speed parity remains open.
+
 Swift H3 bounded weight reads 2026-10-03: small quantization metadata, normalization
 weights, rotary frequencies, streamed biases and admitted LoRA factors now use buffered
 reads. Quantized projection windows assemble at most 88,080,384 bytes through the existing
@@ -20,8 +42,12 @@ API, preserving all schema and file-identity checks. An actual CPU-only comparis
 all 250 markers preserved every byte and JSON validation: mapped acquisition took
 23.412 seconds versus 0.003689 seconds buffered. A separate decoder small-tensor
 comparison saved less than one second and was rejected; decoder acquisition is unchanged.
-The installed-app result above predates this admission-only change; final-worker checks
-remain pending.
+The installed-app result above predates this admission-only change. The final worker also
+completed a 1376 × 768, 124-frame Beowulf recipe in 1016.79 seconds, at a 14.879 GB
+physical peak; an independent same-size A2V recipe took 1038.64 seconds and peaked at
+15.020 GB. Both used four LightX evaluations and passed previews, acceptance and reopening.
+A blind CPU transcription of the A2V output matched the selected source excerpt's recognized
+words. These are individual observations, not matched speed comparisons or voice/lip-sync approval.
 
 Swift H3 canvas admission 2026-10-03: the 1 MP 16:9 canvas is 1376 × 768 on the
 32-pixel grid. Text/reference request checks, endpoint image loading, native keyframe/control
@@ -37,7 +63,10 @@ the square video-reference buffer remains separate. A real non-square CPU media
 regression reproduces the former gray-border contamination and now passes, together
 with independent seam-image admission and malformed-input checks (11 focused tests).
 The prior robot continuation has a visible framing discontinuity and remains rejected
-for seamless quality. No corrected weighted continuation has been rendered yet.
+for seamless quality. A corrected 107-frame, 384 × 256 continuation completed in 155.57
+worker seconds at an 8.142 GB physical peak. Reviewed frames retain the robot and table
+without the former gray-border contamination. Seam texture changes and audio remain
+separate quality checks; this does not establish seamless continuation generally.
 
 Swift native defaults and H3 corrections 2026-10-02: absent H3/LTX 2.5 backend
 preferences now select Swift; saved explicit false preferences retain legacy Python.

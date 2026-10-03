@@ -5,6 +5,25 @@ import MLX
 
 final class MLXStudioMemoryPlanTests:XCTestCase {
   let gib=1024*1024*1024
+  func testAuthoredIngredientsReserveIsAdmittedConsistentlyBeforeWeights() throws {
+    let helper=MLXDistilledRequestTests()
+    var value=helper.base();value["version"]=11;value["task"]="ingredients"
+    value["width"]=768;value["height"]=448;value["frames"]=121
+    value["noise_policy"]="mlx_threefry_bf16_v1";value["ingredients_sampling"]="euler_ancestral_cfg_pp_float32_v1"
+    value["reference_images"]=[];value["audio_reference"]=NSNull();value["union_control_guide"]=NSNull()
+    value["msr"]=NSNull();value["dfr"]=NSNull();value["ic_control"]=NSNull()
+    value["ingredients_sheet"]=["path":"/sheet.png","source_sha256":String(repeating:"b",count:64),
+      "adapter_path":"/ingredients.safetensors","adapter_strength":1.4,"reference_strength":1.0]
+    let request=try helper.decode(value),geometry=try request.recipe().high
+    let plan=try MLXStudioMemoryPlan(request:request,physicalMemory:256*UInt64(gib),recommendedWorkingSet:192*UInt64(gib))
+    let configuration=try AVBlockConfiguration(videoTokens:geometry.videoTokens*2,audioTokens:geometry.audioFrames,textTokens:1024)
+    let baseline=try MLXAVBlock.estimatedActivationBytes(configuration:configuration,perTokenVideo:true)
+    XCTAssertEqual(plan.transformerActivationBytes,baseline+MLXSingleStageRipple.cfgppReserveBytes(geometry:geometry))
+    XCTAssertNoThrow(try MLXMediaPipeline.admit(request,videoActivationBytes:plan.videoActivationBytes,
+      transformerActivationBytes:plan.transformerActivationBytes,videoBackend:.mlx,audioBackend:.mlx))
+    XCTAssertThrowsError(try MLXMediaPipeline.admit(request,videoActivationBytes:plan.videoActivationBytes,
+      transformerActivationBytes:plan.transformerActivationBytes-1,videoBackend:.mlx,audioBackend:.mlx))
+  }
   func testActualHDRefinementRotaryGridsBuildWithoutWeights() throws {
     let request=try request(),geometry=try request.recipe().high
     let configuration=try AVBlockConfiguration(videoTokens:geometry.videoTokens,audioTokens:geometry.audioFrames,textTokens:1024)

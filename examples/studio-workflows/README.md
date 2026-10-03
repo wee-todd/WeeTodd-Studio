@@ -48,6 +48,11 @@ Movie/clip export uses `weetodd-studio-native-job-v1` when all clips select nati
 or accepted movie sources. It freezes the edit and existing prepared `weetodd-headless-v2`
 recipes for WeeToddCLI, without Python or a second sampler. This format is an execution job,
 separate from planning definitions, native image v4 jobs and the legacy Python-hosted movie formats.
+Prepared Ingredients recipes retain their sampler choice across export. Existing deterministic
+recipes use eight evaluations. The explicit experimental `config.single_stage_sampler` value
+`euler_ancestral_cfg_pp` uses eight updates and sixteen serial evaluations in the shared Swift
+worker, with full-strength sheet conditioning and a versioned native noise policy. Unsupported
+choices fail admission; exporting a recipe does not establish reference likeness or scene quality.
 It supports cut-only finishing with embedded source audio; unsupported finishing is rejected
 explicitly. Complete prepared continuous scenes retain member timing and shared take identity;
 ordinary continuity needs an accepted source before export. Pending Ripple drafts use their dedicated
@@ -81,8 +86,9 @@ Studio, native CLI and saved uncached ComfyUI execution, including cancellation 
 and accepted-take reopening. Standalone audio Ref2VA also passed all three hosts and
 cancellation recovery; remaining range/finishing checks are still pending. These route
 checks do not approve the prior continuation seam
-or Fun visual quality; the corrected unletterboxed continuation preparation still needs
-a weighted quality check.
+or Fun visual quality. A later corrected 107-frame continuation has now removed the old
+gray-border contamination while retaining the robot/table; seam texture and audio still
+require separate review.
 Matched useful-size speed/memory and broad identity, seam and audio quality remain open.
 These checks do not qualify all native tasks. See [execution, supported finishing and qualification](../../studio/README.md#headless-movie-and-clip-jobs).
 

@@ -15,6 +15,15 @@ public enum DenoiserMath {
     return angles.map(cosf) + angles.map(sinf)
   }
 
+  /// Authored CFG++ keeps sigma and the trigonometric phase Float32, then
+  /// rounds the completed features at the BF16 model-input boundary.
+  public static func authoredTimestep(_ sigma:Float) throws -> [Float] {
+    guard sigma.isFinite,(0...1).contains(sigma) else { throw LTXError.invalid("Sigma must be finite in 0...1.") }
+    let scaled=sigma*1000
+    let angles=(0..<128).map { scaled*expf(-Float(log(10000.0))*Float($0)/128) }
+    return (angles.map(cosf)+angles.map(sinf)).map(bfloat16)
+  }
+
   public struct Rotary: Sendable { public let cos: [Float]; public let sin: [Float] }
 
   /// Validate storage without allocating grids. The default preserves standalone

@@ -373,6 +373,12 @@ final class NativeLTXPreparationTests: XCTestCase {
     project.clips[0].attachments=[attachment]
     let result=try NativeLTXPreparation.compose(request:request(project,runtime))
     XCTAssertEqual(((result["recipe"] as! [String:Any])["conditioning"] as! [String:Any])["task"] as? String,"control")
+    config["single_stage_sampler"]="euler_ancestral_cfg_pp";recipe["config"]=config
+    try JSONSerialization.data(withJSONObject:recipe).write(to:profile)
+    let authored=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let generation=try XCTUnwrap((authored["report"] as? [String:Any])?["generation"] as? [String:Any])
+    XCTAssertEqual((generation["controls"] as? [String:Any])?["evaluations"] as? Int,16)
+    XCTAssertEqual(((authored["recipe"] as! [String:Any])["config"] as! [String:Any])["single_stage_sampler"] as? String,"euler_ancestral_cfg_pp")
     project.clips[0].duration=4
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
   }

@@ -4,6 +4,33 @@ import Darwin
 import LTX25MLX
 
 final class MLXDistilledRequestTests:XCTestCase {
+  func testAuthoredIngredientsHasExplicitVersionAndNeverReinterpretsLegacyRequests() throws {
+    var value=base();value["version"]=6;value["task"]="ingredients"
+    value["frames"]=121;value["noise_policy"]="mlx_threefry_bf16_v1"
+    value["reference_images"]=[];value["audio_reference"]=NSNull();value["union_control_guide"]=NSNull()
+    value["ingredients_sheet"]=["path":"/sheet.png","source_sha256":String(repeating:"b",count:64),
+      "adapter_path":"/ingredients.safetensors","adapter_strength":1.4,"reference_strength":1.0]
+    let legacy=try decode(value)
+    XCTAssertEqual(legacy.ingredientsSampling,.deterministic)
+    let encoded=try JSONSerialization.jsonObject(with:JSONEncoder().encode(legacy)) as! [String:Any]
+    XCTAssertNil(encoded["ingredients_sampling"])
+    value["version"]=11;value["msr"]=NSNull();value["dfr"]=NSNull();value["ic_control"]=NSNull()
+    XCTAssertThrowsError(try decode(value))
+    value["ingredients_sampling"]="euler_ancestral_cfg_pp_float32_v1"
+    let authored=try decode(value)
+    XCTAssertEqual(authored.ingredientsSampling,.ancestralCFGPP)
+    XCTAssertEqual(authored.ingredientsSampling.transformerEvaluations,16)
+    XCTAssertEqual(try JSONDecoder().decode(MLXDistilledRequest.self,
+      from:JSONEncoder().encode(authored)).ingredientsSampling,.ancestralCFGPP)
+    var sheet=value["ingredients_sheet"] as! [String:Any]
+    sheet["reference_strength"]=0.75;value["ingredients_sheet"]=sheet
+    XCTAssertThrowsError(try decode(value))
+    sheet["reference_strength"]=1.0;value["ingredients_sheet"]=sheet
+    value["ingredients_sampling"]="deterministic_bf16_v1";XCTAssertThrowsError(try decode(value))
+    value["ingredients_sampling"]="euler_ancestral_cfg_pp_float32_v1"
+    value["task"]="t2v";XCTAssertThrowsError(try decode(value))
+    value["task"]="ingredients";value["version"]=6;XCTAssertThrowsError(try decode(value))
+  }
   func testDFRRequestRequiresDedicatedAdapterAndExactSeamCanvas() throws {
     var value=base();value["version"]=8;value["task"]="dfr"
     value["noise_policy"]="mlx_threefry_bf16_v1"

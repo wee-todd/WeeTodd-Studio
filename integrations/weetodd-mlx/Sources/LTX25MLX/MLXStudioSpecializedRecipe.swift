@@ -37,6 +37,14 @@ enum MLXStudioSpecializedRecipe {
       throw invalid("ic_lora_single_stage must be a boolean")
     }
     let single=config["ic_lora_single_stage"] as? Bool ?? false
+    let ingredientsCFGPP:Bool
+    if let sampler=config["single_stage_sampler"] {
+      guard task == "control",single,sampler as? String == "euler_ancestral_cfg_pp" else {
+        throw invalid("single_stage_sampler requires Ingredients and euler_ancestral_cfg_pp")
+      }
+      ingredientsCFGPP=true
+      config.removeValue(forKey:"single_stage_sampler")
+    } else { ingredientsCFGPP=false }
     if task == "control",!single {
       guard inputs.count == 1,(components["msr_lora_path"] as? String ?? "").isEmpty,
         strength.doubleValue <= 2 else { throw invalid("Union Control needs one guide and its stage-one adapter") }
@@ -86,10 +94,14 @@ enum MLXStudioSpecializedRecipe {
     root["conditioning"]=["version":1,"task":"t2v","audio_policy":"generated","inputs":[]]
     var request=try MLXStudioRecipe.compileFields(data:JSONSerialization.data(withJSONObject:root),
       outputDirectory:outputDirectory,requiresSpatialUpscaler:false)
-    request["version"]=task == "ref2va" ? 7 : 6
+    request["version"]=task == "ref2va" ? 7 : ingredientsCFGPP ? 11 : 6
     request["task"]=task == "ref2va" ? "msr" : "ingredients"
     request["audio_reference"]=NSNull();request["union_control_guide"]=NSNull()
     request["ingredients_sheet"]=NSNull()
+    if ingredientsCFGPP {
+      request["msr"]=NSNull();request["dfr"]=NSNull();request["ic_control"]=NSNull()
+      request["ingredients_sampling"]=MLXIngredientsSampling.ancestralCFGPP.rawValue
+    }
     if task == "ref2va" {
       let ordered=inputs.filter { $0["reference_role"] as? String != "background" }
         + inputs.filter { $0["reference_role"] as? String == "background" }

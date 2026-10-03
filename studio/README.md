@@ -159,8 +159,10 @@ pair and a Ref2VA external movie extension with a final-frame seam anchor.
 External-after preparation now keeps that seam image separate from the square
 video-reference buffer, retaining the final source frame's aspect on a bounded
 32-pixel grid instead of copying its gray letterbox. Focused CPU media tests pass;
-the earlier robot output has a framing discontinuity, and corrected weighted
-continuation quality remains unverified.
+the earlier robot output has a framing discontinuity. A corrected 107-frame, 384 × 256
+weighted continuation now retains the robot/table without the old gray-border contamination.
+It completed in 155.57 worker seconds at an 8.142 GB physical peak, excluding FFmpeg;
+texture changes at the join and audio remain separate quality checks.
 Studio's **Match previous frame** now freezes the accepted source's last visible frame
 for Swift H3. **Save motion context** and **Continue scene** use native version-2
 context for text-only H3 clips. Installed-app frame and motion jobs passed live previews,
@@ -995,7 +997,15 @@ Their folder scans inspect bounded adapter headers and link weights in place. Pr
 shared worker preflight after the described images are attached. MSR keeps image order,
 with one optional background last, and maps role, priority, frame count, sizing, reference
 strength and attention strength. Ingredients uses one described sheet and at least 121 frames.
-Both run eight full-resolution evaluations; there is no second stage or spatial upscaler.
+MSR and saved deterministic Ingredients recipes run eight full-resolution evaluations; there
+is no second stage or spatial upscaler. An explicit experimental Ingredients recipe can set
+`config.single_stage_sampler` to `euler_ancestral_cfg_pp`. This version-11 worker request runs
+eight updates with sixteen serial conditional/unconditional evaluations, using learned empty-text
+conditioning, Float32 sampler state and BF16 model inputs. It requires reference strength 1;
+unsupported sampler values and combinations fail before model loading. Native ancestral noise
+is reproducible within its declared runtime policy, not pixel-identical to ComfyUI noise.
+Existing recipes retain their deterministic sampling. The new option is not a qualified default;
+contract/numerical tests and real-model visual acceptance are separate checks.
 Ordinary LoRAs, DFR and audio drivers cannot be combined with these single-adapter profiles.
 Ingredients setup admits compatible 2.5 full-resolution rank-128 sheet adapters after complete
 header/shape checks and starts them at strength 1.0; legacy 2.3 starts at 1.2. The pinned official
@@ -1694,8 +1704,12 @@ The corrected conditioning/decoder worker subsequently passed FFLF, still, movie
 audio and soundtrack Ref2VA, independent A2V, external-after and Fun through Studio,
 native CLI and saved uncached ComfyUI graphs. All eight cases passed sampling
 cancellation, weighted recovery and accepted-project reopening. These results qualify
-that worker; the newer bounded weight-read optimization still needs a complete
-installed-app comparison before inheriting generation or performance qualification.
+that worker. The newer bounded-read worker additionally completed corrected external-after,
+1376 × 768 Beowulf and A2V recipes, and a full 124-frame Fun boxing guide. A2V's blind CPU
+transcription matches the selected source excerpt's recognized words; that does not approve
+voice likeness or lip sync. Fun visibly follows the broad guard/punch/bag motion, while bag
+typography and auditory review remain open. These individual results do not replace matched
+performance measurements or qualify every setting through every host.
 These checks leave broad identity, seam and audio quality
 and matched useful-size performance open.
 

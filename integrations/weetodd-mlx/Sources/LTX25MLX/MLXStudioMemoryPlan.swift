@@ -47,6 +47,9 @@ public struct MLXStudioMemoryPlan:Sendable {
         perTokenVideo:layout != nil || guide != nil || union != nil || ic != nil || ingredients != nil || msr != nil ||
           (dfr?.referenceTokens ?? 0)>0 || (dfr != nil && !request.referenceImages.isEmpty),perTokenAudio:guide != nil))
     }
+    if request.ingredientsSampling == .ancestralCFGPP {
+      transformer += MLXSingleStageRipple.cfgppReserveBytes(geometry:recipe.high)
+    }
     if let dfr=request.dfr,dfr.temporalRounds>0 {
       let configurations=try MLXDFRTemporalPlan.admissionConfigurations(
         geometry:recipe.high,requestedFrames:request.frames,

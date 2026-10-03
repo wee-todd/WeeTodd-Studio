@@ -142,6 +142,7 @@ public enum NativeLTXPreparation {
     let components = recipe["components"] as? [String: Any] ?? [:]
     let task = (recipe["conditioning"] as? [String: Any])?["task"] as? String ?? "t2v"
     let specialized=specialization(recipe)
+    let authoredIngredients=specialized == "ingredients" && config["single_stage_sampler"] as? String == "euler_ancestral_cfg_pp"
     let ordinary = (config["pipeline_mode"] as? String ?? "distilled") == "distilled"
       && (config["duration_mode"] as? String ?? "manual") == "manual"
       && config["stage1_steps"] as? Int == 8 && config["stage2_steps"] as? Int == 3
@@ -165,10 +166,10 @@ public enum NativeLTXPreparation {
     return ["dfrEnabled": dfrValid,"referenceFamily": specialized ?? "ordinary",
       "supportedTasks": specialized != nil ? [specialized == "msr" ? "ref2va" : "control"] : dfrValid ? ["t2v", "i2v", "fflf"] : ordinary && !dfrEnabled
       ? ["t2v", "i2v", "fflf", "a2v", "extension"] : [],
-      "controls": ["evaluations": config["stage1_steps"] ?? 8, "refinementSteps": ["msr","ingredients"].contains(specialized ?? "") ? 0 : config["stage2_steps"] ?? 3,
+      "controls": ["evaluations": authoredIngredients ? 16 : config["stage1_steps"] ?? 8, "refinementSteps": ["msr","ingredients"].contains(specialized ?? "") ? 0 : config["stage2_steps"] ?? 3,
         "cfg": config["video_cfg_scale"] ?? 1, "stepsEditable": false, "refinementStepsEditable": false,
         "cfgEditable": false, "shiftEditable": false,
-        "stepsExplanation": ["msr","ingredients"].contains(specialized ?? "") ? "Swift reference sampling uses eight full-resolution evaluations." : "Swift distilled sampling uses the qualified 8 + 3 schedule.",
+        "stepsExplanation": authoredIngredients ? "Ingredients CFG++ uses eight steps and sixteen serial transformer evaluations." : ["msr","ingredients"].contains(specialized ?? "") ? "Swift reference sampling uses eight full-resolution evaluations." : "Swift distilled sampling uses the qualified 8 + 3 schedule.",
         "cfgExplanation": "Distilled guidance is fixed.",
         "shiftExplanation": "This native adapter does not expose a Shift override."],
       "presets": [

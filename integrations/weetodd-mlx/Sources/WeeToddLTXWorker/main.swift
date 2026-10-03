@@ -73,7 +73,7 @@ import MLX
     let request:MLXDistilledRequest
     if let direct=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any],
       ((direct["version"] as? Int == 5 && direct["task"] as? String == "union_control") ||
-        (direct["version"] as? Int == 6 && direct["task"] as? String == "ingredients") ||
+        ((direct["version"] as? Int == 6 || direct["version"] as? Int == 11) && direct["task"] as? String == "ingredients") ||
         (direct["version"] as? Int == 7 && direct["task"] as? String == "msr") ||
         ((direct["version"] as? Int == 8 || direct["version"] as? Int == 9) && direct["task"] as? String == "dfr") ||
         (direct["version"] as? Int == 10 && direct["task"] as? String == "ic_control")) {

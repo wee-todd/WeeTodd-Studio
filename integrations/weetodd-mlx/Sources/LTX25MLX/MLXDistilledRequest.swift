@@ -19,6 +19,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
   public let msr:MLXMSRRequest?
   public let dfr:MLXDFRRequest?
   public let icControl:MLXICControl?
+  public let ingredientsSampling:MLXIngredientsSampling
   public let noisePolicy:MLXNoisePolicy
   enum CodingKeys:String,CodingKey,CaseIterable {
     case version,engine,task,prompt,width,height,frames,fps,seed
@@ -27,6 +28,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     case unionControlGuide="union_control_guide"
     case ingredientsSheet="ingredients_sheet"
     case msr,dfr,icControl="ic_control"
+    case ingredientsSampling="ingredients_sampling"
     case gemmaRoot="gemma_root",transformerRoot="transformer_root",connectorCheckpoint="connector_checkpoint"
     case videoCheckpoint="video_checkpoint",audioCheckpoint="audio_checkpoint",spatialUpscalerCheckpoint="spatial_upscaler_checkpoint"
     case outputDirectory="output_directory",stageOneLoras="stage_one_loras",stageTwoLoras="stage_two_loras"
@@ -49,6 +51,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if requestVersion < 7 { expected.remove("msr") }
     if requestVersion < 8 { expected.remove("dfr") }
     if requestVersion < 10 { expected.remove("ic_control") }
+    if requestVersion < 11 { expected.remove("ingredients_sampling") }
     guard Set(all.allKeys.map(\.stringValue)) == expected else {
       throw LTXError.invalid("Two-stage request has missing or unsupported fields.")
     }
@@ -74,6 +77,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     msr=version < 7 ? nil : try c.decodeIfPresent(MLXMSRRequest.self,forKey:.msr)
     dfr=version < 8 ? nil : try c.decodeIfPresent(MLXDFRRequest.self,forKey:.dfr)
     icControl=version < 10 ? nil : try c.decodeIfPresent(MLXICControl.self,forKey:.icControl)
+    ingredientsSampling=version < 11 ? .deterministic : try c.decode(MLXIngredientsSampling.self,forKey:.ingredientsSampling)
     noisePolicy=version < 3 ? .native : try c.decode(MLXNoisePolicy.self,forKey:.noisePolicy)
     let dfrCanvas=try (version == 8 || version == 9) ? MLXDFRCanvas(frames:frames) : nil
     let roles=referenceImages.map(\.role)
@@ -83,10 +87,12 @@ public struct MLXDistilledRequest:Codable,Sendable {
         noisePolicy == .releasedMLX) ||
       (version == 5 && task == "union_control" && roles.isEmpty &&
         audioReference == nil && unionControlGuide != nil) ||
-      (version == 6 && task == "ingredients" && roles.isEmpty &&
+      ((version == 6 || version == 11) && task == "ingredients" && roles.isEmpty &&
         audioReference == nil && unionControlGuide == nil && ingredientsSheet != nil &&
         frames >= 121 && stageOneLoras.isEmpty && stageTwoLoras.isEmpty &&
-        noisePolicy == .releasedMLX) ||
+        noisePolicy == .releasedMLX && (version == 6 ||
+          (ingredientsSampling == .ancestralCFGPP && ingredientsSheet?.referenceStrength == 1 &&
+            msr == nil && dfr == nil && icControl == nil))) ||
       (version == 7 && task == "msr" && roles.isEmpty && audioReference == nil &&
         unionControlGuide == nil && ingredientsSheet == nil && msr != nil &&
         stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX) ||
@@ -134,7 +140,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
       _ = try control.guideGeometry(target:recipe().low)
     }
     var requiredPaths=[gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,outputDirectory]
-    if !spatialUpscalerCheckpoint.isEmpty || ![6,7].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
+    if !spatialUpscalerCheckpoint.isEmpty || ![6,7,11].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
     for path in requiredPaths {
       guard path.hasPrefix("/"), path.utf8.count <= 4096, !path.utf8.contains(0) else {
         throw LTXError.invalid("Model and output paths must be explicit absolute local paths.")
@@ -159,6 +165,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if version >= 7 { try c.encode(msr,forKey:.msr) }
     if version >= 8 { try c.encode(dfr,forKey:.dfr) }
     if version >= 10 { try c.encode(icControl,forKey:.icControl) }
+    if version >= 11 { try c.encode(ingredientsSampling,forKey:.ingredientsSampling) }
   }
   public func recipe() throws -> DistilledTwoStageRecipe {
     try DistilledTwoStageRecipe(width:width,height:height,
@@ -179,6 +186,14 @@ public struct MLXDistilledRequest:Codable,Sendable {
     guard data.count <= 1024*1024 else { throw LTXError.invalid("Request exceeds1MiB.") }
     return try JSONDecoder().decode(Self.self,from:data)
   }
+}
+
+/// Version 6 preserves the original deterministic recipe. Version 11 opts into
+/// the authored CFG++ recipe with Float32 sampler state and BF16 model inputs.
+public enum MLXIngredientsSampling:String,Codable,Sendable {
+  case deterministic = "deterministic_bf16_v1"
+  case ancestralCFGPP = "euler_ancestral_cfg_pp_float32_v1"
+  public var transformerEvaluations:Int { self == .ancestralCFGPP ? 16 : 8 }
 }
 
 /// The official Pixel-Spatial x2 adapter applies to DFR's full-resolution stage.

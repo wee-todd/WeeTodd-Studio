@@ -85,7 +85,11 @@ each below the original Python job's 180.50-second target. With the common proce
 through verified-output stopwatch, Swift's median was 171.85 seconds versus 182.15 seconds
 for one fresh Python control. That control is a single observation, not a repeated median.
 Peak Swift-process physical footprint was 8.854 GB (FFmpeg excluded), with no swap.
-The fixed-recipe performance gate now passes; this is not general production qualification.
+Those September 24 developer-binary observations passed that historical fixed-recipe check.
+The current packaged-worker check on the same 1344 × 768, 89-frame, seed-43 recipe took
+203.39 worker seconds and peaked at 8.828 GB process footprint, excluding FFmpeg.
+Its video, audio and muxed files remain byte-identical to the accepted Swift take. Current
+speed parity remains open; the historical median is not a current installed-app claim.
 This uses MLX core 0.32.2, compiled blocks, native sampling/text/fixed-parameter reads,
 compressed per-token conditioning, an MLX upscaler, BF16 video decoding and bounded RGB
 streaming. Independent component oracles pass. All final audiovisual files are byte-identical
@@ -168,7 +172,13 @@ continuous scenes are rejected for DFR.
 Studio's dedicated DFR editor controls still use Python. A separate experimental
 headless Ingredients route accepts a frozen static
 reference sheet, repeats it across at least 121 frames, and samples with the compatible
-rank-128 task adapter in one full-resolution stage. With the experimental Swift LTX worker
+rank-128 task adapter in one full-resolution stage. Saved Ingredients recipes retain their
+eight-evaluation deterministic sampler. An explicit experimental Ingredients recipe option,
+`single_stage_sampler: "euler_ancestral_cfg_pp"`, selects eight updates and sixteen serial
+conditional/unconditional evaluations with Float32 sampler state and BF16 model inputs.
+It requires full-strength sheet conditioning; its native seeded noise does not claim ComfyUI
+pixel parity. Mathematical and contract tests pass; visual qualification remains separate.
+With the experimental Swift LTX worker
 selected, Studio now prepares described Ingredients sheets and MSR images without Python;
 Model Setup includes dedicated Swift presets and bounded adapter discovery. An experimental direct Swift worker MSR route also accepts one to five
 hash-frozen ordered stills, separately VAE-encodes bounded references, and applies its
@@ -1660,6 +1670,13 @@ identity, and passed installed-worker generation, previews, acceptance and reope
 Python. Its dedicated setup preset uses one adapter at strength 1.2 for legacy 2.3 metadata
 or 1.0 for compatible 2.5 metadata, eight full-resolution evaluations and no spatial upscaler.
 The optional 2.5 package remains gated and has not been header-qualified with available access.
+An explicitly selected `config.single_stage_sampler: "euler_ancestral_cfg_pp"` compiles to
+version 11: eight updates, sixteen serial predictions, Float32 sampler state and BF16 model
+inputs. It requires reference strength 1 and retains a separate native seeded-noise policy.
+The setup preset and saved version-6 recipes keep their original deterministic sampler.
+This option passes contract/numerical tests; it is not a quality-qualified default.
+A controlled 121-frame render completed all sixteen predictions and lifecycle checks, but
+retained the reference-board composition instead of the requested scene; scene quality failed.
 A saved recipe-backed ComfyUI graph produced the same movie bytes as Studio. The final
 packaged native CLI also reproduced the Studio media, reopened its accepted project and
 resumed with zero new generations. See the

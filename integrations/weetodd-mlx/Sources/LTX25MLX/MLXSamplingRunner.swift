@@ -29,6 +29,7 @@ public final class MLXSamplingRunner {
   public func evaluate(_ inputs:[String:MLXArray],schedule:SamplingSchedule,
     videoConditioning:MLXVideoDenoiseCondition?=nil,audioConditioning:MLXAudioDenoiseCondition?=nil,
     frozenAudio:Bool=false,bfloat16State:Set<String>=[],
+    unconditionalContexts:[String:MLXArray]?=nil,
     fixedWeights:MLXDenoiser.FixedProvider,blockWeights:MLXDenoiser.BlockProvider,
     fixedAdapters:MLXDenoiser.FixedAdapters = { _ in [] },
     blockAdapters:(Int) throws -> [String:[MLXLoRA]] = { _ in [:] },
@@ -39,6 +40,19 @@ public final class MLXSamplingRunner {
     guard !active else { throw LTXError.invalid("MLX sampler already executing.") }
     guard noise != nil || !schedule.steps.contains(where:\.ancestral) else {
       throw LTXError.invalid("Ancestral sampling requires explicit noise before loading weights.")
+    }
+    if let unconditionalContexts {
+      guard schedule.eta == 1,schedule.noiseStrength == 1,!frozenAudio,audioConditioning == nil,bfloat16State.isEmpty,
+        Set(unconditionalContexts.keys) == ["video_text","audio_text"],
+        videoConditioning?.mask.allSatisfy({ $0 == 0 || $0 == 1 }) ?? true else {
+        throw LTXError.invalid("CFG++ requires eta 1, Float32 state, generated audio and binary reference masks.")
+      }
+      for (name,value) in unconditionalContexts {
+        guard value.dtype == .float32,value.shape == denoiser.inputShapes[name],
+          MLX.isFinite(value).all().item(Bool.self) else {
+          throw LTXError.invalid("CFG++ unconditional text context is invalid: \(name).")
+        }
+      }
     }
     guard videoConditioning == nil || videoConditioning!.clean.shape == denoiser.inputShapes["video_latent"] else {
       throw LTXError.invalid("Reference conditioning differs from the admitted video shape.")
@@ -63,6 +77,7 @@ public final class MLXSamplingRunner {
     // handle over the same immutable MLX value without copying its GPU payload.
     // Snapshot before invoking any caller callback, including head preparation.
     var current=inputs.mapValues { $0.reshaped($0.shape) }
+    let negativeContexts=unconditionalContexts.map { $0.mapValues { $0.reshaped($0.shape) } }
     guard bfloat16State.isSubset(of:["video","audio"]) else { throw LTXError.invalid("Unknown BF16 state modality.") }
     for name in bfloat16State {
       guard let latent=current[name+"_latent"] else { throw LTXError.invalid("Missing BF16 source latent: \(name).") }
@@ -72,7 +87,8 @@ public final class MLXSamplingRunner {
     let preparation=try denoiser.prepare(current,sigmas:schedule.sigmas.dropLast().map(Float.init),
       videoDenoiseMask:videoTokenTimesteps ? videoConditioning?.mask : nil,
       audioDenoiseMask:audioTokenTimesteps ? audioConditioning?.mask : nil,
-      frozenAudio:frozenAudio,weights:fixedWeights,adapters:fixedAdapters) {
+      frozenAudio:frozenAudio,rawGlobalTimesteps:unconditionalContexts != nil,
+      weights:fixedWeights,adapters:fixedAdapters) {
       try stageProgress(0,$0)
     }
     for (index,step) in schedule.steps.enumerated() {
@@ -89,10 +105,27 @@ public final class MLXSamplingRunner {
           noises[name]=value.reshaped(shape)
         }
       }
-      let velocity=try denoiser.evaluatePrepared(current,sigma:Float(schedule.sigmas[index]),preparation:preparation,
-        fixedWeights:fixedWeights,blockWeights:blockWeights,fixedAdapters:fixedAdapters,blockAdapters:blockAdapters) {
-        try stageProgress(index+1,$0)
+      var modelInputs=current
+      if unconditionalContexts != nil,let videoClean,let videoMask {
+        // The inpaint wrapper restores reference rows before each model call.
+        // The sampler itself retains its noisy Float32 tail until terminal x0.
+        modelInputs["video_latent"]=current["video_latent"]!*videoMask+videoClean*(1-videoMask)
       }
+      let velocity=try denoiser.evaluatePrepared(modelInputs,sigma:Float(schedule.sigmas[index]),preparation:preparation,
+        fixedWeights:fixedWeights,blockWeights:blockWeights,fixedAdapters:fixedAdapters,blockAdapters:blockAdapters) {
+        try stageProgress(unconditionalContexts == nil ? index+1 : index*2+1,$0)
+      }
+      let unconditionalVelocity:[String:MLXArray]?
+      if let unconditionalContexts=negativeContexts {
+        try Task.checkCancellation()
+        var negativeInputs=modelInputs
+        negativeInputs.merge(unconditionalContexts) { _,new in new }
+        unconditionalVelocity=try denoiser.evaluatePrepared(negativeInputs,
+          sigma:Float(schedule.sigmas[index]),preparation:preparation,
+          fixedWeights:fixedWeights,blockWeights:blockWeights,fixedAdapters:fixedAdapters,blockAdapters:blockAdapters) {
+            try stageProgress(index*2+2,$0)
+          }
+      } else { unconditionalVelocity=nil }
       for name in ["video","audio"] {
         if name == "audio" && frozenAudio { continue }
         let key=name+"_latent", state=current[key]!.reshaped(denoiser.inputShapes[key]!)
@@ -101,15 +134,26 @@ public final class MLXSamplingRunner {
         let conditionedMask=name == "video" ? videoMask : audioMask
         let conditionedClean=name == "video" ? videoClean : audioClean
         let tokenTimesteps=name == "video" ? videoTokenTimesteps : audioTokenTimesteps
-        let sigma:MLXArray = tokenTimesteps
+        let sigma:MLXArray = unconditionalVelocity != nil ? MLXArray(Float(schedule.sigmas[index])) : tokenTimesteps
           ? conditionedMask!*Float(schedule.sigmas[index]) : MLXArray(sigmas[index])
-        var clean=state-sigma*velocity[name]!
+        let modelState=unconditionalVelocity == nil ? state : modelInputs[key]!
+        var clean=modelState-sigma*velocity[name]!
         if bfloat16State.contains(name) { clean=clean.asType(.bfloat16).asType(.float32) }
         if let conditionedClean,let conditionedMask {
           clean=clean*conditionedMask+conditionedClean*(1-conditionedMask)
         }
         var next:MLXArray
-        if step.terminal { next=clean }
+        if let unconditionalVelocity {
+          let cfgStep=try CFGPPAncestralStep(sigma:Double(Float(schedule.sigmas[index])),
+            nextSigma:Double(Float(schedule.sigmas[index+1])))
+          if cfgStep.terminal { next=clean }
+          else {
+            let rawUnconditional=modelState-sigma*unconditionalVelocity[name]!
+            next=state*cfgStep.sampleScale+clean*cfgStep.predictionScale
+              + rawUnconditional*cfgStep.unconditionalScale+noises[name]!*cfgStep.noiseScale
+          }
+        }
+        else if step.terminal { next=clean }
         else {
           next=state*step.sampleScale+clean*step.predictionScale
           if step.ancestral {

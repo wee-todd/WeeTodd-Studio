@@ -2,6 +2,29 @@ import XCTest
 @testable import LTX25MLX
 
 final class StudioRecipeTests: XCTestCase {
+  func testAuthoredIngredientsCompilesAnExplicitSamplerAndRejectsUnsupportedChoices() throws {
+    var recipe=fixture(),config=recipe["config"] as! [String:Any]
+    config["duration_seconds"]=5.0;config["ic_lora_single_stage"]=true
+    config["single_stage_sampler"]="euler_ancestral_cfg_pp";recipe["config"]=config
+    var components=recipe["components"] as! [String:Any]
+    components["ic_loras"]=[["/models/ingredients.safetensors",1.4]]
+    components["spatial_upscaler_path"]="";recipe["components"]=components
+    recipe["conditioning"]=["version":1,"task":"control","audio_policy":"generated","inputs":[
+      ["id":"sheet","kind":"image","role":"control","control_type":"ingredients_reference_sheet",
+       "path":"/sheet.png","sha256":String(repeating:"a",count:64),"strength":1.0,"description":"Two distinct warriors"]]]
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,11);XCTAssertEqual(request.ingredientsSampling,.ancestralCFGPP)
+    XCTAssertTrue(request.prompt.hasPrefix("Reference sheet: Two distinct warriors\n\nGenerated video:"))
+    config["single_stage_sampler"]="euler_ancestral";recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe))
+    config["single_stage_sampler"]=true;recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe))
+    config.removeValue(forKey:"single_stage_sampler");recipe["config"]=config
+    XCTAssertEqual(try compile(recipe).version,6)
+    var ordinary=fixture(),ordinaryConfig=ordinary["config"] as! [String:Any]
+    ordinaryConfig["single_stage_sampler"]="euler_ancestral_cfg_pp";ordinary["config"]=ordinaryConfig
+    XCTAssertThrowsError(try compile(ordinary))
+  }
   func testMotionTrackCompilesToDedicatedNativeControlWithoutChangingPrompt() throws {
     var recipe=fixture(),components=fixture()["components"] as! [String:Any]
     var config=recipe["config"] as! [String:Any]

@@ -38,6 +38,7 @@ public final class MLXDenoiser {
     let referenceEmbeddings:[UInt32:MLXArray]
     let referenceAudioEmbeddings:[UInt32:MLXArray]
     let frozenAudio:Bool
+    let rawGlobalTimesteps:Bool
   }
 
   public init(configuration:AVBlockConfiguration,blockCount:Int=48,cacheBytes:Int=128*1024*1024,
@@ -116,7 +117,7 @@ public final class MLXDenoiser {
     // Validate rotary arithmetic before invoking any weighted provider.
     var prepared:[String:MLXArray], embedded:[String:MLXArray]
     if let preparation {
-      let scalarKey=DenoiserMath.bfloat16(sigma).bitPattern
+      let scalarKey=(preparation.rawGlobalTimesteps ? sigma : DenoiserMath.bfloat16(sigma)).bitPattern
       guard let mods=preparation.modulations[scalarKey], let embeds=preparation.embeddings[scalarKey] else {
         throw LTXError.invalid("Sigma was not admitted by the sampling session.")
       }
@@ -202,7 +203,7 @@ public final class MLXDenoiser {
   }
 
   func prepare(_ inputs:[String:MLXArray],sigmas:[Float],videoDenoiseMask:[Float]?=nil,audioDenoiseMask:[Float]?=nil,
-    frozenAudio:Bool=false,weights:FixedProvider,adapters:FixedAdapters,
+    frozenAudio:Bool=false,rawGlobalTimesteps:Bool=false,weights:FixedProvider,adapters:FixedAdapters,
     progress:(Progress) throws -> Void) throws -> Preparation {
     guard !active, (1...256).contains(sigmas.count) else { throw LTXError.invalid("Invalid or active denoising session.") }
     for sigma in sigmas { _ = try DenoiserMath.timestep(sigma) }
@@ -225,7 +226,7 @@ public final class MLXDenoiser {
       for sigma in sigmas { audioTimes[sigma.bitPattern]=mask.map { sigma*$0 } }
     }
     for sigma in sigmas {
-      let rounded=DenoiserMath.bfloat16(sigma)
+      let rounded=rawGlobalTimesteps ? sigma : DenoiserMath.bfloat16(sigma)
       if seen.insert(rounded.bitPattern).inserted { uniqueSigmas.append(rounded) }
     }
     if frozenAudio, seen.insert(Float(0).bitPattern).inserted { uniqueSigmas.append(0) }
@@ -242,11 +243,13 @@ public final class MLXDenoiser {
     guard elements*(uniqueSigmas.count+referenceSigmas.count)*4 <= 128*1024*1024 else { throw LTXError.invalid("Timestep cache exceeds 128 MiB.") }
     // Global timesteps cross the model's BF16 scalar boundary. Per-token
     // timesteps remain Float32 in the qualified renderer; do not merge them.
-    let times=try uniqueSigmas.flatMap { try DenoiserMath.timestep($0) } + referenceSigmas.flatMap { sigma -> [Float] in
+    func rawTimestep(_ sigma:Float) -> [Float] {
       let scaled=sigma*1000
       let angles=(0..<128).map { scaled*expf(-Float(log(10000.0))*Float($0)/128) }
       return angles.map(cosf)+angles.map(sinf)
     }
+    let times=try uniqueSigmas.flatMap { try rawGlobalTimesteps ? DenoiserMath.authoredTimestep($0) : DenoiserMath.timestep($0) }
+      + referenceSigmas.flatMap { try rawGlobalTimesteps ? DenoiserMath.authoredTimestep($0) : rawTimestep($0) }
     let inputs=try validatedInputs(inputs)
     active=true
     let previousLimit=Memory.cacheLimit; Memory.cacheLimit=cacheBytes
@@ -283,7 +286,8 @@ public final class MLXDenoiser {
     }
     return Preparation(rotary:positions,modulations:modulations,embeddings:embeddings,videoTimes:videoTimes,audioTimes:audioTimes,
       referenceModulations:referenceModulations,referenceEmbeddings:referenceEmbeddings,
-      referenceAudioEmbeddings:referenceAudioEmbeddings,frozenAudio:frozenAudio)
+      referenceAudioEmbeddings:referenceAudioEmbeddings,frozenAudio:frozenAudio,
+      rawGlobalTimesteps:rawGlobalTimesteps)
   }
 
   func preflightWithoutText(_ inputs:[String:MLXArray],schedule:SamplingSchedule) throws -> [String:MLXArray] {

@@ -78,6 +78,12 @@ public final class MLXMediaPipeline {
     } ?? g
     let geometries=request.ingredientsSheet == nil && request.msr == nil ? [recipe.low,recipe.high] : [recipe.high]
     for (index,geometry) in geometries.enumerated() {
+      let reserve=request.ingredientsSampling == .ancestralCFGPP
+        ? MLXSingleStageRipple.cfgppReserveBytes(geometry:geometry) : 0
+      guard reserve < transformerActivationBytes else {
+        throw LTXError.invalid("CFG++ exceeds the configured activation budget before model loading.")
+      }
+      let blockBudget=transformerActivationBytes-reserve
       let layout=try request.referenceImages.first.map { try MLXReferenceLayout(geometry:geometry,firstStrength:$0.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil) }
       let guide=try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:geometry,contextFrames:$0) }
       let union=try index == 0
@@ -98,11 +104,11 @@ public final class MLXMediaPipeline {
       let block=try MLXAVBlock(configuration:AVBlockConfiguration(
         videoTokens:dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ic?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
         audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
-        maximumActivationBytes:transformerActivationBytes)
+        maximumActivationBytes:blockBudget)
       if layout != nil || union != nil || ic != nil || ingredients != nil || msr != nil || (dfr?.referenceTokens ?? 0) > 0 ||
         (dfr != nil && !request.referenceImages.isEmpty) { try block.admitPerTokenVideo() }
       if guide != nil { try block.admitPerTokenAV() }
-      _ = try MLXDenoiser.admitRotary(configuration:block.configuration,maximumActivationBytes:transformerActivationBytes)
+      _ = try MLXDenoiser.admitRotary(configuration:block.configuration,maximumActivationBytes:blockBudget)
     }
     if let dfr=request.dfr,dfr.temporalRounds>0 {
       let configurations=try MLXDFRTemporalPlan.admissionConfigurations(
@@ -206,7 +212,8 @@ public final class MLXMediaPipeline {
         referenceStrength:sheet.referenceStrength,
         transformerRoot:URL(fileURLWithPath:request.transformerRoot),
         adapters:[LoRAAdapter(path:sheet.adapterPath,strength:sheet.adapterStrength)],
-        task:.ingredients,maximumActivationBytes:transformerActivationBytes)
+        task:.ingredients,ingredientsSampling:request.ingredientsSampling,
+        maximumActivationBytes:transformerActivationBytes)
     } else if let msr=request.msr {
       sampler=nil;ingredientsSampler=nil;dfrSampler=nil
       guard let layout=try MLXMSRReferencePlan.resolve(request,target:request.recipe().high)?.layout else {
@@ -368,9 +375,14 @@ public final class MLXMediaPipeline {
         return fitted
       }
       let textStarted=Date()
-      let contexts=try autoreleasepool {
+      let (contexts,unconditionalContexts)=try autoreleasepool {
         let encoder=try MLXTextEncoder(gemmaRoot:URL(fileURLWithPath:request.gemmaRoot),connectorURL:URL(fileURLWithPath:request.connectorCheckpoint))
-        return try encoder.encode(prompt:request.prompt) { try report("text:"+$0.stage,$0.completed,$0.total) }
+        let positive=try encoder.encode(prompt:request.prompt) { try report("text:"+$0.stage,$0.completed,$0.total) }
+        let negative:MLXTextEncoder.Output?
+        if request.ingredientsSampling == .ancestralCFGPP {
+          negative=try encoder.encode(prompt:"") { try report("text:unconditional:"+$0.stage,$0.completed,$0.total) }
+        } else { negative=nil }
+        return (positive,negative)
       }
       ids=contexts.tokenIDs; timings["text"]=Date().timeIntervalSince(textStarted)
       try report("text_weights_released")
@@ -481,6 +493,7 @@ public final class MLXMediaPipeline {
         }
         let started=Date()
         sampled=try ingredientsSampler.evaluate(videoContext:contexts.video,audioContext:contexts.audio,
+          unconditionalVideoContext:unconditionalContexts?.video,unconditionalAudioContext:unconditionalContexts?.audio,
           referenceVideo:guide,seed:request.seed,progress:report)
         timings["sampling"]=Date().timeIntervalSince(started)
       } else {
@@ -585,7 +598,7 @@ public final class MLXMediaPipeline {
         additionalFrames:publishedFrames,fps:g.fps,decodedSamples:admission.audioSamples).count
     }
     var metadata:[String:Any]=["status":"complete","scope":"developer Swift MLX distilled audiovisual generation",
-      "recipe":request.dfr.map { $0.temporalRounds > 0 ? "ltx25-dfr-spatiotemporal-distilled-v1" : "ltx25-dfr-spatial-distilled-v1" } ?? (request.msr != nil ? "ltx25-msr-single-stage-v1" : request.ingredientsSheet == nil ? DistilledTwoStageRecipe.identifier : "ltx25-ingredients-single-stage-v1"),
+      "recipe":request.dfr.map { $0.temporalRounds > 0 ? "ltx25-dfr-spatiotemporal-distilled-v1" : "ltx25-dfr-spatial-distilled-v1" } ?? (request.msr != nil ? "ltx25-msr-single-stage-v1" : request.ingredientsSheet == nil ? DistilledTwoStageRecipe.identifier : request.ingredientsSampling == .ancestralCFGPP ? "ltx25-ingredients-ancestral-cfgpp-v1" : "ltx25-ingredients-single-stage-v1"),
       "noise_algorithm":request.noisePolicy.algorithm,"seed":request.seed,
       "text_token_ids":ids,"width":outputG.width,"height":outputG.height,"frames":publishedFrames,"fps":outputG.fps,
       "video_seconds":Double(publishedFrames)/outputG.fps,
@@ -645,6 +658,13 @@ public final class MLXMediaPipeline {
       metadata["reference_conditioning"]="full-resolution VAE-encoded static sheet guide in one distilled stage"
       metadata["ingredients_sheet_sha256"]=sheet.sourceSHA256
       metadata["ingredients_adapter_scope"]="single_full_resolution_stage"
+      metadata["ingredients_sampling"]=request.ingredientsSampling.rawValue
+      metadata["transformer_evaluations"]=request.ingredientsSampling.transformerEvaluations
+      if request.ingredientsSampling == .ancestralCFGPP {
+        metadata["sampler_state_precision"]="float32_sampler_bf16_model_v1"
+        metadata["ancestral_noise_policy"]="mlx_threefry_bf16_step_modality_seed_plus_10000_v1"
+        metadata["unconditional_prompt"]=""
+      }
     } else if let msr=request.msr {
       metadata["reference_count"]=msr.references.count
       metadata["reference_preparation"]="bounded per-image RGB24 stills repeated for 25/33 causal frames"
