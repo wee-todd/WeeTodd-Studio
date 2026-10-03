@@ -61,6 +61,106 @@ final class NativeHeadlessExportTests: XCTestCase {
     catch { XCTAssertTrue(error.localizedDescription.contains("pan")) }
     XCTAssertEqual(calls, 0)
   }
+  @MainActor func testNativeExporterPreservesMissingLastFrameAdmissionDuringCleanup() async throws {
+    for (preparationCreatedInputs, scene) in [(false, false), (false, true), (true, false), (true, true)] {
+      let root = try directory(), profile = root.appendingPathComponent("model.json")
+      let recipe: [String: Any] = ["format": "weetodd-headless-v2", "engine": "ltx25",
+        "prompt": "Original prompt", "components": ["transformer_path": "/models/transformer", "loras": []],
+        "config": ["pipeline_mode": "distilled", "stage1_steps": 8, "stage2_steps": 3,
+          "frame_rate": 24, "width": 64, "height": 64, "seed": 43, "duration_seconds": 1],
+        "conditioning": ["version": 1, "task": "fflf", "inputs": []]]
+      try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
+      let image = root.appendingPathComponent("first.png")
+      try Data([1]).write(to: image) // Admission rejects the missing last frame before image decoding.
+      let asset = MediaAsset(name: "First only", kind: .image, path: image.path)
+      var clip = Clip(engine: .ltx25); clip.prompt = "Preserve the original action"
+      clip.duration = 1; clip.generationWidth = 64; clip.generationHeight = 64
+      clip.profileID = profile.path; clip.generationSelection = GenerationSelection(task: "fflf")
+      clip.attachments = [Attachment(assetID: asset.id, role: .first)]
+      var commands: [String] = []
+      let invocation: Bridge.Invocation? = preparationCreatedInputs ? { command, runtime, payload, output in
+        commands.append(command); XCTAssertEqual(command, "ltx-native-prepare")
+        XCTAssertEqual(runtime.pythonPath, "/unavailable/python")
+        if preparationCreatedInputs {
+          try FileManager.default.createDirectory(at: try XCTUnwrap(output), withIntermediateDirectories: true)
+        }
+        var request = payload; request["runtime"] = try runtime.object()
+        return try NativeLTXPreparation.compose(request: request)
+      } : nil
+      let store = StudioStore(dataDirectory: root, restoreSession: false, invocation: invocation)
+      store.runtime = RuntimeSettings(root: "/unavailable", pythonPath: "/unavailable/python", profilesDirectory: root.path)
+      store.runtime.nativeLTX25Enabled = true; store.runtime.ltx25WorkerPath = "/usr/bin/true"
+      store.runtime.ffmpegPath = "/usr/bin/true"
+      store.project.clips = [clip]; store.project.assets = [asset]; store.selectedClipID = clip.id
+      if scene {
+        var next = Clip(engine: .ltx25); next.prompt = "Continue the same action"
+        next.duration = 1; next.generationWidth = 64; next.generationHeight = 64; next.profileID = profile.path
+        next.generationSelection = GenerationSelection(task: "t2v")
+        next.continuity = ClipContinuity(mode: "scene", sourceClipID: clip.id)
+        store.project.clips.append(next)
+      }
+      let original = store.project, destination = root.appendingPathComponent("job.json")
+      var body = try store.payload(); body["generateIDs"] = [clip.id.uuidString]
+      do {
+        try await store.exportNativeHeadlessJob(body: body, to: destination, clipOnly: !scene)
+        XCTFail("Missing last frame must fail before worker preflight")
+      } catch {
+        XCTAssertEqual(error.localizedDescription, "First and last frames requires First frame and Last frame images.")
+      }
+      XCTAssertEqual(commands, preparationCreatedInputs ? ["ltx-native-prepare"] : [])
+      XCTAssertEqual(store.project, original); XCTAssertFalse(store.bridge.busy)
+      XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+      XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: root.path).contains { $0.hasPrefix("job.json.inputs-") })
+    }
+  }
+  @MainActor func testNativeExporterPreservesH3ProfileAdmissionBeforeInputsExist() async throws {
+    for cleanupMode in ["absent", "partial", "denied"] {
+      let root = try directory(), profile = root.appendingPathComponent("model.json")
+      defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path) }
+      let image = root.appendingPathComponent("first.png"); try Data([1]).write(to: image)
+      let recipe: [String: Any] = ["format": "weetodd-headless-v2", "engine": "h3", "prompt": "Reference action",
+        "components": ["task": "ref2va", "transformer": "/models/transformer", "text_encoder": "/models/text",
+          "tokenizer": "/models/tokenizer.json", "video_vae": "/models/video", "audio_vae": "/models/audio"],
+        "config": ["width": 64, "height": 64, "duration_seconds": 2.5, "seed": 42, "steps": 5],
+        // A render recipe with live inputs is not a parameterized Studio model profile.
+        "conditioning": ["version": 1, "task": "ref2va", "audio_policy": "generated",
+          "inputs": [["kind": "image", "role": "reference", "path": image.path]]]]
+      try JSONSerialization.data(withJSONObject: recipe).write(to: profile)
+      let invocation: Bridge.Invocation? = cleanupMode == "absent" ? nil : { _, runtime, payload, output in
+        let target = try XCTUnwrap(output)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data([1]).write(to: target.appendingPathComponent("partial-input"))
+        if cleanupMode == "denied" {
+          // A readable parent without write permission makes removal of its child fail.
+          try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: root.path)
+        }
+        var request = payload; request["runtime"] = try runtime.object()
+        return try NativeH3Preparation.compose(request: request)
+      }
+      let store = StudioStore(dataDirectory: root, restoreSession: false, invocation: invocation)
+      store.runtime = RuntimeSettings(root: "/unavailable", pythonPath: "/unavailable/python", profilesDirectory: root.path)
+      store.runtime.nativeH3Enabled = true; store.runtime.h3WorkerPath = "/usr/bin/false"
+      store.runtime.ffmpegPath = "/usr/bin/true"
+      let asset = MediaAsset(name: "Reference", kind: .image, path: image.path)
+      var clip = Clip(engine: .h3); clip.prompt = "Preserve the reference action"; clip.duration = 2.5
+      clip.generationWidth = 64; clip.generationHeight = 64; clip.profileID = profile.path
+      clip.generationSelection = GenerationSelection(task: "ref2va")
+      clip.attachments = [Attachment(assetID: asset.id, role: .reference)]
+      store.project.clips = [clip]; store.project.assets = [asset]; store.selectedClipID = clip.id
+      let original = store.project, destination = root.appendingPathComponent("job.json")
+      var body = try store.payload(); body["generateIDs"] = [clip.id.uuidString]
+      do {
+        try await store.exportNativeHeadlessJob(body: body, to: destination, clipOnly: true)
+        XCTFail("An inadmissible profile must fail before worker execution")
+      } catch {
+        XCTAssertEqual(error.localizedDescription, "Swift H3 generation is experimental: no compatible ref2va profile is installed.")
+      }
+      XCTAssertEqual(store.project, original); XCTAssertFalse(store.bridge.busy)
+      XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+      let retainedInputs = try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0.hasPrefix("job.json.inputs-") }
+      XCTAssertEqual(retainedInputs.count, cleanupMode == "denied" ? 1 : 0)
+    }
+  }
   @MainActor func testNativeExporterPreparesPendingRippleMovieAndLTXWithoutOrdinaryGeneration() async throws {
     for engine in [Engine.movie, .ltx25] {
       let root = try directory(), source = root.appendingPathComponent("source.mov"), edited = root.appendingPathComponent("edited.png")
@@ -179,14 +279,35 @@ final class NativeHeadlessExportTests: XCTestCase {
     if let index = store.project.clips.firstIndex(where: { $0.id == selected.id }) { store.project.clips[index].profileID = copied.path }
     var body = try store.payload(); body["generateIDs"] = [selected.id.uuidString]
     let job = root.appendingPathComponent("exported.weetodd-job.json")
-    try await store.exportNativeHeadlessJob(body: body, to: job, clipOnly: options["clipOnly"] != "false")
-    let frozen = try NativeHeadlessJob.read(from: job)
-    XCTAssertEqual(frozen.project.clips.first(where: { $0.id == selected.id })?.prompt, selected.prompt)
-    let preflight = try await NativeHeadlessExecutor.run(job: frozen,
-      output: root.appendingPathComponent("CLI-preflight"), preflightOnly: true)
-    XCTAssertEqual(preflight["python_inference"] as? Bool, false)
-    try JSONSerialization.data(withJSONObject: ["exportedJob": job.path, "pythonAvailable": false,
-      "inferenceExecuted": false, "clipID": selected.id.uuidString], options: [.prettyPrinted, .sortedKeys])
-      .write(to: root.appendingPathComponent("export-qualification.json"))
+    if let expected = options["expectedAdmissionError"] {
+      do {
+        try await store.exportNativeHeadlessJob(body: body, to: job, clipOnly: options["clipOnly"] != "false")
+        XCTFail("The retained inadmissible fixture must reject before worker execution")
+      } catch {
+        XCTAssertTrue(error is StudioError, "Admission must retain its actionable Studio error type: \(error)")
+        XCTAssertEqual(error.localizedDescription, expected)
+        try JSONSerialization.data(withJSONObject: ["error": error.localizedDescription,
+          "errorType": String(reflecting: type(of: error)), "pythonAvailable": false,
+          "inferenceExecuted": false], options: [.prettyPrinted, .sortedKeys])
+          .write(to: root.appendingPathComponent("admission-error-qualification.json"))
+      }
+      XCTAssertFalse(FileManager.default.fileExists(atPath: job.path))
+      return
+    }
+    do {
+      try await store.exportNativeHeadlessJob(body: body, to: job, clipOnly: options["clipOnly"] != "false")
+      let frozen = try NativeHeadlessJob.read(from: job)
+      XCTAssertEqual(frozen.project.clips.first(where: { $0.id == selected.id })?.prompt, selected.prompt)
+      let preflight = try await NativeHeadlessExecutor.run(job: frozen,
+        output: root.appendingPathComponent("CLI-preflight"), preflightOnly: true)
+      XCTAssertEqual(preflight["python_inference"] as? Bool, false)
+      try JSONSerialization.data(withJSONObject: ["exportedJob": job.path, "pythonAvailable": false,
+        "inferenceExecuted": false, "clipID": selected.id.uuidString], options: [.prettyPrinted, .sortedKeys])
+        .write(to: root.appendingPathComponent("export-qualification.json"))
+    } catch {
+      // XCTest's uncaught async error report can name a later suppressed cleanup
+      // NSError. Report the error received by the actual exporter caller instead.
+      XCTFail("Native export/preflight failed (\(String(reflecting: type(of: error)))): \(error.localizedDescription)")
+    }
   }
 }

@@ -22,8 +22,10 @@ group as one movie and accepts all member ranges together. Experimental native s
 now expose MSR, Ingredients and Union Control through Swift. Experimental Swift
 Motion Track, CrossView and combined Ingredients control contracts are also implemented;
 direct installed-worker and saved ComfyUI graph checks are recorded below. A corrected combined
-CrossView/Ingredients Studio lifecycle and native exported CLI route passed; broader control
-quality and the other Studio control routes remain pending. Other specialized IC-LoRAs
+CrossView/Ingredients Studio lifecycle and native exported CLI route passed. Standalone
+Motion Track and CrossView also passed packaged Studio previews, acceptance and reopening,
+then native CLI generation with matching media and no-inference resume. Broader control
+quality and matched production-size performance remain pending. Other specialized IC-LoRAs
 and dedicated DFR editor controls still use the explicitly selected Python route.
 An experimental direct Swift worker can execute spatial DFR from a version-8
 request with an installed Pixel-Spatial x2 adapter, including first/last images.
@@ -35,8 +37,11 @@ recognizes the Pixel-Spatial detailing adapter and temporal latent upscaler from
 headers, and the worker preflights the linked profile without Python. Such a profile
 supports T2V, I2V and FFLF. Ordinary LoRAs, A2V, extension and continuous scenes
 are not supported with this route; the dedicated Studio DFR editor controls are not
-yet wired to it. A Studio-style two-round profile passed installed-weight worker
-preflight, but a Studio-triggered render is still unqualified.
+yet wired to it. Spatial and two-round temporal profiles passed actual packaged Studio
+rendering, previews, acceptance and reopening with Python unavailable, joining the earlier
+one-round check. All three passed native exported CLI generation, accepted-project reopening
+and no-inference resume. Spatial CLI matches its new Studio take; the older direct baseline
+differs despite matching request fields and remains unresolved.
 The worker reuses installed paged
 weights and the shared renderer. Unsupported controls fail native preflight; turn the option
 off explicitly for advanced workflows still provided by Python.
@@ -990,7 +995,8 @@ excluding FFmpeg. The Ingredients result still duplicated subjects, so broad ide
 audio quality remain unqualified. Saved recipe-backed ComfyUI MSR and Ingredients graphs
 produced byte-identical movies to these Studio takes. MSR additionally completed the new
 native exported-job CLI route, assembled its movie, reopened its accepted project and reused
-its take on resume; Ingredients native exported-job inference remains unqualified.
+its take on resume. Ingredients now passed the final packaged native CLI route as well,
+matching its Studio media, reopening the accepted project and resuming without new inference.
 
 - **Control:** attach a preprocessed guide video as Control and choose its matching guide type
   (such as depth, pose, motion tracks or crossview). The recipe's adapter must support that type.
@@ -1606,7 +1612,7 @@ job output or export a new job. Dedicated Ripple export, installed-worker prefli
 with Python unavailable. The three-second 768×448 edit matched the original Studio MP4 byte-for-byte,
 its accepted project reopened through Studio, and resume reused the verified take without inference.
 The worker took 160.6 seconds in this adapter check; this was not an isolated performance comparison.
-Actual exported T2V, I2V, FFLF and A2V jobs also matched all three original Studio media
+Actual exported LTX T2V, I2V, FFLF and A2V jobs also matched all three original Studio media
 files byte-for-byte, reopened through Studio with Python unavailable and resumed without
 new inference. The A2V check retained the reviewed Qwen voice and 1280×768 preset.
 The recipe-backed ComfyUI node also accepts a dedicated Ripple request. It freezes
@@ -1650,6 +1656,20 @@ metadata enrichment; the final metadata path has separate audiovisual fixture ch
 not establish all-task exported-job qualification. A corrected CrossView/Ingredients Studio
 job also completed native CLI inference with all video/audio/muxed media byte-identical to
 Studio, then resumed with zero new and one reused generation.
+
+The final packaged native CLI additionally completed LTX Ingredients, Union, after-extension,
+motion continuation, Motion Track, CrossView, spatial DFR, both temporal DFR round counts and
+full/windowed scenes, with accepted-project reopening and zero-new-generation resume.
+Current matching baselines retained media hashes; spatial DFR matches its new Studio take,
+while its older direct baseline differs despite matching request fields. The 30-second,
+six-shot windowed scene preserves one shared take and all member ranges; it is not a new
+weighted Studio execution of that long scene. Ordinary H3 T2VA and motion-continuation CLI
+matched accepted Studio media and passed reopening/resume. H3 FFLF CLI also completed with
+seven previews and all applicable releases, then reopened/resumed, but its last anchor is
+frame 119 rather than the older Studio take's 123. Its media differs, and visible endpoint
+review, exact old parity and matched speed remain open. Six other typed H3 routes have
+preparation/export checks only. These checks leave broad identity, seam and audio quality
+and matched useful-size performance open.
 
 Other backend selections retain the existing `weetodd-studio-job-v1`–`v4` Python-hosted export and
 companion instructions. Those jobs support their existing titles, transitions, added audio and

@@ -1,5 +1,64 @@
 # WeeTodd Studio implementation status
 
+Swift native route qualification 2026-10-02 (experimental): the final packaged MLX
+workers completed Studio-exported CLI generation for LTX T2V, I2V, FFLF, A2V,
+Ingredients, Union, after-extension, motion continuation, Motion Track, CrossView,
+spatial DFR, both temporal DFR round counts, and full/windowed scenes. Accepted CLI
+projects reopened through Studio without inference; resume reused their takes with
+zero new generations. Current matching Studio/direct baselines retained exact video,
+audio and muxed-media hashes. Spatial DFR matches its new Studio execution, while
+its older direct baseline differs despite matching request fields; that discrepancy
+remains unqualified. Spatial and two-round temporal DFR also passed actual Studio
+previews, acceptance, saving and reopening. The six-shot windowed CLI scene retains
+one shared take and all five-second shot ranges over 30 seconds; this is not a new
+weighted Studio execution of that long scene. Saved I2V, A2V, after/motion and Motion
+Track ComfyUI graphs ran uncached and matched their respective frozen media.
+Ingredients, Union and LTX after/motion first-block sampling cancellation exited 130
+without published output or staging residue; allocator-zero was not measured.
+
+Ordinary H3 T2VA now has a fresh, explicitly typed Studio lifecycle test that rejects
+reference/continuation or already accepted inputs before generation. The final packaged
+MLX worker produced 124 frames at 768 × 448/24 fps with synchronized 32 kHz audio,
+seven decoded previews, acceptance, saving and reopening with Python unavailable.
+The requested editorial interval was five seconds; the padded model movie is 124/24
+seconds. Worker execution took 515.82 seconds at a 5.31 GB peak footprint, excluding
+FFmpeg. This closes the ordinary Studio execution check, not matched speed or broad
+quality approval. Success receipts now require all critical acceptance, preview, media
+and reopen checks to pass rather than surviving a failed XCTest assertion.
+
+The ordinary T2VA native CLI execution also matched all three new Studio media files,
+retained seven decoded previews and complete sampling/release logs, reopened its
+accepted project and resumed with zero new inference. Its worker took 518.19 seconds
+and peaked at 5.32 GB, excluding FFmpeg. H3 motion-continuation native CLI likewise
+matched its original accepted Studio media byte for byte, preserving the source latent
+context, five previews, all sampling and applicable release events, accepted-project
+reopening and no-inference resume (288.22 seconds, 2.51 GB worker footprint). These
+route timings are not isolated matched performance comparisons.
+
+H3 FFLF native CLI also completed, retained anchors at frames 0/119, seven decoded previews,
+four full evaluations and all five applicable releases, then passed accepted-project reopening
+and zero-new-inference resume. Worker execution took 562.18 seconds at a 5.76 GB process peak,
+excluding FFmpeg. Its three media files differ from the older Studio take anchored at frame 123;
+exact old parity and matched speed are not established. Visible endpoint review remains open.
+Six typed H3 movie/audio/soundtrack Ref2VA, independent A2V, external-after and Fun cases now
+have preparation-only Studio/export checks; those checks do not establish weighted execution.
+
+The final packaged one-still H3 Ref2VA CLI run used the installed LightX four-step
+adapter at 608 × 352/73 frames, retained four decoded previews and all weighted release
+events, and passed accepted-project reopening and no-inference resume. Sampling
+still took 566.30 seconds: execution is qualified, performance is not. A bounded
+installed QKV diagnostic separates weight decoding, base multiplication and Turbo
+application, preserves exact split/combined output, and returns MLX active memory
+to zero. Those diagnostic phases are not a render-wide speedup or a matched benchmark.
+Actual exporter admission regressions retain the original missing-last-frame and
+unsupported H3-profile errors without publishing a job. Removable partial inputs
+are cleaned; a cleanup failure preserves the original admission error.
+The retained installed H3 fixture confirms the caller receives the intended StudioError;
+its earlier uncaught XCTest report misleadingly named a later ignored missing-directory
+cleanup error. Explicit-catch qualification distinguishes this test-reporting artifact,
+and production cleanup remains unchanged. Full release qualification, useful-size
+matched speed/memory and broad audiovisual acceptance remain open.
+
 Swift native worker diagnostics 2026-10-02: H3/LTX render and preflight events now stream
 to unique disk archives outside atomic worker outputs while the UI retains its 30,000-character
 tail. Archives and diagnostic paths survive success, failure and cancellation. A 64 MiB limit
@@ -53,7 +112,9 @@ Its native exported CLI job reproduced all three media files byte for byte and r
 zero new/one reused generation. The exact corrected frozen recipe also completed as a saved,
 uncached ComfyUI graph with all three media files byte-identical across Studio/CLI/ComfyUI.
 These are route checks, not a matched performance benchmark. This Studio run preceded durable archival; missing early
-UI-log stages remain historical. Other Studio control routes and broad quality remain pending.
+UI-log stages remain historical. At this checkpoint, other Studio control routes were pending;
+the final-package evidence at the top now covers standalone Motion Track/CrossView Studio
+and exported CLI execution. Broad quality and matched production-size performance remain open.
 A separate actual combined-worker SIGTERM after the first stage-one transformer block produced
 exit 130/cancelled in 0.08 seconds after the signal and no published output. Direct allocator-zero
 instrumentation was not collected for that cancellation.
@@ -85,8 +146,10 @@ SHA-256, reused that 605 MB file through a same-inode hard link, retrieved missi
 small notices, and rediscovered the native audio component without Python. The
 shared setup validator also admitted that package. The merged native catalog supplies
 19 pinned packages with mandatory component fields for ordinary H3/LTX profiles, including direct transformer/support
-and supported task adapters. Field coverage does not qualify every checkpoint/task combination. Full clean-machine weight installation, other source
-conversions and complete distribution qualification remain open.
+and supported task adapters. The supported native H3/LTX 2.5 profiles have Swift-ready
+sources and need no Python-only weight conversion. Field coverage does not qualify every
+checkpoint/task combination. Full clean-machine weight installation, conversion of other
+source layouts and complete distribution qualification remain open.
 
 Swift source-audio timeline playback 2026-10-02: source-only cut timelines
 now reference their trimmed video and audio through AVFoundation without invoking
@@ -127,8 +190,9 @@ The adapter runs only in stage one of the existing 8 + 3 schedule. An installed-
 acceptance, saving and reopening. Render/acceptance took 33.49 seconds and peaked
 at 3.21 GB Swift-worker process footprint, excluding FFmpeg. A saved ComfyUI graph
 passed and produced byte-identical video. This closes those Union route subchecks. Later entries add Motion Track, CrossView
-and combined-control execution evidence. Standalone Motion Track/CrossView Studio
-and exported CLI qualification, production-size matched speed/memory and broad
+and combined-control execution evidence. Standalone Motion Track/CrossView Studio and
+exported CLI qualification were pending at this checkpoint; the completed final-package
+checks are recorded at the top. Production-size matched speed/memory and broad
 audiovisual quality remain open.
 
 Swift H3 Studio continuity and native downloads 2026-10-02 (experimental):
@@ -145,9 +209,11 @@ transformer/folded audio files, and excludes Python-only transformer/support dow
 Swift URLSession handles compatible LTX 2.5/H3 Qwen/video-VAE/tokenizer downloads with
 bounded disk streaming, pinned SHA verification, linked installed-file reuse, range resume,
 cancel retention and atomic no-overwrite publication. Focused fixture and real pinned-file
-HTTPS tests pass. Remaining H3 acquisition/conversion, image/A2V saved motion context,
-external-extension Studio controls, lifecycle breadth, matched performance and AV quality
-remain open; this is not full migration closure.
+HTTPS tests pass. At this checkpoint, H3 acquisition and external-extension Studio routing
+were incomplete; later catalog and extension entries record their implementations. All
+mandatory components for supported native tasks now have pinned Swift-ready sources.
+Image/A2V saved motion context, lifecycle breadth, matched performance and AV quality remain
+open; clean-machine acquisition and full migration qualification have not been established.
 
 Swift LTX 2.5 Studio references 2026-10-02 (experimental): MSR and Ingredients
 now compile Studio's described still-image contract to the existing single-stage
@@ -187,7 +253,10 @@ with status 130 without publishing partial media. An installed-app Studio job
 also prepared and rendered one-round DFR with Python unavailable, delivered two
 previews, accepted the take, and reopened the saved project. Dedicated Studio
 DFR controls, broader route parity, higher-resolution memory, matched
-performance and broad audiovisual quality remain open.
+performance and broad audiovisual quality were open at this checkpoint. The final-package
+evidence at the top adds spatial/two-round Studio lifecycle and both temporal CLI routes;
+dedicated editor controls, higher-resolution memory, matched performance and broad quality
+remain open.
 
 Swift LTX 2.5 spatial DFR 2026-10-02 (experimental direct-worker route): strict
 version-8 requests use the installed distilled Q8 transformer and complete
@@ -204,8 +273,11 @@ cup leave the shelf and the final empty shelf. A later padded 41-frame
 first/last job also published exactly 41 frames and landed the empty shelf
 at the requested last frame. The text-only sample's quiet
 ambient track measured -69.5 dBFS mean/-57.8 dBFS peak; broader sound and
-visual quality are not accepted. Studio/ComfyUI routing, large geometry,
-lifecycle and matched speed/memory remain open.
+visual quality are not accepted. Studio/ComfyUI routing and lifecycle were pending at this
+checkpoint; the final-package evidence at the top adds spatial Studio lifecycle and native
+CLI execution/reopening/resume. Its CLI matches the new Studio take, while the older direct
+baseline differs despite matching request fields. That discrepancy, large geometry, matched
+speed/memory and broad audiovisual quality remain open.
 
 Swift native model discovery 2026-10-02 (ordinary profiles): Studio scans user-selected
 folders for H3 and LTX 2.5 components with bounded manifest and SafeTensors header reads.
@@ -213,9 +285,9 @@ It skips model payloads and known cache/page folders, follows installed symlinke
 deduplicates candidates, and keeps scanning off the UI thread. The installed ComfyUI model
 library supplied complete H3 image/reference and LTX 2.5 text candidate sets in a focused
 scan test. Model choice remains explicit when multiple candidates match. Worker preflight
-still validates the selected complete stack. Managed downloads, specialized-adapter setup
-and full distribution qualification remain open; the scan alone does not close the
-Python-free setup gate.
+still validates the selected complete stack. Managed downloads and specialized-adapter setup
+were open at this checkpoint; later catalog entries supply those implemented native routes.
+The scan alone does not establish clean-machine acquisition or full distribution qualification.
 
 Swift native model setup 2026-10-01 (ordinary profiles): when a bundled worker is
 enabled, Studio lists H3 text/image/reference and LTX 2.5 text/image Swift presets
@@ -224,9 +296,9 @@ profile builder writes bounded headless-v2 recipes and invokes the selected
 worker's preflight for text-to-video before retaining a profile. Image and
 reference profiles require clip media and run preflight at clip preparation.
 Focused tests passed with Python unavailable, and installed H3 and LTX 2.5
-component sets each passed the generated profile's worker preflight. Managed
-downloads, specialized adapter setup and full distribution
-qualification remain open.
+component sets each passed the generated profile's worker preflight. Managed downloads and
+specialized setup were open at this checkpoint; later native catalog entries record their
+implementation. Clean-machine acquisition and full distribution qualification remain separate.
 
 Swift H3 continuation and external extension 2026-10-01 (experimental direct-worker
 routes): a version-2 text-to-AV continuation request can save a bounded,
@@ -247,8 +319,10 @@ source movie plus its true final frame as a target-frame-zero guide. Its
 28.45 dB PSNR against the source final frame. Longer source preparation now
 preserves the complete source tail on the aligned video grid and sparsifies
 only Qwen visual samples, but a long-source render has not been qualified.
-Both routes still need Studio/ComfyUI routing, lifecycle checks, matched speed
-work and visual/audio quality acceptance.
+At this checkpoint, both routes still needed Studio/ComfyUI routing and lifecycle checks.
+Later entries record accepted motion-continuation Studio/Comfy/CLI execution and external-after
+Studio/export preparation plus completed-render acceptance replay. Corrected final-package
+external-after end-to-end Studio/CLI checks, matched speed and visual/audio quality remain open.
 
 Swift LTX 2.5 MSR 2026-10-01 (experimental direct-worker route): a strict
 version-7 request freezes one to five ordered image references by SHA-256,

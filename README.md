@@ -198,7 +198,9 @@ real inference. A separate corrected CrossView/Ingredients Studio recipe also pa
 two previews, acceptance and project reopening with Python unavailable. Its native exported CLI
 job produced byte-identical video, audio and muxed media and resumed with zero new generations.
 The exact corrected frozen recipe also completed as a saved, uncached ComfyUI graph; all three
-media files matched Studio and CLI byte for byte.
+media files matched Studio and CLI byte for byte. Standalone Motion Track and CrossView
+also passed packaged Studio previews, acceptance and reopening, then exported CLI generation
+with matching media and zero-new-generation resume.
 Broader camera/identity quality remains pending; camera guides were identical in the earlier
 direct execution fixture.
 See the [Studio controls qualification](studio/README.md#start-here).
@@ -209,11 +211,13 @@ clips; a 41-frame request used a padded internal canvas and published exactly 41
 frames with matching audio duration. The direct Swift worker also accepts one or two
 learned temporal x2 rounds. A two-round 512 × 256 test published 193 frames at
 96 fps with synchronized audio; reviewed seam frames retained normal color after
-generated-slot noise and tile-handoff fixes. A Studio-style two-round DFR recipe passed
-the installed Swift worker's 193-frame/96-fps preflight. A one-round Studio job
-rendered with the packaged Swift worker and Python unavailable, delivered two decoded
-previews, accepted a take and reopened the saved project. Studio's dedicated DFR
-controls still use Python; audiovisual quality needs broader review.
+generated-slot noise and tile-handoff fixes. Spatial and both temporal round counts now
+have packaged native CLI execution, accepted-project reopening and no-inference resume.
+Spatial and two-round temporal profiles also passed Studio rendering, decoded previews,
+acceptance and reopening with Python unavailable, joining the earlier one-round check.
+Spatial CLI media matches the new Studio take; the older direct baseline differs despite
+matching request fields and remains unresolved. Studio's dedicated DFR editor controls
+still use Python; audiovisual quality and matched production-size performance need broader review.
 Independent H3 A2V with a bounded timeline audio driver and optional opening image is
 experimental; its source conditions generated sound and motion rather than being copied.
 
@@ -1650,10 +1654,12 @@ subject and its generated audio was nearly silent. Identity and audio fidelity,
 other sheet layouts and production-scale speed remain unqualified. Studio's experimental
 Swift route now accepts one described Ingredients sheet, preserves its strength and frozen
 identity, and passed installed-worker generation, previews, acceptance and reopening without
-Python. Its dedicated setup preset uses one adapter at strength 1.2, eight full-resolution
-evaluations and no spatial upscaler. A saved recipe-backed ComfyUI graph produced the same
-movie bytes as Studio. Native job export and CLI contract fixtures are available;
-real exported-job inference remains unqualified for Ingredients. See the
+Python. Its dedicated setup preset uses one adapter at strength 1.2 for legacy 2.3 metadata
+or 1.0 for compatible 2.5 metadata, eight full-resolution evaluations and no spatial upscaler.
+The optional 2.5 package remains gated and has not been header-qualified with available access.
+A saved recipe-backed ComfyUI graph produced the same movie bytes as Studio. The final
+packaged native CLI also reproduced the Studio media, reopened its accepted project and
+resumed with zero new generations. See the
 [export qualification boundary](studio/README.md#headless-movie-and-clip-jobs).
 Existing composable nodes retain their Python sampler.
 
@@ -2142,9 +2148,23 @@ the dedicated native request and retain their source interval, edited-frame repl
 `RippleTake` on CLI acceptance. Ripple export, installed-worker preflight and actual exported inference passed without Python.
 The three-second 768×448 edit was byte-identical to its original Studio take; accepted-project
 reopening and hash-verified resume passed with zero new generations.
-Actual exported T2V, I2V, FFLF and A2V jobs likewise matched their original Studio
+Actual exported LTX T2V, I2V, FFLF and A2V jobs likewise matched their original Studio
 video/audio files and passed reopening and zero-new-generation resume. See the
 [Studio native export contract](studio/README.md#headless-movie-and-clip-jobs).
+
+The final packaged native CLI additionally completed LTX Ingredients, Union, after-extension,
+motion continuation, Motion Track, CrossView, spatial DFR, both temporal DFR round counts and
+full/windowed scenes, with accepted-project reopening and zero-new-generation resume.
+Current matching baselines retained media hashes; spatial DFR matches its new Studio take,
+while its older direct baseline differs despite matching request fields. The 30-second,
+six-shot windowed scene preserves one shared take and all member ranges; it is not a new
+weighted Studio execution of that long scene. Ordinary H3 T2VA and motion-continuation CLI
+matched accepted Studio media and passed reopening/resume. H3 FFLF CLI also completed with
+seven previews and all applicable releases, then reopened/resumed, but its last anchor is
+frame 119 rather than the older Studio take's 123. Its media differs, and visible endpoint
+review, exact old parity and matched speed remain open. Six other typed H3 routes have
+preparation/export checks only. These checks leave broad identity, seam and audio quality
+and matched useful-size performance open.
 One LTX 2.5 FFLF headless recipe also completed with synchronized audio.
 The H3 and LTX workers acquire the same
 cross-process inference lock used by the Python host before loading weights.
@@ -2353,7 +2373,7 @@ work. Results apply to the stated workflow and hardware conditions.
 | LTX 2.5 automatic duration | Usability | Low runtime cost | A real Q8 prompt probe spent 0.027 s in the MLX duration head after prompt encoding. | Opt-in modifier; manual duration remains authoritative unless connected. Raw predicted seconds and resolved `8k+1` frames are recorded. |
 | LTX 2.5 Diffusion VAE width tiling | Decode memory | Experimental | A 32-cell stage-four stripe reduced 512×512 peak from 8.27 GB to 7.62 GB. | Decode slowed from 61.99 s to 100.13 s and output was not pixel-identical. Select `stage4_width_tiles` only when memory is the priority. |
 | LTX 2.5 DFR | Full-resolution detail | Experimental | Exact prebaked Q8 pages completed the matched 256×256 probe in 19.41 s versus 89.91 s with live fusion. At 768×512 for five seconds, sampling took 102.36 s at a 28.91 GB MLX peak. The exact Diffusion VAE then took 966.45 s and drove complete-process peak to 164.58 GB. | Decoded video and PCM audio hashes matched the live-Q8 control at 256×256. Use prebaked pages for DFR sampling. Do not treat the exact Diffusion VAE workflow as a low-memory default. DFR changes composition and motion but preserves stage-one audio. |
-| LTX 2.5 DFR temporal refinement | Motion smoothness | Not production-ready | An older Python/MLX 768×512 Q8-paged I2V probe took 127.97 s and peaked at 9.65 GB, but developed color corruption. The direct Swift worker produced a 193-frame 512×256/96 fps two-round clip in 136.15 s at a 4.06 GB Swift-process peak, excluding FFmpeg. | Reviewed Swift seam frames retained normal color after generated-slot noise and pinned-prefix fixes. A spatial recipe ran through ComfyUI and a one-round recipe passed installed-app preparation, previews, acceptance and reopening. Higher-resolution memory, matched performance, dedicated editor controls and broad audiovisual quality remain unqualified. |
+| LTX 2.5 DFR temporal refinement | Motion smoothness | Not production-ready | An older Python/MLX 768×512 Q8-paged I2V probe took 127.97 s and peaked at 9.65 GB, but developed color corruption. The direct Swift worker produced a 193-frame 512×256/96 fps two-round clip in 136.15 s at a 4.06 GB Swift-process peak, excluding FFmpeg. | Reviewed Swift seam frames retained normal color after generated-slot noise and pinned-prefix fixes. Spatial and both temporal round counts passed packaged native CLI execution, reopening and no-inference resume; all three have Studio execution checks. Spatial CLI matches its new Studio take, but its older direct baseline differs despite matching request fields. Higher-resolution memory, matched performance, dedicated editor controls and broad audiovisual quality remain unqualified. |
 
 ### Remaining optimization priorities
 
