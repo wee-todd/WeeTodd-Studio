@@ -13,8 +13,14 @@ them with the existing shared Swift workers without a Python precondition or
 inference fallback. Cut-only FFmpeg finishing preserves source intervals, gain,
 fit/fill and movie format; unsupported titles/audio/transitions/enhancements fail
 explicitly. Full/windowed scene receipts retain shared take identity and ranges;
-dependent continuity requires an already accepted source. Pending Ripple generation is explicitly
-rejected; applied Ripple movie sources remain reusable. Deterministic worker
+dependent continuity requires an already accepted source. Pending Ripple edits now freeze the dedicated
+native request, editorial interval, guide, source digest and edited references. CLI acceptance retains
+a verified `RippleTake`, original source trim and replay artifacts; silent and source-audio policies
+are preserved. Applied Ripple sources remain reusable. Dedicated Ripple fixtures and installed-worker
+export/preflight passed without Python. Actual exported Ripple inference produced the original
+Studio take byte-for-byte (72 frames, 768×448, silent source); `StudioStore.load` reopened its
+accepted project, and hash-verified resume generated no new take.
+Deterministic worker
 and audiovisual fixtures passed immutable recipe transport, all-pending admission,
 cancellation, receipt acceptance, finishing, reopening and hash-verified resume.
 A saved MSR Studio export and actual CLI installed-worker preflight passed with
@@ -120,9 +126,10 @@ The adapter runs only in stage one of the existing 8 + 3 schedule. An installed-
 33-frame 512 × 256/24 fps job with Python unavailable passed two decoded previews,
 acceptance, saving and reopening. Render/acceptance took 33.49 seconds and peaked
 at 3.21 GB Swift-worker process footprint, excluding FFmpeg. A saved ComfyUI graph
-passed and produced byte-identical video. This closes those Union route subchecks;
-Motion Track, CrossView, combined controls, production-size matched speed/memory
-and broad audiovisual quality remain open.
+passed and produced byte-identical video. This closes those Union route subchecks. Later entries add Motion Track, CrossView
+and combined-control execution evidence. Standalone Motion Track/CrossView Studio
+and exported CLI qualification, production-size matched speed/memory and broad
+audiovisual quality remain open.
 
 Swift H3 Studio continuity and native downloads 2026-10-02 (experimental):
 frame matching freezes the accepted source's last visible frame through AVFoundation;
@@ -1770,12 +1777,27 @@ the measured baseline and neither was promoted. DT sampler parity, a saved Comfy
 and physical-36-GB qualification remain open. Six I2V/FFLF setup notes now correctly identify
 their selected vision encoder and explain the optional Q8 vision-paged selector change.
 
+## 2026-10-02 — Native export route parity
+
+Actual Studio-exported Swift CLI jobs for LTX 2.5 T2V, I2V, FFLF and A2V completed
+with `render.mp4`, `video.mp4` and `audio.wav` byte-identical to their existing
+Studio takes. The A2V case retained the previously reviewed Qwen voice, opening
+image and 1280×768 quality preset. Each accepted project reopened through
+`StudioStore.load` with Python unavailable, and each resume reused its take with
+zero new generations. Saved, uncached I2V and A2V ComfyUI graphs also matched all three
+media files. These are route checks, not matched speed comparisons or new visual
+quality approvals. Dedicated Ripple CLI execution, acceptance, reopen and resume
+also passed with its original 3-second 768×448 silent-source recipe. Its saved,
+uncached ComfyUI graph produced the same MP4, with dedicated native preflight
+and verified publication inside ComfyUI’s output folder.
+
+
 ## Shared renderer and ComfyUI
 
 The shared Python/MLX backend runs through ComfyUI or `scripts/render_headless.py`.
 The headless process blocks ComfyUI and node-catalog imports. It accepts versioned JSON
 recipes and records resolved assets, effective conditioning, results, and runtime unloading.
-The catalog contains 128 nodes and 46 UI workflows. Static validation establishes portable
+The catalog contains 129 nodes and 46 UI workflows. Static validation establishes portable
 contracts; it does not establish that every workflow has local models and selected input media.
 
 | Engine | Implemented | Qualification limits |

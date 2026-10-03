@@ -9,7 +9,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from wee_todd_mlx.swift_video_worker import run_swift_video_worker
+from wee_todd_mlx.swift_video_worker import run_swift_video_worker, validate_swift_video_recipe
 
 
 def _output_directory() -> Path:
@@ -76,7 +76,8 @@ class WeeToddSwiftVideoGenerate:
     FUNCTION = "generate"
     CATEGORY = "WeeTodd/Native Swift"
     DESCRIPTION = (
-        "Run a saved weetodd-headless-v2 H3 or LTX 2.5 recipe through the selected "
+        "Run a saved weetodd-headless-v2 H3/LTX 2.5 recipe or dedicated Ripple request "
+        "through the selected "
         "Swift MLX worker. The worker preflights before inference; this node never "
         "loads a Python model. Existing composable nodes remain separate."
     )
@@ -87,21 +88,22 @@ class WeeToddSwiftVideoGenerate:
             raise ValueError("Select a saved headless recipe under 1 MiB")
         data = recipe.read_bytes()
         document = json.loads(data)
-        if not isinstance(document, dict) or document.get("format") != "weetodd-headless-v2":
-            raise ValueError("Select a weetodd-headless-v2 recipe")
-        if document.get("engine") != engine:
-            raise ValueError("Selected engine does not match the recipe engine")
+        ripple = validate_swift_video_recipe(document, engine)
         config = document.get("config") or {}
         if not isinstance(config, dict):
             raise ValueError("Swift video recipe config must be an object")
-        seed = config.get("seed", "take")
+        seed = document["seed"] if ripple else config.get("seed", "take")
         if seed != "take" and (isinstance(seed, bool) or not isinstance(seed, int)):
             raise ValueError("Swift video recipe needs a numeric seed")
         output = _take_directory(filename_prefix, seed)
+        frozen_data = data
+        if ripple:
+            document["output_directory"] = str(output)
+            frozen_data = (json.dumps(document, sort_keys=True) + "\n").encode()
         output.parent.mkdir(parents=True, exist_ok=True)
         worker = Path(swift_worker_path).expanduser().resolve()
         frozen = output.parent / f".{output.name}.recipe.json"
-        frozen.write_bytes(data)
+        frozen.write_bytes(frozen_data)
         try:
             _check_interrupted()
             preflight = run_swift_video_worker(
@@ -113,7 +115,8 @@ class WeeToddSwiftVideoGenerate:
                 worker=worker, engine=engine, recipe=frozen, output=output, mode="render",
                 on_progress=_progress_callback(), check_interrupted=_check_interrupted,
             )
-            movie = Path(result["video"]).resolve()
+            movie_path = result.get("video_path", result.get("path")) if ripple else result["video"]
+            movie = Path(movie_path).resolve()
             root = _output_directory().expanduser().resolve()
             if root not in movie.parents:
                 raise RuntimeError("Swift worker movie is outside ComfyUI's output directory")
@@ -121,7 +124,8 @@ class WeeToddSwiftVideoGenerate:
                 "native_runtime": "swift-mlx",
                 "engine": engine,
                 "recipe": str(recipe),
-                "recipe_sha256": hashlib.sha256(data).hexdigest(),
+                "recipe_sha256": hashlib.sha256(frozen_data).hexdigest(),
+                "source_recipe_sha256": hashlib.sha256(data).hexdigest(),
                 "worker": str(worker),
                 "preflight": preflight,
                 "result": result,

@@ -422,14 +422,23 @@ def runtime_preflight_swift_recipe(
         raise FileNotFoundError("Swift video worker is missing or not executable")
     data = recipe.read_bytes()
     document = json.loads(data)
-    if not isinstance(document, dict) or document.get("format") != "weetodd-headless-v2":
-        raise ValueError("Swift video recipe must use weetodd-headless-v2")
-    if document.get("engine") != engine:
-        raise ValueError("Swift recipe engine does not match the workflow")
     sys.path.insert(0, str(project / "src"))
+    from wee_todd_mlx.swift_video_worker import validate_swift_video_recipe
+
+    ripple = validate_swift_video_recipe(document, engine)
     with tempfile.TemporaryDirectory(prefix="weetodd-swift-workflow-preflight-") as scratch:
+        output = (Path(scratch) / "preflight").resolve()
+        admitted_recipe = recipe
+        admitted_data = data
+        if ripple:
+            # Ripple binds its publication directory to the signed worker envelope.
+            # Freeze only that field for this no-inference admission probe.
+            document["output_directory"] = str(output)
+            admitted_data = (json.dumps(document, sort_keys=True) + "\n").encode()
+            admitted_recipe = Path(scratch) / "ripple-request.json"
+            admitted_recipe.write_bytes(admitted_data)
         result = _run_swift_preflight(
-            worker=worker, recipe=recipe, output=Path(scratch) / "preflight", engine=engine
+            worker=worker, recipe=admitted_recipe, output=output, engine=engine
         )
     return {
         "runtime_ready": True,
@@ -440,6 +449,7 @@ def runtime_preflight_swift_recipe(
         "engine": engine,
         "recipe": str(recipe),
         "recipe_sha256": hashlib.sha256(data).hexdigest(),
+        "preflight_recipe_sha256": hashlib.sha256(admitted_data).hexdigest(),
         "worker": str(worker),
         "task": result.get("task"),
         "frames": result.get("frames"),
@@ -473,7 +483,9 @@ def main() -> int:
                        if node["class_type"] == SWIFT_VIDEO_NODE]
         if swift_nodes:
             if any(node["class_type"] == COMPONENT_NODE for node in graph.values()):
-                raise SystemExit("Swift recipe nodes and composable H3 loaders cannot share this preflight")
+                raise SystemExit(
+                    "Swift recipe nodes and composable H3 loaders cannot share this preflight"
+                )
             if args.comfy_root is None:
                 raise SystemExit("Swift video workflow preflight requires --comfy-root")
             try:

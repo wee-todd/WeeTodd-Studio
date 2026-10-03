@@ -20,6 +20,7 @@ public struct NativeHeadlessJob: Codable {
     var path: String
     var size: UInt64
     var modified: Date
+    var sha256: String?
     static func capture(_ path: String) throws -> Source {
       let attributes = try FileManager.default.attributesOfItem(atPath: path)
       guard attributes[.type] as? FileAttributeType == .typeRegular,
@@ -67,8 +68,24 @@ public struct NativeHeadlessJob: Codable {
         }
       } else if let items = value as? [Any] { items.forEach { inputs($0, parent: parent) } }
     }
-    for recipe in recipes.values { inputs(try JSONSerialization.jsonObject(with: recipe.bytes)) }
-    sources = try paths.sorted().map(Source.capture)
+    var ripplePaths = Set<String>()
+    for recipe in recipes.values {
+      let raw = try JSONSerialization.jsonObject(with: recipe.bytes) as! [String: Any]
+      inputs(raw)
+      if try NativeHeadlessRipple.draft(recipe) != nil {
+        for key in ["source_path", "guide_path", "first_reference_path"] { ripplePaths.insert(raw[key] as! String) }
+        for reference in try NativeHeadlessRipple.references(raw) { ripplePaths.insert(reference["path"] as! String) }
+        guard raw["source_sha256"] as? String == (try Self.fileHash(URL(fileURLWithPath: raw["source_path"] as! String))) else {
+          throw StudioError.invalid("The Ripple source changed during job export.")
+        }
+      }
+    }
+    paths.formUnion(ripplePaths)
+    sources = try paths.sorted().map { path in
+      var source = try Source.capture(path)
+      if ripplePaths.contains(path) { source.sha256 = try Self.fileHash(URL(fileURLWithPath: path)) }
+      return source
+    }
   }
   public static func validateFinishing(_ project: StudioProject) throws {
     try project.settings.validate()
@@ -105,15 +122,19 @@ public struct NativeHeadlessJob: Codable {
     }
     for clip in project.clips {
       if let recipe = recipes[clip.id.uuidString] {
-        guard ["h3", "ltx25"].contains(recipe.engine), recipe.engine == clip.engine.rawValue,
+        let ripple = try NativeHeadlessRipple.validate(recipe, clip: clip, ffmpeg: ffmpeg)
+        guard ripple != nil || clip.rippleDraft?.sourceMatches(clip) != true else {
+          throw StudioError.invalid("A pending Ripple draft requires its dedicated frozen edit request.")
+        }
+        guard ["h3", "ltx25"].contains(recipe.engine), ripple != nil || recipe.engine == clip.engine.rawValue,
           recipe.bytes.count <= 1024 * 1024, !recipe.bytes.isEmpty,
           let document = try JSONSerialization.jsonObject(with: recipe.bytes) as? [String: Any],
-          document["format"] as? String == "weetodd-headless-v2",
+          ripple != nil || document["format"] as? String == "weetodd-headless-v2",
           document["engine"] as? String == recipe.engine,
           let worker = workers[recipe.engine], FileManager.default.isExecutableFile(atPath: worker) else {
           throw StudioError.invalid("A native clip requires its frozen headless recipe and executable Swift worker.")
         }
-        if let source = clip.continuity?.sourceClipID ?? clip.extensionClipID,
+        if ripple == nil, let source = clip.continuity?.sourceClipID ?? clip.extensionClipID,
           recipes[source.uuidString] != nil {
           throw StudioError.invalid("Render and accept the continuity source before exporting its dependent clip.")
         }
@@ -172,8 +193,12 @@ public struct NativeHeadlessJob: Codable {
     return owners
   }
   public func verifySources() throws {
-    for source in sources where try Source.capture(source.path) != source {
-      throw StudioError.invalid("A frozen native job source changed. Re-export the current edit: \(source.path)")
+    for source in sources {
+      var current = try Source.capture(source.path)
+      if source.sha256 != nil { current.sha256 = try Self.fileHash(URL(fileURLWithPath: source.path)) }
+      guard current == source else {
+        throw StudioError.invalid("A frozen native job source changed. Re-export the current edit: \(source.path)")
+      }
     }
   }
   public func write(to url: URL) throws {
@@ -228,6 +253,7 @@ public enum NativeHeadlessExecutor {
     var mediaSHA256: [String: String] = [:]
     var project: StudioProject
     var movieSHA256: String?
+    var rippleArtifactSHA256: [String: String]?
   }
   /// CLI event protocol matches the ordinary Studio/Comfy worker handoff.
   public static func worker(_ executable: String, recipe: URL, output: URL, mode: String,
@@ -286,7 +312,7 @@ public enum NativeHeadlessExecutor {
       throw StudioError.invalid("Native worker failed or returned a different completion identity: \(terminal?["error"] as? String ?? "no valid receipt")")
     }
     if mode == "render" {
-      guard let path = result["video"] as? String else { throw StudioError.invalid("Native worker returned no movie.") }
+      guard let path = result["video"] as? String ?? result["video_path"] as? String ?? result["path"] as? String else { throw StudioError.invalid("Native worker returned no movie.") }
       let url = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
       let root = output.resolvingSymlinksInPath().standardizedFileURL.path + "/"
       guard url.path.hasPrefix(root), FileManager.default.isReadableFile(atPath: url.path) else {
@@ -326,6 +352,20 @@ public enum NativeHeadlessExecutor {
         }
       }
     }
+    for (id, path) in state.completed {
+      if let recipe = job.recipes[id], try NativeHeadlessRipple.draft(recipe) != nil {
+        guard let clip = state.project.clips.first(where: { $0.id.uuidString == id }) else {
+          throw StudioError.invalid("Ripple resume lost its destination clip.")
+        }
+        try NativeHeadlessRipple.verifyResume(recipe: recipe, clip: clip, completedPath: path,
+          artifacts: state.rippleArtifactSHA256 ?? [:])
+      }
+    }
+    for (path, expected) in state.rippleArtifactSHA256 ?? [:] {
+      guard expected == (try? NativeHeadlessJob.fileHash(URL(fileURLWithPath: path))) else {
+        throw StudioError.invalid("An accepted Ripple receipt or replay artifact changed. Use a new exported job.")
+      }
+    }
     let resumedGenerations = state.completed.count
     var newlyGenerated = 0
     let call: Worker = customWorker ?? { executable, recipe, destination, mode in
@@ -345,7 +385,9 @@ public enum NativeHeadlessExecutor {
     for clip in job.project.clips {
       if let owner = owners[clip.id.uuidString], owner != clip.id.uuidString, state.completed[owner] == nil { continue }
       if let recipe = job.recipes[clip.id.uuidString], state.completed[clip.id.uuidString] == nil {
-        _ = try call(job.workers[recipe.engine]!, recipeURL(clip, recipe), output.appendingPathComponent("preflight-\(clip.id)"), "preflight")
+        let target = try NativeHeadlessRipple.target(recipe) ?? output.appendingPathComponent("preflight-\(clip.id)")
+        guard !FileManager.default.fileExists(atPath: target.path) else { throw StudioError.invalid("The frozen native take output already exists. Resume its completed job or export a new job.") }
+        _ = try call(job.workers[recipe.engine]!, recipeURL(clip, recipe), target, "preflight")
       } else { try await inspect(clip: state.project.clips.first { $0.id == clip.id }!) }
     }
     if preflightOnly { return ["status": "success", "native_runtime": "swift-mlx", "python_inference": false, "generations": job.recipes.count, "newlyGenerated": 0, "resumedGenerations": resumedGenerations,
@@ -355,11 +397,23 @@ public enum NativeHeadlessExecutor {
       let clip = job.project.clips[index], id = clip.id.uuidString
       guard let recipe = job.recipes[id], state.completed[id] == nil else { continue }
       try job.verifySources(); try cancellation.check()
-      let target = output.appendingPathComponent("take-\(id)")
+      let target = try NativeHeadlessRipple.target(recipe) ?? output.appendingPathComponent("take-\(id)")
+      guard !FileManager.default.fileExists(atPath: target.path) else { throw StudioError.invalid("The frozen native take output already exists.") }
       var published = false
       defer { if !published { try? FileManager.default.removeItem(at: target) } }
       let frozen = try recipeURL(clip, recipe)
       let result = try call(job.workers[recipe.engine]!, frozen, target, "render")
+      try cancellation.check(); try job.verifySources()
+      if try NativeHeadlessRipple.draft(recipe) != nil {
+        let (path, artifacts) = try await NativeHeadlessRipple.accept(result: result, recipe: recipe, target: target,
+          project: &state.project, index: index)
+        try cancellation.check(); try job.verifySources()
+        state.completed[id] = path; state.mediaSHA256[id] = try NativeHeadlessJob.fileHash(URL(fileURLWithPath: path))
+        if state.rippleArtifactSHA256 == nil { state.rippleArtifactSHA256 = [:] }
+        state.rippleArtifactSHA256!.merge(artifacts) { _, new in new }
+        try encoder.encode(state).write(to: stateURL, options: .atomic); published = true; newlyGenerated += 1
+        continue
+      }
       guard let path = result["video"] as? String else { throw StudioError.invalid("Native worker returned no movie.") }
       let report = recipe.report.isEmpty ? [:] : (try JSONSerialization.jsonObject(with: recipe.report) as? [String: Any] ?? [:])
       let descriptor = try report["generation"].map {

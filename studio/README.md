@@ -1593,8 +1593,28 @@ overrides and Motion Fidelity rather
 than omitting those settings. Native continuous-scene export retains the complete scene group and
 its prepared member ranges, including full and windowed publication; export the whole scene rather
 than one member. A dependent continuity clip needs its source take rendered and accepted before export.
-Pending Ripple generation is rejected by this exporter. Generate, review and apply the Ripple take
-in Studio first; its accepted movie source can then be exported without replacing the edit request.
+A pending Ripple draft exports as its dedicated native edit request, including imported movie clips,
+when native Ripple is enabled. The job freezes the original source digest and trim, full-rate guide,
+edited reference images and strengths, seed, adapter strength and source-audio/silent policy. Its
+worker output directory is frozen under the job’s unique prepared-input folder; retain that folder.
+The CLI verifies the exact request, source identity, receipt, replay references and decoded movie,
+then retains a `RippleTake` and the original source interval before applying the new timeline source.
+Already applied Ripple takes remain reusable movie sources. Cancellation removes an unaccepted
+output so the job can retry; completed jobs resume from hash-verified takes and replay artifacts.
+An existing take belonging to a different output state is never overwritten: resume its original
+job output or export a new job. Dedicated Ripple export, installed-worker preflight and actual CLI inference passed
+with Python unavailable. The three-second 768×448 edit matched the original Studio MP4 byte-for-byte,
+its accepted project reopened through Studio, and resume reused the verified take without inference.
+The worker took 160.6 seconds in this adapter check; this was not an isolated performance comparison.
+Actual exported T2V, I2V, FFLF and A2V jobs also matched all three original Studio media
+files byte-for-byte, reopened through Studio with Python unavailable and resumed without
+new inference. The A2V check retained the reviewed Qwen voice and 1280×768 preset.
+The recipe-backed ComfyUI node also accepts a dedicated Ripple request. It freezes
+only the publication directory into ComfyUI’s unique take folder and records original
+and frozen request hashes. A saved, uncached Ripple graph produced the same MP4 as
+Studio and native CLI. Saved I2V and A2V graphs also matched all three Studio media
+files; A2V retained the reviewed Qwen voice and opening image. ComfyUI remains the
+graph host; its model inference is Swift.
 
 Run the app's CLI with the editor closed:
 

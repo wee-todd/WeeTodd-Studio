@@ -50,7 +50,13 @@ recipes for WeeToddCLI, without Python or a second sampler. This format is an ex
 separate from planning definitions, native image v4 jobs and the legacy Python-hosted movie formats.
 It supports cut-only finishing with embedded source audio; unsupported finishing is rejected
 explicitly. Complete prepared continuous scenes retain member timing and shared take identity;
-ordinary continuity needs an accepted source before export. The saved MSR export and installed-worker
+ordinary continuity needs an accepted source before export. Pending Ripple drafts use their dedicated
+native edit request with frozen source/guide/reference identities and retain `RippleTake` receipts
+and original trims on CLI acceptance. Silent and source-audio fixtures and installed-worker Ripple
+export/preflight passed without Python. Actual exported Ripple inference matched its three-second
+Studio take byte-for-byte; accepted-project reopening and zero-new-generation resume passed.
+A saved, uncached Ripple ComfyUI graph also matched that MP4 through the same Swift worker.
+The saved MSR export and installed-worker
 CLI preflight passed with Python unavailable on 2026-10-02, followed by actual MSR CLI
 inference, movie assembly, accepted-project reopening and verified take reuse on resume.
 A corrected combined CrossView/Ingredients Studio job also passed native export/CLI inference

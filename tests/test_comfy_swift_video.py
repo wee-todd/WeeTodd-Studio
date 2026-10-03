@@ -109,3 +109,77 @@ def test_comfy_swift_video_is_registered_and_missing_worker_cannot_fall_back(
     with pytest.raises(FileNotFoundError, match="executable Swift video worker"):
         node.generate("h3", str(recipe), str(tmp_path / "missing-worker"), "WeeTodd/Native")
     assert not list(output.rglob("*.mp4"))
+
+
+def ripple_recipe(output):
+    # Complete real task shape, with meaningful settings that must survive freezing.
+    return {
+        "version": 1, "engine": "ltx25", "task": "ripple", "seed": 42,
+        "gemma_root": "/models/text", "transformer_root": "/models/transformer",
+        "connector_checkpoint": "/models/fixed", "video_checkpoint": "/models/video",
+        "audio_checkpoint": "/models/audio", "adapter_path": "/models/ripple",
+        "adapter_strength": 1.35, "guide_path": "/inputs/guide.rgb24",
+        "first_reference_path": "/inputs/edit.png", "source_path": "/inputs/source.mp4",
+        "source_sha256": "a" * 64, "source_start": 0.0, "duration": 3.0,
+        "editorial_frames": 72, "width": 768, "height": 448, "frames": 73,
+        "fps": 24.0, "prompt": "Preserve the kitten motion while propagating white fur.",
+        "reference_strength": 1.0,
+        "anchors": [{"frame": 36, "path": "/inputs/middle.png", "strength": 0.75}],
+        "audio_policy": "preserve", "ffmpeg_path": "/tools/ffmpeg",
+        "output_directory": str(output),
+    }
+
+
+def test_comfy_ripple_freezes_only_output_and_accepts_silent_take(tmp_path, monkeypatch):
+    from wee_todd_nodes.swift_video_nodes import WeeToddSwiftVideoGenerate
+
+    source = ripple_recipe(tmp_path / "previous-take")
+    recipe = tmp_path / "ripple.json"
+    recipe.write_text(json.dumps(source))
+    original = recipe.read_bytes()
+    output = tmp_path / "output"
+    monkeypatch.setattr("wee_todd_nodes.swift_video_nodes._output_directory", lambda: output)
+    calls = []
+
+    def run_worker(**kwargs):
+        frozen = json.loads(kwargs["recipe"].read_bytes())
+        calls.append(frozen)
+        assert frozen == {**source, "output_directory": str(kwargs["output"])}
+        if kwargs["mode"] == "preflight":
+            recipe.write_text("{}")
+            return {"nativeRuntime": "swift-mlx", "task": "ripple"}
+        kwargs["output"].mkdir()
+        movie = kwargs["output"] / "ripple.mp4"
+        movie.write_bytes(b"silent take")
+        return {"video_path": str(movie), "path": str(movie), "has_audio": False}
+
+    monkeypatch.setattr("wee_todd_nodes.swift_video_nodes.run_swift_video_worker", run_worker)
+    result = WeeToddSwiftVideoGenerate().generate("ltx25", str(recipe), "/worker", "Ripple/Kitten")
+    assert calls[0] == calls[1]
+    assert Path(result["result"][0]).read_bytes() == b"silent take"
+    info = json.loads(result["result"][1])
+    import hashlib
+    assert info["source_recipe_sha256"] == hashlib.sha256(original).hexdigest()
+    assert info["recipe_sha256"] != info["source_recipe_sha256"]
+
+
+def test_comfy_ripple_cancellation_removes_partial_publication(tmp_path, monkeypatch):
+    from wee_todd_nodes.swift_video_nodes import WeeToddSwiftVideoGenerate
+
+    output = tmp_path / "output"
+    recipe = tmp_path / "ripple.json"
+    recipe.write_text(json.dumps(ripple_recipe(tmp_path / "old-output")))
+    monkeypatch.setattr("wee_todd_nodes.swift_video_nodes._output_directory", lambda: output)
+
+    def run_worker(**kwargs):
+        if kwargs["mode"] == "preflight":
+            return {"task": "ripple"}
+        kwargs["output"].mkdir()
+        (kwargs["output"] / "ripple.mp4").write_bytes(b"partial")
+        raise InterruptedError("sampling cancelled")
+
+    monkeypatch.setattr("wee_todd_nodes.swift_video_nodes.run_swift_video_worker", run_worker)
+    with pytest.raises(InterruptedError, match="cancelled"):
+        WeeToddSwiftVideoGenerate().generate("ltx25", str(recipe), "/worker", "Ripple/Kitten")
+    assert not list(output.rglob("*.mp4"))
+    assert not list(output.rglob("*.recipe.json"))

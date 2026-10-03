@@ -239,3 +239,55 @@ def test_swift_workflow_preflight_validates_recipe_and_worker(tmp_path, monkeypa
             graph={"1": {"class_type": MODULE.SWIFT_VIDEO_NODE, "inputs": inputs}},
             workflow_path=workflow, project=ROOT, comfy_root=comfy,
         )
+
+
+@pytest.mark.parametrize("aliased_scratch", [False, True])
+def test_ripple_workflow_preflight_freezes_output_without_changing_source(
+    tmp_path, monkeypatch, aliased_scratch
+):
+    from test_comfy_swift_video import ripple_recipe
+
+    comfy = tmp_path / "comfy"
+    comfy.mkdir()
+    (comfy / "main.py").write_text("")
+    (comfy / "folder_paths.py").write_text("")
+    recipe = tmp_path / "ripple.json"
+    document = ripple_recipe(tmp_path / "original-output")
+    recipe.write_text(json.dumps(document))
+    original = recipe.read_bytes()
+    worker = tmp_path / "worker"
+    worker.write_text("#!/bin/sh\n")
+    worker.chmod(0o755)
+    graph = {"1": {"class_type": MODULE.SWIFT_VIDEO_NODE, "inputs": {
+        "engine": "ltx25", "recipe_path": str(recipe), "swift_worker_path": str(worker),
+        "filename_prefix": "Ripple/Kitten"}}}
+    workflow = tmp_path / "workflow.json"
+    workflow.write_text(json.dumps(graph))
+    if aliased_scratch:
+        from contextlib import contextmanager
+
+        actual_scratch = tmp_path / "actual-scratch"
+        actual_scratch.mkdir()
+        alias = tmp_path / "scratch-alias"
+        alias.symlink_to(actual_scratch, target_is_directory=True)
+
+        @contextmanager
+        def scratch_directory(**_):
+            yield str(alias)
+
+        monkeypatch.setattr(MODULE.tempfile, "TemporaryDirectory", scratch_directory)
+
+    def preflight(**kwargs):
+        frozen = json.loads(kwargs["recipe"].read_bytes())
+        assert kwargs["output"] == kwargs["output"].resolve()
+        assert frozen["output_directory"] == str(kwargs["output"].resolve())
+        assert frozen == {**document, "output_directory": str(kwargs["output"])}
+        assert kwargs["recipe"] != recipe
+        return {"nativeRuntime": "swift-mlx", "task": "ripple", "frames": 73}
+
+    monkeypatch.setattr(MODULE, "_run_swift_preflight", preflight)
+    result = MODULE.runtime_preflight_swift_recipe(graph=graph, workflow_path=workflow,
+                                                  project=ROOT, comfy_root=comfy)
+    assert recipe.read_bytes() == original
+    assert result["task"] == "ripple"
+    assert result["recipe_sha256"] != result["preflight_recipe_sha256"]

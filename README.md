@@ -2137,14 +2137,22 @@ Studio job completed in Swift and assembled into a 1920×1080 movie; a verified
 resume reused the take. The new `weetodd-studio-native-job-v1` export executes
 through WeeToddCLI without Python; its saved MSR export and actual CLI worker
 preflight passed, followed by real MSR inference and movie assembly without Python.
-The accepted project reopened and verified resume reused its take. See the
+The accepted project reopened and verified resume reused its take. Pending Ripple edits now use
+the dedicated native request and retain their source interval, edited-frame replay data and verified
+`RippleTake` on CLI acceptance. Ripple export, installed-worker preflight and actual exported inference passed without Python.
+The three-second 768×448 edit was byte-identical to its original Studio take; accepted-project
+reopening and hash-verified resume passed with zero new generations.
+Actual exported T2V, I2V, FFLF and A2V jobs likewise matched their original Studio
+video/audio files and passed reopening and zero-new-generation resume. See the
 [Studio native export contract](studio/README.md#headless-movie-and-clip-jobs).
 One LTX 2.5 FFLF headless recipe also completed with synchronized audio.
 The H3 and LTX workers acquire the same
 cross-process inference lock used by the Python host before loading weights.
 The experimental **Generate H3 / LTX 2.5 (Swift MLX Recipe)** ComfyUI node accepts the
-same resolved `weetodd-headless-v2` recipe and an explicit worker executable path. It
-preflights the frozen recipe, streams progress, checks ComfyUI cancellation even between
+same resolved `weetodd-headless-v2` recipe or a dedicated version-1 LTX Ripple request
+and an explicit worker executable path. For Ripple, ComfyUI freezes only the publication
+directory to its unique take folder; all source, guide, edited-reference and generation
+settings stay intact. Metadata records both original and frozen request hashes. It preflights the frozen recipe, streams progress, checks ComfyUI cancellation even between
 worker events, and publishes the movie in ComfyUI's output directory. A missing or
 incompatible worker fails rather than falling back to Python inference. Existing
 composable H3 and LTX 2.5 nodes still use their Python samplers. The new node has
@@ -2152,6 +2160,9 @@ passed contract tests and installed-worker preflight. One saved LTX 2.5 FFLF API
 prompt also completed through an isolated ComfyUI server; its MP4 was byte-identical
 to the same recipe's earlier Swift headless render. One-image H3 Ref2VA also
 completed through the recipe-backed ComfyUI node and direct headless Swift route.
+A saved I2V graph matched its original Studio MP4/video/WAV, and a saved Ripple graph
+matched its Studio/CLI MP4 byte-for-byte; both ran uncached. A saved A2V graph
+also matched the reviewed Qwen-voice Studio MP4/video/WAV byte-for-byte.
 Existing composable nodes and unsupported task families remain to be migrated.
 
 `scripts/inspect_model_library.py --root <existing-folder> --output <new-report.json>`
@@ -2474,7 +2485,7 @@ This table is generated from the registered node contracts. Run
 | LTX 2.5 Generate Chained Timeline | Generate two to four overlapping LTX 2.5 windows with interior video history, regenerated terminal video context, and one synchronized audio/video decode. Supports distilled two-stage and full-resolution single-stage Sol configurations. Guided, CFG++, generated-keyframe, DFR, and automatic-duration modes are unsupported. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Video Upscale / Refine | Upscale decoded ComfyUI IMAGE+AUDIO from any movie through LTX 2.5 latent space, optionally adding generative video-only refinement while preserving the source audio. Refinement can invent identity details, logos, and text. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Unload MLX Runtime | Release process-local LTX 2.5 state. | LTX 2.5 — Core | Supported |
-| Generate H3 / LTX 2.5 (Swift MLX Recipe) | Run a saved weetodd-headless-v2 H3 or LTX 2.5 recipe through the selected Swift MLX worker. The worker preflights before inference; this node never loads a Python model. Existing composable nodes remain separate. | Native Swift — Recipe execution | Experimental |
+| Generate H3 / LTX 2.5 (Swift MLX Recipe) | Run a saved weetodd-headless-v2 H3/LTX 2.5 recipe or dedicated Ripple request through the selected Swift MLX worker. The worker preflights before inference; this node never loads a Python model. Existing composable nodes remain separate. | Native Swift — Recipe execution | Experimental |
 | Canny Preprocessor (MLX) | Create temporally aligned Canny control frames with MLX. The defaults match ComfyUI's current normalized-threshold Canny contract. | MLX preprocessors — Edges | Experimental |
 | Video Depth Model Loader (MLX) | Select a converted Apache-2.0 Video Depth Anything Small checkpoint. This node does not load weights. | MLX preprocessors — Depth | Experimental |
 | Video Depth Preprocessor (MLX) | Estimate temporally consistent relative depth with Video Depth Anything Small on MLX. The default unloads the model after preprocessing. | MLX preprocessors — Depth | Experimental |

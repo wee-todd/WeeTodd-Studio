@@ -280,3 +280,56 @@ def test_exported_job_uses_recorded_studio_swift_selection(tmp_path: Path) -> No
     job["runtime"]["ltx25WorkerPath"] = ""
     with pytest.raises(ValueError, match="enabled.*worker path"):
         studio_job.selected_swift_workers(job, {})
+
+
+@pytest.mark.parametrize("problem", [None, "identity", "runtime", "escape", "receipt", "reference"])
+def test_ripple_worker_native_receipts_and_output_containment(tmp_path, problem):
+    from test_comfy_swift_video import ripple_recipe
+
+    output = tmp_path / "take"
+    recipe = tmp_path / "ripple.json"
+    recipe.write_text(json.dumps(ripple_recipe(output)))
+    worker = fake_worker(tmp_path)
+    script = worker.read_text().replace("'video': str(target / 'render.mp4')",
+        "'video_path': str(target / 'render.mp4'), "
+        "'path': str(target / 'render.mp4'), 'has_audio': False")
+    if problem == "identity":
+        script = script.replace("envelope['jobID']", "'00000000-0000-0000-0000-000000000001'")
+    elif problem == "runtime":
+        script = script.replace("'swift-mlx'", "'python'")
+    elif problem == "escape":
+        (tmp_path / "escape.mp4").write_bytes(b"unrelated")
+        script = script.replace("str(target / 'render.mp4')", "str(target / '..' / 'escape.mp4')")
+    elif problem == "receipt":
+        (tmp_path / "receipt.json").write_text("{}")
+        script = script.replace("'has_audio': False",
+            "'has_audio': False, 'receipt_path': str(target / '..' / 'receipt.json')")
+    elif problem == "reference":
+        (tmp_path / "reference.png").write_bytes(b"unrelated")
+        script = script.replace("'has_audio': False", "'has_audio': False, "
+            "'frozen_references': [{'path': str(target / '..' / 'reference.png')}]")
+    worker.write_text(script)
+    if problem:
+        with pytest.raises(RuntimeError):
+            run_swift_video_worker(worker=worker, engine="ltx25", recipe=recipe,
+                                   output=output, mode="render")
+    else:
+        result = run_swift_video_worker(worker=worker, engine="ltx25", recipe=recipe,
+                                       output=output, mode="render")
+        assert result["has_audio"] is False
+        assert Path(result["video_path"]).is_relative_to(output)
+
+
+def test_ripple_request_rejects_wrong_output_and_unknown_fields_before_worker(tmp_path):
+    from test_comfy_swift_video import ripple_recipe
+
+    output = tmp_path / "take"
+    recipe = tmp_path / "ripple.json"
+    worker = fake_worker(tmp_path)
+    for document in [ripple_recipe(tmp_path / "different"),
+                     {**ripple_recipe(output), "stage1_steps": 2}]:
+        recipe.write_text(json.dumps(document))
+        with pytest.raises(ValueError, match="Ripple"):
+            run_swift_video_worker(worker=worker, engine="ltx25", recipe=recipe,
+                                   output=output, mode="preflight")
+    assert not output.exists()

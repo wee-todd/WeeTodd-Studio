@@ -25,17 +25,20 @@ import StudioCore
       frozenProject.clips = [clip]; frozenProject.name = clip.name
     }
     var generated = Set(body["generateIDs"] as? [String] ?? [])
+    // A pending draft targets its original source, including imported movie clips.
+    // Applied takes no longer match that source and remain ordinary accepted media.
+    let rippleIDs = Set(frozenProject.clips.filter { $0.rippleDraft?.sourceMatches($0) == true }.map(\.id))
+    guard rippleIDs.isEmpty || settings.nativeRippleEnabled == true else {
+      throw StudioError.invalid("Enable native Ripple before exporting its pending edit.")
+    }
+    generated.formUnion(rippleIDs.map(\.uuidString))
     var sceneOwners: [UUID: UUID] = [:]
-    for clip in frozenProject.clips where generated.contains(clip.id.uuidString) {
+    for clip in frozenProject.clips where generated.contains(clip.id.uuidString) && !rippleIDs.contains(clip.id) {
       let members = try snapshot.continuousSceneMembers(for: clip)
       for member in members {
+        guard !rippleIDs.contains(member.id) else { throw StudioError.invalid("Apply the pending Ripple edit before exporting its continuous scene.") }
         generated.insert(member.id.uuidString); sceneOwners[member.id] = members[0].id
       }
-    }
-    guard !frozenProject.clips.contains(where: {
-      generated.contains($0.id.uuidString) && $0.rippleDraft != nil
-    }) else {
-      throw StudioError.invalid("Native headless export cannot generate a pending Ripple edit. Generate and apply the Ripple take in Studio before exporting; an ordinary LTX recipe cannot replace its frozen edit request.")
     }
     var workerPaths: [String: String] = [:]
     if let worker = settings.h3WorkerPath { workerPaths["h3"] = worker }
@@ -52,22 +55,34 @@ import StudioCore
         throw StudioError.invalid("The movie changed during job export. Export the current edit again.")
       }
       let target = inputs.appendingPathComponent(clip.id.uuidString)
+      let ripple = rippleIDs.contains(clip.id), h3 = !ripple && clip.engine == .h3
       var request = body; request["clipID"] = clip.id.uuidString
-      let h3 = clip.engine == .h3
-      let result = try await bridge.invoke(h3 ? "h3-native-prepare" : "ltx-native-prepare",
+      let take = inputs.appendingPathComponent("ripple-take-" + clip.id.uuidString)
+      if ripple {
+        request = ["draft": try clip.rippleDraft!.object(), "takeOutput": take.path]
+      }
+      let result = try await bridge.invoke(ripple ? "ripple-native-prepare" : h3 ? "h3-native-prepare" : "ltx-native-prepare",
         runtime: settings, payload: request, output: target)
       guard let recipePath = result["recipePath"] as? String else { throw StudioError.invalid("Native job preparation returned no recipe.") }
       _ = try await bridge.invoke(h3 ? "h3-native-preflight" : "ltx-native-preflight",
-        runtime: settings, payload: ["recipePath": recipePath], output: target.appendingPathComponent("preflight"))
-      recipes[clip.id.uuidString] = NativeHeadlessJob.Recipe(engine: clip.engine.rawValue,
-        bytes: try Data(contentsOf: URL(fileURLWithPath: recipePath)), signature: signature(for: clip),
-        report: try JSONSerialization.data(withJSONObject: result["report"] ?? [:]))
+        runtime: settings, payload: ["recipePath": recipePath], output: ripple ? take : target.appendingPathComponent("preflight"))
+      let report: Any = ripple ? ["rippleDraft": try clip.rippleDraft!.object()] : result["report"] ?? [:]
+      recipes[clip.id.uuidString] = NativeHeadlessJob.Recipe(engine: h3 ? "h3" : "ltx25",
+        bytes: try Data(contentsOf: URL(fileURLWithPath: recipePath)),
+        signature: ripple ? clip.rippleDraft!.inputFingerprint : signature(for: clip),
+        report: try JSONSerialization.data(withJSONObject: report))
     }
     guard project == snapshot, documentSessionID == session,
       try productionExecutionFingerprint() == execution else {
       throw StudioError.invalid("The movie changed during job export. Export the current edit again.")
     }
-    let job = try NativeHeadlessJob(project: frozenProject, recipes: recipes, workers: workerPaths, ffmpeg: settings.ffmpegPath)
+    let job = try await Task.detached(priority: .userInitiated) {
+      try NativeHeadlessJob(project: frozenProject, recipes: recipes, workers: workerPaths, ffmpeg: settings.ffmpegPath)
+    }.value
+    guard project == snapshot, documentSessionID == session,
+      try productionExecutionFingerprint() == execution else {
+      throw StudioError.invalid("The movie changed during job export. Export the current edit again.")
+    }
     try job.write(to: url); published = true
   }
 }
