@@ -10,6 +10,19 @@ public struct NativeModelScanResult {
 public enum NativeModelSetup {
   public static let engines: Set<String> = ["h3", "ltx25"]
 
+  /// The download path shares discovery's raw Dev admission; page conversion
+  /// and the shared worker retain their stricter complete-source validation.
+  static func validateDevSource(at url: URL) throws {
+    guard try NativeModelInspector.matches(url, key: "dev_transformer_path", engine: "ltx25", task: "t2v") else {
+      throw StudioError.invalid("The downloaded Dev source is incompatible with native Q8 page preparation.")
+    }
+  }
+  static func validateDistilledAdapter(at url: URL) throws {
+    guard try NativeModelInspector.matches(url, key: "distilled_lora_path", engine: "ltx25", task: "t2v") else {
+      throw StudioError.invalid("The downloaded distillation adapter is incompatible with native guided refinement.")
+    }
+  }
+
   /// Inspect bounded headers and manifests in user-selected folders. This never
   /// reads tensor payloads, copies weights, or starts the optional Python runtime.
   /// The worker still validates the selected complete stack before generation.
@@ -97,6 +110,21 @@ public enum NativeModelSetup {
               ? [component("vision_encoder","Qwen3-VL vision tower",["file","directory"])] : []))
         }
     }
+    let guided = LTX25GuidanceMode.allCases.map { mode in
+      ModelSetupPreset(id: "swift-ltx25-" + mode.rawValue,
+        name: "LTX 2.5 · " + mode.label + " · Swift", engine: "ltx25", task: "t2v",
+        description: "Experimental Dev guidance with negative prompts. Reuse an unmerged Dev Q8 paged pack or prepare native pages from the official raw Dev checkpoint, plus the rank-450 distilled refinement adapter. Quality and performance are unqualified; clips require explicit experimental opt-in.",
+        components: [component("dev_transformer_path", "Unmerged LTX 2.5 Dev Q8 pages or raw BF16 source", ["directory","file"])]
+          + ltx.filter { $0.key != "transformer_path" }
+          + [component("distilled_lora_path", "Official LTX 2.5 distilled refinement adapter", ["file"])])
+    }
+    let automaticDuration = ([ordinary.first { $0.id == "swift-ltx25-text" }!]+guided).map { base in
+      let mode = String(base.id.dropFirst("swift-ltx25-".count))
+      return ModelSetupPreset(id: "swift-ltx25-auto-duration"+(mode == "text" ? "" : "-"+mode),
+        name: base.name+" · Automatic duration head", engine: "ltx25", task: "t2v",
+        description: "Link the optional LTX 2.5 duration head in place. Manual timing stays the default; clips must explicitly enable experimental automatic timing. Only ordinary one-shot text/image/first-last tasks are supported.",
+        components:base.components+[component("duration_head_path","LTX 2.5 BF16 duration head",["file"])])
+    }
     let detail = component("dfr_detailing_lora_path", "Pixel-Spatial x2 DFR adapter", ["file"])
     let temporal = component("dfr_temporal_upsampler_path", "LTX temporal x2 latent upscaler", ["file"])
     let dfr = (0...2).map { rounds in
@@ -137,7 +165,7 @@ public enum NativeModelSetup {
       engine: "h3", task: "control",
       description: "Experimental generation using one prepared Canny, depth, HED, MLSD or pose movie. Choose the original full-width five- or ten-block Fun branch and a compatible full-width H3 transformer. Turbo LoRAs cannot be combined with this control route.",
       components: h3 + [component("fun_controlnet", "H3 Fun Union full-width control branch", ["file"])])
-    return ordinary + [h3Fun] + dfr + references + [union] + controls + [crossviewIngredients]
+    return ordinary + [h3Fun] + dfr + references + [union] + controls + [crossviewIngredients] + guided + automaticDuration
   }
 
   public static func recipe(preset: ModelSetupPreset, selected: [String: String],
@@ -181,6 +209,30 @@ public enum NativeModelSetup {
         "duration_seconds": 5.0, "frame_rate": 24.0, "seed": 0,
         "stage1_steps": 8, "stage2_steps": 3, "low_memory": true,
         "low_ram_streaming": false]
+      let modeID = preset.id.replacingOccurrences(of:"swift-ltx25-auto-duration-",with:"swift-ltx25-")
+      if let mode = LTX25GuidanceMode(rawValue: String(modeID.dropFirst("swift-ltx25-".count))) {
+        guard let dev = components.removeValue(forKey: "dev_transformer_path") as? String,
+          (try? URL(fileURLWithPath:dev).resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true,
+          (try? NativeModelInspector.matches(URL(fileURLWithPath: dev), key: "dev_transformer_path", engine: "ltx25", task: "t2v")) == true,
+          let adapter = components["distilled_lora_path"] as? String,
+          (try? NativeModelInspector.matches(URL(fileURLWithPath: adapter), key: "distilled_lora_path", engine: "ltx25", task: "t2v")) == true else {
+          throw StudioError.invalid("Choose an unmerged compatible Dev paged pack and the official distilled refinement adapter.")
+        }
+        components["transformer_path"] = dev
+        config["pipeline_mode"] = mode.rawValue
+        config["stage1_steps"] = mode == .guided ? 30 : 15
+        config["stage1_sampler"] = mode == .guided ? "euler_guided" : "res_2s_guided"
+        config["stage2_sampler"] = "euler"
+        config["video_cfg_scale"] = 3.0; config["audio_cfg_scale"] = 7.0
+        config["stg_scale"] = mode == .guided ? 1.0 : 0.0
+        config["video_rescale_scale"] = mode == .guided ? 0.7 : 0.45
+        config["audio_rescale_scale"] = mode == .guided ? 0.7 : 1.0
+        config["modality_scale"] = 3.0; config["stg_blocks"] = mode == .guided ? [28] : []
+        config["negative_prompt"] = ""
+      }
+      if let head = components["duration_head_path"] as? String {
+        components["duration_head_header_sha256"] = try NativeLTXAutomaticDuration.validateHead(at:URL(fileURLWithPath:head))
+      }
       let controlKeys: [String: [String]] = [
         "swift-ltx25-union": ["union_lora_path"],
         "swift-ltx25-motion-track": ["motion_track_lora_path"],
@@ -419,23 +471,58 @@ private enum NativeModelInspector {
         : metadata["minimax_h3_audio_vae"] != nil && tensors.keys.contains(where: { $0.hasPrefix("decoder.") })
     }
     if directory {
-      guard ["transformer_path", "text_encoder_path"].contains(key),
+      guard ["transformer_path", "dev_transformer_path", "text_encoder_path"].contains(key),
         let manifest = try? document(url.appendingPathComponent("paged_manifest.json")),
         let fixed = manifest["fixed"] as? [String: Any], let file = fixed["file"] as? String,
         FileManager.default.fileExists(atPath: url.appendingPathComponent(file).path) else { return false }
       let metadata = manifest["metadata"] as? [String: Any] ?? [:]
-      if key == "transformer_path" {
+      if ["transformer_path", "dev_transformer_path"].contains(key) {
         let config = embedded(metadata["config"])
+        if key == "dev_transformer_path" {
+          // Task identity is the pack's declared source provenance, not the folder name.
+          guard manifest["format"] as? String == "weetodd-ltx25-transformer-paged-q8-v1",
+            manifest["source"] as? String == "ltx-2.5-22b-dev-transformer-bf16.safetensors",
+            metadata["weetodd_baked_loras"] == nil,
+            manifest["bits"] as? Int == 8, manifest["group_size"] as? Int == 64,
+            manifest["num_layers"] as? Int == 48,
+            (manifest["layers"] as? [Any])?.count == 48 else { return false }
+        }
         return manifest["kind"] as? String == "transformer" &&
           (metadata["model_version"] as? String)?.hasPrefix("2.5") == true && config?["transformer"] is [String: Any]
       }
       let gemma = embedded(metadata["gemma_config"])
       return manifest["kind"] as? String == "gemma" && gemma?["model_type"] as? String == "gemma4_unified"
     }
+    if key == "duration_head_path" { return (try? NativeLTXAutomaticDuration.validateHead(at:url)) != nil }
     let tensors = try header(url)
     let metadata = tensors["__metadata__"] as? [String: String] ?? [:]
     let config = embedded(metadata["config"]) ?? [:]
     switch key {
+    case "dev_transformer_path":
+      guard url.lastPathComponent == "ltx-2.5-22b-dev-transformer-bf16.safetensors",
+        metadata["model_version"] == "2.5.0", metadata["weetodd_baked_loras"] == nil,
+        let transformer = config["transformer"] as? [String:Any],
+        transformer["num_layers"] as? Int == 48, transformer["cross_attention_dim"] as? Int == 4096,
+        transformer["audio_cross_attention_dim"] as? Int == 2048, tensors.count == 4350 else { return false }
+      return (0..<48).allSatisfy { index in
+        let tensor = tensors["model.diffusion_model.transformer_blocks.\(index).attn1.to_q.weight"] as? [String:Any]
+        return tensor?["dtype"] as? String == "BF16" && tensor?["shape"] as? [Int] == [4096,4096]
+      }
+    case "distilled_lora_path":
+      guard ["2.5", "2.5.0"].contains(metadata["model_version"] ?? ""),
+        metadata["lora_rank"] == "450", metadata["lora_alpha"] == "450" else { return false }
+      let names = tensors.keys.filter { $0 != "__metadata__" }
+      let factors = names.filter { $0.hasSuffix(".lora_A.weight") }
+      guard names.count == 3320, factors.count == 1660 else { return false }
+      return factors.allSatisfy { name in
+        let partner = name.replacingOccurrences(of: ".lora_A.weight", with: ".lora_B.weight")
+        guard let a = tensors[name] as? [String: Any], let b = tensors[partner] as? [String: Any],
+          a["dtype"] as? String == "BF16", b["dtype"] as? String == "BF16",
+          let ashape = a["shape"] as? [Int], let bshape = b["shape"] as? [Int],
+          ashape.count == 2, bshape.count == 2, ashape.allSatisfy({ $0 > 0 }),
+          bshape.allSatisfy({ $0 > 0 }), ashape[0] == bshape[1] else { return false }
+        return true
+      }
     case "motion_track_lora_path", "crossview_lora_path":
       let motion = key == "motion_track_lora_path"
       guard metadata["reference_downscale_factor"] == (motion ? "2" : "1"),
@@ -514,6 +601,9 @@ private enum NativeModelInspector {
       return embedded(metadata["gemma_config"])?["model_type"] as? String == "gemma4_unified" &&
         tensors.keys.contains("model.embed_tokens.weight")
     case "video_vae_path":
+      if (config["vae"] as? [String:Any])?["_class_name"] as? String == "CausalDiffusionVAE" {
+        return NativeLTXDiffusionVAE.matches(metadata:metadata,tensors:tensors)
+      }
       return config["vae"] is [String: Any] && tensors.keys.contains(where: { $0.hasPrefix("decoder.") })
     case "audio_vae_path":
       return tensors.keys.contains(where: { $0.hasPrefix("audio_vae.decoder.") }) &&

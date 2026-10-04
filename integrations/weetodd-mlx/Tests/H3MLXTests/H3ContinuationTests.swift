@@ -3,6 +3,30 @@ import XCTest
 @testable import H3MLX
 
 final class H3ContinuationTests: XCTestCase {
+  func testSamplerFingerprintPreservesImplicitEulerAndSeparatesHistoryPolicy() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let component = folder.appendingPathComponent("component")
+    try Data([1, 2, 3]).write(to: component)
+    func request(_ method: H3SamplingMethod? = nil) throws -> H3T2VARequest {
+      if let method {
+        return try H3T2VARequest(prompt: "Walk", width: 32, height: 32,
+          durationSeconds: 2.5, seed: 42, requestedSteps: 5,
+          transformer: component, qwenPages: component, tokenizer: component,
+          videoVAE: component, audioVAE: component, samplingMethod: method)
+      }
+      return try H3T2VARequest(prompt: "Walk", width: 32, height: 32,
+        durationSeconds: 2.5, seed: 42, requestedSteps: 5,
+        transformer: component, qwenPages: component, tokenizer: component,
+        videoVAE: component, audioVAE: component)
+    }
+    XCTAssertEqual(try H3Continuation.fingerprint(request()),
+      try H3Continuation.fingerprint(request(.euler)))
+    XCTAssertNotEqual(try H3Continuation.fingerprint(request()),
+      try H3Continuation.fingerprint(request(.resMultistep)))
+  }
+
   func testWindowAndTrimAdmission() throws {
     let source = URL(fileURLWithPath: "/tmp/context/manifest.json")
     let hash = String(repeating: "a", count: 64)

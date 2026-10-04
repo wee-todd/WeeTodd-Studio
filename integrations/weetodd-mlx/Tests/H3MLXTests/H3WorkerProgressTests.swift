@@ -2,6 +2,20 @@ import XCTest
 @testable import H3MLX
 
 final class H3WorkerProgressTests: XCTestCase {
+  func testLearnedUpscaleCompletesBeforeEncodingAndSamplingWithoutReportingDone() throws {
+    let values=try (0...39).map {try XCTUnwrap(H3WorkerProgress.fraction(stage:"learned_spatial_upscale",completed:$0,total:39,evaluations:3))}
+    XCTAssertEqual(values.first!,0.01,accuracy:0.000001)
+    XCTAssertEqual(values.last!,0.02,accuracy:0.000001)
+    XCTAssertEqual(values,values.sorted())
+    XCTAssertLessThan(values.last!,try XCTUnwrap(H3WorkerProgress.fraction(stage:"transformer_prepare",completed:0,total:50,evaluations:3)))
+    XCTAssertNil(H3WorkerProgress.fraction(stage:"learned_spatial_upscale",completed:1,total:40,evaluations:3))
+  }
+
+  func testAudioDrivenGenerationRecordsActualReleasedStages() {
+    XCTAssertTrue(H3WorkerStageBoundary.tracks(task: "a2v"))
+    XCTAssertEqual(H3WorkerStageBoundary.name(stage: "reference_audio_weights_released",completed: 1,total: 1), "referenceAudioEncode")
+  }
+
   func testControlEncodingHasItsOwnReleasedStageBoundary() {
     XCTAssertTrue(H3WorkerStageBoundary.tracks(task: "control"))
     XCTAssertEqual(H3WorkerStageBoundary.name(stage: "control_video_weights_released",
@@ -18,7 +32,7 @@ final class H3WorkerProgressTests: XCTestCase {
       completed: 1, total: 1), "videoDecode")
     XCTAssertEqual(H3WorkerStageBoundary.name(stage: "audio_weights_released",
       completed: 1, total: 1), "audioDecode")
-    XCTAssertFalse(H3WorkerStageBoundary.tracks(task: "t2va"))
+    XCTAssertTrue(H3WorkerStageBoundary.tracks(task: "t2va"))
   }
 
   func testRef2VAStageBoundariesSeparatePreparationFromSampling() {

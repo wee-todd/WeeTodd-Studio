@@ -16,21 +16,21 @@ public enum NativeH3Preparation {
     "seed", "drop_adaln", "resolution_mode", "resolution_tier", "aspect_ratio", "memory_mode",
     "attention_chunk_size", "attention_head_chunk_size", "ffn_row_chunk_size",
     "projection_backend", "transformer_backend", "sampling_method",
-    "inference_optimization", "paging_cache_gb"]
+    "inference_optimization", "paging_cache_gb", "visual_condition_strength", "audio_condition_strength"]
 
   private static func unsupported(_ detail: String) -> StudioError {
     .invalid("Swift H3 generation is experimental: \(detail).")
   }
-  private static func keyframeIndex(_ attachment: Attachment, duration: Double) -> Int? {
-    guard duration.isFinite, (2.5...15).contains(duration) else { return nil }
+  private static func keyframeIndex(_ attachment: Attachment, duration: Double, publishedFrames:Int?=nil) -> Int? {
+    guard duration.isFinite, (2.5...362.0/24).contains(duration) else { return nil }
     var frames = Int((duration * 24).rounded(.toNearestOrEven))
     while frames % 17 != 5 { frames += 1 }
     switch attachment.role {
     case .first: return attachment.time == 0 ? 0 : nil
-    // Studio displays the requested editorial interval, not H3's extra
-    // alignment frames. Put its last image on the final visible frame.
+    // Ordinary clips end at the requested editorial interval. Saving context
+    // retains the complete grid, so Last follows its effective published end.
     case .last: return attachment.time == 0
-      ? min(frames - 1, Int(ceil(duration * 24)) - 1) : nil
+      ? publishedFrames.map { $0-1 } ?? min(frames - 1, Int(ceil(duration * 24)) - 1) : nil
     case .keyframe:
       guard attachment.time.isFinite, attachment.time >= 0,
         attachment.time <= duration else { return nil }
@@ -102,7 +102,7 @@ public enum NativeH3Preparation {
     return recipe
   }
   private static func supportedLoRA(_ value: Any?) -> Bool {
-    guard let entries = value as? [[Any]], entries.count <= 4 else { return value == nil }
+    guard let entries = value as? [[Any]], entries.count <= 8 else { return value == nil }
     var paths = Set<String>()
     for pair in entries {
       guard pair.count == 2,
@@ -111,7 +111,7 @@ public enum NativeH3Preparation {
         let number = pair[1] as? NSNumber,
         CFGetTypeID(number) != CFBooleanGetTypeID(),
         number.doubleValue.isFinite,
-        (0...2).contains(number.doubleValue),
+        (-10...10).contains(number.doubleValue),
         paths.insert(URL(fileURLWithPath: path).standardizedFileURL.path).inserted
       else { return false }
     }
@@ -134,6 +134,11 @@ public enum NativeH3Preparation {
       adapters[0]["qkv_layout"] as? String == "contiguous_qkv" else { return nil }
     return [path, strength.doubleValue]
   }
+  private static func validReferenceStrength(_ value:Any?) -> Bool {
+    guard let value else { return true }
+    guard let number=value as? NSNumber,CFGetTypeID(number) != CFBooleanGetTypeID() else { return false }
+    return number.doubleValue.isFinite && (0...1).contains(number.doubleValue)
+  }
   private static func supported(_ recipe: [String: Any]) -> Bool {
     guard Set(recipe.keys).isSubset(of: rootKeys),
       (recipe["negative_prompt"] as? String ?? "").isEmpty,
@@ -153,15 +158,14 @@ public enum NativeH3Preparation {
           (components["vision_encoder"] as? String)?.hasPrefix("/") == true)
         && components["allow_fl2va_weights_for_ref2va"] == nil),
       (components["fun_controlnet"] == nil || (modelTask == "t2va" &&
-        (components["fun_controlnet"] as? String)?.hasPrefix("/") == true &&
-        emptyProfileLoRA(components["loras"]) && recipe["loras"] == nil)),
+        (components["fun_controlnet"] as? String)?.hasPrefix("/") == true)),
       supportedLoRA(components["loras"]),
       (recipe["loras"] == nil || (emptyProfileLoRA(components["loras"]) &&
-        rootTurboLoRA(recipe["loras"]) != nil)),
+        (rootTurboLoRA(recipe["loras"]) != nil || NativeH3LoRAComposition.supportsProfileStack(recipe["loras"])))),
       let config = recipe["config"] as? [String: Any],
       Set(config.keys).isSubset(of: configKeys),
       (config["drop_adaln"] as? Bool ?? true),
-      (config["sampling_method"] as? String ?? "euler") == "euler",
+      NativeH3SamplingMethod(rawValue: config["sampling_method"] as? String ?? "euler") != nil,
       ["auto", "mlx"].contains(config["projection_backend"] as? String ?? "mlx"),
       (config["transformer_backend"] as? String ?? "mlx") == "mlx",
       (config["resolution_mode"] as? String ?? "custom") == "custom",
@@ -173,6 +177,8 @@ public enum NativeH3Preparation {
       (config["ffn_row_chunk_size"] as? String ?? "automatic") == "automatic",
       (config["inference_optimization"] as? String ?? "off") == "off",
       (config["paging_cache_gb"] as? Double ?? 0) == 0,
+      validReferenceStrength(config["visual_condition_strength"]),validReferenceStrength(config["audio_condition_strength"]),
+      (modelTask != "t2va" || (config["visual_condition_strength"]==nil && config["audio_condition_strength"]==nil)),
       let conditioning = recipe["conditioning"] as? [String: Any],
       Set(conditioning.keys).isSubset(of: ["version", "task", "inputs", "audio_policy"]),
       conditioning["version"] as? Int == 1,
@@ -189,7 +195,8 @@ public enum NativeH3Preparation {
     let modelTask = (recipe["components"] as? [String: Any])?["task"] as? String
     let task = (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
       : modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"
-    return ["supportedTasks": task == "ref2va" ? ["ref2va", "a2v", "extension"] : [task], "controls": [
+    return ["samplingMethod": config["sampling_method"] as? String ?? "euler",
+      "supportedTasks": task == "ref2va" ? ["ref2va", "a2v", "extension"] : [task], "controls": [
       "evaluations": max(0, (config["steps"] as? Int ?? 20) - 1),
       "stepsEditable": true, "refinementStepsEditable": false,
       "cfgEditable": false, "shiftEditable": false,
@@ -216,7 +223,7 @@ public enum NativeH3Preparation {
             ? "fflf" : "t2v", "generation": descriptor(recipe)]
     }
   }
-  private static func resolve(_ request: [String: Any]) throws -> (StudioProject, Clip, [String: Any], String, [String: Any]) {
+  private static func resolve(_ request: [String: Any]) throws -> (StudioProject, Clip, [String: Any], String, [String: Any], NativeH3MotionPlan?) {
     guard let projectValue = request["project"], let runtime = request["runtime"] as? [String: Any],
       let clipID = request["clipID"] as? String else {
       throw StudioError.invalid("Missing Studio H3 preparation request.")
@@ -233,30 +240,37 @@ public enum NativeH3Preparation {
     guard ["t2v", "t2va", "i2v", "fflf", "ref2va", "a2v", "control"].contains(task) else {
       throw unsupported("task \(clip.inferredTask) is not ported")
     }
-    let supportedRoles: Set<MediaRole> = task == "control" ? [.control]
+    let supportedRoles: Set<MediaRole> = task == "control" ? [.control, .lora]
       : task == "ref2va" ? [.reference, .lora]
-      : task == "a2v" ? [.audioDriver, .first, .lora]
+      : task == "a2v" ? [.audioDriver, .first, .last, .keyframe, .lora]
       : ["i2v", "fflf"].contains(task) ? [.first, .last, .keyframe, .lora] : [.lora]
     let enabledFrames = clip.attachments.filter {
       $0.isEnabled && [.first, .last, .keyframe].contains($0.role)
     }
-    let frameIndices = enabledFrames.compactMap { keyframeIndex($0, duration: clip.duration) }
+    let motion=try NativeH3MotionPlan(project:project,clip:clip)
+    let frameIndices = enabledFrames.compactMap { keyframeIndex($0, duration: clip.duration,publishedFrames:motion?.publishedFrames) }
     let audioDrivers = clip.attachments.filter { $0.role == .audioDriver && $0.isEnabled }
-    let openingImages = clip.attachments.filter { $0.role == .first && $0.isEnabled }
     guard clip.attachments.allSatisfy({ supportedRoles.contains($0.role) }),
-      (task != "a2v" || (audioDrivers.count == 1 && openingImages.count <= 1)),
+      (task != "a2v" || (audioDrivers.count == 1 && enabledFrames.count <= 8 && frameIndices.count == enabledFrames.count && Set(frameIndices).count == frameIndices.count)),
       (task != "control" || (clip.continuityMode == "independent" &&
         clip.attachments.filter({ $0.role == .control && $0.isEnabled }).count == 1)),
-      clip.attachments.filter({ $0.role == .lora && $0.isEnabled }).count <= 4,
+      clip.attachments.filter({ $0.role == .lora && $0.isEnabled }).count <= 8,
       task != "ref2va" || (1...12).contains(clip.attachments.filter({ $0.role == .reference && $0.isEnabled }).count),
       !["i2v", "fflf"].contains(task) ||
         ((1...8).contains(frameIndices.count) && frameIndices.count == enabledFrames.count &&
           Set(frameIndices).count == frameIndices.count &&
           (task != "i2v" || (frameIndices.count == 1 && frameIndices[0] == 0))) else {
-      throw unsupported("this task needs one to eight unique timed images or one to twelve references and at most four Turbo LoRAs")
+      throw unsupported("this task needs one to eight unique timed images or one to twelve references and at most eight H3 LoRAs")
+    }
+    guard clip.attachments.allSatisfy({ ($0.h3LoRA == nil || $0.role == .lora) &&
+      ($0.h3ReferencePlacement == nil || (task == "ref2va" && $0.role == .reference) || (task == "a2v" && [.first,.last,.keyframe].contains($0.role))) }) else {
+      throw unsupported("H3 adapter and reference-placement controls require their matching attachment roles")
     }
     let selection = clip.generationSelection
+    try selection?.h3Reference?.validate(task:task)
     guard selection?.refinementSteps == nil, selection?.cfg == nil, selection?.shift == nil,
+      selection?.ltx25Guidance == nil,selection?.ltx25Keyframes == nil,
+      selection?.ltx25DiffusionVAE == nil,selection?.ltx25AutomaticDuration == nil,selection?.ltx25SingleStage == nil,selection?.ltx25MovieUpscale == nil,
       selection?.memoryPolicy == nil || selection?.memoryPolicy == "recipe",
       selection?.projectionBackend == nil || ["auto", "mlx"].contains(selection!.projectionBackend!),
       selection?.transformerBackend == nil || selection?.transformerBackend == "mlx",
@@ -276,7 +290,7 @@ public enum NativeH3Preparation {
     }
     let recipe = try profile(path)
     guard supported(recipe) else { throw unsupported("the selected profile changed or contains unported settings") }
-    return (project, clip, runtime, path, recipe)
+    return (project, clip, runtime, path, recipe,motion)
   }
   private static func frameRequest(_ request:[String:Any],imagePath:String?=nil) throws
     -> (request:[String:Any],source:NativeLTXFrameSource)? {
@@ -405,6 +419,7 @@ public enum NativeH3Preparation {
     return nextHeading == headings.count && hasBody
   }
   public static func compose(request: [String: Any]) throws -> [String: Any] {
+    try NativeMovieIntervalAdmission.rejectInOrdinaryRequest(request)
     guard try frameRequest(request) == nil,try extensionRequest(request) == nil else {
       throw StudioError.invalid("Frame continuity and extension require native media preparation before composing a runnable recipe.")
     }
@@ -412,12 +427,11 @@ public enum NativeH3Preparation {
   }
   private static func compose(request:[String:Any],frameInput:(path:String,sha256:String)?,
     continuity:[String:Any]?,videoInput:(path:String,sha256:String)?=nil) throws -> [String:Any] {
-    let (project, clip, runtime, path, original) = try resolve(request)
+    let (project, clip, runtime, path, original,motion) = try resolve(request)
     let globalAssets = try JSONDecoder().decode([MediaAsset].self,
       from: data(request["globalAssets"] ?? []))
     let availableAssets = project.assets + globalAssets
     var recipe = original
-    let motion=try NativeH3MotionPlan(project:project,clip:clip)
     let text = clip.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { throw StudioError.invalid("Write a prompt before preparing the render.") }
     let prompt: String
@@ -452,18 +466,19 @@ public enum NativeH3Preparation {
     config["width"] = clip.generationWidth; config["height"] = clip.generationHeight
     config["duration_seconds"] = motion?.duration ?? clip.duration; config["seed"] = clip.seed
     config["steps"] = steps
+    if let method = clip.generationSelection?.h3SamplingMethod { config["sampling_method"] = method.rawValue }
     if let backend = clip.generationSelection?.projectionBackend { config["projection_backend"] = backend }
     recipe["config"] = config; recipe["prompt"] = prompt
-    var components = recipe["components"] as! [String: Any]
-    var loras = components["loras"] as? [[Any]] ?? []
-    var selectedLoRAProfiles: [String: String] = [:]
-    if let legacyStack = recipe.removeValue(forKey: "loras") {
-      guard loras.isEmpty, let adapter = rootTurboLoRA(legacyStack) else {
-        throw unsupported("the profile adapter cannot be mapped to the Swift Turbo reader")
-      }
-      loras.append(adapter)
-      selectedLoRAProfiles[try canonical(adapter[0] as! String)] = "turbo"
+    let advancedH3 = clip.generationSelection?.h3Reference != nil || clip.generationSelection?.h3Joint != nil
+      || clip.attachments.contains { $0.h3LoRA != nil || $0.h3ReferencePlacement != nil }
+    guard !advancedH3 || ((config["projection_backend"] as? String ?? "mlx") == "mlx" &&
+      (config["transformer_backend"] as? String ?? "mlx") == "mlx") else {
+      throw unsupported("advanced H3 reference, LoRA and full-latent controls require the explicit MLX projection backend")
     }
+    var components = recipe["components"] as! [String: Any]
+    let profileLoRAs=components["loras"] as? [[Any]] ?? []
+    let profileStack=recipe.removeValue(forKey:"loras")
+
     if let tokenizer = components["tokenizer"] as? String {
       let tokenFile = URL(fileURLWithPath: tokenizer).appendingPathComponent("tokenizer.json")
       if FileManager.default.fileExists(atPath: tokenFile.path) {
@@ -471,12 +486,12 @@ public enum NativeH3Preparation {
       }
     }
     if clip.inferredTask == "control" {
-      guard motion == nil, loras.isEmpty,
+      guard motion == nil,
         clip.generationWidth <= 2048, clip.generationHeight <= 2048,
         clip.generationWidth * clip.generationHeight <= 768 * 1376,
         let control = components["fun_controlnet"] as? String,
         let transformer = components["transformer"] as? String else {
-        throw unsupported("Fun control requires a full-width adapter, dense sampling without LoRAs, and a bounded output canvas")
+        throw unsupported("Fun control requires a full-width adapter, dense sampling with compatible base-stream LoRAs, and a bounded output canvas")
       }
       let controlPath = try canonical(control)
       try NativeH3FunControlMetadata.validate(control: controlPath, transformer: canonical(transformer))
@@ -486,7 +501,8 @@ public enum NativeH3Preparation {
     let endpointAttachments = clip.attachments.filter {
       $0.isEnabled && Set<MediaRole>([.first, .last, .keyframe]).contains($0.role)
     }.sorted {
-      keyframeIndex($0, duration: clip.duration)! < keyframeIndex($1, duration: clip.duration)!
+      keyframeIndex($0, duration: clip.duration,publishedFrames:motion?.publishedFrames)!
+        < keyframeIndex($1, duration: clip.duration,publishedFrames:motion?.publishedFrames)!
     }
     let orderedAttachments = ["i2v", "fflf"].contains(clip.inferredTask)
       ? endpointAttachments + clip.attachments.filter { $0.role == .lora }
@@ -502,7 +518,7 @@ public enum NativeH3Preparation {
           attachment.referenceRole == nil, attachment.referencePriority == nil,
           attachment.referenceFrames == nil, attachment.referenceSizePolicy == nil,
           attachment.attentionStrength == nil, attachment.audioSourceStart == nil,
-          attachment.audioSourceDuration == nil else {
+          attachment.audioSourceDuration == nil,attachment.h3ReferencePlacement == nil else {
           throw unsupported("Fun control accepts one preprocessed Canny, depth, HED, MLSD or pose video at strength 0–1")
         }
         let controlPath = try canonical(asset.path)
@@ -524,7 +540,7 @@ public enum NativeH3Preparation {
           attachment.referenceFrames == nil,
           attachment.referenceSizePolicy == nil,
           attachment.attentionStrength == nil else {
-          throw unsupported("H3 image, video and audio references require full strength and no timing or specialized controls")
+          throw unsupported("H3 image, video and audio references require full input strength; use H3 global conditioning-strength and explicit placement controls")
         }
         let imagePath = try canonical(asset.path)
         let frozen=attachment.role == .first ? frameInput : isVideoReference && videoInput?.path == imagePath ? videoInput : nil
@@ -538,9 +554,30 @@ public enum NativeH3Preparation {
           "sha256": frozen != nil ? frozen!.sha256 : try sourceSHA256(imagePath,
             maxBytes: isVideoReference ? 4 * 1024 * 1024 * 1024
               : isAudioReference ? 1024 * 1024 * 1024 : 128 * 1024 * 1024)]
+        if let placement=attachment.h3ReferencePlacement {
+          let options=try placement.mediaOptions(kind:input["kind"] as! String,task:clip.inferredTask)
+          for (key,value) in options {input[key]=value}
+          if placement.frame != nil || placement.soundtrackPath != nil {
+            guard attachment.role == .reference,attachment.time==0 else { throw unsupported("explicit reference placement cannot combine legacy attachment timing") }
+          }
+          if let frame=placement.frame {
+            let visible=motion?.publishedFrames ?? Int(ceil(clip.duration*24))
+            input["frame_index"] = frame == .last ? visible-1 : try frame.wire(visibleFrames:visible)
+          }
+          if let sidecar=placement.soundtrackPath {
+            guard isVideoReference else { throw unsupported("a soundtrack sidecar requires a movie reference") }
+            let soundPath=try canonical(H3JointLatentArtifact.localPath(sidecar))
+            guard soundPath != imagePath else { throw unsupported("movie and soundtrack must be distinct source files") }
+            input["soundtrack_path"]=soundPath;input["soundtrack_sha256"]=try sourceSHA256(soundPath,maxBytes:1024*1024*1024)
+          }
+        }
         if attachment.role == .audioDriver {
           input["role"] = "audio_driver"
           let preparedMix = clip.audioDriverSelection != nil
+          let requiredDuration = motion?.duration ?? clip.duration
+          guard !preparedMix || clip.duration + 0.001 >= requiredDuration else {
+            throw unsupported("prepare a timeline audio mix covering the longer effective H3 published interval (\(requiredDuration) seconds); the current mix is not padded")
+          }
           guard !preparedMix || (clip.audioDriverMixKey?.isEmpty == false &&
             asset.scope == .clip && asset.owner == clip.id &&
             attachment.audioSourceStart == nil &&
@@ -552,9 +589,9 @@ public enum NativeH3Preparation {
           let length = preparedMix ? clip.duration : attachment.audioSourceDuration
           guard let start, start.isFinite, (0...86400).contains(start),
             let length, length.isFinite,
-            length >= clip.duration - 0.001, length <= 15,
+            length >= requiredDuration - 0.001, length <= 15,
             asset.duration <= 0 || start + length <= asset.duration + 0.01 else {
-            throw unsupported("H3 A2V needs a source interval covering the visible clip")
+            throw unsupported("H3 A2V needs a source interval covering the effective published clip (\(requiredDuration) seconds)")
           }
           input["source_start_seconds"] = start
           input["source_duration_seconds"] = length
@@ -564,67 +601,32 @@ public enum NativeH3Preparation {
           if clip.inferredTask == "a2v" { input["role"] = "keyframe" }
         }
         if attachment.role == .last {
-          input["frame_index"] = keyframeIndex(attachment, duration: clip.duration)!
+          input["frame_index"] = keyframeIndex(attachment, duration: clip.duration,publishedFrames:motion?.publishedFrames)!
+          if clip.inferredTask == "a2v" { input["role"] = "keyframe" }
         }
         if attachment.role == .keyframe {
-          input["frame_index"] = keyframeIndex(attachment, duration: clip.duration)!
+          input["frame_index"] = keyframeIndex(attachment, duration: clip.duration,publishedFrames:motion?.publishedFrames)!
         }
         referenceInputs.append(input)
         continue
       }
-      guard loras.count < 4 else {
-        throw unsupported("select at most four H3 LoRAs, including profile adapters")
-      }
-      try LoRAMember(asset: asset, strength: attachment.strength).validate(for: .h3)
-      guard asset.loraAdalnInputGrid == nil,
-        asset.loraLayout == nil || asset.loraLayout == "contiguous_qkv",
-        asset.loraProfile == nil || ["standard", "turbo"].contains(asset.loraProfile!) else {
-        throw unsupported("this H3 LoRA requires a different layout or adapter profile")
-      }
-      let adapterPath = try canonical(asset.path)
-      guard FileManager.default.isReadableFile(atPath: adapterPath) else {
-        throw StudioError.invalid("Relink the H3 LoRA: \(asset.name)")
-      }
-      let normalizedPath = URL(fileURLWithPath: adapterPath).standardizedFileURL.path
-      guard !loras.contains(where: {
-        guard let path = $0.first as? String else { return false }
-        return URL(fileURLWithPath: path).standardizedFileURL.path == normalizedPath
-      }) else {
-        throw unsupported("the same H3 LoRA is attached more than once")
-      }
-      loras.append([adapterPath, attachment.strength])
-      selectedLoRAProfiles[adapterPath] = asset.loraProfile
+      // NativeH3LoRAComposition validates enabled adapters together after media ordering.
     }
-    if !loras.isEmpty {
-      var paths = Set<String>()
-      var hasTurbo = false
-      for index in loras.indices {
-        let path = try canonical(loras[index][0] as! String)
-        guard paths.insert(path).inserted else {
-          throw unsupported("the same H3 LoRA is attached more than once")
-        }
-        loras[index][0] = path
-        let selectedProfile = selectedLoRAProfiles[path]
-        let metadata = try NativeLoRAInspection.inspect(URL(fileURLWithPath: path),
-          modelHint: .h3, selectedH3Profile: selectedProfile)
-        hasTurbo = hasTurbo || selectedProfile == "turbo" || metadata["loraProfile"] as? String == "turbo"
-      }
-      // Studio Steps are evaluations; the native recipe stores one extra sigma point.
-      // An ordinary profile default is not an explicit user override of Turbo's schedule.
-      if hasTurbo, clip.generationSelection?.steps == nil { steps = 5 }
-      for pair in loras {
-        let path = pair[0] as! String
-        let metadata = try NativeLoRAInspection.validateH3Sampling(path: path,
-          selectedProfile: selectedLoRAProfiles[path], schedulePoints: steps)
-        guard metadata["loraModel"] as? String == "h3",
-          metadata["loraRequiresAdalnGrid"] as? Bool != true,
-          metadata["loraLayout"] == nil || metadata["loraLayout"] as? String == "contiguous_qkv" else {
-          throw unsupported("this H3 LoRA requires a different training model, layout or AdaLN grid")
-        }
-      }
-      config["steps"] = steps; recipe["config"] = config
-      components["loras"] = loras
+    let adapterStack=try NativeH3LoRAComposition.compose(componentPairs:profileLoRAs,rootStack:profileStack,
+      attachments:clip.attachments,assets:availableAssets,schedulePoints:steps,
+      explicitEvaluations:clip.generationSelection?.steps,samplingMethod:config["sampling_method"] as? String ?? "euler")
+    if !adapterStack.pairs.isEmpty {
+      if let descriptors=adapterStack.descriptors {
+        components.removeValue(forKey:"loras");recipe["loras"]=descriptors
+      } else { components["loras"]=adapterStack.pairs }
+      steps=adapterStack.schedulePoints;config["steps"]=steps
     }
+    if let controls=clip.generationSelection?.h3Reference {
+      try controls.validate(task:clip.inferredTask)
+      if let strength=controls.visualConditionStrength { config["visual_condition_strength"]=strength }
+      if let strength=controls.audioConditionStrength { config["audio_condition_strength"]=strength }
+    }
+    recipe["config"]=config
     recipe["components"] = components
     if let motion { recipe["continuation"]=motion.contract }
     if clip.inferredTask == "control" {
@@ -636,9 +638,12 @@ public enum NativeH3Preparation {
       let imageCount = referenceInputs.filter { $0["kind"] as? String == "image" }.count
       let videoCount = referenceInputs.filter { $0["kind"] as? String == "video" }.count
       let audioCount = referenceInputs.count - imageCount - videoCount
-      guard (1...12).contains(referenceInputs.count), imageCount + videoCount > 0,
+        + referenceInputs.filter { $0["soundtrack_path"] != nil }.count
+      let hasVisualOrTimedAudio = imageCount + videoCount > 0
+        || referenceInputs.allSatisfy { $0["frame_index"] != nil }
+      guard (1...12).contains(referenceInputs.count), hasVisualOrTimedAudio,
         imageCount <= 9, videoCount <= 3, audioCount <= 3 else {
-        throw unsupported("Ref2VA needs a visual source and allows at most nine images, three videos and three audio references")
+        throw unsupported("Ref2VA needs a visual source or explicitly timed audio and allows at most nine images, three videos and three standalone audio or soundtrack sidecar sources")
       }
       recipe["conditioning"] = ["version": 1, "task": "ref2va",
         "inputs": referenceInputs, "audio_policy": "generated"]
@@ -646,6 +651,7 @@ public enum NativeH3Preparation {
       recipe["conditioning"] = ["version": 1, "task": "fflf",
         "inputs": referenceInputs, "audio_policy": "generated"]
     }
+    recipe=try NativeH3JointPreparation.apply(clip.generationSelection?.h3Joint,to:recipe,continuityMode:clip.continuityMode)
     let configuredFFmpeg = runtime["ffmpegPath"] as? String ?? ""
     let ffmpeg = configuredFFmpeg.isEmpty ? [recipe["ffmpeg"] as? String ?? "",
       "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first {
@@ -655,14 +661,20 @@ public enum NativeH3Preparation {
       throw StudioError.invalid("Select an executable FFmpeg in Runtime Settings.")
     }
     recipe["ffmpeg"] = try canonical(ffmpeg)
+    recipe=try NativeH3MotionFidelityPreparation.apply(clip.generationSelection?.h3MotionFidelity,to:recipe,clip:clip)
     var report: [String: Any] = ["profile": URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent,
       "generation": descriptor(recipe), "resolvedFingerprint": try fingerprint(continuity == nil ? recipe : ["recipe":recipe,"continuity":continuity!]),
       "selectionFingerprint": try fingerprint(original),
-      "task": ["ref2va", "a2v", "control"].contains(clip.inferredTask) ? clip.inferredTask
+      "task": recipe["motion_fidelity"] != nil ? "motion_fidelity" : ["ref2va", "a2v", "control"].contains(clip.inferredTask) ? clip.inferredTask
         : ["i2v", "fflf"].contains(clip.inferredTask) ? "fflf" : "t2v", "nativeFPS": 24,
       "nativePreparation": "swift", "productionQualified": false,
       "movieSettings": try JSONSerialization.jsonObject(with: JSONEncoder().encode(clip.settings(in: project))),
       "conditioning": ["inputs": referenceInputs.count]]
+    if let repair=recipe["motion_fidelity"] as? [String:Any] {
+      report["motion_source"]=["path":repair["source_video"]!,"sha256":repair["source_sha256"]!,
+        "sourceStartSeconds":repair["source_in"]!,"sourceDurationSeconds":clip.duration,
+        "sourceFrames":Int((clip.duration*24).rounded(.toNearestOrEven)),"width":clip.generationWidth,"height":clip.generationHeight]
+    }
     if let continuity { report["continuity"]=continuity }
     if let motion {
       report["continuity"]=motion.dependency;report["warnings"]=motion.warnings
@@ -671,10 +683,11 @@ public enum NativeH3Preparation {
     return ["recipe": recipe, "report": report]
   }
   public static func describe(request: [String: Any]) throws -> [String: Any] {
+    try NativeMovieIntervalAdmission.rejectInOrdinaryRequest(request)
     let frame=try frameRequest(request)
     let extensionSource=try extensionRequest(request)
     let normalized=extensionSource?.request ?? frame?.request ?? request
-    let (_, _, _, path, original) = try resolve(normalized)
+    let (_, _, _, path, original, _) = try resolve(normalized)
     var errors: [String] = [], resolved = "",warnings=["Swift H3 generation is experimental and not production qualified."]
     var content = original
     do {
@@ -695,6 +708,14 @@ public enum NativeH3Preparation {
     var sources = [path] + components.values.compactMap { $0 as? String }.filter { $0.hasPrefix("/") }
     let inputs = (content["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]] ?? []
     sources += inputs.compactMap { $0["path"] as? String }
+    sources += inputs.compactMap { $0["soundtrack_path"] as? String }
+    if let motion=content["motion_fidelity"] as? [String:Any] {sources += [motion["source_video"],motion["ffprobe"]].compactMap {$0 as? String}}
+    if let model=(content["refinement"] as? [String:Any])?["learned_upscaler_path"] as? String {sources.append(model)}
+    if let source=(content["refinement"] as? [String:Any])?["source_manifest"] as? String {
+      sources += [source,URL(fileURLWithPath:source).deletingLastPathComponent().appendingPathComponent("joint-latents.f32").path]
+    }
+    if let adapters=(content["loras"] as? [String:Any])?["adapters"] as? [[String:Any]] { sources += adapters.compactMap { $0["path"] as? String } }
+
     if let context=(content["continuation"] as? [String:Any])?["source_context"] as? String {
       sources += [context,URL(fileURLWithPath:context).deletingLastPathComponent().appendingPathComponent("latents.f32").path]
     }
@@ -713,6 +734,8 @@ public enum NativeH3Preparation {
       "readinessErrors": errors]
   }
   public static func prepareWithMedia(request:[String:Any],destination:URL) async throws -> [String:Any] {
+    try await NativeH3MotionFidelityPreparation.inspect(request:request)
+    try NativeMovieIntervalAdmission.rejectInOrdinaryRequest(request)
     if let source=try extensionRequest(request) {
       let provisional=try compose(request:source.request,frameInput:nil,continuity:nil,
         videoInput:(source.source.url.path,String(repeating:"0",count:64)))

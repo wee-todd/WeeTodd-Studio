@@ -19,7 +19,7 @@ public struct H3PackedSequence {
     let audioRows = layout.videoStart - layout.audioStart
     let targetVideoRows = total - layout.videoStart
     let videoRows = layout.conditionVideoRows + targetVideoRows
-    guard (1...40_000).contains(total),
+    guard (1...layout.maximumPackedRows).contains(total),
       textRows > 0, audioRows > 0, targetVideoRows > 0,
       text.shape == [1, textRows, 5376],
       video.shape == [1, videoRows, 5376],
@@ -56,7 +56,7 @@ public struct H3PackedSequence {
     timestepIndices: [Int32]) throws {
     let total = layout.tags.count
     let textRows = total - layout.videoIndices.count - layout.audioIndices.count
-    guard (1...40_000).contains(total), textRows > 0,
+    guard (1...layout.maximumPackedRows).contains(total), textRows > 0,
       text.shape == [1, textRows, 5376],
       video.shape == [1, layout.videoIndices.count, 5376],
       audio.shape == [1, layout.audioIndices.count, 5376],

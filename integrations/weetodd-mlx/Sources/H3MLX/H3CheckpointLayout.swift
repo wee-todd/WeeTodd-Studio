@@ -70,6 +70,10 @@ public struct H3CheckpointLayout: Sendable {
   }
 
   public init(tensors: [String: H3TensorInfo]) throws {
+    try self.init(tensors: tensors, pagedAffine: false, computedRotary: false)
+  }
+
+  init(tensors: [String: H3TensorInfo], pagedAffine: Bool, computedRotary: Bool) throws {
     let candidates = ["model.diffusion_model.", "diffusion_model.", ""]
       .filter { tensors[$0 + "video_patch_proj.weight"] != nil }
     guard candidates.count == 1 else {
@@ -108,7 +112,8 @@ public struct H3CheckpointLayout: Sendable {
       try require("time_embedder.proj_out.weight", [2688, 5376])
       try require("time_embedder.proj_out.bias", [2688], ["F32"])
     }
-    try require("rope.inv_freq", [16], ["F32"])
+    if !computedRotary { try require("rope.inv_freq", [16], ["F32"]) }
+    guard !pagedAffine || curved else { throw H3CheckpointError.invalid("Paged affine H3 requires the FL2VA64 architecture.") }
     try require("token_refiner.final_norm.weight", [5376])
     for index in 0..<2 {
       let base = "token_refiner.blocks.\(index)."
@@ -144,7 +149,7 @@ public struct H3CheckpointLayout: Sendable {
         curved ? ["F32"] : ["BF16", "F16"])
       for (name, shape) in projections {
         let base = root + "blocks.\(index)." + name
-        guard let weight = tensors[base + ".weight"], weight.shape == shape else {
+        guard let weight = tensors[base + ".weight"], weight.shape == ((pagedAffine && weight.dtype == "U32") ? [shape[0], shape[1] / 4] : shape) else {
           throw H3CheckpointError.invalid("Missing or incompatible H3 projection: \(base)")
         }
         switch weight.dtype {
@@ -152,6 +157,11 @@ public struct H3CheckpointLayout: Sendable {
         case "F16" where !curved: break
         case "BF16" where curved && name != "adaln_proj.linear": break
         case "F32" where curved && name == "adaln_proj.linear": break
+        case "U32" where pagedAffine && name != "adaln_proj.linear":
+          guard tensors[base + ".scales"] == H3TensorInfo(dtype: "BF16", shape: [shape[0], shape[1] / 64]),
+            tensors[base + ".biases"] == H3TensorInfo(dtype: "BF16", shape: [shape[0], shape[1] / 64]) else {
+            throw H3CheckpointError.invalid("Incomplete paged affine H3 metadata: \(base)")
+          }
         case "I8":
           guard tensors[base + ".weight_scale"] == H3TensorInfo(dtype: "F32", shape: [shape[0], 1]),
             let marker = tensors[base + ".comfy_quant"], marker.dtype == "U8",
@@ -172,6 +182,10 @@ public struct H3CheckpointLayout: Sendable {
   }
 
   public init(url: URL) throws {
+    if H3CheckpointSource.isPaged(url) {
+      self = try H3CheckpointSource.inspect(url).layout
+      return
+    }
     let identity = try Self.fileIdentity(at: url)
     if let cached = Self.validationCache.lookup(identity) {
       self = cached

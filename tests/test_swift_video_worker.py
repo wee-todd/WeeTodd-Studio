@@ -333,3 +333,41 @@ def test_ripple_request_rejects_wrong_output_and_unknown_fields_before_worker(tm
             run_swift_video_worker(worker=worker, engine="ltx25", recipe=recipe,
                                    output=output, mode="preflight")
     assert not output.exists()
+
+
+def test_movie_wrapper_binds_explicit_ffmpeg_without_rewriting_recipe(tmp_path: Path) -> None:
+    recipe = tmp_path / "movie.json"
+    payload = {
+        "format": "weetodd-headless-v2", "engine": "ltx25",
+        "movie_upscale": {"source": "frozen"},
+    }
+    recipe.write_text(json.dumps(payload))
+    original = recipe.read_bytes()
+    worker = fake_worker(tmp_path)
+    executable = Path("/usr/bin/true").resolve()
+    worker.write_text(worker.read_text().replace(
+        "assert envelope['outputDirectory'] == output",
+        "assert envelope['outputDirectory'] == output\nassert envelope['ffmpegPath'] == "
+        + repr(str(executable)),
+    ))
+    run_swift_video_worker(worker=worker, engine="ltx25", recipe=recipe,
+                          output=tmp_path / "take", mode="preflight", ffmpeg=executable)
+    assert recipe.read_bytes() == original
+    with pytest.raises(FileNotFoundError, match="FFmpeg"):
+        run_swift_video_worker(worker=worker, engine="ltx25", recipe=recipe,
+                              output=tmp_path / "take", mode="preflight",
+                              ffmpeg=tmp_path / "missing")
+
+
+def test_movie_wrapper_rejects_missing_ffmpeg_before_worker_launch(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    recipe = tmp_path / "movie.json"
+    recipe.write_text(json.dumps({
+        "format": "weetodd-headless-v2", "engine": "ltx25", "movie_upscale": {},
+    }))
+    monkeypatch.setattr("wee_todd_mlx.swift_video_worker.shutil.which", lambda _: None)
+    with pytest.raises(FileNotFoundError, match="FFmpeg"):
+        run_swift_video_worker(worker=fake_worker(tmp_path), engine="ltx25", recipe=recipe,
+                              output=tmp_path / "take", mode="preflight")
+    assert not (tmp_path / "take").exists()

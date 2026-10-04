@@ -35,6 +35,22 @@ public enum H3VideoVAEDecoder {
       lengths: Array(repeating: tileSize, count: count), overlaps: overlaps)
   }
 
+  /// Header/shape-only expanded canvas check reuses the actual decoder's
+  /// spatial partition. Each 17-frame temporal clip stays in bounded 256px
+  /// spatial tiles; no full-2MP projection/convolution is admitted here.
+  public static func preflightSpatial(geometry: H3Geometry) throws -> Int {
+    try geometry.canvasAdmission.validate(width: geometry.width,height: geometry.height)
+    try geometry.canvasAdmission.validatePackedRows(geometry.videoRows + geometry.audioRows + 1)
+    let x = splitTiles(geometry.width), y = splitTiles(geometry.height)
+    let count = x.starts.count * y.starts.count
+    guard count > 0, count <= 64,
+      x.lengths.allSatisfy({ $0 <= 256 }), y.lengths.allSatisfy({ $0 <= 256 }),
+      UInt64(4 * 8 * 16 * 16 * 2048) < UInt64(Int32.max) else {
+      throw H3CheckpointError.invalid("Expanded H3 spatial decoder exceeds the tile or 32-bit activation bound.")
+    }
+    return count
+  }
+
   private static func blend(_ previous: MLXArray, _ current: MLXArray,
     extent: Int, axis: Int) -> MLXArray {
     let count = min(extent, previous.shape[axis], current.shape[axis])

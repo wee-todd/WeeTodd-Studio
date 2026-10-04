@@ -26,9 +26,9 @@ public enum H3FinalLayer {
   static func evaluate(checkpointURL: URL, input: MLXArray,
     timeEmbeddings: MLXArray, timestepIndices: MLXArray,
     videoIndices: MLXArray, audioIndices: MLXArray,
-    observe: (String, MLXArray) throws -> Void) throws -> Output {
+    maximumRows: Int = 40_000, observe: (String, MLXArray) throws -> Void) throws -> Output {
     guard input.ndim == 3, input.shape[0] == 1,
-      (1...40_000).contains(input.shape[1]), input.shape[2] == 5376,
+      [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(input.shape[1]), input.shape[2] == 5376,
       input.dtype == .bfloat16, timeEmbeddings.ndim == 2,
       (1...128).contains(timeEmbeddings.shape[0]),
       [64, 2688].contains(timeEmbeddings.shape[1]),
@@ -52,7 +52,8 @@ public enum H3FinalLayer {
     guard timeEmbeddings.shape[1] == (layout.curveRank ?? 2688) else {
       throw H3CheckpointError.invalid("H3 final AdaLN coordinates differ from the checkpoint.")
     }
-    let file = try SafeTensorFile(url: checkpointURL)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let file = try SafeTensorFile(url: tensorURL)
     defer {
       Stream.gpu.synchronize()
       Memory.clearCache()
@@ -105,7 +106,8 @@ public enum H3FinalLayer {
     let result = Output(video: take(video, videoIndices, axis: 1),
       audio: take(audio, audioIndices, axis: 1))
     eval(result.video, result.audio)
-    try file.checkUnchanged(at: checkpointURL)
+    try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
     try Task.checkCancellation()
     return result
   }

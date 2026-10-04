@@ -6,7 +6,7 @@ import LTX25Video
 final class MLXMediaPipelineTests:XCTestCase {
   func testPaddedSpatialDFRDecodesCanvasWhileTemporalDecodesPublishedFrames() throws {
     let helper=MLXDistilledRequestTests()
-    var values=helper.base()
+    var values=try decoderRequestBase(helper.base())
     values["version"]=8;values["task"]="dfr";values["frames"]=41
     values["width"]=512;values["height"]=256
     values["noise_policy"]="mlx_threefry_bf16_v1"
@@ -35,7 +35,7 @@ final class MLXMediaPipelineTests:XCTestCase {
   func testStudioDurationRangeAdmitsWithinWorkerBudgetsAndStillEnforcesMemory() throws {
     let helper=MLXDistilledRequestTests()
     for frames in [121,129,137,145,241,361] {
-      var values=helper.base();values["width"]=768;values["height"]=448;values["frames"]=frames
+      var values=try decoderRequestBase(helper.base());values["width"]=768;values["height"]=448;values["frames"]=frames
       let request=try helper.decode(values)
       let admission=try MLXMediaPipeline.admit(request,videoActivationBytes:12*1024*1024*1024,
         transformerActivationBytes:12*1024*1024*1024,videoBackend:.mlx,audioBackend:.mlx)
@@ -53,7 +53,7 @@ final class MLXMediaPipelineTests:XCTestCase {
   }
   func testTwentySecondEndpointKeepsAudioAndVideoAdmissionConsistent() throws {
     let helper=MLXDistilledRequestTests()
-    var values=helper.base();values["width"]=448;values["height"]=256;values["frames"]=481
+    var values=try decoderRequestBase(helper.base());values["width"]=448;values["height"]=256;values["frames"]=481
     let request=try helper.decode(values)
     let admitted=try MLXMediaPipeline.admit(request,videoActivationBytes:12*1024*1024*1024,
       transformerActivationBytes:12*1024*1024*1024,videoBackend:.mlx,audioBackend:.mlx)
@@ -66,7 +66,7 @@ final class MLXMediaPipelineTests:XCTestCase {
   }
   func testMatchedFullSizeRequiresExplicitWorkspace() throws {
     let helper=MLXDistilledRequestTests()
-    var values=helper.base();values["width"]=1344;values["height"]=768;values["frames"]=89
+    var values=try decoderRequestBase(helper.base());values["width"]=1344;values["height"]=768;values["frames"]=89
     let request=try helper.decode(values)
     XCTAssertThrowsError(try MLXMediaPipeline.admit(request))
     let admitted=try MLXMediaPipeline.admit(request,videoActivationBytes:12*1024*1024*1024,transformerActivationBytes:12*1024*1024*1024)
@@ -79,7 +79,7 @@ final class MLXMediaPipelineTests:XCTestCase {
     XCTAssertThrowsError(try MLXMediaPipeline.admit(request,videoActivationBytes:12*1024*1024*1024))
   }
   func testGeometryAndOutputAdmissionRunsWithoutModelIO() throws {
-    let helper=MLXDistilledRequestTests(), request=try helper.decode(helper.base())
+    let helper=MLXDistilledRequestTests(), request=try helper.decode(try decoderRequestBase(helper.base()))
     let admission=try MLXMediaPipeline.admit(request)
     XCTAssertEqual(admission.videoFrames,33)
     XCTAssertEqual(admission.audioSamples,65760)
@@ -87,12 +87,12 @@ final class MLXMediaPipelineTests:XCTestCase {
     let mlx=try MLXMediaPipeline.admit(request,audioBackend:.mlx)
     XCTAssertEqual(mlx.audioSamples,admission.audioSamples)
     XCTAssertGreaterThan(mlx.audioEstimatedBytes,admission.audioEstimatedBytes)
-    var tooLarge=helper.base(); tooLarge["width"]=1344; tooLarge["height"]=768; tooLarge["frames"]=145
+    var tooLarge=try decoderRequestBase(helper.base()); tooLarge["width"]=1344; tooLarge["height"]=768; tooLarge["frames"]=145
     XCTAssertThrowsError(try MLXMediaPipeline.admit(helper.decode(tooLarge)))
   }
   func testExplicitDecoderWorkspaceAdmitsTwoSecondsWithoutChangingDefault() throws {
     let helper=MLXDistilledRequestTests()
-    var values=helper.base();values["width"]=448;values["height"]=256;values["frames"]=49
+    var values=try decoderRequestBase(helper.base());values["width"]=448;values["height"]=256;values["frames"]=49
     let request=try helper.decode(values)
     XCTAssertThrowsError(try MLXMediaPipeline.admit(request))
     let admitted=try MLXMediaPipeline.admit(request,videoActivationBytes:576*1024*1024)
@@ -107,7 +107,7 @@ final class MLXMediaPipelineTests:XCTestCase {
   func testExplicitWorkspaceAdmitsThreeToFiveSecondReviewClips() throws {
     let helper=MLXDistilledRequestTests()
     for (frames,bytes) in [(73,819982336),(97,1084911616),(121,1349840896)] {
-      var values=helper.base();values["width"]=448;values["height"]=256;values["frames"]=frames
+      var values=try decoderRequestBase(helper.base());values["width"]=448;values["height"]=256;values["frames"]=frames
       let request=try helper.decode(values)
       XCTAssertThrowsError(try MLXMediaPipeline.admit(request))
       let admission=try MLXMediaPipeline.admit(request,videoActivationBytes:1536*1024*1024)

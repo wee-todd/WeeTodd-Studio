@@ -5,6 +5,22 @@ import TensorIO
 @testable import LTX25MLX
 
 final class MLXTiledVideoEncoderTests: XCTestCase {
+  func testAdmittedFullSpatialWindowAvoidsArtificialGuideSeam() throws {
+    let plan = try MLXVideoEncodeTilePlan(frames: 17, width: 768, height: 448,
+      maximumOwnedBufferBytes: 4 * 1024 * 1024 * 1024)
+    XCTAssertEqual(plan.tiles.count, 1)
+    XCTAssertEqual(plan.tiles.first?.width, 768)
+    XCTAssertEqual(plan.tiles.first?.height, 448)
+    XCTAssertTrue(plan.coverageWeights().allSatisfy { $0 == 1 })
+  }
+
+  func testExplicitSpatialTilingStillAvailableForIndependentSeamTests() throws {
+    let plan = try MLXVideoEncodeTilePlan(frames: 17, width: 768, height: 448,
+      spatialPolicy: .tiles, maximumOwnedBufferBytes: 4 * 1024 * 1024 * 1024)
+    XCTAssertEqual(plan.tiles.count, 2)
+    XCTAssertTrue(plan.coverageWeights().allSatisfy { $0 > 0 })
+  }
+
   func testFullRateGuideIsPartitionedWithinFourGiBAndCoversEveryLatent() throws {
     let plan = try MLXVideoEncodeTilePlan(frames: 129, width: 1376, height: 768,
       tilePixels: 512, maximumOwnedBufferBytes: 4 * 1024 * 1024 * 1024)
@@ -73,7 +89,7 @@ final class MLXTiledVideoEncoderTests: XCTestCase {
     let expected = try MLXWeight.read(SafeTensorFile(url: root.appendingPathComponent("latent.safetensors")),
       "latent")
     let plan = try MLXVideoEncodeTilePlan(frames: frames, width: 192, height: 128,
-      tilePixels: 128)
+      tilePixels: 128, spatialPolicy: .tiles)
     XCTAssertEqual(plan.tiles.count, tiles)
     let output = try MLXTiledVideoEncoder.encode(guide: root.appendingPathComponent("guide.rgb24"),
       checkpoint: URL(fileURLWithPath: checkpoint), plan: plan)

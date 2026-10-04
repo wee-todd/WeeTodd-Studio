@@ -7,11 +7,13 @@ public struct H3StillReference: Sendable {
   public let rgb8: Data
   public let width: Int
   public let height: Int
+  public let pixelBudgetPercent: Int?
 
-  public init(rgb8: Data, width: Int, height: Int) {
+  public init(rgb8: Data, width: Int, height: Int, pixelBudgetPercent: Int? = nil) {
     self.rgb8 = rgb8
     self.width = width
     self.height = height
+    self.pixelBudgetPercent = pixelBudgetPercent
   }
 }
 
@@ -45,7 +47,8 @@ public enum H3StillReferencePreparation {
         try Task.checkCancellation()
         let moments = try H3VideoVAEEncoder.encodeStill(
           checkpointURL: videoVAEURL, rgb8: Array(reference.rgb8),
-          width: reference.width, height: reference.height)
+          width: reference.width, height: reference.height,
+          maximumReferencePixels: reference.pixelBudgetPercent == nil ? nil : 4 * H3Geometry.maximumCanvasPixels)
         let rows = try H3LatentCodec.videoEncoderRows(latents: moments,
           mean: metadata.latentsMean,
           standardDeviation: metadata.latentsStandardDeviation)
@@ -76,7 +79,7 @@ public enum H3StillReferencePreparation {
     for reference in references {
       try Task.checkCancellation()
       try H3StillReferenceMedia.validateCanvas(width: reference.width,
-        height: reference.height)
+        height: reference.height, pixelBudgetPercent: reference.pixelBudgetPercent)
       guard reference.rgb8.count == reference.width * reference.height * 3 else {
         throw H3CheckpointError.invalid("Still reference must be bounded, prepared RGB8 on a 32-pixel grid.")
       }

@@ -23,17 +23,23 @@ public enum H3VideoVAEEncoder {
   }
 
   public static func encodeStill(checkpointURL: URL, rgb8: [UInt8],
-    width: Int, height: Int) throws -> MLXArray {
-    try encodeStill(checkpointURL: checkpointURL, rgb8: rgb8,
-      width: width, height: height, samplePosterior: false)
+    width: Int, height: Int, maximumReferencePixels: Int? = nil) throws -> MLXArray {
+    guard maximumReferencePixels == nil || (H3Geometry.maximumCanvasPixels...(4 * H3Geometry.maximumCanvasPixels)).contains(maximumReferencePixels!) else {
+      throw H3CheckpointError.invalid("H3 still encoder reference budget is out of bounds.")
+    }
+    return try encodeFrames(checkpointURL: checkpointURL, rgb8: rgb8,
+      frameCount: 1, width: width, height: height, samplePosterior: false,
+      maximumPixels: maximumReferencePixels ?? H3Geometry.maximumCanvasPixels)
   }
 
   /// FL2VA samples the posterior independently of the generation seed. Seed
   /// MLXRandom once before a sequence of keyframes so each draw is distinct.
   public static func encodeKeyframe(checkpointURL: URL, rgb8: [UInt8],
-    width: Int, height: Int) throws -> MLXArray {
-    try encodeStill(checkpointURL: checkpointURL, rgb8: rgb8,
-      width: width, height: height, samplePosterior: true)
+    width: Int, height: Int, canvasAdmission: H3CanvasAdmission = .ordinary) throws -> MLXArray {
+    if canvasAdmission == .spatialRefinement { try canvasAdmission.validate(width: width,height:height) }
+    return try encodeFrames(checkpointURL: checkpointURL, rgb8: rgb8,
+      frameCount:1, width: width, height: height, samplePosterior: true,
+      maximumPixels: canvasAdmission.maximumPixels)
   }
 
   /// Encode a 24 fps reference movie on the model's 17-frame clip grid.
@@ -86,10 +92,11 @@ public enum H3VideoVAEEncoder {
     frameCount: Int, width: Int, height: Int,
     samplePosterior: Bool,
     progress: (Int, Int) -> Void = { _, _ in },
-    releaseTemporalConvolutionTerms: Bool = false) throws -> MLXArray {
+    releaseTemporalConvolutionTerms: Bool = false,
+    maximumPixels: Int = H3Geometry.maximumCanvasPixels) throws -> MLXArray {
     guard checkpointURL.isFileURL,
       (32...2048).contains(width), (32...2048).contains(height),
-      width * height <= H3Geometry.maximumCanvasPixels,
+      width * height <= maximumPixels,
       width.isMultiple(of: 16), height.isMultiple(of: 16),
       frameCount > 0, frameCount <= 362,
       rgb8.count == frameCount * width * height * 3 else {

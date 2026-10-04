@@ -3,6 +3,7 @@ import Foundation
 public struct H3PackedLayout: Sendable {
   public enum Anchor: Sendable, Equatable { case first, last, frame(Int) }
 
+  public let maximumPackedRows: Int
   public let positions: [SIMD3<Float>]
   public let tags: [Int32]
   public let conditionVideoRows: Int
@@ -22,6 +23,7 @@ public struct H3PackedLayout: Sendable {
     guard !overflow else { throw H3GeometryError.invalid("H3 keyframe rows overflow Int.") }
     let count = try geometry.packedRows(textRows: textTags.count,
       conditionVideoRows: conditionRows, conditionAudioRows: 0)
+    maximumPackedRows = geometry.maximumPackedRows
     conditionVideoRows = conditionRows
     audioStart = textTags.count + conditionRows
     videoStart = audioStart + geometry.audioRows

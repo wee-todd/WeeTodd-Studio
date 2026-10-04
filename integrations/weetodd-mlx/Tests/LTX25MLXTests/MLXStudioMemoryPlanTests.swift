@@ -7,7 +7,7 @@ final class MLXStudioMemoryPlanTests:XCTestCase {
   let gib=1024*1024*1024
   func testAuthoredIngredientsReserveIsAdmittedConsistentlyBeforeWeights() throws {
     let helper=MLXDistilledRequestTests()
-    var value=helper.base();value["version"]=11;value["task"]="ingredients"
+    var value=try decoderRequestBase(helper.base());value["version"]=11;value["task"]="ingredients"
     value["width"]=768;value["height"]=448;value["frames"]=121
     value["noise_policy"]="mlx_threefry_bf16_v1";value["ingredients_sampling"]="euler_ancestral_cfg_pp_float32_v1"
     value["reference_images"]=[];value["audio_reference"]=NSNull();value["union_control_guide"]=NSNull()
@@ -41,7 +41,7 @@ final class MLXStudioMemoryPlanTests:XCTestCase {
   }
   func request(frames:Int=241,reference:Bool=false,width:Int=1344,height:Int=768) throws -> MLXDistilledRequest {
     let helper=MLXDistilledRequestTests()
-    var values=helper.base();values["width"]=width;values["height"]=height;values["frames"]=frames
+    var values=try decoderRequestBase(helper.base());values["width"]=width;values["height"]=height;values["frames"]=frames
     if reference {
       values["version"]=2;values["task"]="fflf"
       values["reference_images"]=[["role":"first","path":"/images/first.png","strength":1,"crf":33],
@@ -81,7 +81,7 @@ final class MLXStudioMemoryPlanTests:XCTestCase {
   }
   func testLaterSceneImageAndHistoryAreAdmittedTogether() throws {
     let helper=MLXDistilledRequestTests()
-    var values=helper.base()
+    var values=try decoderRequestBase(helper.base())
     values["width"]=384;values["height"]=256;values["frames"]=73
     values["version"]=2;values["task"]="i2v"
     values["reference_images"]=[["role":"first","path":"/images/shot-two.png",

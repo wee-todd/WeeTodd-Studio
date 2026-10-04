@@ -51,7 +51,15 @@ public enum H3StillReferenceMedia {
     return best
   }
 
-  public static func validateCanvas(width: Int, height: Int) throws {
+  public static func validateCanvas(width: Int, height: Int, pixelBudgetPercent: Int? = nil) throws {
+    if let pixelBudgetPercent {
+      guard (50...400).contains(pixelBudgetPercent), (32...2048).contains(width),
+        (32...2048).contains(height), width.isMultiple(of: 32), height.isMultiple(of: 32),
+        (4096...(4 * H3Geometry.maximumCanvasPixels)).contains(width * height) else {
+        throw H3CheckpointError.invalid("Explicit H3 image reference exceeds its bounded 32-pixel canvas.")
+      }
+      return
+    }
     guard (32...2048).contains(width), (32...2048).contains(height),
       width.isMultiple(of: 32), height.isMultiple(of: 32),
       (4096...65_536).contains(width * height) else {
@@ -68,9 +76,19 @@ public enum H3StillReferenceMedia {
     public let thumbnailWidth: Int
     public let thumbnailHeight: Int
     public let preparedSHA256: String
+    public var preparationPolicy: String {
+      reference.pixelBudgetPercent == nil ? H3StillReferenceMedia.preparationPolicy : "owned-output-area-down-only32-v1"
+    }
   }
 
-  public static func load(path: String) throws -> Loaded {
+  public static func load(path: String, outputGeometry: H3Geometry? = nil,
+    pixelBudgetPercent: Int? = nil) throws -> Loaded {
+    guard (outputGeometry == nil) == (pixelBudgetPercent == nil) else {
+      throw H3CheckpointError.invalid("Explicit image pixel budget needs its output canvas.")
+    }
+    if let pixelBudgetPercent, !(50...400).contains(pixelBudgetPercent) {
+      throw H3CheckpointError.invalid("H3 image reference pixel budget must be50–400percent.")
+    }
     guard path.hasPrefix("/"), !path.utf8.contains(0) else {
       throw H3CheckpointError.invalid("H3 reference image needs an absolute local path.")
     }
@@ -98,8 +116,20 @@ public enum H3StillReferenceMedia {
       throw H3CheckpointError.invalid("H3 reference image has invalid or excessive source dimensions.")
     }
     let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
-    let canvas = try resolveCanvas(sourceWidth: sourceWidth,
-      sourceHeight: sourceHeight, orientation: orientation)
+    guard (1...8).contains(orientation) else {
+      throw H3CheckpointError.invalid("H3 image reference has invalid EXIF orientation.")
+    }
+    let canvas: Canvas
+    if let geometry = outputGeometry, let percent = pixelBudgetPercent {
+      let swapsAxes = (5...8).contains(orientation)
+      let prepared = try H3ReferenceCanvasPolicy.image(sourceWidth: swapsAxes ? sourceHeight : sourceWidth,
+        sourceHeight: swapsAxes ? sourceWidth : sourceHeight, outputWidth: geometry.width,
+        outputHeight: geometry.height, percent: percent)
+      try validateCanvas(width: prepared.width, height: prepared.height, pixelBudgetPercent: percent)
+      canvas = Canvas(width: prepared.width, height: prepared.height)
+    } else {
+      canvas = try resolveCanvas(sourceWidth: sourceWidth, sourceHeight: sourceHeight, orientation: orientation)
+    }
     let options: [CFString: Any] = [
       kCGImageSourceCreateThumbnailFromImageAlways: true,
       kCGImageSourceCreateThumbnailWithTransform: true,
@@ -136,7 +166,7 @@ public enum H3StillReferenceMedia {
       }
     }
     return Loaded(reference: H3StillReference(rgb8: rgb, width: canvas.width,
-      height: canvas.height), sourceSHA256: SHA256.hash(data: bytes)
+      height: canvas.height, pixelBudgetPercent: pixelBudgetPercent), sourceSHA256: SHA256.hash(data: bytes)
         .map { String(format: "%02x", $0) }.joined(),
       sourceWidth: sourceWidth, sourceHeight: sourceHeight,
       sourceOrientation: orientation, thumbnailWidth: thumbnail.width,

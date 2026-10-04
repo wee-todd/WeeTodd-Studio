@@ -4,6 +4,7 @@ import XCTest
 
 final class H3StudioRecipeTests: XCTestCase {
   private var recipeMemoryMode = "normal"
+  private var recipeSamplingMethod = "euler"
   func testExternalExtensionRequiresPromptAndAnchorsTheTrueLastFrame() throws {
     var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
     var components = try XCTUnwrap(root["components"] as? [String: Any])
@@ -44,6 +45,7 @@ final class H3StudioRecipeTests: XCTestCase {
     let request = try compile()
     XCTAssertTrue(resolved)
     XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(request.samplingMethod.rawValue, recipeSamplingMethod)
     XCTAssertEqual(request.references.count, 2)
     if case .timedImage(let anchor, let frame) = request.references[1] {
       XCTAssertEqual(frame, 0)
@@ -67,7 +69,7 @@ final class H3StudioRecipeTests: XCTestCase {
       "audio_vae": "/tmp/audio.safetensors", "task": "t2va"]
     let config: [String: Any] = ["width": 32, "height": 32,
       "duration_seconds": 2.5, "steps": 5, "seed": 123,
-      "memory_mode": recipeMemoryMode]
+      "memory_mode": recipeMemoryMode, "sampling_method": recipeSamplingMethod]
       .merging(controls) { _, new in new }
     return try JSONSerialization.data(withJSONObject: ["format": "weetodd-headless-v2",
       "engine": "h3", "prompt": "A person walks", "components": paths,
@@ -77,10 +79,11 @@ final class H3StudioRecipeTests: XCTestCase {
   func testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs() throws {
     let request = try H3StudioRecipe.compile(data: recipe())
     XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(request.samplingMethod.rawValue, recipeSamplingMethod)
     XCTAssertEqual(request.seed, 123)
     XCTAssertEqual(request.requestedSteps, 5)
     XCTAssertEqual(request.geometry.frames, 73)
-    XCTAssertThrowsError(try H3StudioRecipe.compile(data: recipe(
+    XCTAssertNoThrow(try H3StudioRecipe.compile(data: recipe(
       controls: ["sampling_method": "res_multistep"])))
     XCTAssertThrowsError(try H3StudioRecipe.compile(data: recipe(
       conditioning: ["version": 1, "task": "fflf", "inputs": []])))
@@ -108,6 +111,7 @@ final class H3StudioRecipeTests: XCTestCase {
   func testUnimplementedOrMistypedExecutionControlsFailBeforeWeights() throws {
     for control: [String: Any] in [
       ["memory_mode": "resident"],
+      ["sampling_method": "unknown"], ["sampling_method": true],
       ["drop_adaln": "true"],
       ["paging_cache_gb": "0"],
       ["attention_head_chunk_size": "2"],
@@ -151,6 +155,7 @@ final class H3StudioRecipeTests: XCTestCase {
     let request = try compile(root)
     XCTAssertEqual(paths, ["/tmp/a.png", "/tmp/b.png"])
     XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(request.samplingMethod.rawValue, recipeSamplingMethod)
     XCTAssertEqual(request.references.count, 2)
     XCTAssertEqual(request.qwenVision.path, "/tmp/qwen-vision.safetensors")
     var rejected = root
@@ -159,8 +164,16 @@ final class H3StudioRecipeTests: XCTestCase {
     inputs[0]["frame_index"] = 0
     conditioning["inputs"] = inputs
     rejected["conditioning"] = conditioning
+    let timed = try compile(rejected)
+    if case .timedImage(_, let frame) = timed.references[0] {
+      XCTAssertEqual(frame, 0)
+    } else { XCTFail("The timed image placement was discarded.") }
+    XCTAssertEqual(paths, ["/tmp/a.png", "/tmp/b.png", "/tmp/a.png", "/tmp/b.png"])
+    inputs[0]["unsupported_reference_control"] = 0.5
+    conditioning["inputs"] = inputs
+    rejected["conditioning"] = conditioning
     XCTAssertThrowsError(try compile(rejected))
-    XCTAssertEqual(paths.count, 2, "No media should load after control rejection")
+    XCTAssertEqual(paths.count, 4, "No media should load after unsupported-control rejection")
   }
 
   func testMixedMediaRecipeRetainsInputOrderAndRequiresVisualForAudio() throws {
@@ -201,6 +214,7 @@ final class H3StudioRecipeTests: XCTestCase {
     let result = try compile(root)
     XCTAssertEqual(result.references.count, 3)
     XCTAssertEqual(result.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(result.samplingMethod.rawValue, recipeSamplingMethod)
     XCTAssertEqual(seen, ["image:/tmp/face.png", "video:/tmp/motion.mp4",
       "audio:/tmp/voice.wav"])
     var invalid = root
@@ -236,6 +250,7 @@ final class H3StudioRecipeTests: XCTestCase {
     }
     let audioOnly = try compile(root)
     XCTAssertEqual(audioOnly.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(audioOnly.samplingMethod.rawValue, recipeSamplingMethod)
     XCTAssertEqual(loaded.map(\.0), ["/tmp/voice.wav"])
     XCTAssertEqual(loaded[0].1, 2)
     XCTAssertEqual(loaded[0].2, 2.5)
@@ -261,6 +276,7 @@ final class H3StudioRecipeTests: XCTestCase {
           count: 2 * 80_000), frames: 80_000))
       }
     XCTAssertEqual(imageAndSound.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(imageAndSound.samplingMethod.rawValue, recipeSamplingMethod)
     XCTAssertEqual(imageAndSound.references.count, 2)
     if case .timedImage(_, let frame) = imageAndSound.references[0] {
       XCTAssertEqual(frame, 0)
@@ -299,6 +315,7 @@ final class H3StudioRecipeTests: XCTestCase {
     }
     let admitted = try compile(root)
     XCTAssertEqual(admitted.base.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(admitted.base.samplingMethod.rawValue, recipeSamplingMethod)
     XCTAssertEqual(admitted.anchors, [.first, .last])
     XCTAssertEqual(loaded, ["/tmp/first.png", "/tmp/last.png"])
     var visibleLast = root
@@ -348,6 +365,16 @@ final class H3StudioRecipeTests: XCTestCase {
     XCTAssertThrowsError(try compile([input("a", 0), input("z", 999)]))
     XCTAssertEqual(loaded.count, 3)
   }
+  func testResMultistepPropagatesThroughAllExistingTaskFixtures() throws {
+    recipeSamplingMethod = "res_multistep"
+    try testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs()
+    try testExternalExtensionRequiresPromptAndAnchorsTheTrueLastFrame()
+    try testStillReferenceRecipePreservesInputOrderAndRejectsDroppedControls()
+    try testMixedMediaRecipeRetainsInputOrderAndRequiresVisualForAudio()
+    try testA2VRecipePlacesDriverAtTargetStartAndRetainsSourceInterval()
+    try testFL2VARecipeKeepsOrderedEndpointRolesAndRejectsUnportedInputs()
+  }
+
   func testLowerMemoryModePropagatesThroughAllExistingTaskFixtures() throws {
     recipeMemoryMode = "low_memory_bf16"
     try testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs()
@@ -367,6 +394,7 @@ final class H3StudioRecipeTests: XCTestCase {
       videoVAE: URL(fileURLWithPath: "/tmp/video.safetensors"),
       audioVAE: URL(fileURLWithPath: "/tmp/audio.safetensors"))
     XCTAssertNil(legacy.videoDecodeMemoryMode)
+    XCTAssertEqual(legacy.samplingMethod, .euler)
     XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: nil)["materializationPolicy"] as? String, "eager")
     XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: .normal)["materializationPolicy"] as? String, "defer_projections_and_residual")
     XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: .lowMemoryBF16)["materializationPolicy"] as? String, "defer_projections")

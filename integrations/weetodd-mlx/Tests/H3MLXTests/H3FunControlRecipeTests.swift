@@ -53,7 +53,7 @@ final class H3FunControlRecipeTests: XCTestCase {
       value["conditioning"] = condition; recipes.append(value)
     }
     var lora = recipe(); var component = lora["components"] as! [String: Any]
-    component["loras"] = [["/tmp/turbo.safetensors", 1.0]]; lora["components"] = component; recipes.append(lora)
+    component["loras"] = [["/tmp/turbo.safetensors", "strong"]]; lora["components"] = component; recipes.append(lora)
     var optimized = recipe(); var config = optimized["config"] as! [String: Any]
     config["inference_optimization"] = "fast"; optimized["config"] = config; recipes.append(optimized)
     for value in recipes {

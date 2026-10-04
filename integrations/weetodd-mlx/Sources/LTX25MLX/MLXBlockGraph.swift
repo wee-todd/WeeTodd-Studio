@@ -14,10 +14,11 @@ struct MLXBlockGraph {
   let inputs:[String:Int]
   let weights:[String:Weight]
   let videoAttentionGroups:[Int]
+  let perturbation:MLXGuidancePerturbation.Block
 
   static func bind(configuration:AVBlockConfiguration,inputs:[String:MLXArray],
     weights:[String:MLXWeight],adapters:[String:[MLXLoRA]],
-    videoAttentionGroups:[Int]=[]) -> (Self,[MLXArray],[Int]) {
+    videoAttentionGroups:[Int]=[],perturbation:MLXGuidancePerturbation.Block = .none) -> (Self,[MLXArray],[Int]) {
     var arrays:[MLXArray]=[],inputSlots:[String:Int]=[:],weightSlots:[String:Weight]=[:]
     var signature=[inputs["video_modulation_indices"] == nil ? 0 : 1,
       inputs["audio_modulation_indices"] == nil ? 0 : 1]
@@ -33,9 +34,9 @@ struct MLXBlockGraph {
       signature += [packed.count,factors.count]
       weightSlots[name]=Weight(start:start,quantized:packed.count == 3,adapters:factors)
     }
-    signature += [videoAttentionGroups.count]+videoAttentionGroups
+    signature += [videoAttentionGroups.count]+videoAttentionGroups+perturbation.signature
     return (Self(configuration:configuration,inputs:inputSlots,weights:weightSlots,
-      videoAttentionGroups:videoAttentionGroups),arrays,signature)
+      videoAttentionGroups:videoAttentionGroups,perturbation:perturbation),arrays,signature)
   }
 
   func call(_ arrays:[MLXArray]) -> [MLXArray] {
@@ -56,7 +57,7 @@ struct MLXBlockGraph {
       return result
     }
     let result=MLXAVBlock.forward(configuration:configuration,x,parameter:parameter,linear:linear,
-      videoAttentionGroups:videoAttentionGroups)
+      videoAttentionGroups:videoAttentionGroups,perturbation:perturbation)
     return [result["video"]!,result["audio"]!]
   }
 }

@@ -104,7 +104,9 @@ public final class MLXDenoiser {
     fixedWeights:FixedProvider,blockWeights:BlockProvider,
     fixedAdapters:FixedAdapters = { _ in [] },
     blockAdapters:(Int) throws -> [String:[MLXLoRA]] = { _ in [:] },
+    perturbation:MLXGuidancePerturbation = .none,
     progress:(Progress) throws -> Void = { _ in }) throws -> [String:MLXArray] {
+    try stack.validatePerturbation(perturbation)
     _ = try DenoiserMath.timestep(sigma)
     let snapshot=inputs.mapValues { $0.reshaped($0.shape) }
     let preparation:Preparation?
@@ -115,14 +117,16 @@ public final class MLXDenoiser {
         weights:fixedWeights,adapters:fixedAdapters,progress:progress)
     } else { preparation=nil }
     return try evaluatePrepared(snapshot,sigma:sigma,preparation:preparation,fixedWeights:fixedWeights,blockWeights:blockWeights,
-      fixedAdapters:fixedAdapters,blockAdapters:blockAdapters,progress:progress)
+      fixedAdapters:fixedAdapters,blockAdapters:blockAdapters,progress:progress,perturbation:perturbation)
   }
 
   /// Internal schedule cache is owned by a single sampling call with immutable
   /// providers. It cannot be reused with a different prompt, position or adapter.
   func evaluatePrepared(_ inputs:[String:MLXArray],sigma:Float,preparation:Preparation?,
     fixedWeights:FixedProvider,blockWeights:BlockProvider,fixedAdapters:FixedAdapters,
-    blockAdapters:(Int) throws -> [String:[MLXLoRA]],progress:(Progress) throws -> Void) throws -> [String:MLXArray] {
+    blockAdapters:(Int) throws -> [String:[MLXLoRA]],progress:(Progress) throws -> Void,
+    perturbation:MLXGuidancePerturbation = .none) throws -> [String:MLXArray] {
+    try stack.validatePerturbation(perturbation)
     guard !active else { throw LTXError.invalid("MLX denoiser is already evaluating.") }
     let time=try DenoiserMath.timestep(sigma)
     let current=try validatedInputs(inputs)
@@ -210,7 +214,7 @@ public final class MLXDenoiser {
       try report(prefix+"patchify_proj")
     }
     prepared["video_attention_templates"]=current["video_attention_templates"]
-    let hidden=try stack.evaluate(prepared,weights:blockWeights,adapters:blockAdapters) {
+    let hidden=try stack.evaluate(prepared,weights:blockWeights,adapters:blockAdapters,perturbation:perturbation) {
       try report("transformer",$0.completedBlocks,$0)
     }
     prepared.removeAll()

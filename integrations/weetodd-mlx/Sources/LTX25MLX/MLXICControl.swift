@@ -61,6 +61,18 @@ public struct MLXICControl: Codable, Sendable {
   public var referenceDownscale: Int { family == "motion_track" ? 2 : 1 }
   enum CodingKeys: String, CodingKey, CaseIterable { case family, adapters, guides, publicationAudio="publication_audio" }
 
+  public func encode(to encoder:Encoder) throws {
+    var c=encoder.container(keyedBy:CodingKeys.self)
+    try c.encode(family,forKey:.family)
+    try c.encode(adapters,forKey:.adapters)
+    try c.encode(guides,forKey:.guides)
+    if let publicationAudio {
+      try c.encode(publicationAudio,forKey:.publicationAudio)
+    } else {
+      try c.encodeNil(forKey:.publicationAudio)
+    }
+  }
+
   public init(from decoder: Decoder) throws {
     try Self.exact(decoder,Set(CodingKeys.allCases.map(\.rawValue)))
     let c=try decoder.container(keyedBy:CodingKeys.self)

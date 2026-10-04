@@ -12,10 +12,10 @@ public final class MLXTwoStageTrajectory {
   public init() {}
 
   public func evaluate(recipe:DistilledTwoStageRecipe,noisePolicy:MLXNoisePolicy = .native,
-    frozenAudio:MLXArray?=nil,
+    frozenAudio:MLXArray?=nil,firstSchedule:SamplingSchedule?=nil,
     stageOneVideoObserver:((MLXArray) throws -> Void)?=nil,
     sample:Sample,upscale:Upscale) throws -> [String:MLXArray] {
-    try evaluateInternal(recipe:recipe,noisePolicy:noisePolicy,frozenAudio:frozenAudio,guideTokens:nil,
+    try evaluateInternal(recipe:recipe,noisePolicy:noisePolicy,frozenAudio:frozenAudio,guideTokens:nil,firstSchedule:firstSchedule,
       stageOneVideoObserver:stageOneVideoObserver,
       sample:{ stage,g,state,_,schedule,noise in try sample(stage,g,state,schedule,noise) },upscale:upscale)
   }
@@ -28,12 +28,12 @@ public final class MLXTwoStageTrajectory {
     sample:GuideSample,upscale:Upscale) throws -> [String:MLXArray] {
     guard videoGuideFrames>0,audioGuideTokens>0 else { throw LTXError.invalid("LTX extension needs positive audiovisual guide lengths.") }
     return try evaluateInternal(recipe:recipe,noisePolicy:.releasedMLX,frozenAudio:nil,
-      guideTokens:(videoFrames:videoGuideFrames,audio:audioGuideTokens),
+      guideTokens:(videoFrames:videoGuideFrames,audio:audioGuideTokens),firstSchedule:nil,
       stageOneVideoObserver:stageOneVideoObserver,sample:sample,upscale:upscale)
   }
 
   private func evaluateInternal(recipe:DistilledTwoStageRecipe,noisePolicy:MLXNoisePolicy,
-    frozenAudio:MLXArray?,guideTokens:(videoFrames:Int,audio:Int)?,
+    frozenAudio:MLXArray?,guideTokens:(videoFrames:Int,audio:Int)?,firstSchedule:SamplingSchedule?,
     stageOneVideoObserver:((MLXArray) throws -> Void)?,
     sample:GuideSample,upscale:Upscale) throws -> [String:MLXArray] {
     guard gate.try() else { throw LTXError.invalid("Two-stage MLX trajectory is already active.") }
@@ -59,11 +59,15 @@ public final class MLXTwoStageTrajectory {
       let firstGuide:[String:MLXArray]=guideTokens == nil ? [:] : [
         "video":initialVideoFull[recipe.low.videoTokens...],
         "audio":initialAudioFull[recipe.low.audioFrames...]]
-      let state=["video":initialVideo,"audio":initialAudio]
+      var state=["video":initialVideo,"audio":initialAudio]
+      if let schedule=firstSchedule,schedule.sigmas[0] != 1 {
+        state["video"]=initialVideo*Float(schedule.sigmas[0])
+        if sourceAudio == nil { state["audio"]=initialAudio*Float(schedule.sigmas[0]) }
+      }
       // Fix evaluation/draw order explicitly; dictionary iteration never owns RNG.
       var ancestral=GaussianNoise(seed:recipe.seed &+ 10000)
       var ancestralKey=MLXRandom.key(recipe.seed &+ 10000)
-      let first=try Self.validated(sample(1,recipe.low,state,firstGuide,recipe.first,{ _,_,shape in
+      let first=try Self.validated(sample(1,recipe.low,state,firstGuide,firstSchedule ?? recipe.first,{ _,_,shape in
         try Task.checkCancellation()
         if noisePolicy == .releasedMLX {
           let (next,draw)=MLXRandom.split(key:ancestralKey); ancestralKey=next

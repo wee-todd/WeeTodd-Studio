@@ -15,6 +15,14 @@ final class H3WorkerReceiptTests: XCTestCase {
     XCTAssertEqual(result["usable_duration"] as? Double,3.75)
     XCTAssertEqual(result["use_complete_duration"] as? Bool,true)
   }
+  func testMotionReceiptPublishesRecoveredSourceInsteadOfExpandedSamplingClock() {
+    let result=H3WorkerReceipt.renderResult(video:URL(fileURLWithPath:"/tmp/motion/render.mp4"),
+      metadata:["task":"motion_fidelity","frames":60,"sampledFrames":124,"fps":24],jobID:UUID())
+    XCTAssertEqual(result["usable_duration"] as? Double,2.5)
+    XCTAssertEqual(result["usable_source_in"] as? Double,0)
+    XCTAssertEqual(result["use_complete_duration"] as? Bool,true)
+    XCTAssertNil(result["continuation_artifact"])
+  }
   func testRenderCompletionPreservesRequestIdentity() {
     let jobID = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
     let video = URL(fileURLWithPath: "/tmp/take/render.mp4")

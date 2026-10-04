@@ -19,9 +19,11 @@ public struct MLXStudioMemoryPlan:Sendable {
       UInt64(min(MLXMediaPipeline.maximumVideoActivationMiB,MLXMediaPipeline.maximumTransformerActivationMiB))*1024*1024)
     let recipe=try request.recipe()
     var transformer=0
-    let geometries=request.ingredientsSheet == nil && request.msr == nil ? [recipe.low,recipe.high] : [recipe.high]
+    let geometries=request.ingredientsSheet == nil && request.msr == nil && request.singleStageSampling == nil ? [recipe.low,recipe.high] : [recipe.high]
     for (index,geometry) in geometries.enumerated() {
-      let layout=try request.referenceImages.first.map { try MLXReferenceLayout(geometry:geometry,
+      let ordinary=try request.ordinaryKeyframeLayout(geometry:geometry,stage:index)
+      let singleStage=try request.singleStageControlLayout()
+      let layout=try (request.usesOrdinaryKeyframes ? nil : request.referenceImages.first).map { try MLXReferenceLayout(geometry:geometry,
         firstStrength:$0.strength,lastStrength:request.referenceImages.count == 2 ? request.referenceImages[1].strength : nil) }
       let guide=try extensionContextFrames.map { try MLXExtensionGuideLayout(geometry:geometry,contextFrames:$0) }
       let union=try index == 0 ? request.unionControlGuide.map {
@@ -42,10 +44,16 @@ public struct MLXStudioMemoryPlan:Sendable {
         throw LTXError.invalid("A last-frame image cannot share an LTX history guide.")
       }
       transformer=max(transformer,try MLXAVBlock.estimatedActivationBytes(configuration:
-        AVBlockConfiguration(videoTokens:dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ic?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
+        AVBlockConfiguration(videoTokens:singleStage?.videoTokens ?? ordinary?.videoTokens ?? dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ic?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
           audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
-        perTokenVideo:layout != nil || guide != nil || union != nil || ic != nil || ingredients != nil || msr != nil ||
-          (dfr?.referenceTokens ?? 0)>0 || (dfr != nil && !request.referenceImages.isEmpty),perTokenAudio:guide != nil))
+        perTokenVideo:singleStage?.requiresPerTokenVideo == true || ordinary?.anchors.isEmpty == false || layout != nil || guide != nil || union != nil || ic != nil || ingredients != nil || msr != nil ||
+          (dfr?.referenceTokens ?? 0)>0 || (dfr != nil && !request.referenceImages.isEmpty),perTokenAudio:guide != nil) + (index == 0 && request.guidedSampling != nil ?
+          MLXGuidedSampling.reserveBytes(videoTokens:ordinary?.videoTokens ?? layout?.videoTokens ?? geometry.videoTokens,
+            audioTokens:geometry.audioFrames) : 0))
+    }
+    if request.singleStageSampling?.method == .cfgpp {
+      let layout=try request.singleStageControlLayout()!
+      transformer += try layout.cfgppReserveBytes(audioTokens:recipe.high.audioFrames)
     }
     if request.ingredientsSampling == .ancestralCFGPP {
       transformer += MLXSingleStageRipple.cfgppReserveBytes(geometry:recipe.high)
@@ -72,15 +80,15 @@ public struct MLXStudioMemoryPlan:Sendable {
         frames:MLXDFRTemporalPlan.outputFrames(inputFrames:request.frames,rounds:dfr.temporalRounds),
         fps:recipe.high.fps*Double(1 << dfr.temporalRounds))
     } ?? recipe.high
-    let decoder=try MLXVideoDecodePlan(shape:output.videoShape,configuration:
-      MLXMediaPipeline.videoConfiguration(for:output,activationBytes:Int.max)).admittedActivationBytes
+    let decoder=try MLXNativeVideoDecoder.admit(checkpoint:URL(fileURLWithPath:request.videoCheckpoint),settings:request.diffusionVAE,shape:output.videoShape,configuration:
+      MLXMediaPipeline.videoConfiguration(for:output,activationBytes:Int.max),backend:.mlx).bytes
     let unionGuideEncoder=try request.unionControlGuide.map { _ in
       try MLXVideoEncodeTilePlan(frames:recipe.low.frames,width:recipe.low.width/2,
         height:recipe.low.height/2,maximumOwnedBufferBytes:Int.max)
         .tiles.map(\.ownedBufferBytes).max() ?? 0
     } ?? 0
     let ingredientsGuideEncoder=try request.ingredientsSheet.map { _ in
-      try MLXVideoEncodeTilePlan(frames:recipe.high.frames,width:recipe.high.width,
+      try MLXVideoEncodeTilePlan(frames:1,width:recipe.high.width,
         height:recipe.high.height,maximumOwnedBufferBytes:Int.max)
         .tiles.map(\.ownedBufferBytes).max() ?? 0
     } ?? 0
@@ -120,9 +128,8 @@ public struct MLXStudioMemoryPlan:Sendable {
       audioTokens: request.geometry.audioFrames, textTokens: 1024)
     let transformer = try MLXAVBlock.estimatedActivationBytes(configuration: configuration,
       perTokenVideo: true)
-    let video = try MLXVideoDecodePlan(shape: request.geometry.videoShape,
-      configuration: MLXMediaPipeline.videoConfiguration(for: request.geometry,
-        activationBytes: Int.max)).admittedActivationBytes
+    let video = try MLXNativeVideoDecoder.admit(checkpoint:URL(fileURLWithPath:request.videoCheckpoint),settings:request.diffusionVAE,shape:request.geometry.videoShape,
+      configuration:MLXMediaPipeline.videoConfiguration(for:request.geometry,activationBytes:Int.max),backend:.mlx).bytes
     for (stage, needed) in [("transformer", transformer), ("video decoder", video)] {
       guard UInt64(needed) <= ceiling else {
         throw LTXError.invalid("Ripple \(request.width)×\(request.height), \(request.frames) frames: \(stage) needs \(needed) activation bytes; this Mac admits \(ceiling) after reserves.")

@@ -4,6 +4,89 @@ import Darwin
 import LTX25MLX
 
 final class MLXDistilledRequestTests:XCTestCase {
+  private func ordinaryPolicyRequest(version:Int) throws -> [String:Any] {
+    var value=ordinary();value["version"]=version
+    if version<14 { value.removeValue(forKey:"generated_keyframes") }
+    if version<13 { value.removeValue(forKey:"automatic_duration") }
+    if version == 12 || version == 14 {
+      let policy=try MLXGuidedSampling(mode:.guidedHQ,steps:15,negativePrompt:"blur",
+        stg:0,videoRescale:0.45,audioRescale:1,stgBlocks:[],
+        distilledAdapterPath:"/models/refinement.safetensors")
+      value["guided_sampling"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(policy))
+    }
+    if version>=13 {
+      let policy=MLXAutomaticDurationPolicy(headCheckpointPath:"/models/duration.safetensors",
+        minimumSeconds:1,maximumSeconds:3)
+      value["automatic_duration"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(policy))
+    }
+    if version == 14 {
+      value["task"]="i2v"
+      value["reference_images"]=[
+        ["role":"first","path":"/first.png","strength":1,"crf":0],
+        ["role":"keyframe","frame_index":7,"path":"/timed.png","strength":0.8,"crf":33]]
+    }
+    return value
+  }
+  func testOrdinaryVersionsRejectIngredientsOnlySamplerAtDecode() throws {
+    for version in [12,13,14] {
+      var value=try ordinaryPolicyRequest(version:version)
+      XCTAssertEqual(try decode(value).ingredientsSampling,.deterministic)
+      value["ingredients_sampling"]="euler_ancestral_cfg_pp_float32_v1"
+      XCTAssertThrowsError(try decode(value),"version \(version) must reject before any weighted provider") { error in
+        XCTAssertTrue(String(describing:error).contains("Ingredients sampler"))
+      }
+    }
+  }
+  func testDeterministicPlaceholderPreservesGuidedAutomaticTimedAndGeneratedContract() throws {
+    let request=try decode(ordinaryPolicyRequest(version:14))
+    let replay=try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONEncoder().encode(request))
+    XCTAssertEqual(replay.version,14);XCTAssertEqual(replay.ingredientsSampling,.deterministic)
+    XCTAssertEqual(replay.guidedSampling?.mode,.guidedHQ);XCTAssertEqual(replay.guidedSampling?.steps,15)
+    XCTAssertEqual(replay.guidedSampling?.negativePrompt,"blur")
+    XCTAssertEqual(replay.automaticDuration?.minimumSeconds,1)
+    XCTAssertEqual(replay.automaticDuration?.maximumSeconds,3)
+    XCTAssertEqual(replay.referenceFrames,[0,7]);XCTAssertEqual(replay.generatedKeyframes,2)
+    let resolved=try replay.replacingFrames(25)
+    XCTAssertEqual(resolved.referenceFrames,[0,7]);XCTAssertEqual(resolved.generatedKeyframes,2)
+    XCTAssertEqual(resolved.frames,25)
+  }
+  func ordinary() -> [String:Any] {
+    var value=base();value["version"]=14;value["noise_policy"]="mlx_threefry_bf16_v1"
+    value["reference_images"]=[];value["generated_keyframes"]=2
+    for name in ["audio_reference","union_control_guide","ingredients_sheet","msr","dfr","ic_control",
+      "guided_sampling","automatic_duration"] { value[name]=NSNull() }
+    value["ingredients_sampling"]="deterministic_bf16_v1"
+    return value
+  }
+  func testOrdinaryRequestKeepsTimedImageOrderingAndOldRequestsRejectTimedFields() throws {
+    var value=ordinary();value["task"]="i2v"
+    let refs:[[String:Any]]=[
+      ["role":"keyframe","frame_index":23,"path":"/later.png","strength":0.8,"crf":33],
+      ["role":"first","path":"/first.png","strength":1,"crf":0],
+      ["role":"keyframe","frame_index":7,"path":"/earlier.png","strength":0.9,"crf":0]]
+    value["reference_images"]=refs
+    let request=try decode(value)
+    XCTAssertEqual(request.referenceFrames,[23,0,7])
+    XCTAssertEqual(try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONEncoder().encode(request)).referenceFrames,[23,0,7])
+    value["version"]=3
+    for key in ["generated_keyframes","audio_reference","union_control_guide","ingredients_sheet","msr","dfr",
+      "ic_control","ingredients_sampling","guided_sampling","automatic_duration"] { value.removeValue(forKey:key) }
+    XCTAssertThrowsError(try decode(value))
+  }
+  func testOrdinaryRequestRejectsInvalidCountsBooleanFramesDuplicateAndUnknownFields() throws {
+    for invalid:Any in [-1,9,true,NSNull()] {
+      var value=ordinary();value["generated_keyframes"]=invalid;XCTAssertThrowsError(try decode(value))
+    }
+    var value=ordinary();value.removeValue(forKey:"generated_keyframes");XCTAssertThrowsError(try decode(value))
+    value=ordinary();value["task"]="i2v"
+    var image:[String:Any]=["role":"keyframe","frame_index":7,"path":"/a.png","strength":1,"crf":0]
+    value["reference_images"]=[image,image];XCTAssertThrowsError(try decode(value))
+    for invalid:Any in [-1,33,true] {
+      image["frame_index"]=invalid;value["reference_images"]=[image];XCTAssertThrowsError(try decode(value))
+    }
+    image["frame_index"]=7;image["ignored"]=1;value["reference_images"]=[image]
+    XCTAssertThrowsError(try decode(value))
+  }
   func testAuthoredIngredientsHasExplicitVersionAndNeverReinterpretsLegacyRequests() throws {
     var value=base();value["version"]=6;value["task"]="ingredients"
     value["frames"]=121;value["noise_policy"]="mlx_threefry_bf16_v1"

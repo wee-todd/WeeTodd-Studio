@@ -5,6 +5,23 @@ import LTX25Engine
 
 /// Released LTX audio-encoder front end: centered reflect-padded Hann STFT,
 /// magnitude spectrum, and area-normalized Slaney mel bands at 16 kHz.
+public struct MLXAudioMelPlan: Sendable {
+  public static let maximumMelFrames = 6004
+  public static let maximumSamples = maximumMelFrames * 160 - 1
+  public let samples: Int, melFrames: Int, latentFrames: Int, ownedBufferBytes: Int
+  public init(samples: Int, maximumOwnedBufferBytes: Int = 128*1024*1024) throws {
+    guard (513...Self.maximumSamples).contains(samples) else {
+      throw LTXError.invalid("Audio conditioning exceeds the native 1501-token clock.")
+    }
+    self.samples=samples;melFrames=samples/160+1;latentFrames=(melFrames+3)/4
+    // Original planar PCM; CPU+MLX framed slabs; complex FFT and magnitude;
+    // two retained mel channels and normalized output. No whole-video payload.
+    ownedBufferBytes=2*samples*4+2*melFrames*1024*4+melFrames*513*12+4*melFrames*64*4+513*64*4+1024*4
+    guard maximumOwnedBufferBytes>0,ownedBufferBytes<=maximumOwnedBufferBytes else {
+      throw LTXError.invalid("Audio mel needs its admitted owned-buffer workspace before FFT.")
+    }
+  }
+}
 public enum MLXAudioMel {
   private static let fftSize = 1024
   private static let hop = 160
@@ -35,15 +52,17 @@ public enum MLXAudioMel {
     if index >= count { return 2 * count - index - 2 }
     return index
   }
-  public static func encode(wav: URL) throws -> MLXArray {
+  public static func encode(wav: URL, maximumOwnedBufferBytes: Int = 128*1024*1024) throws -> MLXArray {
     guard wav.isFileURL else { throw LTXError.invalid("Audio conditioning must use a local WAV file.") }
     let file = try AVAudioFile(forReading: wav)
     let format = file.processingFormat
     guard format.sampleRate == 16000, format.channelCount == 2,
       format.commonFormat == .pcmFormatFloat32, !format.isInterleaved,
-      (513...321600).contains(file.length) else {
-      throw LTXError.invalid("Audio conditioning WAV must be finite 16 kHz stereo Float32 PCM of at most 20 seconds.")
+      (513...Int64(MLXAudioMelPlan.maximumSamples)).contains(file.length) else {
+      throw LTXError.invalid("Audio conditioning WAV must be finite 16 kHz stereo Float32 PCM within the native 1501-token clock.")
     }
+    _ = try MLXAudioMelPlan(samples:Int(file.length),maximumOwnedBufferBytes:maximumOwnedBufferBytes)
+    try Task.checkCancellation()
     let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(file.length))!
     try file.read(into: buffer)
     guard buffer.frameLength == file.length, let channels = buffer.floatChannelData else {
@@ -52,18 +71,20 @@ public enum MLXAudioMel {
     let count = Int(buffer.frameLength)
     let planar = Array(UnsafeBufferPointer(start: channels[0], count: count))
       + Array(UnsafeBufferPointer(start: channels[1], count: count))
-    return try encode(planar: planar, sampleRate: 16000)
+    return try encode(planar: planar, sampleRate: 16000,maximumOwnedBufferBytes:maximumOwnedBufferBytes)
   }
   /// Planar stereo [left, right] Float32 PCM. This is a bounded conditioning
   /// stage; the original publication waveform stays outside this transform.
-  public static func encode(planar: [Float], sampleRate: Int) throws -> MLXArray {
+  public static func encode(planar: [Float], sampleRate: Int, maximumOwnedBufferBytes: Int = 128*1024*1024) throws -> MLXArray {
     guard sampleRate == 16000, planar.count % 2 == 0,
-      (fftSize / 2 + 1...321600).contains(planar.count / 2),
+      (fftSize / 2 + 1...MLXAudioMelPlan.maximumSamples).contains(planar.count / 2),
       planar.allSatisfy(\.isFinite) else {
-      throw LTXError.invalid("LTX audio mel input requires finite 16 kHz stereo PCM of at least 513 samples and at most 20 seconds.")
+      throw LTXError.invalid("LTX audio mel input requires finite 16 kHz stereo PCM within the native 1501-token clock.")
     }
     try Task.checkCancellation()
-    let samples = planar.count / 2, frames = samples / hop + 1
+    let samples = planar.count / 2
+    let plan=try MLXAudioMelPlan(samples:samples,maximumOwnedBufferBytes:maximumOwnedBufferBytes)
+    let frames=plan.melFrames
     let window = (0..<fftSize).map { Float(0.5 - 0.5 * cos(2 * Double.pi * Double($0) / Double(fftSize))) }
     let basis = filterbank()
     var channels: [MLXArray] = []

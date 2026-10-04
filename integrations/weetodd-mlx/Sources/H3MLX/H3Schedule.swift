@@ -33,6 +33,17 @@ public struct H3Schedule: Sendable {
     timesteps = values.dropLast().map { Float(1) - $0 }
   }
 
+  /// Explicit initialized/refinement grid. Ordinary construction is unchanged.
+  public init(sigmas: [Float]) throws {
+    guard (2...102).contains(sigmas.count), sigmas.last == 0,
+      sigmas.dropLast().allSatisfy({ $0.isFinite && $0 > 0 && $0 <= 1 }),
+      zip(sigmas, sigmas.dropFirst()).allSatisfy({ $0.0 > $0.1 }) else {
+      throw H3GeometryError.invalid("H3 explicit sigmas must be finite, strictly decreasing and end at zero.")
+    }
+    self.sigmas = sigmas
+    self.timesteps = sigmas.dropLast().map { Float(1) - $0 }
+  }
+
   public func advance(sample: MLXArray, velocity: MLXArray, index: Int) throws -> MLXArray {
     guard (0..<timesteps.count).contains(index), sample.shape == velocity.shape,
       sample.dtype.isFloatingPoint, velocity.dtype.isFloatingPoint else {

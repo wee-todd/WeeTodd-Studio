@@ -83,6 +83,7 @@ public final class MLXDenoiserWeights {
   private let pages:[MLXBlockSource]
   private let adapters:MLXLoRAStack
   public let sourceCheckpoint:String?
+  public let requiresKeyframeMarker:Bool
   public var blockCount:Int { pages.count }
   public var largestBlockBytes:Int { pages.map(\.storageBytes).max() ?? 0 }
   public init(root:URL,configuration:AVBlockConfiguration,adapters:[LoRAAdapter]=[],
@@ -150,6 +151,7 @@ public final class MLXDenoiserWeights {
     }
     try stack.validateTargets(targets)
     self.fixed=fixed; self.pages=pages; self.adapters=stack; sourceCheckpoint=manifest.source
+    self.requiresKeyframeMarker=requireKeyframeMarker
   }
   public func readFixed(_ name:String,_ shape:[Int]) throws -> MLXWeight {
     try fixed.read(name,shape:shape)

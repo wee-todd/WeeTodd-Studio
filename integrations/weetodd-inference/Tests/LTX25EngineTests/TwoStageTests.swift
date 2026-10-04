@@ -2,6 +2,13 @@ import XCTest
 @testable import LTX25Engine
 
 final class TwoStageTests: XCTestCase {
+  func testExplicitSingleStageUsesFullThirtyTwoGridAndKeepsTwoStageValidation() throws {
+    let recipe=try DistilledTwoStageRecipe(width:480,height:288,frames:49,fps:24,seed:7,singleStage:true)
+    XCTAssertEqual(recipe.low.width,480);XCTAssertEqual(recipe.low.height,288)
+    XCTAssertEqual(recipe.high.width,480)
+    XCTAssertThrowsError(try DistilledTwoStageRecipe(width:480,height:288,frames:49,fps:24,seed:7))
+  }
+
   func testRecipeGeometryAndReleasedSchedules() throws {
     let recipe = try DistilledTwoStageRecipe(width: 512,height: 256,frames: 33,fps: 24,seed: 42)
     XCTAssertEqual(recipe.low.videoTokens*4,recipe.high.videoTokens)

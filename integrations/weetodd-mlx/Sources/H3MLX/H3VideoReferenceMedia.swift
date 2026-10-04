@@ -13,7 +13,13 @@ public enum H3VideoReferenceMedia {
 
   public static func load(path: String, ffmpeg: URL,
     retainCompleteAudio: Bool = false,
-    preserveTail: Bool = false) throws -> Loaded {
+    preserveTail: Bool = false, outputGeometry: H3Geometry? = nil,
+    controls: H3ReferencePreparationControls? = nil) throws -> Loaded {
+    guard (controls == nil) == (outputGeometry == nil),
+      controls?.imagePixelBudgetPercent == nil,
+      !preserveTail || controls == nil else {
+      throw H3CheckpointError.invalid("Explicit movie reference policy needs an output canvas and cannot change an extension seam.")
+    }
     guard path.hasPrefix("/"), !path.utf8.contains(0),
       ffmpeg.isFileURL,
       FileManager.default.isExecutableFile(atPath: ffmpeg.path) else {
@@ -21,15 +27,42 @@ public enum H3VideoReferenceMedia {
     }
     let asset = AVURLAsset(url: URL(fileURLWithPath: path))
     let hasAudio = !asset.tracks(withMediaType: .audio).isEmpty
-    let side = 256
-    let frameBytes = side * side * 3
-    let maximumFrames = preserveTail ? 361 : 175
+    var width = 256, height = 256
+    var filter = "fps=24,scale=256:256:force_original_aspect_ratio=decrease,pad=256:256:(ow-iw)/2:(oh-ih)/2:color=gray"
+    var maximumFrames = preserveTail ? 361 : 175
+    if let controls, let geometry = outputGeometry {
+      guard let track = asset.tracks(withMediaType: .video).first else {
+        throw H3CheckpointError.invalid("H3 movie reference needs a video track.")
+      }
+      let display = CGRect(origin: .zero, size: track.naturalSize).applying(track.preferredTransform)
+      let sourceWidth = abs(display.width), sourceHeight = abs(display.height)
+      guard sourceWidth.isFinite, sourceHeight.isFinite, (32...20_000).contains(sourceWidth),
+        (32...20_000).contains(sourceHeight) else {
+        throw H3CheckpointError.invalid("H3 movie display geometry is invalid.")
+      }
+      let canvas = try H3ReferenceCanvasPolicy.video(sourceWidth: Int(sourceWidth.rounded()),
+        sourceHeight: Int(sourceHeight.rounded()), outputWidth: geometry.width,
+        outputHeight: geometry.height, policy: controls.videoSizePolicy ?? .matchOutput)
+      width = canvas.width; height = canvas.height
+      let seconds = asset.duration.seconds
+      guard (32...2048).contains(width), (32...2048).contains(height),
+        width * height <= H3Geometry.maximumCanvasPixels,
+        seconds.isFinite, seconds >= 5.0 / 24, seconds <= 15.001 else {
+        throw H3CheckpointError.invalid("H3 explicit movie reference exceeds its canvas or fifteen-second budget.")
+      }
+      maximumFrames = min(361, Int(ceil(seconds * 24)) + 1)
+      guard maximumFrames * width * height * 3 <= 1024 * 1024 * 1024 else {
+        throw H3CheckpointError.invalid("H3 explicit movie RGB timeline exceeds its one-GiB admission budget.")
+      }
+      filter = "fps=24,scale=\(width):\(height)"
+    }
+    let frameBytes = width * height * 3
     let maximumBytes = maximumFrames * frameBytes
     let process = Process()
     process.executableURL = ffmpeg
     process.arguments = ["-v", "error", "-nostdin", "-i", path,
       "-map", "0:v:0", "-vf",
-      "fps=24,scale=256:256:force_original_aspect_ratio=decrease,pad=256:256:(ow-iw)/2:(oh-ih)/2:color=gray",
+      filter,
       "-frames:v", String(maximumFrames), "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     let output = Pipe()
     process.standardOutput = output
@@ -62,12 +95,12 @@ public enum H3VideoReferenceMedia {
       throw H3CheckpointError.invalid("H3 reference movie could not be decoded on the 24 fps grid.")
     }
     let decodedFrames = bytes.count / frameBytes
-    guard decodedFrames >= 5, !preserveTail || decodedFrames <= 360 else {
+    guard decodedFrames >= 5, (!preserveTail && controls == nil) || decodedFrames <= 360 else {
       throw H3CheckpointError.invalid("H3 extension source needs 5–360 decoded frames.")
     }
     let paddedLastFrame = H3StillReference(rgb8: bytes.subdata(in:
       ((decodedFrames - 1) * frameBytes)..<(decodedFrames * frameBytes)),
-      width: side, height: side)
+      width: width, height: height)
     let selected = preserveTail
       ? decodedFrames + (5 - decodedFrames % 17 + 17) % 17
       : (decodedFrames - 5) / 17 * 17 + 5
@@ -81,9 +114,11 @@ public enum H3VideoReferenceMedia {
     let soundtrack = try hasAudio ? H3AudioReferenceMedia.load(path: path,
       ffmpeg: ffmpeg,
       maximumSeconds: Double(retainCompleteAudio ? decodedFrames : selected) / 24) : nil
+    let density = try controls.map { try H3ReferenceTemporalPolicy.resolve(rgb8: bytes,
+      frames: selected, width: width, height: height, policy: $0.temporalDensity ?? .full) }
     return Loaded(reference: H3VideoReference(rgb8: bytes,
-      frameCount: selected, width: side, height: side,
-      audio: soundtrack),
+      frameCount: selected, width: width, height: height,
+      audio: soundtrack, controls: controls, temporalDecision: density),
       decodedFrames: decodedFrames, lastFrame: lastFrame)
   }
 

@@ -42,16 +42,8 @@ public final class MLXImageEncoder {
   }
   public init(checkpoint:URL) throws {
     file=try SafeTensorFile(url:checkpoint)
-    guard file.metadata["model_version"] == "2.5.0",
-      let data=file.metadata["config"]?.data(using:.utf8),
-      let config=try JSONSerialization.jsonObject(with:data) as? [String:Any],
-      let vae=config["vae"] as? [String:Any],
-      vae["_class_name"] as? String == "CausalVideoAutoencoder",
-      vae["spatial_padding_mode"] as? String == "zeros",
-      vae["norm_layer"] as? String == "pixel_norm",vae["patch_size"] as? Int == 4,
-      vae["encoder_base_channels"] as? Int == 128,vae["latent_channels"] as? Int == 128,
-      vae["latent_log_var"] as? String == "uniform",vae["use_quant_conv"] as? Bool == false else {
-      throw LTXError.invalid("Expected the released LTX2.5 convolutional image encoder architecture.")
+    guard try MLXVideoEncoderConfiguration.compatible(file.metadata) else {
+      throw LTXError.invalid("Expected the released LTX2.5 convolutional or DiffVAE image encoder architecture.")
     }
     var expected:[String:[Int]]=[:]
     for layer in Self.layers {

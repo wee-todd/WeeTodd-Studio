@@ -9,10 +9,12 @@ public struct MLXStudioProgress {
   private var fraction=0.0,steps=0,sceneSteps=0
   private let sceneWindowCount:Int
   private let temporalRounds:Int
+  private var samplingSteps:Int
   private var temporalRound=0,temporalTiles=1,temporalTilesCompleted=0
-  public init(sceneWindowCount:Int=0,temporalRounds:Int=0) {
+  public init(sceneWindowCount:Int=0,temporalRounds:Int=0,samplingSteps:Int=11) {
     self.sceneWindowCount=max(0,sceneWindowCount)
     self.temporalRounds=max(0,temporalRounds)
+    self.samplingSteps=max(1,samplingSteps)
   }
   public mutating func event(stage:String,completed:Int,total:Int) -> [String:Any] {
     let part=total > 0 ? min(1,max(0,Double(completed)/Double(total))) : 0
@@ -60,6 +62,7 @@ public struct MLXStudioProgress {
         : "Encoding Ripple references · \(completed)/\(total)"
     }
     else if stage == "sampling" {
+      if total > 0 { samplingSteps=total }
       steps=completed;next=0.1+(temporalRounds>0 ? 0.52 : 0.72)*part
       message="Sampling · \(completed)/\(total) steps"
     }
@@ -68,9 +71,9 @@ public struct MLXStudioProgress {
       let name=stage.hasPrefix("ingredients:") ? "Ingredients" : stage.hasPrefix("msr:") ? "MSR" : "Ripple"
       message="Sampling \(name) · step \(min(steps+1,8))/8 · block \(completed)/\(total)"
     }
-    else if stage.hasPrefix("stage1:") || stage.hasPrefix("stage2:") {
-      next=0.1+(temporalRounds>0 ? 0.52 : 0.72)*min(1,(Double(steps)+part)/11)
-      message="Sampling · step \(min(steps+1,11))/11 · block \(completed)/\(total)"
+    else if stage.hasPrefix("stage1:") || stage.hasPrefix("stage2:") || stage.hasPrefix("single_stage:") {
+      next=0.1+(temporalRounds>0 ? 0.52 : 0.72)*min(1,(Double(steps)+part)/Double(samplingSteps))
+      message="Sampling · step \(min(steps+1,samplingSteps))/\(samplingSteps) · block \(completed)/\(total)"
     } else if stage == "temporal_upscaler_weights_released" && temporalRounds>0 {
       temporalRound=min(temporalRounds,max(1,completed))
       next=0.62+0.2*Double(temporalRound-1)/Double(temporalRounds)

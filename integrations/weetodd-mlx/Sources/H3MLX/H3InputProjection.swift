@@ -28,7 +28,8 @@ public enum H3InputProjection {
     }
     try Task.checkCancellation()
     let layout = try H3CheckpointLayout(url: checkpointURL)
-    let file = try SafeTensorFile(url: checkpointURL)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let file = try SafeTensorFile(url: tensorURL)
     defer {
       Stream.gpu.synchronize()
       Memory.clearCache()
@@ -63,7 +64,8 @@ public enum H3InputProjection {
       result = addMM(bias, input.asType(.float32), weight.asType(.float32).T)
     }
     eval(result)
-    try file.checkUnchanged(at: checkpointURL)
+    try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
     try Task.checkCancellation()
     return result
   }

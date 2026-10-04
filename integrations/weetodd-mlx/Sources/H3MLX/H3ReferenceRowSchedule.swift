@@ -8,8 +8,11 @@ public struct H3ReferenceRowSchedule: Sendable {
 
   public init(layout: H3ReferenceLayout, video: H3Schedule, audio: H3Schedule,
     visualConditionStrength: Float = 0.999,
-    audioConditionStrength: Float = 1) throws {
-    guard video.timesteps.count == audio.timesteps.count,
+    audioConditionStrength: Float = 1, cleanVideoPrefixRows: Int = 0,
+    cleanAudioPrefixRows: Int = 0) throws {
+    guard (0...layout.conditionVideoIndices.count).contains(cleanVideoPrefixRows),
+      (0...layout.conditionAudioIndices.count).contains(cleanAudioPrefixRows),
+      video.timesteps.count == audio.timesteps.count,
       !video.timesteps.isEmpty,
       visualConditionStrength.isFinite, (0...1).contains(visualConditionStrength),
       audioConditionStrength.isFinite, (0...1).contains(audioConditionStrength) else {
@@ -26,6 +29,7 @@ public struct H3ReferenceRowSchedule: Sendable {
         used.insert(max(audio.timesteps[step], audioConditionStrength))
       }
     }
+    if cleanVideoPrefixRows > 0 || cleanAudioPrefixRows > 0 { used.insert(1) }
     let sorted = used.sorted()
     guard (1...128).contains(sorted.count) else {
       throw H3GeometryError.invalid("Ref2VA timestep table exceeds the H3 budget.")
@@ -53,6 +57,14 @@ public struct H3ReferenceRowSchedule: Sendable {
           throw H3GeometryError.invalid("Ref2VA audio condition timestep was not admitted.")
         }
         for row in layout.conditionAudioIndices { rows[row] = condition }
+      }
+      if cleanVideoPrefixRows > 0 {
+        guard let clean = lookup[1] else { throw H3GeometryError.invalid("Missing clean context timestep.") }
+        for row in layout.conditionVideoIndices.prefix(cleanVideoPrefixRows) { rows[row] = clean }
+      }
+      if cleanAudioPrefixRows > 0 {
+        guard let clean = lookup[1] else { throw H3GeometryError.invalid("Missing clean audio context timestep.") }
+        for row in layout.conditionAudioIndices.prefix(cleanAudioPrefixRows) { rows[row] = clean }
       }
       for row in layout.targetAudioIndices { rows[row] = audioIndex }
       rowsByStep.append(rows)

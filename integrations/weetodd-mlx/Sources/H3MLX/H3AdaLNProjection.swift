@@ -23,7 +23,8 @@ public enum H3AdaLNProjection {
     }
     let name = layout.prefix + "blocks.\(blockIndex).adaln_proj.linear.weight"
     if layout.curveRank == 64 {
-      let file = try SafeTensorFile(url: checkpointURL)
+      let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, block: blockIndex)
+    let file = try SafeTensorFile(url: tensorURL)
       let weight = try file.withTensorBytes(named: name) {
         MLXArray($0, [96768, 64], type: Float.self)
       }
@@ -34,16 +35,19 @@ public enum H3AdaLNProjection {
       let result = addMM(bias, timeEmbeddings.asType(.float32), weight.T)
         .asType(.bfloat16)
       eval(result)
-      try file.checkUnchanged(at: checkpointURL)
+      try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
       return result
     }
     let rotated: H3ComfyRotatedProjection?
     if projectionMode == .activationRotated {
-      let file = try SafeTensorFile(url: checkpointURL)
+      let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, block: blockIndex)
+    let file = try SafeTensorFile(url: tensorURL)
       rotated = try H3ComfyRotatedProjection(file: file,
         name: name, rows: 96768, columns: 2688,
         biasName: String(name.dropLast(".weight".count)) + ".bias")
-      try file.checkUnchanged(at: checkpointURL)
+      try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
     } else {
       rotated = nil
     }

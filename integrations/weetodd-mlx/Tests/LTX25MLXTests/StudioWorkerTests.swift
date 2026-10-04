@@ -3,6 +3,32 @@ import ImageIO
 @testable import LTX25MLX
 
 final class StudioWorkerTests: XCTestCase {
+  func testSingleStageProgressAdvancesWithinAllEightUpdates() {
+    var progress=MLXStudioProgress(samplingSteps:8)
+    let first=progress.event(stage:"single_stage:transformer",completed:24,total:48)
+    XCTAssertTrue((first["message"] as! String).contains("1/8"))
+    XCTAssertEqual(first["fraction"] as! Double,0.1+0.72*0.5/8,accuracy:1e-12)
+    _=progress.event(stage:"sampling",completed:7,total:8)
+    let last=progress.event(stage:"single_stage:transformer",completed:48,total:48)
+    XCTAssertTrue((last["message"] as! String).contains("8/8"))
+    XCTAssertEqual(last["fraction"] as! Double,0.82,accuracy:1e-12)
+    XCTAssertLessThan(last["fraction"] as! Double,1)
+  }
+  func testGuidedProgressUsesAdmittedUpdatesFromFirstBlockThroughRefinement() throws {
+    var progress=MLXStudioProgress(samplingSteps:19)
+    let first=progress.event(stage:"stage1:transformer",completed:24,total:48)
+    XCTAssertTrue((first["message"] as! String).contains("1/19"))
+    XCTAssertEqual(first["fraction"] as! Double,0.1+0.72*0.5/19,accuracy:1e-12)
+    _ = progress.event(stage:"sampling",completed:12,total:19)
+    let later=progress.event(stage:"stage1:transformer",completed:24,total:48)
+    XCTAssertTrue((later["message"] as! String).contains("13/19"))
+    XCTAssertLessThan(later["fraction"] as! Double,0.82)
+    let stageTwo=progress.event(stage:"sampling",completed:18,total:19)
+    XCTAssertGreaterThan(stageTwo["fraction"] as! Double,later["fraction"] as! Double)
+    let end=progress.event(stage:"sampling",completed:19,total:19)
+    XCTAssertEqual(end["fraction"] as! Double,0.82,accuracy:1e-12)
+    XCTAssertLessThan(end["fraction"] as! Double,1)
+  }
   func testSceneOpeningImageReportsPreparationAndEncodingBeforeSampling() {
     var progress=MLXStudioProgress(sceneWindowCount:2)
     let preparing=progress.event(stage:"scene_reference_prepare:1:first",completed:1,total:2)

@@ -5,8 +5,9 @@ import LTX25Video
 import LTX25Audio
 
 /// Samples native scene windows with the same released two-stage renderer used
-/// for ordinary clips. Shot images use the ordinary image VAE at their exact
-/// boundary; only compact audiovisual tails cross window boundaries.
+/// for ordinary clips. Version-one boundary images retain their old placement;
+/// version-two images use exact local frames and appended rows. Only compact
+/// audiovisual tails cross window boundaries.
 public enum MLXSceneSampler {
   public struct Result {
     public let video: MLXArray
@@ -43,6 +44,29 @@ public enum MLXSceneSampler {
       (source.shape[0] - count)..<source.shape[0])
   }
 
+  /// Exact scene-specific row admission. Ordinary base transports do not carry
+  /// the appended image rows; the worker combines this with its stage ceiling.
+  public static func estimatedTransformerActivationBytes(_ compiled:MLXStudioSceneRecipe.Compiled) throws -> Int {
+    var maximum=0
+    for index in compiled.requests.indices {
+      try Task.checkCancellation()
+      let request=compiled.requests[index],recipe=try request.recipe()
+      let hasImages = !(try compiled.references(in:index)).isEmpty
+      for geometry in [recipe.low,recipe.high] {
+        let history=try index == 0 ? nil : MLXExtensionGuideLayout(geometry:geometry,
+          contextFrames:compiled.plan.overlapFrames,videoGuideLatentFrames:compiled.plan.videoOverlapLatentFrames-1,
+          audioGuideTokens:compiled.plan.joinAudioTokens[index-1])
+        let scene=try compiled.imageRouting.map { try MLXSceneKeyframeLayout(geometry:geometry,
+          anchors:$0.windows[index].map(\.layoutAnchor),extensionGuide:history) }
+        let configuration=try AVBlockConfiguration(videoTokens:scene?.videoTokens ?? history?.videoTokens ?? geometry.videoTokens,
+          audioTokens:scene?.audioTokens ?? history?.audioTokens ?? geometry.audioFrames,textTokens:1024)
+        maximum=max(maximum,try MLXAVBlock.estimatedActivationBytes(configuration:configuration,
+          perTokenVideo:history != nil || hasImages,perTokenAudio:history != nil))
+      }
+    }
+    return maximum+(compiled.imageRouting?.retainedConditioningBytes ?? 0)
+  }
+
   public static func preflight(_ compiled: MLXStudioSceneRecipe.Compiled,
     maximumActivationBytes: Int,
     decodePlan: MLXSceneDecodeWindowPlan) throws -> AVGeometry {
@@ -52,6 +76,18 @@ public enum MLXSceneSampler {
     }
     let geometry = try AVGeometry(width: first.width, height: first.height,
       frames: plan.totalFrames, fps: plan.fps)
+    let windowImages=try requests.indices.map { try compiled.references(in:$0) }
+    guard try estimatedTransformerActivationBytes(compiled)<=maximumActivationBytes else {
+      throw LTXError.invalid("Scene image and history rows exceed the admitted transformer activation budget.")
+    }
+    let selected=try MLXVideoDecoderSelection(checkpoint:URL(fileURLWithPath:first.videoCheckpoint),settings:first.diffusionVAE)
+    if selected.isDiffusion {
+      guard decodePlan.overlapFrames == 0,decodePlan.latentRanges == [0..<geometry.latentFrames],compiled.decodeMode.maximumWindowFrames == nil else {
+        throw LTXError.invalid("DiffVAE cannot reuse convolutional scene temporal overlap windows.")
+      }
+      _ = try MLXDiffusionScenePublication.admit(geometry:geometry,plan:plan,strictBoundaries:compiled.strictBoundaries,
+        checkpoint:URL(fileURLWithPath:first.videoCheckpoint),settings:first.diffusionVAE,maximumWorkspaceBytes:decodePlan.admittedActivationBytes)
+    } else {
     try MLXSceneMediaPublisher.admit(geometry: geometry,
       decodePlan: decodePlan)
     if !compiled.strictBoundaries.isEmpty {
@@ -64,9 +100,10 @@ public enum MLXSceneSampler {
           maximumWindowFrames: compiled.decodeMode.maximumWindowFrames)
       }
     }
+    }
     let text = try MLXTextEncoder(gemmaRoot: URL(fileURLWithPath: first.gemmaRoot),
       connectorURL: URL(fileURLWithPath: first.connectorCheckpoint))
-    _ = try VideoDecoder(checkpoint: URL(fileURLWithPath: first.videoCheckpoint))
+    _ = try MLXVideoDecoderSelection(checkpoint:URL(fileURLWithPath:first.videoCheckpoint),settings:first.diffusionVAE)
     try AudioDecoder.validateCheckpoint(URL(fileURLWithPath: first.audioCheckpoint))
     for index in requests.indices {
       let request = requests[index], recipe = try request.recipe()
@@ -77,6 +114,7 @@ public enum MLXSceneSampler {
         request.transformerRoot == first.transformerRoot,
         request.connectorCheckpoint == first.connectorCheckpoint,
         request.videoCheckpoint == first.videoCheckpoint,
+        request.diffusionVAE == first.diffusionVAE,
         request.audioCheckpoint == first.audioCheckpoint,
         request.spatialUpscalerCheckpoint == first.spatialUpscalerCheckpoint,
         request.task == (request.audioReference != nil ? "a2v" :
@@ -86,8 +124,8 @@ public enum MLXSceneSampler {
         throw LTXError.invalid("Swift LTX scene windows need identical components and admitted geometry.")
       }
       _ = try MLXTextEncodingPlan(promptTokens: text.tokenize(request.prompt).count)
-      if !request.referenceImages.isEmpty {
-        try MLXReferenceImage.inspect(URL(fileURLWithPath: request.referenceImages[0].path))
+      if !windowImages[index].isEmpty {
+        for image in windowImages[index] { try MLXReferenceImage.inspect(URL(fileURLWithPath:image.path)) }
         for g in [recipe.low, recipe.high] {
           _ = try MLXImageEncodePlan(width: g.width, height: g.height)
         }
@@ -106,6 +144,7 @@ public enum MLXSceneSampler {
         statisticsCheckpoint: URL(fileURLWithPath: request.videoCheckpoint),
         firstStrength: request.referenceImages.first?.strength,
         firstFrame: index == 0 ? 0 : plan.overlapFrames - 1,
+        sceneAnchors:compiled.imageRouting?.windows[index].map(\.layoutAnchor),
         extensionContextFrames: index == 0 ? nil : plan.overlapFrames,
         extensionVideoGuideLatentFrames: index == 0 ? nil : plan.videoOverlapLatentFrames - 1,
         extensionAudioGuideTokens: index == 0 ? nil : plan.joinAudioTokens[index - 1],
@@ -137,7 +176,8 @@ public enum MLXSceneSampler {
       frames: plan.totalFrames, fps: plan.fps)
     let imageDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("weetodd-scene-image-" + UUID().uuidString)
-    if requests.contains(where: { !$0.referenceImages.isEmpty }) {
+    let windowImages=try requests.indices.map { try compiled.references(in:$0) }
+    if windowImages.contains(where: { !$0.isEmpty }) {
       try FileManager.default.createDirectory(at: imageDirectory,
         withIntermediateDirectories: false)
     }
@@ -145,8 +185,8 @@ public enum MLXSceneSampler {
     var preparedImages: [[[MLXReferenceImage.Prepared]]] = []
     for (window, request) in requests.enumerated() {
       let recipe = try request.recipe()
-      let stages = try request.referenceImages.isEmpty ? [] :
-        MLXReferenceImage.prepareStages(request.referenceImages,
+      let stages = try windowImages[window].isEmpty && compiled.imageRouting == nil ? [] :
+        MLXReferenceImage.prepareStages(windowImages[window],
           sizes: [(recipe.low.width, recipe.low.height),
             (recipe.high.width, recipe.high.height)],
           ffmpeg: ffmpeg, directory: imageDirectory) { stage, role in
@@ -208,8 +248,21 @@ public enum MLXSceneSampler {
         request.fps == geometry.fps, request.frames == plan.windowFrames[index] else {
         throw LTXError.invalid("Swift LTX scene window changed its validated conditioning or geometry.")
       }
+      let sceneReferences:[[MLXArray]] = try autoreleasepool {
+        guard compiled.imageRouting != nil else { return [] }
+        guard !windowImages[index].isEmpty else { return [[],[]] }
+        let encoder=try MLXImageEncoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint))
+        return try preparedImages[index].enumerated().map { stage,images in
+          try images.enumerated().map { ordinal,image in
+            try Task.checkCancellation()
+            return try encoder.encode(MLXArray(try image.pixels(),[1,image.height,image.width,3])) { completed in
+              try progress("scene_reference_encode:\(index+1):\(stage+1):\(ordinal+1)",completed,42)
+            }
+          }
+        }
+      }
       let references: [(first: MLXArray, last: MLXArray?)] = try autoreleasepool {
-        guard !preparedImages[index].isEmpty else { return [] }
+        guard compiled.imageRouting == nil,!preparedImages[index].isEmpty else { return [] }
         let encoder = try MLXImageEncoder(
           checkpoint: URL(fileURLWithPath: request.videoCheckpoint))
         var stages: [(first: MLXArray, last: MLXArray?)] = []
@@ -224,7 +277,7 @@ public enum MLXSceneSampler {
         return stages
       }
       Stream.gpu.synchronize(); Memory.clearCache()
-      if !references.isEmpty {
+      if !references.isEmpty || sceneReferences.contains(where: { !$0.isEmpty }) {
         try progress("scene_reference_weights_released", index + 1, requests.count)
       }
       let sampler = try MLXDistilledSamplingRunner(recipe: recipe,
@@ -233,6 +286,7 @@ public enum MLXSceneSampler {
         statisticsCheckpoint: URL(fileURLWithPath: request.videoCheckpoint),
         firstStrength: request.referenceImages.first?.strength,
         firstFrame: index == 0 ? 0 : plan.overlapFrames - 1,
+        sceneAnchors:compiled.imageRouting?.windows[index].map(\.layoutAnchor),
         extensionContextFrames: index == 0 ? nil : plan.overlapFrames,
         extensionVideoGuideLatentFrames: index == 0 ? nil : plan.videoOverlapLatentFrames - 1,
         extensionAudioGuideTokens: index == 0 ? nil : plan.joinAudioTokens[index - 1],
@@ -245,7 +299,7 @@ public enum MLXSceneSampler {
       let sampled = try sampler.evaluateWithStageOneCapture(
         videoContext: contexts[index].video,
         audioContext: contexts[index].audio,
-        references: references,
+        sceneReferences:sceneReferences,references: references,
         frozenAudio: audioDrivers[index],
         extensionGuides: prior,
         stageOneVideoObserver: { low in

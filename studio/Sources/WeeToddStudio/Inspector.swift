@@ -47,12 +47,12 @@ struct ClipInspector: View {
   }
   var geometryAndSeed: some View {
     VStack(alignment: .leading, spacing: 10) {
-    HStack {
+    if clip.inferredTask != "video_upscale" { HStack {
       Text("Render size")
       TextField("Width", value: binding(\.generationWidth), format: .number)
       Text("×")
       TextField("Height", value: binding(\.generationHeight), format: .number)
-    }.textFieldStyle(.roundedBorder)
+    }.textFieldStyle(.roundedBorder) }
     HStack {
       Text("Seed")
       TextField(
@@ -82,7 +82,11 @@ struct ClipInspector: View {
         Circle().fill(Theme.engine(clip.engine)).frame(width: 6, height: 6)
         Text(clip.displayTask).font(.system(size: 10)).foregroundStyle(.secondary)
       }
-      if !clip.sourcePath.isEmpty { RippleClipInspector(clip: clip) }
+      if !clip.sourcePath.isEmpty {
+        RippleClipInspector(clip: clip)
+        Button("Create LTX 2× copy") { Task { await store.createLTXMovieUpscaleCopy() } }
+          .disabled(store.operationBusy)
+      }
       if clip.engine != .movie {
         field("GENERATION") {
           Picker("Generation", selection: Binding(get: { clip.generationProvider }, set: { provider in
@@ -97,7 +101,7 @@ struct ClipInspector: View {
           DrawThingsClipInspector(clip: clip)
         } else {
           GenerationInspector(clip: clip)
-          ContinuityInspector(clip: clip)
+          if clip.inferredTask != "video_upscale" { ContinuityInspector(clip: clip) }
         }
         geometryAndSeed
         Button {
@@ -422,6 +426,13 @@ struct AttachmentRow: View {
         if store.selectedClip?.engine == .ltx25 && attachment.role == .reference {
           msrControls
         }
+        if store.selectedClip?.engine == .h3,store.runtime.usesNativeH3,attachment.role == .reference {
+          H3ReferenceInspector(attachment:attachment,isVideo:store.allAssets.first(where:{$0.id==attachment.assetID})?.kind == .video,isImage:store.allAssets.first(where:{$0.id==attachment.assetID})?.kind == .image)
+        }
+      }
+      if store.selectedClip?.engine == .h3,store.runtime.usesNativeH3,store.selectedClip?.inferredTask == "a2v",
+        [.first,.last,.keyframe].contains(attachment.role),store.allAssets.first(where:{$0.id==attachment.assetID})?.kind == .image {
+        H3ReferenceInspector(attachment:attachment,isVideo:false,showsPlacement:false)
       }
     }.padding(9).background(Theme.raised, in: RoundedRectangle(cornerRadius: 7))
   }

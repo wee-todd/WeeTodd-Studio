@@ -301,7 +301,7 @@ struct LoRALibrary: View {
                       if let index = draft?.members.firstIndex(where: { $0.id == member.id }) {
                         draft?.members[index].strength = strength
                       }
-                    }))
+                    }),range:draft?.engine == .h3 ? -10...10 : 0...2)
               }
             }
           }
@@ -371,10 +371,11 @@ struct LoRALibrary: View {
 
 struct LoRAStrength: View {
   @Binding var value: Double
+  var range:ClosedRange<Double> = 0...2
   var body: some View {
     HStack {
       Text("Strength").font(.caption)
-      Slider(value: $value, in: 0...2, step: 0.01).accessibilityLabel("LoRA strength")
+      Slider(value: $value, in: range, step: 0.01).accessibilityLabel("LoRA strength")
       TextField("LoRA strength", value: $value, format: .number.precision(.fractionLength(2)))
         .textFieldStyle(.roundedBorder).frame(width: 58)
     }
@@ -443,7 +444,10 @@ struct ClipLoRAInspector: View {
                     c.attachments[index].strength = strength
                   }
                 }
-              }))
+              }),range:clip.engine == .h3 ? -10...10 : 0...2)
+          if clip.engine == .h3,store.runtime.usesNativeH3 {
+            H3LoRAInspector(attachment:attachment)
+          }
         }.padding(9).background(Theme.raised, in: RoundedRectangle(cornerRadius: 7))
       }
     }

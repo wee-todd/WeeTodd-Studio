@@ -70,6 +70,12 @@ public struct Attachment: Codable, Identifiable, Equatable {
   public var role: MediaRole
   public var time: Double = 0
   public var strength: Double = 1
+  /// Source-movie upscaling uses a complete, explicit interval at the original
+  /// frame rate. Nil preserves older attachment contracts.
+  public var sourceStartSeconds:Double?
+  public var sourceDurationSeconds:Double?
+  public var h3ReferencePlacement:H3ReferencePlacement?
+  public var h3LoRA:H3LoRASettings?
   /// Missing in legacy projects means enabled. Disabling keeps the saved strength.
   public var enabled: Bool?
   public var isEnabled: Bool { enabled ?? true }
@@ -147,12 +153,13 @@ public struct RenderVersion: Codable, Identifiable, Equatable {
   public var usableSourceIn: Double?
   public var usableDuration: Double?
   public var continuationArtifact: ContinuationArtifact?
+  public var jointLatentArtifact:H3JointLatentArtifact?
   /// All member takes point into one movie and must be activated together.
   public var sceneMembers: [ContinuousSceneMember]?
   public var sceneTakeID: UUID?
   public var sceneInputFingerprint: String?
   public var sceneFrameRate: Double?
-  public init(path: String, seed: Int, prompt: String, recipePath: String, stats: RenderStats? = nil, generationSettings: GenerationDescriptor? = nil, resolvedFingerprint: String? = nil, usableSourceIn: Double? = nil, usableDuration: Double? = nil, continuationArtifact: ContinuationArtifact? = nil, sceneMembers: [ContinuousSceneMember]? = nil, sceneTakeID: UUID? = nil, sceneInputFingerprint: String? = nil, sceneFrameRate: Double? = nil) {
+  public init(path: String, seed: Int, prompt: String, recipePath: String, stats: RenderStats? = nil, generationSettings: GenerationDescriptor? = nil, resolvedFingerprint: String? = nil, usableSourceIn: Double? = nil, usableDuration: Double? = nil, continuationArtifact: ContinuationArtifact? = nil, jointLatentArtifact:H3JointLatentArtifact?=nil, sceneMembers: [ContinuousSceneMember]? = nil, sceneTakeID: UUID? = nil, sceneInputFingerprint: String? = nil, sceneFrameRate: Double? = nil) {
     self.path = path
     self.seed = seed
     self.prompt = prompt
@@ -163,6 +170,7 @@ public struct RenderVersion: Codable, Identifiable, Equatable {
     self.usableSourceIn = usableSourceIn
     self.usableDuration = usableDuration
     self.continuationArtifact = continuationArtifact
+    self.jointLatentArtifact=jointLatentArtifact
     self.sceneMembers = sceneMembers
     self.sceneTakeID = sceneTakeID
     self.sceneInputFingerprint = sceneInputFingerprint
@@ -281,6 +289,7 @@ public struct Clip: Codable, Identifiable, Equatable {
     case "a2v": return "Audio-driven video"
     case "control": return "Controlled video"
     case "extension": return "Video extension"
+    case "video_upscale": return "Source movie 2× upscale"
     default: return "Text to video"
     }
   }
@@ -478,6 +487,16 @@ public enum ProjectStorage {
       }
     }
     for i in project.clips.indices {
+      project.clips[i].generationSelection?.mapH3CreativePaths(transform)
+      if var saved=project.clips[i].savedNativeGenerations {
+        for key in Array(saved.keys) { saved[key]?.selection?.mapH3CreativePaths(transform) }
+        project.clips[i].savedNativeGenerations=saved
+      }
+      for j in project.clips[i].attachments.indices {
+        if let soundtrack=project.clips[i].attachments[j].h3ReferencePlacement?.soundtrackPath {
+          project.clips[i].attachments[j].h3ReferencePlacement?.soundtrackPath=transform(soundtrack)
+        }
+      }
       project.clips[i].sourcePath = transform(project.clips[i].sourcePath)
       if project.clips[i].motionResult != nil {
         project.clips[i].motionResult!.path = transform(project.clips[i].motionResult!.path)
@@ -494,6 +513,9 @@ public enum ProjectStorage {
       for j in project.clips[i].versions.indices {
         project.clips[i].versions[j].path = transform(project.clips[i].versions[j].path)
         project.clips[i].versions[j].recipePath = transform(project.clips[i].versions[j].recipePath)
+        if let manifest=project.clips[i].versions[j].jointLatentArtifact?.manifest {
+          project.clips[i].versions[j].jointLatentArtifact?.manifest=transform(manifest)
+        }
         if let manifest = project.clips[i].versions[j].continuationArtifact?.manifest {
           project.clips[i].versions[j].continuationArtifact?.manifest = transform(manifest)
         }

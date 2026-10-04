@@ -11,6 +11,8 @@ public struct H3Geometry: Sendable {
   /// Packed-row admission separately bounds duration and conditioning.
   public static let maximumCanvasPixels = 1376 * 768
 
+  public let canvasAdmission: H3CanvasAdmission
+  public var maximumPackedRows: Int { canvasAdmission.maximumPackedRows }
   public let width: Int
   public let height: Int
   public let frames: Int
@@ -21,11 +23,20 @@ public struct H3Geometry: Sendable {
   public var audioRows: Int { audioLatentFrames * 2 }
 
   public init(width: Int, height: Int, durationSeconds: Double) throws {
+    try self.init(width: width, height: height, durationSeconds: durationSeconds, canvasAdmission: .ordinary)
+  }
+
+  public init(width: Int, height: Int, durationSeconds: Double,
+    canvasAdmission: H3CanvasAdmission) throws {
     guard (32...4096).contains(width), (32...4096).contains(height),
       width.isMultiple(of: 32), height.isMultiple(of: 32),
       durationSeconds.isFinite, (2.5...15).contains(durationSeconds) else {
       throw H3GeometryError.invalid("H3 requires 32-pixel canvas multiples and a finite 2.5–15 second duration.")
     }
+    if canvasAdmission == .spatialRefinement {
+      try canvasAdmission.validate(width: width, height: height)
+    }
+    self.canvasAdmission = canvasAdmission
     self.width = width
     self.height = height
     var aligned = Int((durationSeconds * 24).rounded(.toNearestOrEven))
@@ -46,6 +57,7 @@ public struct H3Geometry: Sendable {
       guard !overflow else { throw H3GeometryError.invalid("H3 packed row count overflows Int.") }
       result = sum
     }
+    if canvasAdmission == .spatialRefinement { try canvasAdmission.validatePackedRows(result) }
     return result
   }
 }

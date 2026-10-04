@@ -182,6 +182,19 @@ final class ContinuousSceneInteractionTests: XCTestCase {
     XCTAssertNotEqual(store.pendingContinuousScene?.id, previous.id)
   }
 
+  @MainActor func testSceneReportsAdmitOnlyKnownVersionsAndRetainExactMembers() throws {
+    let clip=Clip(name:"Shot",engine:.ltx25)
+    let members:[[String:Any]]=[["clip_id":clip.id.uuidString,"source_in":0.0,"duration":5.0]]
+    for version in [1,2] {
+      let scene:[String:Any]=["version":version,"frame_rate":24.0,
+        "publication_mode":"single_decode_native_latent_chain","members":members]
+      let report=try ContinuousSceneRenderReport.decode(scene)
+      XCTAssertEqual(report.version,version);XCTAssertEqual(report.members.first?.clipID,clip.id)
+      XCTAssertEqual(report.duration,5)
+      var invalid=scene;invalid["version"]=3;XCTAssertThrowsError(try ContinuousSceneRenderReport.decode(invalid))
+      invalid["version"]=true;XCTAssertThrowsError(try ContinuousSceneRenderReport.decode(invalid))
+    }
+  }
   @MainActor func testReviewSummaryShowsWholeSceneRequestedAndResolvedTiming() throws {
     let clip = Clip(name: "Second shot", engine: .ltx25)
     let scene: [String: Any] = ["version": 1, "frame_rate": 24.0,

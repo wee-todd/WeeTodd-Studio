@@ -2,17 +2,35 @@ import Foundation
 import MLX
 import TensorIO
 
+public enum H3LoRAQKVLayout: String, Sendable { case auto, nativeInterleaved = "native_interleaved", contiguousQKV = "contiguous_qkv" }
+public enum H3LoRAProfile: String, Sendable { case auto, standard, turbo }
+
 public struct H3LoRAAdapter: Sendable {
   public let url: URL
   public let strength: Float
+  public let profile: H3LoRAProfile
+  public let qkvLayout: H3LoRAQKVLayout
+  public let startAfterEvaluations: Int
 
-  public init(url: URL, strength: Float) throws {
+  public init(url: URL, strength: Float, profile: H3LoRAProfile = .auto,
+    qkvLayout: H3LoRAQKVLayout = .auto, startAfterEvaluations: Int = 0) throws {
     guard url.isFileURL, url.path.hasPrefix("/"), strength.isFinite,
-      (0...2).contains(strength) else {
+      (-10...10).contains(strength), (0...99).contains(startAfterEvaluations) else {
       throw H3CheckpointError.invalid("Invalid H3 LoRA path or strength.")
     }
     self.url = url
     self.strength = strength
+    self.profile = profile; self.qkvLayout = qkvLayout
+    self.startAfterEvaluations = startAfterEvaluations
+  }
+  func validate(requestedSteps: Int, samplingMethod: H3SamplingMethod) throws {
+    guard startAfterEvaluations < requestedSteps - 1,
+      profile != .turbo || (requestedSteps == 5 && samplingMethod == .euler && startAfterEvaluations == 0) else {
+      throw H3CheckpointError.invalid("H3 LoRA activation must occur before the final evaluation; explicit Turbo needs the complete four-evaluation Euler schedule.")
+    }
+  }
+  func isActive(evaluation: Int?) -> Bool {
+    evaluation.map { $0 >= startAfterEvaluations } ?? true
   }
 }
 
@@ -25,20 +43,23 @@ protocol H3LoRAApplying {
 /// no merged checkpoint or resident adapter-weight stack is created.
 final class H3LoRAStack: H3LoRAApplying {
   private let files: [H3LoRAFile]
+  private let adapters: [H3LoRAAdapter]
+  var evaluation: Int? = nil
 
   init(adapters: [H3LoRAAdapter]) throws {
-    guard (1...4).contains(adapters.count),
+    guard (1...8).contains(adapters.count),
       Set(adapters.map { $0.url.standardizedFileURL.path }).count == adapters.count else {
-      throw H3CheckpointError.invalid("H3 supports one to four distinct ordered LoRAs.")
+      throw H3CheckpointError.invalid("H3 supports one to eight distinct ordered LoRAs.")
     }
+    self.adapters = adapters
     files = try adapters.map { try H3LoRAFile(url: $0.url,
-      strength: $0.strength) }
+      strength: $0.strength, qkvLayout: $0.qkvLayout, profile: $0.profile, startAfterEvaluations: $0.startAfterEvaluations) }
   }
 
   func apply(base: MLXArray, input: MLXArray,
     target: String, reorderQKV: Bool = false) throws -> MLXArray {
     var value = base
-    for file in files {
+    for (file, adapter) in zip(files, adapters) where adapter.isActive(evaluation: evaluation) {
       value = try file.apply(base: value, input: input,
         target: target, reorderQKV: reorderQKV)
     }
@@ -81,13 +102,21 @@ final class H3LoRAFile: H3LoRAApplying {
   let targetCount: Int
   private let file: SafeTensorFile
   private let targets: [String: (rank: Int, alpha: Float)]
+  private let qkvLayout: H3LoRAQKVLayout
 
-  init(url: URL, strength: Float, requestedSteps: Int? = nil) throws {
-    guard url.isFileURL, strength.isFinite, (0...2).contains(strength) else {
+  init(url: URL, strength: Float, requestedSteps: Int? = nil,
+    samplingMethod: H3SamplingMethod = .euler, qkvLayout: H3LoRAQKVLayout = .auto,
+    profile: H3LoRAProfile = .auto, startAfterEvaluations: Int = 0,
+    requiresStandardProfile: Bool = false) throws {
+    guard url.isFileURL, strength.isFinite, (-10...10).contains(strength) else {
       throw H3CheckpointError.invalid("Invalid H3 LoRA path or strength.")
     }
     let file = try SafeTensorFile(url: url)
-    try Self.validateSampling(metadata: file.metadata, requestedSteps: requestedSteps)
+    let isTurbo = try Self.validateSampling(metadata: file.metadata, requestedSteps: requestedSteps,
+      samplingMethod: samplingMethod, profile: profile, startAfterEvaluations: startAfterEvaluations)
+    guard !requiresStandardProfile || !isTurbo else {
+      throw H3CheckpointError.invalid("Initialized partial H3 refinement requires ordinary full-schedule adapters, not Turbo metadata.")
+    }
     let explicitAlpha = file.metadata["target_format"] == "ComfyUI generic LoRA"
       && file.metadata["qkv_fusion"]?.contains("block diagonal B") == true
     let conversion = file.metadata["conversion"] ?? ""
@@ -163,6 +192,7 @@ final class H3LoRAFile: H3LoRAApplying {
     self.url = url
     self.strength = strength
     self.targetCount = targets.count
+    self.qkvLayout = qkvLayout
     self.file = file
     self.targets = targets
     try file.checkUnchanged(at: url)
@@ -172,7 +202,7 @@ final class H3LoRAFile: H3LoRAApplying {
   /// the historical `turboLoRA` argument name. Request steps count grid points;
   /// adapter inference-step declarations count actual transformer evaluations.
   private static func validateSampling(metadata: [String: String],
-    requestedSteps: Int?) throws {
+    requestedSteps: Int?, samplingMethod: H3SamplingMethod, profile: H3LoRAProfile, startAfterEvaluations: Int) throws -> Bool {
     func normalized(_ key: String) -> String? {
       metadata[key]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
@@ -212,7 +242,14 @@ final class H3LoRAFile: H3LoRAApplying {
     guard profiles.count <= 1 else {
       throw H3CheckpointError.invalid("Conflicting H3 LoRA profile metadata.")
     }
+    if profiles.isEmpty && profile != .auto { profiles.insert(profile.rawValue) }
     if profiles.first == "turbo" {
+      guard startAfterEvaluations == 0 else {
+        throw H3CheckpointError.invalid("H3 Turbo metadata requires all four evaluations; deferred activation is unsupported for this adapter.")
+      }
+      guard samplingMethod == .euler else {
+        throw H3CheckpointError.invalid("H3 Turbo LoRA requires Euler sampling.")
+      }
       guard evaluations.first == nil || evaluations.first == 4 else {
         throw H3CheckpointError.invalid("H3 Turbo LoRA supports four evaluations (five schedule points).")
       }
@@ -220,6 +257,7 @@ final class H3LoRAFile: H3LoRAApplying {
         throw H3CheckpointError.invalid("H3 Turbo LoRA requires five requested schedule points for four evaluations.")
       }
     }
+    return profiles.first == "turbo"
   }
 
   func apply(base: MLXArray, input: MLXArray,
@@ -239,7 +277,7 @@ final class H3LoRAFile: H3LoRAApplying {
     }
     let output = H3LoRAProjection.apply(base: base, input: input,
       a: a, b: b, alpha: info.alpha, strength: strength,
-      reorderQKV: reorderQKV)
+      reorderQKV: reorderQKV && qkvLayout != .nativeInterleaved)
     eval(output)
     try file.checkUnchanged(at: url)
     try Task.checkCancellation()

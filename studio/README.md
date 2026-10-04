@@ -9,6 +9,71 @@ engines and remain available separately. Studio does not need ComfyUI.
 This guide covers the application. Start with the [project overview](../README.md) for product
 direction and backend choices. This is a source-build preview, not a notarized consumer release.
 
+## Current Swift controls and qualification
+
+H3 and LTX 2.5 select Swift when no backend preference is saved. An explicit legacy selection
+is retained. The ordinary distilled/manual defaults and older frozen recipes retain their
+contracts; the controls below require explicit selections and fail unsupported mixtures.
+Historical measurements later in this guide describe their dated recipe and worker, not every
+feature in the current app.
+
+| Control | Native behavior and limit | Current evidence |
+| --- | --- | --- |
+| LTX Dev guidance | Experimental Production Euler or HQ `res_2s`, editable negative/guidance controls, followed by three distilled refinement updates | CPU numerical/contract checks; one real HQ + automatic duration + timed/generated-keyframe combination |
+| LTX automatic duration | Explicit opt-in for ordinary T2V/I2V/FFLF; duration head resolves the `8k+1` grid before sampling, with 0.25–30-second bounds | Pinned head and CPU tests; actual 57-frame combined take completed |
+| LTX ordinary keyframes | Up to eight distinct timed images and 0–8 generated slots; arbitrary integer frames are allowed; first-frame input replaces the main opening plane | CPU/header tests and the combined take; ordinary slots are stage-one-only |
+| LTX full-resolution single stage | Eight updates; Euler/ancestral use eight forwards and CFG++ full/balanced/speed use 15/12/10 forwards; no spatial upscaler or second stage | CPU math/header checks and one functional balanced 12-forward take with first/last images and generated slots; other schedules and guide compositions have CPU/header qualification only |
+| LTX scene anchors | Experimental scene v2: at most 32 global first/interior/last anchors and 256 MiB encoded references; two to six shots, at most 30 seconds | CPU routing/budget checks plus actual two-window/five-anchor/source-PCM take; new scene-v2 Studio lifecycle and broad quality remain separate from earlier v1 evidence |
+| LTX movie upscale | Experimental learned 2× only, learned 2× + refine, or Pixel-Spatial 2× + refine; exact source frame count/rate with explicit source/sidecar/silent audio | CPU source/movie/acceptance tests plus actual learned 2×/three-evaluation refinement/source interval with exact sidecar PCM; actual StudioCore export/native CLI acceptance, zero-generation resume and Store.load reopen passed |
+| LTX one-step Diffusion VAE | Explicit experimental complete-component decoder selection; Conv remains the default, with strict workspace and checkpoint admission | CPU/header/release checks, tiny numerical comparisons and actual retained 1344 × 768/89-frame decode; no whole-job or Conv pixel-parity claim |
+| H3 reference preparation | Optional 50–400% image pixel budget; movie match-output/native-H3 budget; full/half/quarter/automatic density; explicit frame or Last placement and replacement soundtrack | CPU tests; new policies are not a general likeness/motion-quality approval |
+| H3 LoRA composition | Up to eight distinct ordered adapters, signed strengths −10 to 10, explicit QKV layout/profile and deferred standard-adapter start | Header/CPU arithmetic checks; historical real stacks qualify only those adapters |
+| H3 full latent refinement | Save complete AV latents; initialize at the same canvas or enlarge both axes by at most 2×; exact source duration/task/component identity | Full saving/initialized/interpolation packets completed; corrected learned 1920 × 1088, 73-frame target completed with exact source PCM and coherent sampled stills; full audiovisual/user quality approval separate |
+| H3 Motion Fidelity | Experimental independent T2VA movie repair; 24 fps matching canvas/trim, at least 15 base evaluations, immediate standard adapters, bounded expansion | CPU producer/acceptance/lifecycle tests plus actual native repair with exact selected source PCM; sampled frames coherent, full audiovisual/user approval separate |
+
+For **Dev guidance**, **Automatic duration**, **Timed images and generated keyframes** and
+**Full-resolution single-stage sampling**, enable the corresponding experimental execution
+switch in the generation inspector. Automatic timing resolves symbolic Last after prediction;
+numeric anchors outside the predicted interval reject before transformer loading. Manual timing
+remains required for audio-driven shots, extensions, specialized controls and continuous scenes.
+Scene anchors cannot combine Dev guidance, automatic duration, generated slots, single-stage,
+DFR or specialized control adapters. The ordinary image limit stays eight; the larger scene limit
+belongs only to the dedicated scene contract.
+
+Generic single-stage direct worker recipes can compose timed images/generated slots with either
+IC or Union guides and compatible generic LoRAs. The shared layout includes every guide in memory
+admission, applies its task adapter once and retains global attention. This direct composition
+is not an ordinary Studio control preset. CFG++ generates audio and rejects a frozen A2V driver.
+Ingredients uses its separate version-11 authored option: sixteen forwards, not the ordinary
+15/12/10 schedules. Its latest marker-corrected sample still animated the reference board instead
+of composing the requested scene; it is not quality-approved.
+
+In an H3 attachment, **H3 reference placement** controls optional image/movie policies and
+replacement audio. Defaults retain the prior bounded preparation. Explicit movie policies admit
+at most 15 seconds on the aligned 24 fps grid and preserve the source audio clock while reducing
+persistent video density. Full density remains the reference-quality starting point. Aggregate
+Qwen tokens, packed rows, RGB bytes and activation limits can reject otherwise valid media counts.
+Ordinary Swift H3 retains a 32-pixel grid, at most 1376×768 total pixels and 40,000 packed rows.
+Explicit spatial-v2 refinement has separate bounds: longest edge 1920, shortest 1088, total
+pixels 1920 × 1088, at most 64,000 complete packed rows and a 32 GiB estimated stage budget.
+A learned 1920 × 1088, 73-frame target completed and sampled stills were coherent; full motion/audio,
+user approval, clean performance and maximum-duration/max-canvas combinations remain unqualified.
+The learned upscaler is separate from spatial interpolation. Native VDN and FastH3 remain unavailable through this Swift route.
+Retained transformer caches/forecasting and arbitrary Python optimizer settings are not
+implicitly selected by these controls.
+Timed audio-only Ref2VA is distinct from A2V; H3 generates a new soundtrack in either case.
+**Full latent refinement · experimental** uses accepted complete-latent artifacts, not a movie
+as a latent substitute. It rejects saved-tail continuation, Fun and Motion Fidelity mixtures.
+**Motion repair · experimental** uses its own source and controls; the older **Motion Fidelity**
+enhancement workflow documented below remains a separate legacy Python-hosted route.
+
+Native clip/movie export freezes creative source files and required latent/context payloads,
+including replacement soundtracks and movie source intervals. Changed dependencies reject before
+worker execution and cannot be accepted from resume state. Headless cut-only finishing restrictions
+still apply. The recipe-backed ComfyUI node delegates feature admission to the same worker; it
+requires an available FFmpeg bound into movie requests; an explicit node path may be supplied. Composable nodes remain separate engines.
+No new route is quality-qualified merely because its recipe exports or its header is admitted.
+
 ## Start here
 
 Source builds include Swift MLX H3 and LTX 2.5 workers, selected by default for supported
@@ -18,7 +83,7 @@ supports native distilled 8 + 3 step T2V, first-image, first/last-frame and
 single-audio-driver A2V rendering with an optional first-frame image and compatible
 standard LoRAs, including LTX 2.3 adapters. Continuous scenes of
 two to six shots with identical effective components and sampling settings also use Swift.
-Any scene shot may use one first-frame image. One consecutive interval of the same
+Legacy scene recipes admit one first-frame image per shot; experimental version-2 scene recipes also retain interior/last anchors as described below. One consecutive interval of the same
 audio source can drive every shot, including shots with an image. Studio renders the
 group as one movie and accepts all member ranges together. Experimental native setup profiles
 now expose MSR, Ingredients and Union Control through Swift. Experimental Swift
@@ -164,8 +229,7 @@ weighted continuation now retains the robot/table without the old gray-border co
 It completed in 155.57 worker seconds at an 8.142 GB physical peak, excluding FFmpeg;
 texture changes at the join and audio remain separate quality checks.
 Studio's **Match previous frame** now freezes the accepted source's last visible frame
-for Swift H3. **Save motion context** and **Continue scene** use native version-2
-context for text-only H3 clips. Installed-app frame and motion jobs passed live previews,
+for Swift H3. **Save motion context** and **Continue scene** now use task-bound T2VA v2, FL2VA v3 or Ref2VA/A2V v4 request contracts with a native context artifact. The earlier text-only v2 installed-app frame and motion jobs passed live previews,
 acceptance, saving and reopening with Python unavailable. The motion output matched its
 headless and saved ComfyUI graph byte for byte. This proves route/lifecycle parity for
 one recipe; joins remain visible. With Swift H3 enabled, **Extend → After** now prepares an
@@ -183,9 +247,9 @@ settings, then requires worker preflight before a take can render. **Use Swift M
 up to nine still images, three movies and three audio-bearing references. A movie
 contributes its first 7.3 seconds, resampled to 24 fps and trimmed to the VAE clip grid;
 an embedded soundtrack from that interval contributes sound-reference latents.
-Standalone audio used as an ordinary Ref2VA reference requires a visual reference. The
+Standalone audio used as an ordinary Ref2VA reference requires a visual reference or explicit temporal placement. The
 separate **Audio to video** task accepts one 2.5–15-second driver interval covering the
-clip and optionally one opening image. It generates a new soundtrack and motion from the
+clip and optionally up to eight timed images. It generates a new soundtrack and motion from the
 source; it does not copy the original audio into the finished movie.
 The H3 audio encoder has a short numerical parity test, but full audio/soundtrack output quality,
 adapter stacks and production quality remain unqualified.
@@ -260,7 +324,7 @@ rendered a real nine-image, 768 × 448, five-second Beowulf boxing clip. It took
 peaked at 6.06 GB Swift process footprint, and retained a recognizable subject in the reviewed
 frames. The one-image run took 750.71 seconds at 5.73 GB under a different workload, so this
 pair does not establish an isolated scaling benchmark.
-Swift H3 preparation accepts up to four compatible LoRAs in a stack. One installed
+Swift H3 preparation accepts up to eight compatible LoRAs, including profile adapters, in an ordered stack. One installed
 FL2VA test combined the full-rank and resized Lightx four-step adapters at strength
 0.5 each. The signed worker passed preflight and generated a 73-frame, 768 × 448
 audiovisual robot clip in 403.78 seconds, with a 4.10 GB peak Swift-process footprint
@@ -278,8 +342,8 @@ the selected worker checks that during preparation.
 To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import up to nine
 images, three movies and three audio files into the clip asset store, then choose
 **Use in clip → Appearance** for images/movies and **Audio · reference sound / voice** for
-audio. Movie references use only their first 7.3 seconds and include any soundtrack in that interval;
-audio references use at most 15 seconds and need an image or movie alongside them.
+audio. Without explicit movie preparation overrides, movie references use their first 7.3 seconds and include any soundtrack in that interval;
+audio references use at most 15 seconds and need an image/movie alongside them or explicit temporal placement.
 Write a complete H3 prompt, select the installed compatible Ref2VA profile, and use
 **Prepare clip** to inspect the exact settings and run preflight before generating.
 
@@ -793,16 +857,46 @@ hardlinked on the same volume or linked across volumes; keep the original files 
 Cancellation preserves partial downloads without publishing an incomplete package. Progress
 and **Cancel** appear in the setup window. The native path uses a Studio Keychain token or
 `HF_TOKEN`; it never writes the token into download state, provenance or logs.
-The merged native catalog has 19 pinned packages supplying mandatory component fields for ordinary H3/LTX profiles,
-including direct H3 transformer/support, Qwen, video VAE, folded audio VAE and tokenizer, plus
+The merged native catalog has 23 pinned packages, including the duration head, raw Dev transformer, distilled refinement adapter and one-step Diffusion VAE.
+It also includes direct H3 transformer/support, Qwen, video VAE, folded audio VAE and tokenizer, plus
 supported task adapters. This field coverage does not establish every checkpoint/task combination;
 source terms, gating and structural admission still apply to every file. H3 image/endpoint tasks
 use the verified 64-curve BF16 FL2VA package; the full-width Singularity package serves its
 supported text/reference/Fun Control tasks and is rejected for native image/endpoint generation.
-The older Python paged-transformer/support packs and source conversion remain separate. The
+Validated native paged Q8 layouts can be linked in place; the older download packs retain their own preparation/provenance requirements. Gemma and other source conversions remain separate. The
 folded audio VAE retains its source license, notices and conversion modifications. Installed-file
 checks verify exact hashes, shared-file reuse and package discovery; they do not establish a
 complete clean-machine download/install of all weights or universal adapter compatibility.
+
+For native Dev setup, link the official raw BF16 Dev transformer under its component field,
+then choose **Prepare Q8 Pages…** and select a new destination directory.
+Swift preflight captures the source identity; conversion streams one bounded block at a time,
+retains original metadata and writes completed pages atomically. It never overwrites existing
+pages or changes the source. Setup adopts the result only after manifest verification and only
+when the captured preset/source selection still matches. Cancellation leaves the source selected;
+retry with a fresh directory. The actual installed Dev conversion completed in 170.4 seconds and
+Studio adoption tests passed. That does not establish full clean-library acquisition/reuse of
+every native package or bit identity to the original BF16 model: affine Q8 is quantized.
+A final-app clean-registry check completed in 8.177 seconds with Python/runtime unavailable:
+it validated all 23 catalog contracts and eight setup/header cases, adopted the completed Dev
+directory and imported Turbo. The eighth case adopted Diffusion VAE into a complete LTX profile
+while preserving its four other component paths. Weights remained in place; there was no network,
+inference or conversion rerun. This proves isolated reuse/setup, not a fresh download/install of
+every checkpoint.
+
+For native LTX Diffusion VAE, select the compatible official one-step checkpoint and enable
+**One-step Diffusion VAE · experimental** in advanced generation controls. Its execution layout,
+query chunk size, context width and stage-four tile controls are explicit; they do not affect the
+convolutional VAE. Studio preparation, exported native jobs and saved-recipe Swift Comfy execution
+preserve the selected component and settings. Unsupported backend/checkpoint combinations fail
+admission without fallback. The legacy composable Diffusion VAE Optimization node remains part
+of its separate maintained Python engine.
+
+Default and experimental query-tiled Metal tiny decoder checks passed the same declared numerical
+limits, with 24 parameter releases and zero retained parameter bytes. They did not match BF16/RGB
+bytes exactly. A retained 1344 × 768, 89-frame latent decoded through the production Swift Metal
+mode with exact source PCM and coherent sampled frames. That decoder-only result does not qualify
+the full sampler, full-size Python/Conv pixel parity, full audiovisual quality or whole-job speed.
 
 For the optional Python H3 setup, choose four downloads in the same library: the **text/image or reference Q8 transformer**,
 its matching **support files**, the **Q8 vision encoder**, and the **Q8 video VAE**. The support files
@@ -1013,7 +1107,10 @@ contract/numerical tests and real-model visual acceptance are separate checks.
 Ordinary LoRAs, DFR and audio drivers cannot be combined with these single-adapter profiles.
 Ingredients setup admits compatible 2.5 full-resolution rank-128 sheet adapters after complete
 header/shape checks and starts them at strength 1.0; legacy 2.3 starts at 1.2. The pinned official
-2.5 download is gated, and actual header qualification with the available access remains pending.
+2.5 download is gated; an authenticated header request returned 403, so that new variant remains
+unqualified. The current authored 2.5 example uses the supported 2.3 Ingredients adapter at 1.3
+with distilled eight-step CFG++; denied access to the new variant is not a diagnosed cause of
+the retained 2.3 collage failure.
 The current MSR V1 contract has 480 video pairs and five visual-slot tensors. The actual MSR V2
 header has 1,152 pairs, extra audio/video-to-audio targets and five audio-slot tensors; V2's
 sparse-speaker/reference-audio contracts are not implemented and its files are explicitly rejected.
@@ -1285,7 +1382,7 @@ Use **New group**, or **Save current stack as group**, name it, and set each mem
 Groups can be edited or deleted. **Add to current stack** preserves existing LoRAs and rejects
 duplicates atomically; **Replace current stack** explicitly replaces them. Draw Things image and
 video group actions use the same Add/Replace choices. Each entry has an enable toggle, a slider,
-and an exact numeric strength field from 0 to 2. Disabling retains the strength and saved assignment;
+and an exact numeric strength field. H3 native adapter controls accept signed −10 to 10 strengths; other library/remote controls retain their 0–2 ranges. Disabling retains the strength and saved assignment;
 disabled entries are excluded from generation, including missing files or unavailable server LoRAs.
 Remove individual entries or an entire applied group from the inspector. Duplicate file application
 is rejected, including overlap between an individual entry and a group.
@@ -1315,7 +1412,7 @@ small synthetic header fixtures; these checks do not qualify LoRA visual quality
 With Swift H3 enabled, use the dedicated Fun ControlNet setup preset and attach one preprocessed
 Canny, depth, HED, MLSD or pose movie as Control. The route uses the supported T2VA branch and
 shared native video VAE/sampler and freezes the guide and checksum. It requires the supported
-dense full-width T2VA checkpoint, no LoRAs or motion context, strength from 0 to 1, each output
+dense full-width T2VA checkpoint, compatible immediate standard base-stream LoRAs and no motion context, strength from 0 to 1, each output
 side at most 2,048 and total canvas pixels at most 768 × 1,376. The separate packed-row
 admission still bounds duration and references; this is the current Swift limit, not a limit
 of the H3 model. Task controls are validated. A direct 384 × 256, 73-frame test at 24 fps completed in 663.45 seconds with 32 kHz
@@ -1342,7 +1439,7 @@ whole-generation speed or memory result; the full render above predates it.
 
 **Adapter file details** exposes layout and the optional linked AdaLN input grid. Adapters with
 AdaLN targets need that grid; the validator reports missing or incompatible auxiliary data before
-weighted work. The experimental Swift H3 route accepts up to four distinct ordered compatible
+weighted work. The experimental Swift H3 route accepts up to eight distinct ordered compatible
 ComfyUI-format adapters with independent strengths, including sparse projection sets and variable
 ranks. Installed converted Lightx FL2V four-step adapters with baked scaling pass
 header and projection checks. The full-rank adapter completed one signed-app audiovisual
@@ -1378,9 +1475,13 @@ must match the generated endpoint within half a frame; Prepare suggests compatib
 The target must use matching model components, dimensions, sampling and LoRA settings.
 
 With **Use Swift MLX for H3** enabled, frame matching uses native AVFoundation extraction
-and preserves the original editor attachments. Motion context currently requires text-only
-H3 generation and matching settings; image/reference/A2V context saving is rejected.
-Swift v2 `latents.f32` artifacts are distinct from Python v1 `latents.safetensors` artifacts.
+and preserves the original editor attachments. Native motion context is task-bound: T2VA v2,
+timed-image FL2VA v3 or Ref2VA/A2V v4 requests require matching component, conditioning,
+sampling and LoRA identities. New non-text paths have CPU/source qualification; their
+weighted continuation quality remains separate from the earlier text-only execution.
+Native `latents.f32` artifacts are distinct from Python v1 `latents.safetensors` artifacts.
+The explicit Python-v1 text/FL importer verifies source/model identities and complete payloads
+before publishing a native context; it does not make arbitrary old contexts interchangeable.
 Saving keeps the complete terminal 17-frame grid and makes the accepted clip use that
 aligned duration, shown in preparation. Trimming its ending invalidates motion continuation.
 The worker fully verifies manifest/payload hashes before loading weights.
@@ -1528,8 +1629,9 @@ Draw Things retains its existing conditioning and generation controls.
 The shared headless renderer can save and reload a bounded synchronized video/audio latent tail.
 Studio's motion continuity controls use this same opt-in contract. It remains available directly
 to headless clients; the app does not maintain a second sampler. The JSON and file-content
-identity rules below describe the Python version-1 path. Swift uses `"version": 2`,
-checks component metadata identity and stores `latents.f32`; artifacts cannot cross engines.
+identity rules below describe the Python version-1 path. Swift uses task-bound request
+versions 2/3/4 and stores `latents.f32`; component and conditioning identities must match.
+Python context needs the explicit validated text/FL import bridge; it cannot be loaded directly.
 The Swift text-only path keeps terminal alignment when saving, rather than rejecting the
 aligned editorial-duration expansion. See [Clip continuity](#clip-continuity-in-studio).
 

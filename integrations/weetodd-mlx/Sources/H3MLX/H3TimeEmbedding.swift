@@ -42,7 +42,8 @@ public enum H3TimeEmbedding {
     }
     try Task.checkCancellation()
     let layout = try H3CheckpointLayout(url: checkpointURL)
-    let file = try SafeTensorFile(url: checkpointURL)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let file = try SafeTensorFile(url: tensorURL)
     if layout.curveRank == 64 {
       let table = try file.readFloat32(named: "adaln_t_table")
       let values = try interpolateCurve(table: table,
@@ -50,7 +51,8 @@ public enum H3TimeEmbedding {
       let result = MLXArray(values, [timesteps.shape[0], 64])
       eval(result)
       try observe("curve", result)
-      try file.checkUnchanged(at: checkpointURL)
+      try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
       return result
     }
     defer {
@@ -92,7 +94,8 @@ public enum H3TimeEmbedding {
     let output = addMM(secondBias, activated, secondWeight.T)
     try observe("output", output)
     eval(output)
-    try file.checkUnchanged(at: checkpointURL)
+    try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
     try Task.checkCancellation()
     return output
   }

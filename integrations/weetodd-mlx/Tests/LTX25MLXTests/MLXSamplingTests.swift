@@ -70,6 +70,77 @@ final class MLXSamplingTests:XCTestCase {
     for row in [1,3] { XCTAssertEqual(actual["video"]![row].asArray(Float.self),clean[row].asArray(Float.self)) }
   }
 
+  func testSelectedCFGPPPassesMatchIndependentMaskedBF16TrajectoryAndNeverEvaluateTerminalNegative() throws {
+    let f=try fixture(),oracle=try MLXDenoiser(configuration:f.configuration,blockCount:1)
+    let initial=Dictionary(uniqueKeysWithValues:f.inputs.map { ($0.key,MLXArray($0.value,oracle.inputShapes[$0.key]!)) })
+    let negative=initial.filter { $0.key.hasSuffix("_text") }.mapValues { $0+0.17 }
+    let sigmas:[Double]=[1,0.725,0.421875,0],schedule=try SamplingSchedule(sigmas:sigmas,eta:1)
+    let mask:[Float]=[1,0,0.5,0,1],maskArray=MLXArray(mask,[5,1]),clean=initial["video_latent"]!
+    let condition=try MLXVideoDenoiseCondition(clean:clean,mask:mask)
+    let blocks:MLXDenoiser.BlockProvider={ try self.weight("transformer_blocks.\($0)."+$1,$2) }
+    func noise(_ index:Int,_ name:String,_ shape:[Int]) -> MLXArray {
+      MLXArray((0..<shape.reduce(1,*)).map { Float(($0*7+index*13+(name == "audio" ? 3 : 0))%19-9)/10 },shape)
+    }
+    for selected:Set<Int> in [[0,1],[0],[]] {
+      var expected=initial.mapValues { $0.reshaped($0.shape) }
+      for name in ["video","audio"] { expected[name+"_latent"]=expected[name+"_latent"]!.asType(.bfloat16).asType(.float32) }
+      for index in schedule.steps.indices {
+        let from=Float(sigmas[index]),to=Float(sigmas[index+1])
+        let preparation=try oracle.prepare(expected,sigmas:[from],videoDenoiseMask:mask,
+          weights:weight,adapters:{ _ in [] },progress:{ _ in })
+        let positive=try oracle.evaluatePrepared(expected,sigma:from,preparation:preparation,fixedWeights:weight,
+          blockWeights:blocks,fixedAdapters:{ _ in [] },blockAdapters:{ _ in [:] },progress:{ _ in })
+        var unconditional:[String:MLXArray]?=nil
+        if selected.contains(index) {
+          var input=expected;input.merge(negative) { _,new in new }
+          unconditional=try oracle.evaluatePrepared(input,sigma:from,preparation:preparation,fixedWeights:weight,
+            blockWeights:blocks,fixedAdapters:{ _ in [] },blockAdapters:{ _ in [:] },progress:{ _ in })
+        }
+        for name in ["video","audio"] {
+          let key=name+"_latent",state=expected[key]!
+          let sigma:MLXArray=name == "video" ? maskArray*from : MLXArray(DenoiserMath.bfloat16(from))
+          var c=(state-sigma*positive[name]!).asType(.bfloat16).asType(.float32)
+          if name == "video" { c=c*maskArray+clean*(1-maskArray) }
+          var next:MLXArray
+          if to == 0 { next=c }
+          else if let unconditional {
+            var u=(state-sigma*unconditional[name]!).asType(.bfloat16).asType(.float32)
+            if name == "video" { u=u*maskArray+clean*(1-maskArray) }
+            let alphaS=Double(1-from),alphaT=Double(1-to),snrFrom=alphaS == 0 ? Double.infinity : Double(from)/alphaS
+            let snrTo=Double(to)/alphaT,up=snrTo*sqrt(max(0,1-pow(snrTo/snrFrom,2)))
+            let down=alphaT*sqrt(max(0,snrTo*snrTo-up*up))
+            next=c*Float(alphaT)+(state-u*Float(alphaS))*Float(down/Double(from))+noise(index,name,state.shape)*Float(alphaT*up)
+            if name == "video" { next=next*maskArray+clean*(1-maskArray) }
+          } else {
+            let down=Double(to)*(Double(to)/Double(from)),ratio=down/Double(from)
+            let alphaT=1-Double(to),alphaDown=1-down
+            let up=sqrt(max(0,Double(to)*Double(to)-down*down*alphaT*alphaT/(alphaDown*alphaDown)))
+            next=(state*Float(ratio)+c*Float(1-ratio))*Float(alphaT/alphaDown)+noise(index,name,state.shape)*Float(up)
+            next=next.asType(.bfloat16).asType(.float32)
+            if name == "video" { next=next*maskArray+clean*(1-maskArray) }
+          }
+          expected[key]=next.asType(.bfloat16).asType(.float32);eval(expected[key]!)
+        }
+      }
+      let runner=try MLXSamplingRunner(configuration:f.configuration,blockCount:1)
+      var forwards:[Int]=[]
+      let actual=try runner.evaluate(initial,schedule:schedule,videoConditioning:condition,bfloat16State:["video","audio"],
+        unconditionalContexts:negative,cfgppStepIndices:selected,fixedWeights:weight,blockWeights:blocks,
+        noise:noise,stageProgress:{ index,event in if event.stage == "transformer" { forwards.append(index) } })
+      XCTAssertEqual(forwards,Array(1...(3+selected.count)))
+      for name in ["video","audio"] {
+        XCTAssertLessThan(zip(actual[name]!.asArray(Float.self),expected[name+"_latent"]!.asArray(Float.self)).map { abs($0-$1) }.max()!,0.003)
+      }
+      for row in [1,3] { XCTAssertEqual(actual["video"]![row].asArray(Float.self),clean[row].asArray(Float.self)) }
+      XCTAssertEqual(runner.residentWeightBytes,0)
+    }
+    let runner=try MLXSamplingRunner(configuration:f.configuration,blockCount:1)
+    var reads=0
+    XCTAssertThrowsError(try runner.evaluate(initial,schedule:schedule,unconditionalContexts:negative,cfgppStepIndices:[2],
+      fixedWeights:{ name,shape in reads += 1;return try self.weight(name,shape) },blockWeights:blocks,noise:noise))
+    XCTAssertEqual(reads,0)
+  }
+
   func testCFGPPRejectsInvalidContextsBeforeWeightsAndUnconditionalFailureAllowsRetry() throws {
     enum Stop:Error { case stop }
     let f=try fixture(),runner=try MLXSamplingRunner(configuration:f.configuration,blockCount:1)

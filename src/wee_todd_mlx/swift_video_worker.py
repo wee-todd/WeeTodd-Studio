@@ -7,6 +7,7 @@ import json
 import math
 import os
 import select
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -67,6 +68,7 @@ def run_swift_video_worker(
     recipe: Path,
     output: Path,
     mode: str,
+    ffmpeg: Path | None = None,
     on_progress: Callable[[dict], None] = lambda _: None,
     check_interrupted: Callable[[], None] = lambda: None,
 ) -> dict:
@@ -97,6 +99,20 @@ def run_swift_video_worker(
         "recipeSHA256": hashlib.sha256(data).hexdigest(),
         "outputDirectory": str(output),
     }
+    movie = engine == "ltx25" and "movie_upscale" in document
+    configured_ffmpeg = ffmpeg or document.get("ffmpeg")
+    if movie and not configured_ffmpeg:
+        configured_ffmpeg = shutil.which("ffmpeg")
+    if configured_ffmpeg:
+        raw_ffmpeg = str(configured_ffmpeg)
+        if "\0" in raw_ffmpeg or any(ord(value) < 32 for value in raw_ffmpeg):
+            raise ValueError("FFmpeg must be a local executable path")
+        executable = Path(raw_ffmpeg).expanduser().resolve()
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise FileNotFoundError("Select an executable FFmpeg for the native job")
+        envelope["ffmpegPath"] = str(executable)
+    elif movie:
+        raise FileNotFoundError("Source movie upscaling requires executable FFmpeg")
     with tempfile.TemporaryDirectory(prefix="weetodd-swift-worker-", dir=output.parent) as scratch:
         request = Path(scratch) / "request.json"
         request.write_text(json.dumps(envelope, separators=(",", ":")))

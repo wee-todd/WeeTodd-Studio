@@ -1,3 +1,4 @@
+import Foundation
 import LTX25Engine
 
 public enum MLXSceneDecodeMode: Sendable {
@@ -25,6 +26,21 @@ public struct MLXSceneDecodeWindowPlan: Sendable {
   public let admittedActivationBytes: Int
   public let overlapFrames: Int
 
+  public init(geometry:AVGeometry,checkpoint:URL,settings:MLXDiffusionVideoSettings?,
+    plan:LTX25ScenePlan,strictBoundaries:Set<Int>,maximumActivationBytes:Int,
+    maximumWindowFrames:Int?=nil) throws {
+    let selected=try MLXVideoDecoderSelection(checkpoint:checkpoint,settings:settings)
+    if !selected.isDiffusion {
+      self=try Self(geometry:geometry,maximumActivationBytes:maximumActivationBytes,maximumWindowFrames:maximumWindowFrames)
+      return
+    }
+    guard maximumWindowFrames == nil else {
+      throw LTXError.invalid("DiffVAE uses internal context/query/width tiling; convolutional temporal decode window controls are unsupported.")
+    }
+    admittedActivationBytes=try MLXDiffusionScenePublication.admit(geometry:geometry,plan:plan,
+      strictBoundaries:strictBoundaries,checkpoint:checkpoint,settings:settings,maximumWorkspaceBytes:maximumActivationBytes)
+    latentRanges=[0..<geometry.latentFrames];overlapFrames=0
+  }
   public init(geometry: AVGeometry, maximumActivationBytes: Int,
     maximumWindowFrames: Int? = nil) throws {
     guard maximumActivationBytes > 0,

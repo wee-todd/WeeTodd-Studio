@@ -107,7 +107,9 @@ final class ModelSetupTests: XCTestCase {
       "swift-h3-reference", "swift-h3-fun-control", "swift-ltx25-text", "swift-ltx25-image",
       "swift-ltx25-dfr-spatial", "swift-ltx25-dfr-temporal-1", "swift-ltx25-dfr-temporal-2",
       "swift-ltx25-msr", "swift-ltx25-ingredients", "swift-ltx25-union",
-      "swift-ltx25-motion-track", "swift-ltx25-crossview", "swift-ltx25-crossview-ingredients"]))
+      "swift-ltx25-motion-track", "swift-ltx25-crossview", "swift-ltx25-crossview-ingredients",
+      "swift-ltx25-guided", "swift-ltx25-guided_hq", "swift-ltx25-auto-duration",
+      "swift-ltx25-auto-duration-guided", "swift-ltx25-auto-duration-guided_hq"]))
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }

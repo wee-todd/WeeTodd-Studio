@@ -20,6 +20,7 @@ public enum H3ReferenceSampler {
     videoSchedule: H3Schedule, audioSchedule: H3Schedule,
     rowSchedule: H3ReferenceRowSchedule,
     videoLatents: MLXArray, audioLatents: MLXArray,
+    samplingMethod: H3SamplingMethod = .euler,
     progress: (Int, Int) -> Void = { _, _ in },
     blockProgress: (Int, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
     let layout = predictor.layout
@@ -39,6 +40,8 @@ public enum H3ReferenceSampler {
         && $0.allSatisfy({ (0..<rowSchedule.table.count).contains(Int($0)) }) }) else {
       throw H3CheckpointError.invalid("Invalid Ref2VA synchronized sampling inputs.")
     }
+    var videoStepper = H3SamplingStepper(schedule: videoSchedule, method: samplingMethod)
+    var audioStepper = H3SamplingStepper(schedule: audioSchedule, method: samplingMethod)
     var video = videoLatents
     var audio = audioLatents
     for index in 0..<steps {
@@ -55,11 +58,11 @@ public enum H3ReferenceSampler {
         velocity.audio.dtype.isFloatingPoint else {
         throw H3CheckpointError.invalid("Ref2VA predictor returned mismatched AV velocity rows.")
       }
-      let advancedVideo = try videoSchedule.advance(
+      let advancedVideo = try videoStepper.advance(
         sample: video[0..<1, conditionVideo..<videoRows, 0..<96],
         velocity: velocity.video[0..<1, conditionVideo..<videoRows, 0..<96]
           .asType(.float32), index: index)
-      let advancedAudio = try audioSchedule.advance(
+      let advancedAudio = try audioStepper.advance(
         sample: audio[0..<1, conditionAudio..<audioRows, 0..<32],
         velocity: velocity.audio[0..<1, conditionAudio..<audioRows, 0..<32]
           .asType(.float32), index: index)

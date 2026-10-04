@@ -2,6 +2,39 @@ import XCTest
 @testable import StudioCore
 
 final class GenerationSelectionTests: XCTestCase {
+  func testMovieUpscaleSelectionPreservesOldBytesAndRoundTripsExplicitSettings() throws {
+    var old=try JSONDecoder().decode(GenerationSelection.self,from:Data(#"{"task":"t2v","preset":"balanced"}"#.utf8))
+    XCTAssertNil(old.ltx25MovieUpscale)
+    XCTAssertEqual(Set((try JSONSerialization.jsonObject(with:JSONEncoder().encode(old)) as! [String:Any]).keys),["task","preset"])
+    old.task="video_upscale";old.ltx25MovieUpscale=LTX25MovieUpscaleSettings()
+    old.ltx25MovieUpscale?.experimentalEnabled=true;old.ltx25MovieUpscale?.chunking=true
+    old.ltx25MovieUpscale?.resume=true;old.ltx25MovieUpscale?.audioPolicy = .silence
+    XCTAssertTrue(old.isModified)
+    XCTAssertEqual(try JSONDecoder().decode(GenerationSelection.self,from:JSONEncoder().encode(old)),old)
+    XCTAssertEqual(GenerationSelection.taskLabel(old.task),"Source movie 2× upscale")
+    old.resetOverrides();XCTAssertNil(old.ltx25MovieUpscale);XCTAssertFalse(old.isModified)
+  }
+  func testExperimentalSamplingSettingsRoundTripAndResetWithoutChangingOldDocuments() throws {
+    let legacy = Data(#"{"task":"t2v","preset":"balanced"}"#.utf8)
+    var selection = try JSONDecoder().decode(GenerationSelection.self, from: legacy)
+    XCTAssertNil(selection.h3SamplingMethod)
+    XCTAssertNil(selection.ltx25Guidance)
+    XCTAssertNil(selection.ltx25AutomaticDuration)
+    let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(selection)) as! [String: Any]
+    XCTAssertEqual(Set(encoded.keys), ["task", "preset"])
+    selection.h3SamplingMethod = .resMultistep
+    selection.ltx25Guidance = LTX25GuidanceSettings(mode: .guidedHQ, experimentalEnabled: true)
+    selection.ltx25Guidance?.sigmas = [0.8, 0.4, 0]
+    selection.ltx25AutomaticDuration = LTX25AutomaticDurationSettings(experimentalEnabled:true,minimumSeconds:0.25,maximumSeconds:30)
+    XCTAssertTrue(selection.isModified)
+    XCTAssertEqual(try JSONDecoder().decode(GenerationSelection.self, from: JSONEncoder().encode(selection)), selection)
+    selection.resetOverrides()
+    XCTAssertFalse(selection.isModified)
+    XCTAssertNil(selection.h3SamplingMethod)
+    XCTAssertNil(selection.ltx25Guidance)
+    XCTAssertNil(selection.ltx25AutomaticDuration)
+  }
+
   func testNativeCoreSelectionPreservesOldDocumentsAndRoundTrips() throws {
     let legacy = Data(#"{"task":"ref2va","preset":"custom"}"#.utf8)
     var selection = try JSONDecoder().decode(GenerationSelection.self, from: legacy)

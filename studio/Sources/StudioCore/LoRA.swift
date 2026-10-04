@@ -23,11 +23,13 @@ public struct LoRAMember: Codable, Identifiable, Equatable {
   public var asset: MediaAsset
   public var strength: Double
   public var enabled: Bool?
+  public var h3Settings:H3LoRASettings?
   public var isEnabled: Bool { enabled ?? true }
-  public init(asset: MediaAsset, strength: Double = 1, enabled: Bool? = nil) {
+  public init(asset: MediaAsset, strength: Double = 1, enabled: Bool? = nil, h3Settings:H3LoRASettings?=nil) {
     self.asset = asset
     self.strength = strength
     self.enabled = enabled
+    self.h3Settings = h3Settings
   }
   public var fileKey: String {
     URL(fileURLWithPath: asset.path).standardizedFileURL.resolvingSymlinksInPath().path
@@ -43,8 +45,14 @@ public struct LoRAMember: Codable, Identifiable, Equatable {
     else {
       throw StudioError.invalid("Link a SafeTensors LoRA file for \(asset.name).")
     }
-    guard strength.isFinite, (0...2).contains(strength) else {
-      throw StudioError.invalid("LoRA strength must be a finite number from 0 to 2.")
+    let range:ClosedRange<Double> = engine == .h3 ? -10...10 : 0...2
+    guard strength.isFinite, range.contains(strength) else {
+      throw StudioError.invalid(engine == .h3 ? "H3 LoRA strength must be finite from −10 to 10." : "LoRA strength must be a finite number from 0 to 2.")
+    }
+    if let settings=h3Settings {
+      guard engine == .h3,(0...99).contains(settings.startAfterEvaluations) else {
+        throw StudioError.invalid("H3 adapter settings require an H3 group and an activation from 0 to 99.")
+      }
     }
   }
 }
@@ -106,6 +114,7 @@ extension StudioProject {
       var attachment = Attachment(assetID: asset.id, role: .lora)
       attachment.strength = member.strength
       attachment.enabled = member.enabled
+      attachment.h3LoRA = member.h3Settings
       attachment.loraGroupName = groupName
       attachment.loraGroupID = applicationID
       clips[index].attachments.append(attachment)
@@ -123,7 +132,7 @@ extension StudioProject {
       guard let asset = sources.first(where: { $0.id == attachment.assetID }) else {
         throw StudioError.invalid("Relink the missing LoRA before saving this stack.")
       }
-      return LoRAMember(asset: asset, strength: attachment.strength, enabled: attachment.enabled)
+      return LoRAMember(asset: asset, strength: attachment.strength, enabled: attachment.enabled, h3Settings:attachment.h3LoRA)
     }
     let group = LoRAGroup(name: name, engine: clip.engine, members: members)
     try group.validate()

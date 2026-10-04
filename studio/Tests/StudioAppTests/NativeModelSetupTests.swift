@@ -10,7 +10,7 @@ final class NativeModelSetupTests: XCTestCase {
     }
     let bundle = URL(fileURLWithPath: app)
     let catalog = bundle.appendingPathComponent("Contents/Resources/RendererSource/src/wee_todd_mlx/model_download_catalog.json")
-    XCTAssertEqual(try NativeModelDownloads.catalog(at:catalog).count,19)
+    XCTAssertEqual(try NativeModelDownloads.catalog(at:catalog).count,23)
     let worker = bundle.appendingPathComponent("Contents/MacOS/WeeToddH3MLXWorker")
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

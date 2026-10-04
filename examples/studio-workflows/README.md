@@ -92,6 +92,44 @@ require separate review.
 Matched useful-size speed/memory and broad identity, seam and audio quality remain open.
 These checks do not qualify all native tasks. See [execution, supported finishing and qualification](../../studio/README.md#headless-movie-and-clip-jobs).
 
+## Current experimental native recipe boundary
+
+Planning definitions retain their operation versions and approval gates; new native render
+contracts do not make the planning runner generate media. Native exported jobs freeze the
+selected Dev/automatic-duration/keyframe, scene, single-stage, movie and H3 creative settings
+through the same compiler and worker used by Studio. Frozen manifests include replacement
+soundtracks, full-latent artifacts and continuation payloads; changing those inputs invalidates
+execution/resume admission. Cut-only native finishing restrictions remain in force.
+
+Ordinary LTX accepts up to eight timed images and 0–8 generated slots, with slots in stage one
+only. One HQ + predicted-duration + timed/generated combination completed real inference.
+Scene v2 has a separate 32-anchor/256 MiB reference budget and rejects guided/automatic-duration,
+generated-slot, single-stage, DFR and specialized-control mixtures. New scene, generic
+single-stage and movie-upscale headers pass. Representative ordinary balanced CFG++, scene-v2
+with five anchors/source PCM and learned 2× movie refinement completed functional inference;
+CPU-only guide compositions are not thereby rendered. Eight H3 integrated creative packets also
+completed, and learned spatial-v2 completed a 1920 × 1088/73-frame target with exact source PCM and
+coherent sampled stills. This does not establish broad quality, clean performance, full AV review or
+every new host lifecycle. See [current controls and restrictions](../../studio/README.md#current-swift-controls-and-qualification).
+
+Shipped ComfyUI UI/API definitions remain portable templates for their documented composable
+engines. The recipe-backed Swift node is a separate host: unchanged recipes go through native
+preflight, and movie requests require an available FFmpeg bound in the job envelope; an explicit node
+path may be supplied. Contract validation, empty media selectors
+and correct sockets do not establish installed weights, completed inference or creative quality.
+A final-app isolated setup/reuse check passed all 23 catalog contracts and eight setup/header
+cases without Python, network, inference, conversion reruns or weight copies. It does not certify
+fresh acquisition of every checkpoint. A real native Movie exported job matched its retained
+direct take in all three media files, then resumed with zero new generations and reopened through
+StudioStore.load without invoking a worker. The learned H3 latent upscaler/full
+2 MP path now has a bounded functional result under explicit spatial-v2 admission; ordinary
+1 MP/40,000-row limits remain separate. Native LTX Diffusion VAE passed scoped CPU/numerical and actual retained 89-frame decoder
+qualification; the default Conv decoder is unchanged. Legacy typed composable Comfy generation
+uses its Python pipeline; saved-recipe Swift execution can carry native DiffVAE controls. MSR V2 architectural conditioning remains unsupported; authenticated
+403 limits only the new official 2.5 Ingredients variant, while supported 2.3 output remains
+scene-quality rejected without a proven engine cause. The historical 31-check route ledger and
+the remaining feature inventory retain separate scopes.
+
 ## Try the examples
 
 Use the project's configured Python environment, with project dependencies installed:

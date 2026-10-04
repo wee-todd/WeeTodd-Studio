@@ -20,15 +20,41 @@ public struct MLXDistilledRequest:Codable,Sendable {
   public let dfr:MLXDFRRequest?
   public let icControl:MLXICControl?
   public let ingredientsSampling:MLXIngredientsSampling
+  public let guidedSampling:MLXGuidedSampling?
+  public let automaticDuration:MLXAutomaticDurationPolicy?
+  public let singleStageSampling:MLXSingleStageSampling?
+  public let diffusionVAE:MLXDiffusionVideoSettings?
+  public let generatedKeyframes:Int?
+  public var usesOrdinaryKeyframes:Bool { version == 14 || version == 15 }
+  public var referenceFrames:[Int] {
+    referenceImages.map { $0.role == "first" ? 0 : $0.role == "last" ? frames-1 : $0.frameIndex! }
+  }
+  public func ordinaryKeyframeLayout(geometry:AVGeometry,stage:Int) throws -> MLXOrdinaryKeyframeLayout? {
+    guard usesOrdinaryKeyframes else { return nil }
+    guard stage == 0 || stage == 1 else { throw LTXError.invalid("Invalid ordinary keyframe stage.") }
+    return try MLXOrdinaryKeyframeLayout(geometry:geometry,
+      anchors:zip(referenceFrames,referenceImages).map { .init(frame:$0.0,strength:$0.1.strength) },
+      generatedCount:stage == 0 ? generatedKeyframes ?? 0 : 0)
+  }
+  public func singleStageControlLayout() throws -> MLXSingleStageControlLayout? {
+    guard singleStageSampling != nil else { return nil }
+    return try MLXSingleStageControlLayout(geometry:recipe().high,
+      anchors:zip(referenceFrames,referenceImages).map { .init(frame:$0.0,strength:$0.1.strength) },
+      generatedCount:generatedKeyframes ?? 0,icControl:icControl,
+      unionStrength:unionControlGuide?.referenceStrength)
+  }
   public let noisePolicy:MLXNoisePolicy
   enum CodingKeys:String,CodingKey,CaseIterable {
     case version,engine,task,prompt,width,height,frames,fps,seed
+    case diffusionVAE="diffusion_vae"
     case referenceImages="reference_images",noisePolicy="noise_policy"
     case audioReference="audio_reference"
     case unionControlGuide="union_control_guide"
     case ingredientsSheet="ingredients_sheet"
     case msr,dfr,icControl="ic_control"
-    case ingredientsSampling="ingredients_sampling"
+    case ingredientsSampling="ingredients_sampling",guidedSampling="guided_sampling"
+    case automaticDuration="automatic_duration"
+    case generatedKeyframes="generated_keyframes",singleStageSampling="single_stage_sampling"
     case gemmaRoot="gemma_root",transformerRoot="transformer_root",connectorCheckpoint="connector_checkpoint"
     case videoCheckpoint="video_checkpoint",audioCheckpoint="audio_checkpoint",spatialUpscalerCheckpoint="spatial_upscaler_checkpoint"
     case outputDirectory="output_directory",stageOneLoras="stage_one_loras",stageTwoLoras="stage_two_loras"
@@ -43,6 +69,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     let all=try decoder.container(keyedBy:AnyKey.self)
     let requestVersion=try all.decode(Int.self,forKey:AnyKey(stringValue:"version"))
     var expected=Set(CodingKeys.allCases.map(\.rawValue))
+    expected.remove("diffusion_vae")
     if requestVersion == 1 { expected.remove("reference_images") }
     if requestVersion < 3 { expected.remove("noise_policy") }
     if requestVersion < 4 { expected.remove("audio_reference") }
@@ -52,10 +79,15 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if requestVersion < 8 { expected.remove("dfr") }
     if requestVersion < 10 { expected.remove("ic_control") }
     if requestVersion < 11 { expected.remove("ingredients_sampling") }
-    guard Set(all.allKeys.map(\.stringValue)) == expected else {
+    if requestVersion < 12 { expected.remove("guided_sampling") }
+    if requestVersion < 13 { expected.remove("automatic_duration") }
+    if requestVersion < 14 { expected.remove("generated_keyframes") }
+    if requestVersion < 15 { expected.remove("single_stage_sampling") }
+    guard Set(all.allKeys.map(\.stringValue)).subtracting(["diffusion_vae"]) == expected else {
       throw LTXError.invalid("Two-stage request has missing or unsupported fields.")
     }
     let c=try decoder.container(keyedBy:CodingKeys.self)
+    diffusionVAE=try c.decodeIfPresent(MLXDiffusionVideoSettings.self,forKey:.diffusionVAE)
     version=try c.decode(Int.self,forKey:.version); engine=try c.decode(String.self,forKey:.engine)
     task=try c.decode(String.self,forKey:.task)
     gemmaRoot=try c.decode(String.self,forKey:.gemmaRoot)
@@ -78,10 +110,38 @@ public struct MLXDistilledRequest:Codable,Sendable {
     dfr=version < 8 ? nil : try c.decodeIfPresent(MLXDFRRequest.self,forKey:.dfr)
     icControl=version < 10 ? nil : try c.decodeIfPresent(MLXICControl.self,forKey:.icControl)
     ingredientsSampling=version < 11 ? .deterministic : try c.decode(MLXIngredientsSampling.self,forKey:.ingredientsSampling)
+    guard version == 11 || ingredientsSampling == .deterministic else {
+      throw LTXError.invalid("The authored Ingredients sampler requires its dedicated version 11 request.")
+    }
+    guidedSampling=version < 12 ? nil : try c.decodeIfPresent(MLXGuidedSampling.self,forKey:.guidedSampling)
+    automaticDuration=version < 13 ? nil : try c.decodeIfPresent(MLXAutomaticDurationPolicy.self,forKey:.automaticDuration)
+    generatedKeyframes=version < 14 ? nil : try c.decode(Int.self,forKey:.generatedKeyframes)
+    singleStageSampling=version < 15 ? nil : try c.decode(MLXSingleStageSampling.self,forKey:.singleStageSampling)
     noisePolicy=version < 3 ? .native : try c.decode(MLXNoisePolicy.self,forKey:.noisePolicy)
     let dfrCanvas=try (version == 8 || version == 9) ? MLXDFRCanvas(frames:frames) : nil
     let roles=referenceImages.map(\.role)
-    guard (version == 4 && task == "a2v" && (roles.isEmpty || roles == ["first"]) && audioReference != nil) ||
+    let ordinaryKeyframes = (version == 14 || (version == 15 && singleStageSampling != nil && guidedSampling == nil && automaticDuration == nil && stageTwoLoras.isEmpty)) && noisePolicy == .releasedMLX &&
+      (0...8).contains(generatedKeyframes ?? -1) && referenceImages.count <= 8 &&
+      Set(referenceFrames).count == referenceFrames.count && referenceFrames.allSatisfy { (0..<frames).contains($0) } &&
+      unionControlGuide == nil && ingredientsSheet == nil && msr == nil && dfr == nil && icControl == nil &&
+      ((task == "t2v" && roles.isEmpty && audioReference == nil) ||
+       (task == "i2v" && !roles.isEmpty && audioReference == nil) ||
+       (task == "fflf" && roles.contains("first") && roles.contains("last") && audioReference == nil) ||
+       (task == "a2v" && audioReference != nil && automaticDuration == nil))
+    let singleStageControl = version == 15 && singleStageSampling != nil && guidedSampling == nil &&
+      automaticDuration == nil && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX &&
+      (0...8).contains(generatedKeyframes ?? -1) && referenceImages.count<=8 &&
+      Set(referenceFrames).count == referenceFrames.count && referenceFrames.allSatisfy { (0..<frames).contains($0) } &&
+      ingredientsSheet == nil && msr == nil && dfr == nil && audioReference == nil &&
+      ((task == "ic_control" && icControl != nil && unionControlGuide == nil) ||
+       (task == "union_control" && unionControlGuide != nil && icControl == nil))
+    guard ordinaryKeyframes || singleStageControl || ((version == 12 && guidedSampling != nil || version == 13 && automaticDuration != nil) && noisePolicy == .releasedMLX &&
+      unionControlGuide == nil && ingredientsSheet == nil && msr == nil && dfr == nil && icControl == nil &&
+      ((task == "t2v" && roles.isEmpty && audioReference == nil) ||
+       (task == "i2v" && roles == ["first"] && audioReference == nil) ||
+       (task == "fflf" && roles == ["first","last"] && frames > 1 && audioReference == nil) ||
+       (version == 12 && task == "a2v" && (roles.isEmpty || roles == ["first"]) && audioReference != nil))) ||
+      (version == 4 && task == "a2v" && (roles.isEmpty || roles == ["first"]) && audioReference != nil) ||
       (version == 10 && task == "ic_control" && roles.isEmpty && audioReference == nil &&
         unionControlGuide == nil && ingredientsSheet == nil && msr == nil && dfr == nil && icControl != nil &&
         noisePolicy == .releasedMLX) ||
@@ -109,6 +169,19 @@ public struct MLXDistilledRequest:Codable,Sendable {
     guard engine == "ltx25", prompt.utf8.count <= 65536,
       stageOneLoras.count <= 16, stageTwoLoras.count <= 16 else {
       throw LTXError.invalid("Only bounded LTX2.5 distilled audiovisual requests are supported.")
+    }
+    if let guidedSampling {
+      guard stageTwoLoras.count < 16,
+        !(stageOneLoras+stageTwoLoras).contains(where: { $0.path == guidedSampling.distilledAdapterPath }) else {
+        throw LTXError.invalid("The Dev refinement adapter must appear only in its dedicated stage-two slot.")
+      }
+      _ = try guidedSampling.schedule(videoTokens:recipe().low.videoTokens)
+    }
+    if let automaticDuration {
+      _ = try automaticDuration.maximumFrames(fps:fps)
+    }
+    guard version == 14 || version == 15 || !roles.contains("keyframe") else {
+      throw LTXError.invalid("Timed image references require the ordinary-keyframe request version.")
     }
     if let unionControlGuide {
       guard stageOneLoras.count < 16,
@@ -139,14 +212,16 @@ public struct MLXDistilledRequest:Codable,Sendable {
       }
       _ = try control.guideGeometry(target:recipe().low)
     }
+    guard singleStageSampling?.method != .cfgpp || audioReference == nil else { throw LTXError.invalid("Single-stage CFG++ cannot freeze source audio.") }
     var requiredPaths=[gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,outputDirectory]
-    if !spatialUpscalerCheckpoint.isEmpty || ![6,7,11].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
+    if !spatialUpscalerCheckpoint.isEmpty || ![6,7,11,15].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
     for path in requiredPaths {
       guard path.hasPrefix("/"), path.utf8.count <= 4096, !path.utf8.contains(0) else {
         throw LTXError.invalid("Model and output paths must be explicit absolute local paths.")
       }
     }
     _ = try recipe()
+    _ = try singleStageControlLayout()
   }
   public func encode(to encoder:Encoder) throws {
     var c=encoder.container(keyedBy:CodingKeys.self)
@@ -154,6 +229,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     try c.encode(gemmaRoot,forKey:.gemmaRoot);try c.encode(transformerRoot,forKey:.transformerRoot)
     try c.encode(connectorCheckpoint,forKey:.connectorCheckpoint);try c.encode(videoCheckpoint,forKey:.videoCheckpoint)
     try c.encode(audioCheckpoint,forKey:.audioCheckpoint);try c.encode(spatialUpscalerCheckpoint,forKey:.spatialUpscalerCheckpoint)
+    try c.encodeIfPresent(diffusionVAE,forKey:.diffusionVAE)
     try c.encode(prompt,forKey:.prompt);try c.encode(width,forKey:.width);try c.encode(height,forKey:.height)
     try c.encode(frames,forKey:.frames);try c.encode(fps,forKey:.fps);try c.encode(seed,forKey:.seed)
     try c.encode(outputDirectory,forKey:.outputDirectory);try c.encode(stageOneLoras,forKey:.stageOneLoras);try c.encode(stageTwoLoras,forKey:.stageTwoLoras)
@@ -166,10 +242,28 @@ public struct MLXDistilledRequest:Codable,Sendable {
     if version >= 8 { try c.encode(dfr,forKey:.dfr) }
     if version >= 10 { try c.encode(icControl,forKey:.icControl) }
     if version >= 11 { try c.encode(ingredientsSampling,forKey:.ingredientsSampling) }
+    if version >= 12 { try c.encode(guidedSampling,forKey:.guidedSampling) }
+    if version >= 13 { try c.encode(automaticDuration,forKey:.automaticDuration) }
+    if version >= 14 { try c.encode(generatedKeyframes,forKey:.generatedKeyframes) }
+    if version >= 15 { try c.encode(singleStageSampling,forKey:.singleStageSampling) }
+  }
+  /// Resolves geometry through the same strict versioned contract. Last-image
+  /// references remain endpoint roles, so they follow the effective last frame.
+  public func replacingFrames(_ effectiveFrames:Int,automaticHeadHeaderSHA256:String?=nil) throws -> Self {
+    var object=try JSONSerialization.jsonObject(with:JSONEncoder().encode(self)) as! [String:Any]
+    object["frames"]=effectiveFrames
+    if let automaticHeadHeaderSHA256 {
+      guard var policy=object["automatic_duration"] as? [String:Any] else {
+        throw LTXError.invalid("A duration-head pin requires an automatic request.")
+      }
+      policy["head_header_sha256"]=automaticHeadHeaderSHA256
+      object["automatic_duration"]=policy
+    }
+    return try JSONDecoder().decode(Self.self,from:JSONSerialization.data(withJSONObject:object))
   }
   public func recipe() throws -> DistilledTwoStageRecipe {
     try DistilledTwoStageRecipe(width:width,height:height,
-      frames:dfr == nil ? frames : MLXDFRCanvas(frames:frames).frames,fps:fps,seed:seed)
+      frames:dfr == nil ? frames : MLXDFRCanvas(frames:frames).frames,fps:fps,seed:seed,singleStage:singleStageSampling != nil)
   }
   public static func load(_ url:URL) throws -> Self {
     guard url.isFileURL else { throw LTXError.invalid("Request must be a local file.") }
@@ -381,6 +475,11 @@ public struct MLXImageReference:Codable,Sendable {
   public let role:String,path:String
   public let strength:Float
   public let crf:Int
+  public let frameIndex:Int?
+  enum CodingKeys:String,CodingKey {
+    case role,path,strength,crf
+    case frameIndex="frame_index"
+  }
   private struct Key:CodingKey {
     let stringValue:String;var intValue:Int? { nil }
     init(stringValue:String) { self.stringValue=stringValue }
@@ -388,10 +487,13 @@ public struct MLXImageReference:Codable,Sendable {
   }
   public init(from decoder:Decoder) throws {
     let c=try decoder.container(keyedBy:Key.self)
-    guard Set(c.allKeys.map(\.stringValue)) == ["role","path","strength","crf"] else { throw LTXError.invalid("Unknown or missing image reference fields.") }
     role=try c.decode(String.self,forKey:Key(stringValue:"role"));path=try c.decode(String.self,forKey:Key(stringValue:"path"))
+    let expected:Set<String> = role == "keyframe" ? ["role","path","strength","crf","frame_index"] : ["role","path","strength","crf"]
+    guard Set(c.allKeys.map(\.stringValue)) == expected else { throw LTXError.invalid("Unknown or missing image reference fields.") }
+    frameIndex=role == "keyframe" ? try c.decode(Int.self,forKey:Key(stringValue:"frame_index")) : nil
     strength=try c.decode(Float.self,forKey:Key(stringValue:"strength"));crf=try c.decode(Int.self,forKey:Key(stringValue:"crf"))
-    guard ["first","last"].contains(role),path.hasPrefix("/"),path.utf8.count<=4096,!path.utf8.contains(0),
+    guard ["first","last","keyframe"].contains(role),frameIndex.map({ $0 >= 0 }) ?? true,
+      path.hasPrefix("/"),path.utf8.count<=4096,!path.utf8.contains(0),
       strength.isFinite,(0...1).contains(strength),(0...51).contains(crf) else { throw LTXError.invalid("Invalid image reference settings.") }
   }
 }

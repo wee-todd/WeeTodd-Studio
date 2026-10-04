@@ -29,7 +29,7 @@ public final class MLXSamplingRunner {
   public func evaluate(_ inputs:[String:MLXArray],schedule:SamplingSchedule,
     videoConditioning:MLXVideoDenoiseCondition?=nil,audioConditioning:MLXAudioDenoiseCondition?=nil,
     frozenAudio:Bool=false,bfloat16State:Set<String>=[],
-    unconditionalContexts:[String:MLXArray]?=nil,
+    unconditionalContexts:[String:MLXArray]?=nil,cfgppStepIndices:Set<Int>?=nil,
     fixedWeights:MLXDenoiser.FixedProvider,blockWeights:MLXDenoiser.BlockProvider,
     fixedAdapters:MLXDenoiser.FixedAdapters = { _ in [] },
     blockAdapters:(Int) throws -> [String:[MLXLoRA]] = { _ in [:] },
@@ -42,9 +42,9 @@ public final class MLXSamplingRunner {
       throw LTXError.invalid("Ancestral sampling requires explicit noise before loading weights.")
     }
     if let unconditionalContexts {
-      guard schedule.eta == 1,schedule.noiseStrength == 1,!frozenAudio,audioConditioning == nil,bfloat16State.isEmpty,
+      guard schedule.eta == 1,schedule.noiseStrength == 1,!frozenAudio,audioConditioning == nil,(cfgppStepIndices != nil || bfloat16State.isEmpty),
         Set(unconditionalContexts.keys) == ["video_text","audio_text"],
-        videoConditioning?.mask.allSatisfy({ $0 == 0 || $0 == 1 }) ?? true else {
+        cfgppStepIndices != nil || (videoConditioning?.mask.allSatisfy({ $0 == 0 || $0 == 1 }) ?? true) else {
         throw LTXError.invalid("CFG++ requires eta 1, Float32 state, generated audio and binary reference masks.")
       }
       for (name,value) in unconditionalContexts {
@@ -53,6 +53,9 @@ public final class MLXSamplingRunner {
           throw LTXError.invalid("CFG++ unconditional text context is invalid: \(name).")
         }
       }
+    }
+    guard cfgppStepIndices == nil || (unconditionalContexts != nil && cfgppStepIndices!.allSatisfy({ schedule.steps.indices.contains($0) && !schedule.steps[$0].terminal })) else {
+      throw LTXError.invalid("CFG++ indices require negative contexts and existing nonterminal steps.")
     }
     guard videoConditioning == nil || videoConditioning!.clean.shape == denoiser.inputShapes["video_latent"] else {
       throw LTXError.invalid("Reference conditioning differs from the admitted video shape.")
@@ -87,10 +90,11 @@ public final class MLXSamplingRunner {
     let preparation=try denoiser.prepare(current,sigmas:schedule.sigmas.dropLast().map(Float.init),
       videoDenoiseMask:videoTokenTimesteps ? videoConditioning?.mask : nil,
       audioDenoiseMask:audioTokenTimesteps ? audioConditioning?.mask : nil,
-      frozenAudio:frozenAudio,rawGlobalTimesteps:unconditionalContexts != nil,
+      frozenAudio:frozenAudio,rawGlobalTimesteps:unconditionalContexts != nil && cfgppStepIndices == nil,
       weights:fixedWeights,adapters:fixedAdapters) {
       try stageProgress(0,$0)
     }
+    var evaluation=0
     for (index,step) in schedule.steps.enumerated() {
       try Task.checkCancellation()
       var noises:[String:MLXArray]=[:]
@@ -106,24 +110,26 @@ public final class MLXSamplingRunner {
         }
       }
       var modelInputs=current
-      if unconditionalContexts != nil,let videoClean,let videoMask {
+      if unconditionalContexts != nil,cfgppStepIndices == nil,let videoClean,let videoMask {
         // The inpaint wrapper restores reference rows before each model call.
         // The sampler itself retains its noisy Float32 tail until terminal x0.
         modelInputs["video_latent"]=current["video_latent"]!*videoMask+videoClean*(1-videoMask)
       }
+      evaluation += 1
       let velocity=try denoiser.evaluatePrepared(modelInputs,sigma:Float(schedule.sigmas[index]),preparation:preparation,
         fixedWeights:fixedWeights,blockWeights:blockWeights,fixedAdapters:fixedAdapters,blockAdapters:blockAdapters) {
-        try stageProgress(unconditionalContexts == nil ? index+1 : index*2+1,$0)
+        try stageProgress(evaluation,$0)
       }
       let unconditionalVelocity:[String:MLXArray]?
-      if let unconditionalContexts=negativeContexts {
+      if let unconditionalContexts=negativeContexts,cfgppStepIndices == nil || cfgppStepIndices!.contains(index) {
+        evaluation += 1
         try Task.checkCancellation()
         var negativeInputs=modelInputs
         negativeInputs.merge(unconditionalContexts) { _,new in new }
         unconditionalVelocity=try denoiser.evaluatePrepared(negativeInputs,
           sigma:Float(schedule.sigmas[index]),preparation:preparation,
           fixedWeights:fixedWeights,blockWeights:blockWeights,fixedAdapters:fixedAdapters,blockAdapters:blockAdapters) {
-            try stageProgress(index*2+2,$0)
+            try stageProgress(evaluation,$0)
           }
       } else { unconditionalVelocity=nil }
       for name in ["video","audio"] {
@@ -134,9 +140,9 @@ public final class MLXSamplingRunner {
         let conditionedMask=name == "video" ? videoMask : audioMask
         let conditionedClean=name == "video" ? videoClean : audioClean
         let tokenTimesteps=name == "video" ? videoTokenTimesteps : audioTokenTimesteps
-        let sigma:MLXArray = unconditionalVelocity != nil ? MLXArray(Float(schedule.sigmas[index])) : tokenTimesteps
+        let sigma:MLXArray = unconditionalContexts != nil && cfgppStepIndices == nil ? MLXArray(Float(schedule.sigmas[index])) : tokenTimesteps
           ? conditionedMask!*Float(schedule.sigmas[index]) : MLXArray(sigmas[index])
-        let modelState=unconditionalVelocity == nil ? state : modelInputs[key]!
+        let modelState=cfgppStepIndices != nil || unconditionalVelocity == nil ? state : modelInputs[key]!
         var clean=modelState-sigma*velocity[name]!
         if bfloat16State.contains(name) { clean=clean.asType(.bfloat16).asType(.float32) }
         if let conditionedClean,let conditionedMask {
@@ -148,7 +154,13 @@ public final class MLXSamplingRunner {
             nextSigma:Double(Float(schedule.sigmas[index+1])))
           if cfgStep.terminal { next=clean }
           else {
-            let rawUnconditional=modelState-sigma*unconditionalVelocity[name]!
+            var rawUnconditional=modelState-sigma*unconditionalVelocity[name]!
+            if cfgppStepIndices != nil {
+              if bfloat16State.contains(name) { rawUnconditional=rawUnconditional.asType(.bfloat16).asType(.float32) }
+              if let conditionedClean,let conditionedMask {
+                rawUnconditional=rawUnconditional*conditionedMask+conditionedClean*(1-conditionedMask)
+              }
+            }
             next=state*cfgStep.sampleScale+clean*cfgStep.predictionScale
               + rawUnconditional*cfgStep.unconditionalScale+noises[name]!*cfgStep.noiseScale
           }
@@ -167,6 +179,10 @@ public final class MLXSamplingRunner {
               next=next*conditionedMask+conditionedClean*(1-conditionedMask)
             }
           }
+        }
+        if cfgppStepIndices != nil,unconditionalVelocity != nil,!step.terminal,
+          let conditionedClean,let conditionedMask {
+          next=next*conditionedMask+conditionedClean*(1-conditionedMask)
         }
         if bfloat16State.contains(name) { next=next.asType(.bfloat16).asType(.float32) }
         eval(next)

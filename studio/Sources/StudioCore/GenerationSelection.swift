@@ -103,6 +103,68 @@ public enum GenerationPreset: String, Codable, CaseIterable, Identifiable {
   }
 }
 
+public enum NativeH3SamplingMethod: String, Codable, CaseIterable, Identifiable {
+  case euler, resMultistep = "res_multistep"
+  public var id: String { rawValue }
+  public var label: String { self == .euler ? "Euler" : "Res multistep (experimental)" }
+}
+
+public enum LTX25GuidanceMode: String, Codable, CaseIterable, Identifiable {
+  case guided, guidedHQ = "guided_hq"
+  public var id: String { rawValue }
+  public var label: String { self == .guided ? "Production guided (experimental)" : "HQ guided (experimental)" }
+}
+
+/// Explicit experimental intent; absent on every existing distilled clip.
+public struct LTX25GuidanceSettings: Codable, Equatable {
+  public var mode: LTX25GuidanceMode
+  public var experimentalEnabled: Bool
+  public var audioCFG: Double?
+  public var stgScale: Double?
+  public var videoRescale: Double?
+  public var audioRescale: Double?
+  public var modalityScale: Double?
+  public var stgBlocks: [Int]?
+  /// Nil inherits profile timing; an empty array explicitly selects adaptive timing.
+  public var sigmas: [Double]?
+  public init(mode: LTX25GuidanceMode, experimentalEnabled: Bool = false) {
+    self.mode = mode; self.experimentalEnabled = experimentalEnabled
+  }
+}
+
+/// Explicit user intent. Nil on older clips preserves their exact recipe behavior.
+public struct LTX25KeyframeSettings:Codable,Equatable {
+  public var generatedCount:Int
+  public var experimentalEnabled:Bool
+  public init(generatedCount:Int=0,experimentalEnabled:Bool=false) {
+    self.generatedCount=generatedCount;self.experimentalEnabled=experimentalEnabled
+  }
+}
+
+public enum LTX25SingleStageMethod:String,Codable,CaseIterable,Identifiable {
+  case euler,ancestral="euler_ancestral",cfgpp="euler_ancestral_cfg_pp"
+  public var id:String { rawValue }
+  public var label:String { switch self {
+    case .euler:return "Euler"
+    case .ancestral:return "Euler ancestral"
+    case .cfgpp:return "Euler ancestral CFG++"
+  } }
+}
+public enum LTX25NegativeSchedule:String,Codable,CaseIterable,Identifiable {
+  case full,balanced,speed
+  public var id:String { rawValue }
+  public var label:String { rawValue.capitalized }
+  public var evaluationCount:Int { self == .full ? 15 : self == .balanced ? 12 : 10 }
+}
+public struct LTX25SingleStageSettings:Codable,Equatable {
+  public var method:LTX25SingleStageMethod
+  public var negativeSchedule:LTX25NegativeSchedule
+  public var experimentalEnabled:Bool
+  public init(method:LTX25SingleStageMethod = .ancestral,negativeSchedule:LTX25NegativeSchedule = .full,experimentalEnabled:Bool=false) {
+    self.method=method;self.negativeSchedule=negativeSchedule;self.experimentalEnabled=experimentalEnabled
+  }
+}
+
 /// Explicit user intent. Nil on older clips preserves their exact recipe behavior.
 public struct GenerationSelection: Codable, Equatable {
   public var task: String
@@ -114,6 +176,16 @@ public struct GenerationSelection: Codable, Equatable {
   public var memoryPolicy: String?
   public var projectionBackend: String?
   public var transformerBackend: String?
+  public var h3SamplingMethod: NativeH3SamplingMethod?
+  public var h3Reference:H3ReferenceSettings?
+  public var h3Joint:H3JointSettings?
+  public var h3MotionFidelity:H3MotionFidelitySettings?
+  public var ltx25DiffusionVAE:LTX25DiffusionVAESettings?
+  public var ltx25Guidance: LTX25GuidanceSettings?
+  public var ltx25AutomaticDuration: LTX25AutomaticDurationSettings?
+  public var ltx25Keyframes:LTX25KeyframeSettings?
+  public var ltx25SingleStage:LTX25SingleStageSettings?
+  public var ltx25MovieUpscale:LTX25MovieUpscaleSettings?
   public init(task: String = "t2v", preset: GenerationPreset = .balanced) {
     self.task = task
     self.preset = preset
@@ -121,10 +193,15 @@ public struct GenerationSelection: Codable, Equatable {
   public var isModified: Bool {
     steps != nil || refinementSteps != nil || cfg != nil || shift != nil
       || memoryPolicy != nil || projectionBackend != nil || transformerBackend != nil
+      || ltx25DiffusionVAE != nil || h3SamplingMethod != nil || h3Reference != nil || h3Joint != nil || h3MotionFidelity != nil || ltx25Guidance != nil || ltx25AutomaticDuration != nil || ltx25Keyframes != nil || ltx25SingleStage != nil || ltx25MovieUpscale != nil
   }
   public mutating func resetOverrides() {
     steps = nil; refinementSteps = nil; cfg = nil; shift = nil
     memoryPolicy = nil; projectionBackend = nil; transformerBackend = nil
+    h3Reference=nil;h3Joint=nil;h3MotionFidelity=nil
+    h3SamplingMethod = nil; ltx25Guidance = nil; ltx25AutomaticDuration = nil
+    ltx25DiffusionVAE=nil
+    ltx25Keyframes = nil;ltx25SingleStage = nil;ltx25MovieUpscale = nil
   }
   public static func taskLabel(_ task: String) -> String {
     switch task {
@@ -135,6 +212,7 @@ public struct GenerationSelection: Codable, Equatable {
     case "a2v": return "Audio-driven video"
     case "control": return "Controlled video"
     case "extension": return "Video extension"
+    case "video_upscale": return "Source movie 2× upscale"
     default: return task
     }
   }
@@ -162,6 +240,8 @@ public struct GenerationDescriptor: Codable, Equatable {
   public var supportedTasks: [String]
   public var controls: GenerationControls
   public var presets: [Preset]
+  public var pipelineMode: String? = nil
+  public var samplingMethod: String? = nil
 }
 
 public struct AccelerationSettings: Codable, Equatable {

@@ -117,6 +117,23 @@ final class H3LoRASamplingMetadataTests: XCTestCase {
     }
   }
 
+  func testTurboRequiresEulerButUnmarkedAndStandardAdaptersDoNotInferFromFilename() throws {
+    for metadata in [["profile": "turbo"], ["adapter_role": "turbo"], ["steps": "4"]] {
+      try withAdapter(metadata) { url in
+        XCTAssertThrowsError(try H3LoRAFile(url: url, strength: 1,
+          requestedSteps: 5, samplingMethod: .resMultistep))
+        XCTAssertNoThrow(try H3LoRAFile(url: url, strength: 1,
+          requestedSteps: 5, samplingMethod: .euler))
+      }
+    }
+    for metadata in [[:], ["profile": "standard"]] {
+      try withAdapter(metadata) { url in
+        XCTAssertNoThrow(try H3LoRAFile(url: url, strength: 1,
+          requestedSteps: 12, samplingMethod: .resMultistep))
+      }
+    }
+  }
+
   func testOptionalRequestedStepsPreservesProjectionCallersButChecksMetadata() throws {
     try withAdapter(["profile": "turbo", "steps": "4"]) { url in
       XCTAssertNoThrow(try H3LoRAFile(url: url, strength: 1))

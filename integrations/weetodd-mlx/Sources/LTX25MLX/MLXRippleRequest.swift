@@ -30,6 +30,7 @@ public struct MLXRippleRequest: Codable, Sendable {
     enum CodingKeys: String, CodingKey { case frame, path, strength }
   }
 
+  public let diffusionVAE:MLXDiffusionVideoSettings?
   public let version: Int, engine: String, task: String
   public let gemmaRoot: String, transformerRoot: String, connectorCheckpoint: String
   public let videoCheckpoint: String, audioCheckpoint: String, adapterPath: String
@@ -41,6 +42,7 @@ public struct MLXRippleRequest: Codable, Sendable {
   public let audioPolicy: String, ffmpegPath: String, outputDirectory: String
 
   enum CodingKeys: String, CodingKey, CaseIterable {
+    case diffusionVAE="diffusion_vae"
     case version, engine, task, prompt, width, height, frames, fps, seed, duration, anchors
     case gemmaRoot = "gemma_root", transformerRoot = "transformer_root"
     case connectorCheckpoint = "connector_checkpoint", videoCheckpoint = "video_checkpoint"
@@ -62,10 +64,11 @@ public struct MLXRippleRequest: Codable, Sendable {
 
   public init(from decoder: Decoder) throws {
     let raw = try decoder.container(keyedBy: Key.self)
-    guard Set(raw.allKeys.map(\.stringValue)) == Set(CodingKeys.allCases.map(\.rawValue)) else {
+    guard Set(raw.allKeys.map(\.stringValue)).subtracting(["diffusion_vae"]) == Set(CodingKeys.allCases.map(\.rawValue)).subtracting(["diffusion_vae"]) else {
       throw LTXError.invalid("Ripple request has missing or unsupported fields.")
     }
     let c = try decoder.container(keyedBy: CodingKeys.self)
+    diffusionVAE=try c.decodeIfPresent(MLXDiffusionVideoSettings.self,forKey:.diffusionVAE)
     version = try c.decode(Int.self, forKey: .version)
     engine = try c.decode(String.self, forKey: .engine)
     task = try c.decode(String.self, forKey: .task)

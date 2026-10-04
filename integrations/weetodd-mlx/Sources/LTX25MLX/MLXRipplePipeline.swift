@@ -35,7 +35,7 @@ public final class MLXRipplePipeline {
       connectorURL: URL(fileURLWithPath: request.connectorCheckpoint))
     _ = try MLXTextEncodingPlan(promptTokens: text.tokenize(request.prompt).count)
     _ = try MLXVideoEncoder(checkpoint: URL(fileURLWithPath: request.videoCheckpoint))
-    _ = try MLXVideoDecoder(checkpoint: URL(fileURLWithPath: request.videoCheckpoint))
+    _ = try MLXVideoDecoderSelection(checkpoint:URL(fileURLWithPath:request.videoCheckpoint),settings:request.diffusionVAE)
     guard FileManager.default.fileExists(atPath: request.transformerRoot) else {
       throw LTXError.invalid("Ripple distilled transformer is missing.")
     }
@@ -157,7 +157,7 @@ public final class MLXRipplePipeline {
       width: g.width, height: g.height, frames: request.editorialFrames, fps: g.fps)
     defer { writer.cancel() }
     let decoded = try g.unpackVideo(sampled)
-    let decoder = try MLXVideoDecoder(checkpoint: URL(fileURLWithPath: request.videoCheckpoint))
+    let decoder = try MLXNativeVideoDecoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint),settings:request.diffusionVAE,maximumWorkspaceBytes:memory.videoActivationBytes)
     let configuration = MLXMediaPipeline.videoConfiguration(for: g,
       activationBytes: memory.videoActivationBytes)
     var written = 0
@@ -210,7 +210,7 @@ public final class MLXRipplePipeline {
         "path": output.appendingPathComponent(name).path,
         "strength": Double(input.2)])
     }
-    let result: [String: Any] = [
+    var result: [String: Any] = [
       "video_path": output.appendingPathComponent("ripple.mp4").path,
       "path": output.appendingPathComponent("ripple.mp4").path,
       "duration": request.duration, "frames": request.editorialFrames,
@@ -232,7 +232,7 @@ public final class MLXRipplePipeline {
     guard memoryStatus == KERN_SUCCESS else {
       throw LTXError.invalid("Cannot measure Ripple process memory.")
     }
-    let metadata: [String: Any] = [
+    var metadata: [String: Any] = [
       "status": "complete", "task": "ripple", "nativeRuntime": "swift-mlx",
       "production_qualified": false, "python_inference": false,
       "width": request.width, "height": request.height,
@@ -244,6 +244,8 @@ public final class MLXRipplePipeline {
       "peak_process_footprint_bytes": info.ledger_phys_footprint_peak,
       "current_process_footprint_bytes": info.phys_footprint,
       "process_memory_scope": "Swift worker; external FFmpeg excluded"]
+    let decoderMetadata=MLXNativeVideoDecoder.publicationMetadata(isDiffusion:decoder.isDiffusion,settings:request.diffusionVAE)
+    result.merge(decoderMetadata) { _,new in new };metadata.merge(decoderMetadata) { _,new in new }
     let receipt: [String: Any] = [
       "format": "weetodd-ripple-take-v1", "status": "complete",
       "source_sha256": request.sourceSHA256, "source_path": request.sourcePath,

@@ -67,7 +67,8 @@ class WeeToddSwiftVideoGenerate:
                 "recipe_path": ("STRING", {"default": ""}),
                 "swift_worker_path": ("STRING", {"default": ""}),
                 "filename_prefix": ("STRING", {"default": "WeeTodd/SwiftVideo"}),
-            }
+            },
+            "optional": {"ffmpeg_path": ("STRING", {"default": ""})},
         }
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -76,13 +77,13 @@ class WeeToddSwiftVideoGenerate:
     FUNCTION = "generate"
     CATEGORY = "WeeTodd/Native Swift"
     DESCRIPTION = (
-        "Run a saved weetodd-headless-v2 H3/LTX 2.5 recipe or dedicated Ripple request "
-        "through the selected "
+        "Run a saved weetodd-headless-v2 H3/LTX 2.5 recipe, including frozen movie "
+        "upscaling, or a dedicated Ripple request through the selected "
         "Swift MLX worker. The worker preflights before inference; this node never "
         "loads a Python model. Existing composable nodes remain separate."
     )
 
-    def generate(self, engine, recipe_path, swift_worker_path, filename_prefix):
+    def generate(self, engine, recipe_path, swift_worker_path, filename_prefix, ffmpeg_path=""):
         recipe = Path(recipe_path).expanduser().resolve()
         if not recipe.is_file() or not 0 < recipe.stat().st_size <= 1024 * 1024:
             raise ValueError("Select a saved headless recipe under 1 MiB")
@@ -108,11 +109,13 @@ class WeeToddSwiftVideoGenerate:
             _check_interrupted()
             preflight = run_swift_video_worker(
                 worker=worker, engine=engine, recipe=frozen, output=output, mode="preflight",
+                ffmpeg=Path(ffmpeg_path) if ffmpeg_path else None,
                 on_progress=_progress_callback(), check_interrupted=_check_interrupted,
             )
             _check_interrupted()
             result = run_swift_video_worker(
                 worker=worker, engine=engine, recipe=frozen, output=output, mode="render",
+                ffmpeg=Path(ffmpeg_path) if ffmpeg_path else None,
                 on_progress=_progress_callback(), check_interrupted=_check_interrupted,
             )
             movie_path = result.get("video_path", result.get("path")) if ripple else result["video"]

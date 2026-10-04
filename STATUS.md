@@ -1,5 +1,91 @@
 # WeeTodd Studio implementation status
 
+Current Swift feature scope 2026-10-03: native H3/LTX defaults and the previously qualified
+Studio/CLI/saved-Comfy route/lifecycle evidence remain distinct from new creative contracts.
+The original 31-item migration ledger has 29 completed checks; matched performance and broad
+quality remain open. Its fixed denominator does not absorb the separate 22-item remaining-feature
+inventory or turn CPU/header admission into completed generation. Full migration is not complete.
+A final-app isolated clean-registry reuse check passed in 8.177 seconds: 23 catalog contracts,
+eight setup/header cases, completed Dev-directory adoption, Turbo import and Diffusion VAE
+component adoption. Python/runtime were intentionally unavailable; no network, inference,
+conversion rerun or weight copies occurred. This qualifies installed-component reuse and header
+admission, not fresh clean-machine acquisition of every checkpoint.
+
+New LTX Dev guidance, learned automatic timing and ordinary timed/generated keyframes passed
+CPU numerical/contract checks. One real HQ/automatic-duration job with images at frames 0/7
+and two stage-one-only slots completed 93 + 3 observed transformer evaluations, 57 output frames
+at 768 × 448/24 fps, in 321.427 worker seconds. Its exact causal audio count was 113,760 samples,
+2.370 seconds versus 2.375 seconds of video. This is one combined execution, not broad quality
+or an isolated performance benchmark. Scene-v2 interior/terminal images (32 global anchors,
+256 MiB retained-reference budget), ordinary full-resolution single-stage CFG++ and standalone
+movie upscale/refinement have focused CPU tests and current signed-worker headers. Their new
+representative functional takes completed: ordinary balanced CFG++ 49 frames, a two-window/five-anchor
+source-PCM scene 96 published frames, and learned 2×/three-evaluation movie refinement 49 source frames.
+All were game-active functional runs, not clean benchmarks or broad quality/host approval.
+A native StudioCore export reproduced all three direct-baseline media files byte for byte;
+zero-generation resume and actual StudioStore.load reopen passed without Python model inference. Unsupported scene mixtures
+continue to reject; existing ordinary recipes retain the eight-image limit.
+
+H3 now exposes reference pixel budgets/density/placement and soundtrack replacement, signed
+ordered eight-adapter stacks with explicit layout/deferred activation, complete joint-latent
+saving/refinement and experimental native Motion Fidelity. Focused engine/Studio checks cover
+strict sources, compatible task/schedule, publication timing and result acceptance. These new
+integrated creative packets completed all eight functional executions; sampled interpolation 03
+had severe ghosting and Fun 08 was soft. Corrected learned spatial-v2 also completed 1920 × 1088,
+73 frames/three standard suffix evaluations/no LoRA with source PCM exact and staged release.
+Its worker time was 1037.097 seconds and MLX/physical peaks were 14.391/15.283 GB excluding FFmpeg.
+Sampled frames 0/36/72 were coherent without ghost/checkerboard; no full motion/audio/user approval or
+clean performance claim is made. Legacy Q8 FL reuse and
+`res_multistep` have separate real execution evidence; neither qualifies every paged source,
+continuation, reference mixture or new refinement. Saved-tail formats/imports retain their own
+source and model identities. Existing composable ComfyUI engines remain separate from the
+recipe-backed native Swift worker.
+
+Native setup offers 23 pinned packages, including Dev source, its rank-450 refinement adapter,
+the duration head and one-step Diffusion VAE. Raw Dev-to-Q8 conversion is native, bounded, cancellable and atomic;
+one actual installed conversion took 170.4 seconds and Studio adoption checks passed.
+Gemma/other source conversion routes and full clean-machine acquisition remain separately qualified.
+Learned H3 upscaling is ported and has the scoped functional 2 MP result above. Ordinary H3
+retains its 1 MP/40,000-row bound; explicit spatial-v2 has bounded 1920 × 1088/64,000-row/32 GiB
+admission and does not promise maximum duration at maximum canvas.
+Native Diffusion VAE now has CPU/header/release checks, tiny numerical comparisons and an actual
+retained 1344×768, 89-frame decoder-only take with exact source PCM. The experimental tiled Metal
+mode passed the same declared tiny numerical limits; it is not BF16/RGB byte parity or a whole-job
+benchmark. The default convolutional VAE remains unchanged. Studio, headless and saved-recipe
+Swift nodes preserve native DiffVAE selection and settings; the legacy typed composable Comfy generator
+still uses its maintained Python model pipeline. MSR V2 remains structurally
+unimplemented (audio/speaker/reference-audio conditioning); it is not interchangeable with V1.
+The optional VDN checkpoint family is not implemented by native Swift H3.
+Authenticated 403 blocks the new official 2.5 Ingredients adapter variant only. The current authored
+2.5 workflow uses supported 2.3 Ingredients 1.3/distilled 8 CFG++; its retained native collage failure
+is unapproved and has no proven engine cause. Prefix/one-projection witnesses are not full sampler parity.
+
+Native LTX Diffusion VAE qualification 2026-10-03: default tiny decode passed unchanged
+predeclared limits with 0.52145% relative L2, maximum error 0.03125 and RGB mean absolute error
+0.0851 against the owned Python reference. Experimental query-tiled Metal passed the same gates
+with 0.52469% relative L2 and RGB error 0.08668. Neither is BF16/RGB byte parity. Tiny component
+decode time/MLX peak were 23.641 seconds/1.569 GB for staged Swift default, 3.801 seconds/0.390 GB
+for experimental Metal and 4.391 seconds/2.456 GB for the resident Python reference. Load and
+wrapper costs are separate; these are component measurements, not whole-job benchmarks.
+The actual retained 1344 × 768, 89-frame/24-fps latent decoded in 93.4975 seconds, 96.4164 seconds
+wall, with 26.140 GB MLX and 23.923 GB process peak excluding FFmpeg. Source PCM was exact;
+24 parameter releases and zero retained parameter bytes were reported. Sampled frames 0/44/88
+were coherent cup/stone views. No sampler rerun, full-size Python/Conv pixel parity, full-motion
+listening review or user-quality approval is claimed. Conv remains the default.
+Focused shared tests passed 45 cases with three optional skips, Studio passed 35 with 13 skips,
+media passed two, and three installed header/first-block-failure-release/Metal operator checks passed.
+
+Native exported Movie qualification 2026-10-03: an actual StudioCore export and packaged CLI
+completed the retained learned/refinement recipe at 768 × 512, 49 frames/24 fps, seed 20261003,
+three evaluations and strength 0.35. Worker/pipeline time were 42.236/40.730 seconds, with
+2.128 GB MLX and 4.153 GB process peak excluding FFmpeg. The selected sidecar remained exactly
+65,333 stereo sample frames at 32 kHz; video duration follows 49/24 independently of AAC padding.
+All three take media files matched the retained direct baseline byte for byte. Resume produced
+zero new/one resumed generation with media and event archives unchanged. Actual StudioStore.load
+reopening invoked no worker. This establishes the tested exported route, not Studio UI generation,
+broad quality or an isolated speed comparison. Its already successful header invocation was
+validated against the actual CLI result schema without rerunning inference or changing the job.
+
 LTX Ingredients authored sampling 2026-10-03: the explicit recipe option
 `config.single_stage_sampler: "euler_ancestral_cfg_pp"` compiles to a separate version-11
 Ingredients request. It implements rectified-flow CFG++ at CFG 1/eta 1 with eight updates
@@ -24,7 +110,7 @@ an isolated performance comparison. Ingredients remains experimental and not qua
 The authored sampler now applies the checkpoint's learned marker to the first generated
 latent frame, excluding the guide tail and audio. Three focused CPU tests verify row selection,
 legacy defaults and trailing-slot arithmetic. This corrects a primary-code discrepancy;
-its effect on the failed scene-quality result still requires a real-model check.
+the subsequent marker-corrected 121-frame sample still animated the board with invented text. The scene-quality gate remains failed. The native guide now encodes one RGB still and repeats normalized latents; static repetition itself follows the reference contract. Bounded spatial/temporal VAE context remains a separate numerical issue, not an established quality fix.
 
 Latest LTX default regression 2026-10-03: the authored-sampler app's worker reproduced
 the frozen 1344 × 768, 89-frame, seed-43, eight-plus-three-evaluation FFLF take with all
@@ -53,7 +139,8 @@ seconds (15.39%), with a 4.459 GB MLX peak. These are decoder-only results, not 
 gains or qualification of higher-resolution peak memory. Packed weights remain resident only
 inside the video stage and release before audio decoding. Worker metadata reports the mode,
 evaluation policy, spatial batch and allocation-cache limit; the cache limit is not a total
-memory cap. Final integrated-worker qualification is still pending.
+memory cap. Those stage comparisons do not qualify every task or canvas; the newer functional
+creative packets above do not establish broad quality or clean performance.
 
 Swift H3 bounded weight reads 2026-10-03: small quantization metadata, normalization
 weights, rotary frequencies, streamed biases and admitted LoRA factors now use buffered
@@ -295,7 +382,7 @@ used by the existing Swift generations. An installed-file test verified the full
 SHA-256, reused that 605 MB file through a same-inode hard link, retrieved missing
 small notices, and rediscovered the native audio component without Python. The
 shared setup validator also admitted that package. The merged native catalog supplies
-19 pinned packages with mandatory component fields for ordinary H3/LTX profiles, including direct transformer/support
+19 pinned packages at that checkpoint with mandatory component fields for ordinary H3/LTX profiles, including direct transformer/support
 and supported task adapters. The supported native H3/LTX 2.5 profiles have Swift-ready
 sources and need no Python-only weight conversion. Field coverage does not qualify every
 checkpoint/task combination. Full clean-machine weight installation, conversion of other

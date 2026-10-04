@@ -2,6 +2,47 @@ import Foundation
 import MLX
 import LTX25Engine
 
+/// Batch-one guidance perturbations. Self-attention replaces attention mixing
+/// with the projected values; it retains the learned head/output/residual gates.
+/// Cross-modality guidance removes both audiovisual cross-attention residuals.
+public struct MLXGuidancePerturbation: Sendable, Equatable {
+  public let videoSelfAttentionBlocks:Set<Int>
+  public let audioSelfAttentionBlocks:Set<Int>
+  public let skipCrossModality:Bool
+  public static let none=Self()
+  public init(videoSelfAttentionBlocks:Set<Int>=[],audioSelfAttentionBlocks:Set<Int>=[],
+    skipCrossModality:Bool=false) {
+    self.videoSelfAttentionBlocks=videoSelfAttentionBlocks
+    self.audioSelfAttentionBlocks=audioSelfAttentionBlocks
+    self.skipCrossModality=skipCrossModality
+  }
+  public struct Block: Sendable, Equatable {
+    public let skipVideoSelfAttention:Bool
+    public let skipAudioSelfAttention:Bool
+    public let skipCrossModality:Bool
+    public static let none=Self()
+    public init(skipVideoSelfAttention:Bool=false,skipAudioSelfAttention:Bool=false,
+      skipCrossModality:Bool=false) {
+      self.skipVideoSelfAttention=skipVideoSelfAttention
+      self.skipAudioSelfAttention=skipAudioSelfAttention
+      self.skipCrossModality=skipCrossModality
+    }
+    var signature:[Int] {
+      [skipVideoSelfAttention ? 1 : 0,skipAudioSelfAttention ? 1 : 0,skipCrossModality ? 1 : 0]
+    }
+  }
+  func validate(blockCount:Int) throws {
+    guard blockCount>0,videoSelfAttentionBlocks.union(audioSelfAttentionBlocks)
+      .allSatisfy({ (0..<blockCount).contains($0) }) else {
+      throw LTXError.invalid("Guidance perturbation targets must name an admitted transformer block.")
+    }
+  }
+  func block(_ index:Int) -> Block {
+    Block(skipVideoSelfAttention:videoSelfAttentionBlocks.contains(index),
+      skipAudioSelfAttention:audioSelfAttentionBlocks.contains(index),skipCrossModality:skipCrossModality)
+  }
+}
+
 /// Joint AV block expressed through the same MLX primitives as the working
 /// reference engine. Initial qualification is batch-one, uniform timestep,
 /// split RoPE and no attention masks. Unsupported input fields are rejected.
@@ -134,7 +175,8 @@ public final class MLXAVBlock {
     weights.removeAll(); adapters.removeAll(); loadedBytes=0
   }
 
-  public func evaluate(_ inputs:[String:MLXArray]) throws -> [String:MLXArray] {
+  public func evaluate(_ inputs:[String:MLXArray],
+    perturbation:MLXGuidancePerturbation.Block = .none) throws -> [String:MLXArray] {
     do {
       try Task.checkCancellation()
       try validateInputs(inputs)
@@ -153,7 +195,7 @@ public final class MLXAVBlock {
       x["video_modulation_indices"]=inputs["video_modulation_indices"]
       x["audio_modulation_indices"]=inputs["audio_modulation_indices"]
       let (graph,arguments,signature)=MLXBlockGraph.bind(configuration:configuration,inputs:x,weights:weights,
-        adapters:adapters,videoAttentionGroups:videoAttentionGroups)
+        adapters:adapters,videoAttentionGroups:videoAttentionGroups,perturbation:perturbation)
       let outputs:[MLXArray]
       if compileGraph {
         if compiledSignature != signature {
@@ -234,7 +276,7 @@ public final class MLXAVBlock {
 
   static func forward(configuration c:AVBlockConfiguration,_ x:[String:MLXArray],
     parameter:(String) -> MLXArray,linear:(String,MLXArray) -> MLXArray,
-    videoAttentionGroups:[Int]=[]) -> [String:MLXArray] {
+    videoAttentionGroups:[Int]=[],perturbation:MLXGuidancePerturbation.Block = .none) -> [String:MLXArray] {
     let vd=c.videoDimension, ad=c.audioDimension, heads=c.heads
     func norm(_ value:MLXArray) -> MLXArray {
       // The reference normalizes across the complete projected width, before
@@ -269,7 +311,7 @@ public final class MLXAVBlock {
       return concatenated([first*cos-second*sin,first*sin+second*cos],axis:1).reshaped([1,rows,heads,width])
     }
     func attention(_ name:String,_ query:MLXArray,_ context:MLXArray,_ headWidth:Int,
-      queryRoPE:String? = nil,keyRoPE:String? = nil) -> MLXArray {
+      queryRoPE:String? = nil,keyRoPE:String? = nil,skipMixing:Bool=false) -> MLXArray {
       let nq=query.shape[0], nk=context.shape[0]
       let qp=linear(name+".to_q",query), kp=linear(name+".to_k",context)
       let value=linear(name+".to_v",context).reshaped([1,nk,heads,headWidth]).transposed(0,2,1,3)
@@ -280,7 +322,10 @@ public final class MLXAVBlock {
       let queryHeads=q.transposed(0,2,1,3),keys=k.transposed(0,2,1,3)
       let scale=1/Float(headWidth).squareRoot()
       let attended:MLXArray
-      if name == "attn1",let templates=x["video_attention_templates"] {
+      if skipMixing {
+        // Batch-one zero perturbation mask selects V before head gating.
+        attended=value
+      } else if name == "attn1",let templates=x["video_attention_templates"] {
         attended=MLXGroupedVideoAttention.evaluateAdmitted(q:queryHeads,k:keys,v:value,
           groups:videoAttentionGroups,templates:templates,scale:scale)
       } else {
@@ -296,15 +341,17 @@ public final class MLXAVBlock {
     }
     let v=x["video"]!, a=x["audio"]!
     let vn=normalized(v,vm,0), an=normalized(a,am,0)
-    var video=v + (attention("attn1",vn,vn,c.videoHeadDimension,queryRoPE:"video",keyRoPE:"video"))*vm[2]
-    var audio=a + (attention("audio_attn1",an,an,c.audioHeadDimension,queryRoPE:"audio",keyRoPE:"audio"))*am[2]
+    var video=v + (attention("attn1",vn,vn,c.videoHeadDimension,queryRoPE:"video",keyRoPE:"video",skipMixing:perturbation.skipVideoSelfAttention))*vm[2]
+    var audio=a + (attention("audio_attn1",an,an,c.audioHeadDimension,queryRoPE:"audio",keyRoPE:"audio",skipMixing:perturbation.skipAudioSelfAttention))*am[2]
     video=video + (attention("attn2",normalized(video,vm,6),x["video_text"]!*(1+vp[1])+vp[0],c.videoHeadDimension))*vm[8]
     audio=audio + (attention("audio_attn2",normalized(audio,am,6),x["audio_text"]!*(1+ap[1])+ap[0],c.audioHeadDimension))*am[8]
-    let sharedVideo=norm(video), sharedAudio=norm(audio)
-    video=video + (attention("audio_to_video_attn",sharedVideo*(1+vc[0])+vc[1],sharedAudio*(1+ac[0])+ac[1],c.audioHeadDimension,
-      queryRoPE:"video_cross",keyRoPE:"audio_cross"))*vg
-    audio=audio + (attention("video_to_audio_attn",sharedAudio*(1+ac[2])+ac[3],sharedVideo*(1+vc[2])+vc[3],c.audioHeadDimension,
-      queryRoPE:"audio_cross",keyRoPE:"video_cross"))*ag
+    if !perturbation.skipCrossModality {
+      let sharedVideo=norm(video), sharedAudio=norm(audio)
+      video=video + (attention("audio_to_video_attn",sharedVideo*(1+vc[0])+vc[1],sharedAudio*(1+ac[0])+ac[1],c.audioHeadDimension,
+        queryRoPE:"video_cross",keyRoPE:"audio_cross"))*vg
+      audio=audio + (attention("video_to_audio_attn",sharedAudio*(1+ac[2])+ac[3],sharedVideo*(1+vc[2])+vc[3],c.audioHeadDimension,
+        queryRoPE:"audio_cross",keyRoPE:"video_cross"))*ag
+    }
     func feedForward(_ name:String,_ value:MLXArray) -> MLXArray {
       let h=linear(name+".proj_in",value)
       let gelu=0.5*h*(1+tanh(Float(sqrt(2/Double.pi))*(h+0.044715*h*h*h)))

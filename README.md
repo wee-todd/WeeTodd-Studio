@@ -12,9 +12,11 @@ Swift H3 and LTX 2.5 setup can find compatible components in folders you select,
 including existing ComfyUI model libraries. Discovery reads bounded metadata and leaves
 weights in place. Compatible pinned preconverted downloads now run in Swift with
 streamed checksums, resume and cancellation. Native setup includes DFR, MSR and
-Ingredients, Union, Motion Track and CrossView profiles. The merged catalog has 19 pinned packages supplying mandatory component fields for ordinary H3/LTX profiles;
+Ingredients, Union, Motion Track and CrossView profiles. The merged native catalog has 23 pinned packages, including the duration head, raw Dev transformer, distilled refinement adapter and one-step Diffusion VAE;
 checkpoint/task admission and complete clean-machine installation remain separately qualified.
-Source conversion and unsupported specialized adapters still need their explicit setup paths.
+Native setup can convert the admitted raw LTX 2.5 Dev transformer to unmerged Q8 pages in a new directory. Other source conversions and unsupported adapters retain their explicit setup paths. A final-app isolated clean-registry check passed eight setup/header cases against all 23 catalog contracts,
+including Diffusion VAE adoption, without Python, network, conversion reruns or weight copies.
+Complete clean-machine acquisition of all weights remains pending.
 
 [Get started](#get-started) · [Studio guide](studio/README.md) ·
 [Make a movie with Director](#make-a-movie-with-director) ·
@@ -31,6 +33,59 @@ stages: **Brief → Subjects → Shots**, with detailed review available. Drafts
 technical model records remain available on demand. Qwen3.5 4B can reuse a compatible installed
 checkpoint or download through **Set up assistant…**, without the Draw Things app. Planning and
 media generation remain separate steps. See [Director and local workflows](studio/README.md#local-workflows).
+
+## Current Swift generation controls
+
+Supported H3/LTX 2.5 jobs select Swift by default; saved explicit Python selections remain
+available. Studio, exported native jobs and the recipe-backed ComfyUI node reuse the same
+worker. Missing workers or incompatible features fail admission without Python inference fallback.
+Existing composable ComfyUI graphs retain their Python engines and measured presets.
+
+LTX 2.5 adds explicit experimental Dev Euler/HQ guidance, prompt-predicted duration,
+up to eight timed images and zero to eight generated keyframe slots. Ordinary generated slots
+participate in stage one only. One actual HQ/automatic-duration take with two timed images
+and two generated slots completed; it establishes execution of that combination, not broad quality.
+Full-resolution single-stage Euler, ancestral and CFG++ controls skip the upscaler and second
+stage. Direct single-stage requests can combine ordinary images/slots with IC or Union guides;
+IC and Union are mutually exclusive, and CFG++ cannot freeze an A2V driver. Guide compositions retain their CPU/header qualification. One ordinary balanced CFG++ take
+with first/last images and generated slots completed; that take does not qualify IC/Union composition
+or every sampler schedule. It was a functional run, not an isolated benchmark or broad quality approval.
+
+Continuous-scene version 2 retains up to 32 global first/interior/last image anchors under a
+256 MiB encoded-reference budget. It preserves shared take ranges and explicit automatic/strict
+image routing. Guided, automatic-duration, generated-slot, single-stage, DFR and specialized
+control mixtures remain rejected for scenes. Standalone movie upscaling has experimental learned
+2×, refinement and Pixel-Spatial modes, frozen source timing, optional endpoint anchors, and
+source/sidecar/silent publication audio. A two-window scene-v2 take with five anchors and exact source PCM completed, as did one learned
+2× movie/refinement take with exact sidecar PCM. These functional results do not establish broad
+quality, an isolated performance benchmark or completion of every new host route.
+
+H3 adds explicit image pixel budgets, movie size/density policies, timed reference placement,
+replacement movie soundtracks, signed ordered LoRA strengths and deferred standard-adapter
+activation. Euler remains the default; `res_multistep` is explicit. Turbo requires four Euler
+evaluations and immediate activation. Supported paged Q8 and legacy continuation imports are
+validated per task. Full audio/video latent saving, initialized/spatial latent refinement and
+native Motion Fidelity repair have experimental controls and strict source/timing checks;
+eight integrated creative packets completed native execution. Their static sampled review includes
+severe ghosting in the older interpolation sample and a soft Fun midpoint; execution is not quality
+approval. The learned H3 latent upscaler is separate from interpolation. Its corrected 1920×1088,
+73-frame take completed under explicit spatial-v2 admission with exact source PCM and coherent
+sampled first/middle/last frames. This does not qualify full motion/audio, unrestricted 2 MP/15-second
+generation or clean performance. Ordinary H3 retains its existing 1 MP/40,000-row admission. Density reduction is a
+fidelity/compute trade, not a guarantee of preserved motion or likeness.
+
+The native migration's historical route/lifecycle acceptance does not certify every new feature.
+Matched performance, useful-size quality, Ingredients scene adherence and full clean-machine acquisition
+remain separate work. Native Diffusion VAE now has CPU/header/release checks, tiny numerical comparisons and an actual
+retained 1344×768, 89-frame decoder-only take with exact source PCM. The experimental tiled Metal
+mode passed the same declared tiny numerical limits; it is not BF16/RGB byte parity or a whole-job
+benchmark. The default convolutional VAE remains unchanged. Studio, headless and saved-recipe
+Swift nodes preserve native DiffVAE selection and settings; the legacy typed composable Comfy generator
+still uses its maintained Python model pipeline. MSR V2's audio/speaker/reference-audio
+architecture is not implemented; native VDN remains unavailable. An authenticated header request for the gated new official 2.5 Ingredients adapter returned 403;
+that variant remains unqualified. This does not disable the supported 2.3 adapter, which the current authored 2.5 example also uses.
+The retained 2.3 collage failure has no proven engine cause. See the [current Studio controls](studio/README.md#current-swift-controls-and-qualification)
+and [implementation status](STATUS.md) for the qualified scope and remaining restrictions.
 
 ## Why WeeTodd Studio?
 
@@ -173,7 +228,7 @@ profile supports Swift T2V, I2V or FFLF; ordinary LoRAs, A2V, extension and
 continuous scenes are rejected for DFR.
 Studio's dedicated DFR editor controls still use Python. A separate experimental
 headless Ingredients route accepts a frozen static
-reference sheet, repeats it across at least 121 frames, and samples with the compatible
+reference sheet, encodes one RGB still and repeats its normalized latent across at least 121 frames, then samples with the compatible
 rank-128 task adapter in one full-resolution stage. Saved Ingredients recipes retain their
 eight-evaluation deterministic sampler. An explicit experimental Ingredients recipe option,
 `single_stage_sampler: "euler_ancestral_cfg_pp"`, selects eight updates and sixteen serial
@@ -246,7 +301,7 @@ ordered image/video/audio Ref2VA and independent A2V through the installed Qwen,
 transformer and separate video/audio VAE components. Studio defaults to guarded Swift
 preparation and worker execution for supported H3 and LTX 2.5 jobs. Saved explicit Python
 opt-outs remain available; missing workers and incompatible native tasks fail without
-automatic backend switching. It admits up to four distinct,
+automatic backend switching. It admits up to eight distinct,
 ordered ComfyUI-format H3 LoRAs with
 independent strengths and supported projection/QKV layouts; sparse target sets and variable
 ranks are accepted. Installed converted Lightx FL2V four-step LoRAs with baked scaling
@@ -258,10 +313,10 @@ three movies and three audio-bearing references for Ref2VA, and rejects unsuppor
 unsupported adapter layouts, controls and profiles before model loading.
 Each movie reference uses its first 7.3 seconds on a bounded 24 fps grid; any embedded audio
 in the selected interval becomes a sound reference. Standalone audio references require a visual
-reference and use at most 15 seconds at 32 kHz stereo. The Swift audio encoder has a two-channel
+reference or explicit temporal placement and use at most 15 seconds at 32 kHz stereo. The Swift audio encoder has a two-channel
 numerical parity test, while full audio-reference and soundtrack output quality remain unqualified.
 Independent A2V uses a Ref2VA checkpoint with one 2.5–15-second source-audio interval
-covering the requested clip and optionally one opening image. Its soundtrack is newly generated;
+covering the requested clip and optionally up to eight timed images. Its soundtrack is newly generated;
 the source audio is not copied to the movie. Audio-only A2V needs no visual reference.
 Reference count is further limited by the
 1,024-token Qwen request window and the 40,000-row H3 admission budget. One mixed image/movie
@@ -1119,8 +1174,7 @@ and task-support packages below are for the Python renderer; they are excluded f
 download choices. The folded audio VAE is a separate pinned package that retains its source
 license and notices and reuses matching installed weights. Compatible direct H3 transformers
 can now be imported or selected from the pinned native catalog: full-width text/reference/Fun
-Control and verified 64-curve FL2VA image/endpoint packages have separate task admission. Source conversion and CLI-login authentication remain on the optional
-Python setup route. See [guided native setup](studio/README.md#guided-model-setup).
+Control and verified 64-curve FL2VA image/endpoint packages have separate task admission. Native Model Setup now converts the admitted raw Dev transformer to Q8 pages without Python; Gemma and other source conversions, and CLI-login authentication, retain their optional Python setup routes. See [guided native setup](studio/README.md#guided-model-setup).
 
 | Package | Download size¹ | Included | Still separate |
 | --- | --- | --- | --- |
@@ -1247,9 +1301,8 @@ visually unusable. Latent-overlap continuation remains experimental and is avail
 the internal node, native headless contract, and Studio's opt-in **Clip Continuity** controls.
 Studio also supports visible-frame matching and compatible LTX source-tail continuation.
 An experimental **direct Swift H3 worker** can save and load its own version-2
-normalized audiovisual latent context for text-to-AV chaining. It is not
-interchangeable with Python's version-1 SafeTensors context. Studio now selects
-it for text-only saved motion continuation; a saved ComfyUI graph reproduced
+normalized audiovisual latent context for text-to-AV chaining. Native motion continuation now has task-bound T2VA v2, FL2VA v3 and Ref2VA/A2V v4 request contracts. Python version-1 SafeTensors context is not directly interchangeable; the explicit text/FL importer verifies its full source/model identity and payload before publishing a native artifact. The earlier text-only route selected
+it for saved motion continuation; a saved ComfyUI graph reproduced
 the Studio take byte for byte. A separate direct
 Swift Ref2VA extension route prepares an audio-bearing source movie and its
 true last frame as a frame-zero seam anchor. Both routes published installed-
@@ -1646,7 +1699,7 @@ Pixel-Spatial, and MSR layouts remain recognizable after arbitrary file renaming
 unknown reference adapter reports `unclassified_reference_conditioning` and cannot silently enter
 a task-specific pipeline. Guarded Ingredients admission also accepts compatible LTX 2.5
 rank-128 full-resolution sheet adapters after complete tensor/header checks; the pinned official
-2.5 package's gated header is not yet qualified with the available access. Licon MSR V2 is
+2.5 package's authenticated header request returned 403, so that variant remains unqualified. Licon MSR V2 is
 structurally different: its actual header has 1,152 rank-128 pairs across 48 blocks, additional
 audio attention/feed-forward and video-to-audio targets, and five audio-slot embedding tensors.
 The current V1 route supports 480 video pairs and five visual-slot tensors, without V2's
@@ -2203,7 +2256,7 @@ frame 119 rather than the older Studio take's 123. Its media differs, and visibl
 review, exact old parity and matched speed remain open. All six other typed H3 routes have
 preparation/export checks; A2V, external-after, movie and standalone-audio Ref2VA also passed
 actual typed Studio generation, previews, acceptance and save/reopen with the earlier worker.
-Corrected H3 conditioning and decoder changes still require fresh packaged execution.
+Those dated checks used earlier workers. Subsequent corrected-worker route/lifecycle evidence is separate from the new creative controls described above.
 These checks leave broad identity, seam and audio quality
 and matched useful-size performance open.
 One LTX 2.5 FFLF headless recipe also completed with synchronized audio.
@@ -2387,8 +2440,10 @@ previews after the schedule midpoint; non-finite latents stop immediately.
 
 ## Performance and memory optimizations
 
-The tables below summarize measured production paths, approximate accelerators, and remaining
-work. Results apply to the stated workflow and hardware conditions.
+The tables below retain dated measurements of their stated production paths, approximate
+accelerators and remaining work. Existing composable ComfyUI measurements describe their Python
+engines; they are not current Swift-worker benchmarks. Native component measurements and
+qualification are reported separately in [implementation status](STATUS.md).
 
 ### Current high-impact options
 
@@ -2546,7 +2601,7 @@ This table is generated from the registered node contracts. Run
 | LTX 2.5 Generate Chained Timeline | Generate two to four overlapping LTX 2.5 windows with interior video history, regenerated terminal video context, and one synchronized audio/video decode. Supports distilled two-stage and full-resolution single-stage Sol configurations. Guided, CFG++, generated-keyframe, DFR, and automatic-duration modes are unsupported. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Video Upscale / Refine | Upscale decoded ComfyUI IMAGE+AUDIO from any movie through LTX 2.5 latent space, optionally adding generative video-only refinement while preserving the source audio. Refinement can invent identity details, logos, and text. | LTX 2.5 — Core | Experimental |
 | LTX 2.5 Unload MLX Runtime | Release process-local LTX 2.5 state. | LTX 2.5 — Core | Supported |
-| Generate H3 / LTX 2.5 (Swift MLX Recipe) | Run a saved weetodd-headless-v2 H3/LTX 2.5 recipe or dedicated Ripple request through the selected Swift MLX worker. The worker preflights before inference; this node never loads a Python model. Existing composable nodes remain separate. | Native Swift — Recipe execution | Experimental |
+| Generate H3 / LTX 2.5 (Swift MLX Recipe) | Run a saved weetodd-headless-v2 H3/LTX 2.5 recipe, including frozen movie upscaling, or a dedicated Ripple request through the selected Swift MLX worker. The worker preflights before inference; this node never loads a Python model. Existing composable nodes remain separate. | Native Swift — Recipe execution | Experimental |
 | Canny Preprocessor (MLX) | Create temporally aligned Canny control frames with MLX. The defaults match ComfyUI's current normalized-threshold Canny contract. | MLX preprocessors — Edges | Experimental |
 | Video Depth Model Loader (MLX) | Select a converted Apache-2.0 Video Depth Anything Small checkpoint. This node does not load weights. | MLX preprocessors — Depth | Experimental |
 | Video Depth Preprocessor (MLX) | Estimate temporally consistent relative depth with Video Depth Anything Small on MLX. The default unloads the model after preprocessing. | MLX preprocessors — Depth | Experimental |

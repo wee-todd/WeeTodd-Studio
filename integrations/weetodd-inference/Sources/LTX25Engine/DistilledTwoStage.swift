@@ -8,11 +8,15 @@ public struct DistilledTwoStageRecipe: Sendable {
   public let second: SamplingSchedule
   public static let identifier = "ltx25-distilled-two-stage-native-rng-v1"
   public init(width: Int,height: Int,frames: Int,fps: Double,seed: UInt64) throws {
-    guard width >= 64,height >= 64,width % 64 == 0,height % 64 == 0 else {
-      throw LTXError.invalid("Two-stage LTX requires final dimensions divisible by 64.")
+    try self.init(width:width,height:height,frames:frames,fps:fps,seed:seed,singleStage:false)
+  }
+  public init(width: Int,height: Int,frames: Int,fps: Double,seed: UInt64,singleStage: Bool) throws {
+    let alignment=singleStage ? 32 : 64
+    guard width >= alignment,height >= alignment,width % alignment == 0,height % alignment == 0 else {
+      throw LTXError.invalid("LTX dimensions must be divisible by \(alignment) for the selected stage contract.")
     }
     high = try AVGeometry(width: width,height: height,frames: frames,fps: fps)
-    low = try AVGeometry(width: width/2,height: height/2,frames: frames,fps: fps)
+    low = try singleStage ? high : AVGeometry(width: width/2,height: height/2,frames: frames,fps: fps)
     self.seed = seed
     first = try SamplingSchedule(sigmas: [1,0.99375,0.9875,0.98125,0.975,0.909375,0.725,0.421875,0],eta: 1)
     second = try SamplingSchedule(sigmas: [0.909375,0.725,0.421875,0],eta: 0)

@@ -4,6 +4,10 @@ import LTX25Engine
 /// Spatial and causal-temporal partitions for an RGB24 video guide. Each tile
 /// is admitted by the existing encoder before any source bytes or weights load.
 public struct MLXVideoEncodeTilePlan: Sendable {
+  /// Whole spatial windows retain the encoder's convolution context. Forced
+  /// tiles are useful for qualification and remain the bounded fallback.
+  public enum SpatialPolicy: Sendable { case preferWhole, tiles }
+
   public struct Tile: Sendable {
     public let frameStart: Int, frameEnd: Int
     public let yStart: Int, yEnd: Int
@@ -26,6 +30,7 @@ public struct MLXVideoEncodeTilePlan: Sendable {
   public let tiles: [Tile]
 
   public init(frames: Int, width: Int, height: Int, tilePixels: Int = 512,
+    spatialPolicy: SpatialPolicy = .preferWhole,
     maximumOwnedBufferBytes: Int = 4 * 1024 * 1024 * 1024) throws {
     guard tilePixels >= 128, tilePixels % 32 == 0, maximumOwnedBufferBytes > 0 else {
       throw LTXError.invalid("Video encoder tiles require a bounded 32-pixel grid.")
@@ -57,8 +62,11 @@ public struct MLXVideoEncodeTilePlan: Sendable {
     }
     var result: [Tile] = []
     for (f0, f1) in temporal() {
-      for (y0, y1) in spatial(height) {
-        for (x0, x1) in spatial(width) {
+      let useWhole = spatialPolicy == .preferWhole &&
+        (try? MLXVideoEncodePlan(frames: f1 - f0, width: width, height: height,
+          maximumOwnedBufferBytes: min(maximumOwnedBufferBytes, 4 * 1024 * 1024 * 1024))) != nil
+      for (y0, y1) in useWhole ? [(0, height)] : spatial(height) {
+        for (x0, x1) in useWhole ? [(0, width)] : spatial(width) {
           let admission = try MLXVideoEncodePlan(frames: f1 - f0, width: x1 - x0,
             height: y1 - y0, maximumOwnedBufferBytes: maximumOwnedBufferBytes)
           result.append(Tile(frameStart: f0, frameEnd: f1,

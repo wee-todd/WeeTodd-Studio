@@ -16,7 +16,7 @@ struct ContinuousSceneRenderReport: Codable, Equatable {
   }
   static func decode(_ value: Any) throws -> Self {
     let report = try JSONDecoder().decode(Self.self, from: JSONSerialization.data(withJSONObject: value))
-    guard report.version == 1, report.frameRate.isFinite, report.frameRate > 0,
+    guard (1...2).contains(report.version), report.frameRate.isFinite, report.frameRate > 0,
       ["single_decode_native_latent_chain", "windowed_decode_native_latent_chain"]
         .contains(report.publicationMode) else {
       throw StudioError.invalid("The result is not a supported native continuous scene.")

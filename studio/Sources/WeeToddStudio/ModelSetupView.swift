@@ -71,7 +71,7 @@ struct ModelSetupView: View {
           Text("Set up compatible models").font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
-        Button("Done") { state.selectedPreset = nil }.disabled(bridge.busy || state.downloading)
+        Button("Done") { state.selectedPreset = nil }.disabled(bridge.busy || state.downloading || state.convertingTransformer)
       }
       Divider()
       ScrollViewReader { proxy in
@@ -100,7 +100,7 @@ struct ModelSetupView: View {
                 Button("Use Recipe for Selected Clip") {
                   state.useRecipeForSelectedClip(store: store)
                 }
-                .disabled(bridge.busy || state.downloading || clip.profileID == state.resultPath)
+                .disabled(bridge.busy || state.downloading || state.convertingTransformer || clip.profileID == state.resultPath)
                 Text(
                   clip.profileID == state.resultPath
                     ? "Selected for \(clip.name). Prepare the clip to validate its media and settings."
@@ -141,7 +141,14 @@ struct ModelSetupView: View {
             ProgressView().controlSize(.small)
           }
           Text(bridge.message).font(.caption).lineLimit(2)
-          Button("Cancel") { bridge.cancel() }
+          Button("Cancel") {
+            if state.convertingTransformer { state.cancelTransformerConversion(bridge: bridge) }
+            else { bridge.cancel() }
+          }
+        } else if state.convertingTransformer {
+          ProgressView().controlSize(.small)
+          Text("Inspecting native conversion headers…").font(.caption)
+          Button("Cancel") { state.cancelTransformerConversion(bridge: bridge) }
         } else if !state.resultPath.isEmpty {
           Label("Recipe created", systemImage: "checkmark.circle.fill")
             .font(.caption).foregroundStyle(.green)
@@ -153,11 +160,11 @@ struct ModelSetupView: View {
         Button("Create Recipe") { Task { await state.createRecipe(store: store) } }
           .buttonStyle(.borderedProminent)
           .disabled(
-            bridge.busy || state.downloading || !state.selection.missingComponents(for: preset).isEmpty
+            bridge.busy || state.downloading || state.convertingTransformer || state.rawDevTransformer != nil || !state.selection.missingComponents(for: preset).isEmpty
               || !state.resultPath.isEmpty)
       }
     }.padding(24).frame(width: 720, height: 760)
-      .interactiveDismissDisabled(bridge.busy || state.downloading)
+      .interactiveDismissDisabled(bridge.busy || state.downloading || state.convertingTransformer)
   }
 
   private var displayLog: String {
@@ -199,7 +206,7 @@ struct ModelSetupView: View {
           .disabled(state.roots.isEmpty || state.scanning)
         if state.scanning { ProgressView().controlSize(.small) }
       }
-    }.disabled(bridge.busy || state.downloading)
+    }.disabled(bridge.busy || state.downloading || state.convertingTransformer)
   }
 
   private var componentChoices: some View {
@@ -208,7 +215,7 @@ struct ModelSetupView: View {
       ForEach(preset.components) { component in
         componentRow(component)
       }
-    }.disabled(bridge.busy || state.downloading)
+    }.disabled(bridge.busy || state.downloading || state.convertingTransformer)
   }
 
   private func componentRow(_ component: ModelSetupComponent) -> some View {
@@ -274,6 +281,18 @@ struct ModelSetupView: View {
           .foregroundStyle(
             .secondary)
       }
+      if component.key == "dev_transformer_path", state.rawDevTransformer != nil {
+        Text("Prepare native Q8 pages in a new folder before creating the recipe. The original checkpoint stays in place; the pages require additional disk space.")
+          .font(.caption).foregroundStyle(.secondary)
+        Button("Prepare Q8 Pages…") {
+          let panel = NSSavePanel()
+          panel.title = "Choose a new native transformer pages directory"
+          panel.nameFieldStringValue = "ltx-2.5-22b-dev-transformer-q8-paged"
+          panel.canCreateDirectories = true
+          guard panel.runModal() == .OK, let destination = panel.url else { return }
+          Task { await state.convertDevTransformer(store: store, destination: destination) }
+        }
+      }
     }
   }
 
@@ -305,7 +324,7 @@ struct ModelSetupView: View {
         "This Mac: \(Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824, specifier: "%.0f") GB unified memory"
       )
       .font(.caption).foregroundStyle(.secondary)
-    }.disabled(bridge.busy || state.downloading).onChange(of: state.memoryMode) { _, _ in state.resultPath = "" }
+    }.disabled(bridge.busy || state.downloading || state.convertingTransformer).onChange(of: state.memoryMode) { _, _ in state.resultPath = "" }
   }
 
   private var compatibleDownloads: [ModelSetupDownload] {
@@ -366,7 +385,7 @@ struct ModelSetupView: View {
         if !state.downloadMessage.isEmpty {
           Text(state.downloadMessage).font(.caption).textSelection(.enabled)
         }
-      }.padding(.top, 10).disabled(bridge.busy || state.downloading)
+      }.padding(.top, 10).disabled(bridge.busy || state.downloading || state.convertingTransformer)
         .onChange(of: state.selectedDownloadID) { _, _ in sourceTermsReviewed = false }
     }
   }

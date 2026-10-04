@@ -2,6 +2,51 @@ import XCTest
 @testable import LTX25MLX
 
 final class StudioRecipeTests: XCTestCase {
+  func testAutomaticDurationPinsTheHeadAndResolvesThroughStrictRequestGeometry() throws {
+    var recipe=fixture(),config=recipe["config"] as! [String:Any],components=recipe["components"] as! [String:Any]
+    config["duration_mode"]="automatic";config["auto_duration_min_seconds"]=0.25
+    config["auto_duration_max_seconds"]=30;recipe["config"]=config
+    components["duration_head_path"]="/models/duration-head.safetensors"
+    components["duration_head_header_sha256"]=String(repeating:"a",count:64);recipe["components"]=components
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,13)
+    let policy=try XCTUnwrap(request.automaticDuration)
+    XCTAssertEqual(policy.headHeaderSHA256,String(repeating:"a",count:64))
+    XCTAssertEqual(try policy.maximumFrames(fps:24),713)
+    let resolved=try request.replacingFrames(49)
+    XCTAssertEqual(resolved.frames,49);XCTAssertEqual(resolved.automaticDuration,policy)
+    var object=try JSONSerialization.jsonObject(with:JSONEncoder().encode(request)) as! [String:Any]
+    var automatic=object["automatic_duration"] as! [String:Any]
+    automatic["ignored_override"]=true;object["automatic_duration"]=automatic
+    XCTAssertThrowsError(try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONSerialization.data(withJSONObject:object)))
+    config["auto_duration_max_seconds"]=true;recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe))
+  }
+  func testLinkedDurationHeadDoesNotChangeManualSamplingOrActivatePrediction() throws {
+    var recipe=fixture(),components=recipe["components"] as! [String:Any]
+    components["duration_head_path"]="/models/duration-head.safetensors"
+    components["duration_head_header_sha256"]=String(repeating:"b",count:64);recipe["components"]=components
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,3);XCTAssertNil(request.automaticDuration)
+    XCTAssertEqual(request.frames,try compile(fixture()).frames)
+    let encoded=try JSONSerialization.jsonObject(with:JSONEncoder().encode(request)) as! [String:Any]
+    XCTAssertNil(encoded["automatic_duration"])
+  }
+  func testDevGuidedRecipeAdmitsNegativeConditioningWithoutChangingDistilledRecipe() throws {
+    var recipe=fixture(), config=recipe["config"] as! [String:Any]
+    config["pipeline_mode"]="guided"; config["stage1_steps"]=30
+    config["stage1_sampler"]="euler_guided"; config["negative_prompt"]="blurry, plastic skin"
+    config["video_cfg_scale"]=3; config["audio_cfg_scale"]=7; config["stg_scale"]=1
+    config["video_rescale_scale"]=0.7; config["audio_rescale_scale"]=0.7
+    config["modality_scale"]=3; config["stg_blocks"]=[28]; recipe["config"]=config
+    var components=recipe["components"] as! [String:Any]
+    components["distilled_lora_path"]="/models/distilled-refinement.safetensors"
+    recipe["components"]=components
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,12)
+    XCTAssertEqual(try compile(fixture()).version,3)
+  }
+
   func testAuthoredIngredientsCompilesAnExplicitSamplerAndRejectsUnsupportedChoices() throws {
     var recipe=fixture(),config=recipe["config"] as! [String:Any]
     config["duration_seconds"]=5.0;config["ic_lora_single_stage"]=true
@@ -198,7 +243,10 @@ final class StudioRecipeTests: XCTestCase {
     XCTAssertEqual(withFirst.referenceImages.map(\.role),["first"])
     var last=first;last["frame_index"]="last";recipe["conditioning"]=["version":1,"task":"a2v",
       "inputs":[source,last]]
-    XCTAssertThrowsError(try compile(recipe))
+    let withLast=try compile(recipe)
+    XCTAssertEqual(withLast.version,14);XCTAssertEqual(withLast.task,"a2v")
+    XCTAssertEqual(withLast.referenceFrames,[withLast.frames-1])
+    XCTAssertEqual(withLast.audioReference?.sourceStartSeconds,1.25)
   }
   func fixture() -> [String:Any] {
     ["engine":"ltx25", "format":"weetodd-headless-v2", "prompt":"A cup moves.",
@@ -287,12 +335,43 @@ final class StudioRecipeTests: XCTestCase {
     components["loras"]=[["/style",1,"alpha override"]];recipe["components"]=components
     XCTAssertThrowsError(try compile(recipe))
   }
-  func testRejectsMiddleReferenceAndRoundTiesLikePython() throws {
+  func testAdmitsExactMiddleReferenceAndRoundTiesLikePython() throws {
     var recipe=fixture();var c=recipe["conditioning"] as! [String:Any]
     var inputs=c["inputs"] as! [[String:Any]];inputs[1]["frame_index"]=40;c["inputs"]=inputs;recipe["conditioning"]=c
-    XCTAssertThrowsError(try compile(recipe))
+    let timed=try compile(recipe)
+    XCTAssertEqual(timed.version,14);XCTAssertEqual(timed.referenceFrames,[0,40])
     recipe=fixture();var config=recipe["config"] as! [String:Any];config["duration_seconds"]=20.0/24;recipe["config"]=config
     XCTAssertEqual(try compile(recipe).frames,17)
+  }
+  func testGeneratedOrdinarySlotsHaveExplicitVersionAndOnlyFirstStageMarkers() throws {
+    var recipe=fixture(),config=recipe["config"] as! [String:Any]
+    config["generated_keyframes"]=3;recipe["config"]=config
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,14);XCTAssertEqual(request.generatedKeyframes,3)
+    XCTAssertEqual(try request.ordinaryKeyframeLayout(geometry:request.recipe().low,stage:0)?.generatedFrames,[22,44,66])
+    XCTAssertEqual(try request.ordinaryKeyframeLayout(geometry:request.recipe().high,stage:1)?.slotTokens,0)
+    config["generated_keyframes"]=true;recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe))
+    config["generated_keyframes"]=9;recipe["config"]=config
+    XCTAssertThrowsError(try compile(recipe))
+    config["generated_keyframes"]=0;recipe["config"]=config
+    XCTAssertEqual(try compile(recipe).version,3)
+  }
+  func testAudioDriverAllowsMultipleTimedImagesAndRejectsDuplicateRoundedFrames() throws {
+    var recipe=fixture()
+    let source:[String:Any]=["id":"audio","kind":"audio","role":"audio_driver","path":"/voice.wav",
+      "strength":1,"source_start_seconds":0,"source_duration_seconds":4]
+    func image(_ id:String,_ frame:Int) -> [String:Any] {
+      ["id":id,"kind":"image","role":"keyframe","path":"/\(id).png","frame_index":frame,"strength":0.75]
+    }
+    recipe["conditioning"]=["version":1,"task":"a2v","audio_policy":"source",
+      "inputs":[source,image("a",7),image("b",52)]]
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,14);XCTAssertEqual(request.referenceFrames,[7,52])
+    XCTAssertEqual(request.task,"a2v");XCTAssertNotNil(request.audioReference)
+    recipe["conditioning"]=["version":1,"task":"a2v","audio_policy":"source",
+      "inputs":[source,image("a",7),image("b",7)]]
+    XCTAssertThrowsError(try compile(recipe))
   }
   func testStudioSingleAnchorAndReversedAttachmentOrder() throws {
     var recipe=fixture(),c=fixture()["conditioning"] as! [String:Any]

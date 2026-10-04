@@ -7,6 +7,187 @@ import XCTest
 @testable import StudioCore
 
 final class NativeH3PreparationTests: XCTestCase {
+  func testAudioOnlyRefRequiresEveryInputTimedAndKeepsAuthoredOrder() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    let profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="ref2va";definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    project.assets=[];project.clips[0].attachments=[];project.clips[0].generationSelection = .init(task:"ref2va")
+    for index in 0..<2 {
+      let url=root.appendingPathComponent("timed-audio-\(index).wav");try Data([UInt8(index+1)]).write(to:url)
+      let asset=MediaAsset(name:"Timed audio",kind:.audio,path:url.path);project.assets.append(asset)
+      var attachment=Attachment(assetID:asset.id,role:.reference)
+      attachment.h3ReferencePlacement = .init(frame:index==0 ? .last : .index(0))
+      project.clips[0].attachments.append(attachment)
+    }
+    let recipe=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(inputs.compactMap {$0["kind"] as? String},["audio","audio"])
+    XCTAssertEqual(inputs.compactMap {$0["frame_index"] as? Int},[119,0])
+    project.clips[0].attachments[1].h3ReferencePlacement=nil
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+  }
+
+  func testA2VHistorySaveNeedsExactEffectiveAudioCoverageAndNeverPadsPreparedMix() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    let profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="ref2va";definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    var target=project.clips[0];target.generationSelection = .init(task:"a2v");target.duration=3
+    target.generationWidth=64;target.generationHeight=64;target.continuity = .init(mode:"motion",saveContext:true)
+    let directory=root.appendingPathComponent("a2v-context");try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:false)
+    let payload=Data(count:7*2*2*96*4+2*37*32*4)
+    func hash(_ data:Data)->String {SHA256.hash(data:data).map {String(format:"%02x",$0)}.joined()}
+    try payload.write(to:directory.appendingPathComponent("latents.f32"))
+    let manifest:[String:Any]=["format":"weetodd-h3-swift-continuation-v2","task":"ref2va","contextFrames":22,"width":64,"height":64,
+      "generatedFrames":90,"publishedFrames":90,"overlapFrames":0,"identity":String(repeating:"c",count:64),"payloadBytes":payload.count,"payloadSHA256":hash(payload)]
+    let bytes=try JSONSerialization.data(withJSONObject:manifest),manifestURL=directory.appendingPathComponent("manifest.json")
+    try bytes.write(to:manifestURL)
+    let sourceMovie=root.appendingPathComponent("a2v-source.mp4");try Data([3]).write(to:sourceMovie)
+    var source=Clip(engine:.h3);source.sourcePath=sourceMovie.path;source.duration=3.75
+    source.versions=[RenderVersion(path:sourceMovie.path,seed:1,prompt:"",recipePath:"",usableSourceIn:0,usableDuration:3.75,
+      continuationArtifact:.init(manifest:manifestURL.path,manifestSHA256:hash(bytes),payloadSHA256:hash(payload),payloadFilename:"latents.f32"))]
+    let driverURL=root.appendingPathComponent("a2v-history-driver.wav");try Data([4]).write(to:driverURL)
+    var audio=MediaAsset(name:"Driver",kind:.audio,path:driverURL.path,scope:.clip,owner:target.id);audio.duration=3.6
+    var attachment=Attachment(assetID:audio.id,role:.audioDriver);attachment.audioSourceStart=0;attachment.audioSourceDuration=3
+    target.attachments=[attachment];project.assets=[audio]
+    func body() throws->[String:Any] {
+      project.clips=[source,target];var value=try request(project,runtime);value["clipID"]=target.id.uuidString;return value
+    }
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:body())) {error in
+      XCTAssertTrue(error.localizedDescription.contains("effective published"))
+    }
+    target.attachments[0].audioSourceDuration=3.6
+    let recipe=try NativeH3Preparation.compose(request:body())["recipe"] as! [String:Any]
+    XCTAssertEqual((recipe["config"] as! [String:Any])["duration_seconds"] as? Double,85.0/24)
+    let driver=((recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]])[0]
+    XCTAssertEqual(driver["source_duration_seconds"] as? Double,3.6)
+    XCTAssertEqual(driver["source_start_seconds"] as? Double,0)
+    XCTAssertNil(driver["frame_index"])
+    target.audioDriverSelection=AudioDriverSelection(mode:.voice);target.audioDriverMixKey="prepared"
+    target.attachments[0].audioSourceStart=nil;target.attachments[0].audioSourceDuration=nil
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:body())) {error in
+      XCTAssertTrue(error.localizedDescription.contains("longer effective H3 published interval"))
+      XCTAssertTrue(error.localizedDescription.contains("not padded"))
+    }
+  }
+
+// Insert inside NativeH3PreparationTests; use its existing private fixture/request.
+// These tests compose only. Tiny payloads are intentionally not decoded.
+func testA2VFirstLastBudgetAnchorsFreezeAsOrderedKeyframes() throws {
+  let(root,original,runtime)=try fixture();var project=original
+  let profile=root.appendingPathComponent("h3.json")
+  var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+  var components=definition["components"] as! [String:Any];components["task"]="ref2va";definition["components"]=components
+  definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+  try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+  let sound=root.appendingPathComponent("budget-driver.wav");try Data([1]).write(to:sound)
+  var audio=MediaAsset(name:"Driver",kind:.audio,path:sound.path);audio.duration=5
+  project.assets=[audio];var driver=Attachment(assetID:audio.id,role:.audioDriver)
+  driver.audioSourceStart=0;driver.audioSourceDuration=5;project.clips[0].attachments=[driver]
+  for role in [MediaRole.last,.first] {
+    let url=root.appendingPathComponent("budget-\(role.rawValue).png");try Data([2]).write(to:url)
+    let image=MediaAsset(name:"Anchor",kind:.image,path:url.path);project.assets.append(image)
+    var anchor=Attachment(assetID:image.id,role:role)
+    anchor.h3ReferencePlacement = .init(imagePixelBudgetPercent:200)
+    project.clips[0].attachments.append(anchor)
+  }
+  project.clips[0].generationSelection = .init(task:"a2v")
+  let recipe=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+  let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+  XCTAssertEqual(inputs.dropFirst().compactMap {$0["role"] as? String},["keyframe","keyframe"])
+  XCTAssertEqual(inputs.dropFirst().compactMap {$0["frame_index"] as? Int},[119,0])
+  XCTAssertEqual(inputs.dropFirst().compactMap {$0["image_pixel_budget_percent"] as? Int},[200,200])
+  XCTAssertEqual(inputs[0]["role"] as? String,"audio_driver")
+  XCTAssertNil(inputs[0]["image_pixel_budget_percent"])
+}
+
+func testReferenceDensitySidecarAndAudioCapMatchWorkerAdmission() throws {
+  let(root,original,runtime)=try fixture();var project=original
+  let profile=root.appendingPathComponent("h3.json")
+  var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+  var components=definition["components"] as! [String:Any];components["task"]="ref2va";definition["components"]=components
+  definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+  try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+  let movie=root.appendingPathComponent("density.mov"),sidecar=root.appendingPathComponent("density-sidecar.wav")
+  try Data([1]).write(to:movie);try Data([2]).write(to:sidecar)
+  let visual=MediaAsset(name:"Movie",kind:.video,path:movie.path);project.assets=[visual]
+  var attachment=Attachment(assetID:visual.id,role:.reference)
+  attachment.h3ReferencePlacement = .init(soundtrackPath:sidecar.path,videoTemporalDensity:.quarter)
+  project.clips[0].attachments=[attachment];project.clips[0].generationSelection = .init(task:"ref2va")
+  for index in 0..<2 {
+    let url=root.appendingPathComponent("standalone-\(index).wav");try Data([UInt8(index+3)]).write(to:url)
+    let asset=MediaAsset(name:"Audio",kind:.audio,path:url.path);project.assets.append(asset)
+    project.clips[0].attachments.append(Attachment(assetID:asset.id,role:.reference))
+  }
+  let recipe=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+  let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+  XCTAssertEqual(inputs[0]["size_policy"] as? String,"match_output")
+  XCTAssertEqual(inputs[0]["temporal_density"] as? String,"quarter")
+  XCTAssertEqual(inputs[0]["soundtrack_path"] as? String,sidecar.path)
+  let fourth=root.appendingPathComponent("fourth-audio.wav");try Data([6]).write(to:fourth)
+  let extra=MediaAsset(name:"Fourth audio source",kind:.audio,path:fourth.path);project.assets.append(extra)
+  project.clips[0].attachments.append(Attachment(assetID:extra.id,role:.reference))
+  XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)),
+    "The movie sidecar is one of the worker's maximum three audio sources.")
+}
+
+  func testH3RejectsCraftedLTXKeyframeSelectionBeforePreparation() throws {
+    let(_,original,runtime)=try fixture();var project=original
+    project.clips[0].generationSelection?.ltx25Keyframes = .init(generatedCount:2,experimentalEnabled:true)
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    project.clips[0].generationSelection?.ltx25Keyframes=nil
+    XCTAssertNoThrow(try NativeH3Preparation.compose(request:request(project,runtime)))
+  }
+  func testResMultistepProfileAndSelectionPreserveStepsWithoutPython() throws {
+    let (root, original, runtime) = try fixture()
+    var project = original
+    project.clips[0].generationSelection?.h3SamplingMethod = .resMultistep
+    project.clips[0].generationSelection?.steps = 4
+    let composed = try NativeH3Preparation.compose(request: request(project, runtime))
+    let recipe = composed["recipe"] as! [String: Any]
+    let config = recipe["config"] as! [String: Any]
+    XCTAssertEqual(config["sampling_method"] as? String, "res_multistep")
+    XCTAssertEqual(config["steps"] as? Int, 5)
+    let url = root.appendingPathComponent("h3.json")
+    try JSONSerialization.data(withJSONObject: recipe).write(to: url)
+    XCTAssertEqual(try NativeH3Preparation.catalog(directory: root.path).count, 1)
+    project.clips[0].generationSelection?.h3SamplingMethod = nil
+    let inherited = try NativeH3Preparation.compose(request: request(project, runtime))["recipe"] as! [String: Any]
+    XCTAssertEqual((inherited["config"] as! [String: Any])["sampling_method"] as? String, "res_multistep")
+    project.clips[0].generationSelection?.h3SamplingMethod = .euler
+    let overridden = try NativeH3Preparation.compose(request: request(project, runtime))["recipe"] as! [String: Any]
+    XCTAssertEqual((overridden["config"] as! [String: Any])["sampling_method"] as? String, "euler")
+  }
+
+  func testResMultistepRejectsExplicitAndHeaderTurboBeforeWeights() throws {
+    for metadata in [[:], ["adapter_profile": "turbo", "inference_steps": "4"]] {
+      let (root, original, runtime) = try fixture()
+      let adapter = try loraFile(root, metadata: metadata)
+      var project = original
+      attachLoRA(adapter, profile: metadata.isEmpty ? "turbo" : nil, to: &project)
+      project.clips[0].generationSelection?.h3SamplingMethod = .resMultistep
+      XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime))) { error in
+        XCTAssertTrue(error.localizedDescription.contains("Turbo"))
+        XCTAssertTrue(error.localizedDescription.contains("Euler"))
+      }
+      project.clips[0].generationSelection?.h3SamplingMethod = .euler
+      XCTAssertEqual(try preparedSteps(project, runtime), 5)
+    }
+    let (root, original, runtime) = try fixture()
+    let adapter = try loraFile(root)
+    try setProfile(root, rootTurbo: adapter.path)
+    var project = original
+    project.clips[0].generationSelection?.h3SamplingMethod = .resMultistep
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(project, runtime))) { error in
+      XCTAssertTrue(error.localizedDescription.contains("Turbo requires Euler"))
+    }
+  }
+
   func testExtensionPromptRetainsStructuredAudioWithoutEmbeddingHeadersInAction() throws {
     var clip=Clip(engine:.h3)
     clip.prompt="integrated_multimodal_description: [Shot 1] The robot lowers its arm.\n\noverall_soundscape: Rain and a metallic whir.\n\nnon_diegetic_music: A quiet cello."
@@ -322,7 +503,8 @@ final class NativeH3PreparationTests: XCTestCase {
       ("adaln", ["adapter_profile": "standard"], "diffusion_model.blocks.0.adaln_proj.linear")] {
       let url = try loraFile(root, name: name, metadata: metadata, target: target)
       try setProfile(root, pairs: [[url.path, 1.0]])
-      XCTAssertThrowsError(try preparedSteps(original, runtime))
+      if name == "layout" { XCTAssertEqual(try preparedSteps(original,runtime),20) }
+      else { XCTAssertThrowsError(try preparedSteps(original,runtime)) }
     }
   }
 
@@ -369,6 +551,90 @@ final class NativeH3PreparationTests: XCTestCase {
     project.clips[0].duration=362.0/24
     let rerender=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
     XCTAssertEqual((rerender["config"] as! [String:Any])["duration_seconds"] as? Double,15)
+  }
+
+  private func flContextFixture() throws -> (URL,StudioProject,[String:Any]) {
+    let (root,original,runtime)=try fixture()
+    let profile=root.appendingPathComponent("h3.json")
+    var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=recipe["components"] as! [String:Any]
+    components["task"]="fl2va";components["vision_encoder"]="/model/vision"
+    recipe["components"]=components
+    recipe["conditioning"]=["version":1,"task":"fflf","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:recipe).write(to:profile)
+    let image=root.appendingPathComponent("anchor.png")
+    let context=try XCTUnwrap(CGContext(data:nil,width:64,height:64,bitsPerComponent:8,bytesPerRow:256,
+      space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue))
+    context.setFillColor(CGColor(red:0.2,green:0.3,blue:0.4,alpha:1));context.fill(CGRect(x:0,y:0,width:64,height:64))
+    let destination=try XCTUnwrap(CGImageDestinationCreateWithURL(image as CFURL,"public.png" as CFString,1,nil))
+    CGImageDestinationAddImage(destination,try XCTUnwrap(context.makeImage()),nil)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    let asset=MediaAsset(name:"Anchor",kind:.image,path:image.path)
+    var project=original;project.assets=[asset]
+    project.clips[0].generationWidth=64;project.clips[0].generationHeight=64
+    project.clips[0].duration=3;project.clips[0].generationSelection=GenerationSelection(task:"fflf")
+    project.clips[0].attachments=[Attachment(assetID:asset.id,role:.last),Attachment(assetID:asset.id,role:.first)]
+    return(root,project,runtime)
+  }
+
+  func testFL2VASaveContextUsesVersionThreeAndEffectiveVisibleLastFrameWithoutPython() throws {
+    let (root,original,runtime)=try flContextFixture();var project=original
+    project.clips[0].continuity=ClipContinuity(saveContext:true)
+    let composed=try NativeH3Preparation.compose(request:request(project,runtime))
+    let recipe=composed["recipe"] as! [String:Any],context=recipe["continuation"] as! [String:Any]
+    XCTAssertEqual(context["version"] as? Int,3);XCTAssertNil(context["source_context"])
+    XCTAssertEqual((recipe["components"] as! [String:Any])["task"] as? String,"fl2va")
+    XCTAssertEqual((recipe["config"] as! [String:Any])["duration_seconds"] as? Double,3)
+    let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(inputs.compactMap { $0["frame_index"] as? Int },[0,72])
+    XCTAssertEqual(project.clips[0].attachments,original.clips[0].attachments)
+    let prepared=try NativeH3Preparation.prepare(request:request(project,runtime),destination:root.appendingPathComponent("prepared"))
+    XCTAssertEqual((prepared["report"] as! [String:Any])["nativePreparation"] as? String,"swift")
+    XCTAssertEqual(try JSONSerialization.jsonObject(with:Data(contentsOf:root.appendingPathComponent("prepared/editor-request.json"))) as! NSDictionary,
+      try request(project,runtime) as NSDictionary)
+    project.clips[0].duration=362.0/24
+    let rerender=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    let repeatedInputs=(rerender["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(repeatedInputs.compactMap { $0["frame_index"] as? Int },[0,361])
+    XCTAssertEqual((rerender["config"] as! [String:Any])["duration_seconds"] as? Double,15)
+  }
+
+  func testFL2VAMotionKeepsVisibleKeyframesAndRequiresTaskBoundNativeContext() throws {
+    let (root,original,runtime)=try flContextFixture();var project=original
+    let directory=root.appendingPathComponent("fl-context");try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+    let payload=Data(repeating:0,count:7*2*2*96*4+2*37*32*4)
+    func hash(_ bytes:Data)->String { SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined() }
+    var manifest:[String:Any]=["format":"weetodd-h3-swift-continuation-v2","task":"fl2va","contextFrames":22,
+      "width":64,"height":64,"generatedFrames":90,"publishedFrames":90,"overlapFrames":0,
+      "identity":String(repeating:"c",count:64),"payloadBytes":payload.count,"payloadSHA256":hash(payload)]
+    let manifestURL=directory.appendingPathComponent("manifest.json")
+    let movie=root.appendingPathComponent("source.mp4");try Data([0]).write(to:movie)
+    try payload.write(to:directory.appendingPathComponent("latents.f32"))
+    var source=original.clips[0];source.sourcePath=movie.path;source.duration=3.75
+    var target=original.clips[0];target.id=UUID();target.duration=3;target.continuity=ClipContinuity(mode:"motion",saveContext:true)
+    var timed=Attachment(assetID:project.assets[0].id,role:.keyframe);timed.time=71.0/24
+    target.attachments.append(timed)
+    func body() throws->[String:Any] {
+      let bytes=try JSONSerialization.data(withJSONObject:manifest)
+      try bytes.write(to:manifestURL)
+      source.versions=[RenderVersion(path:movie.path,seed:1,prompt:"",recipePath:"",usableSourceIn:0,usableDuration:3.75,
+        continuationArtifact:ContinuationArtifact(manifest:manifestURL.path,manifestSHA256:hash(bytes),payloadSHA256:hash(payload),payloadFilename:"latents.f32"))]
+      project.clips=[source,target]
+      var value=try request(project,runtime);value["clipID"]=target.id.uuidString;return value
+    }
+    let composed=try NativeH3Preparation.compose(request:body()),recipe=composed["recipe"] as! [String:Any]
+    XCTAssertEqual((recipe["continuation"] as! [String:Any])["version"] as? Int,3)
+    XCTAssertEqual((recipe["config"] as! [String:Any])["duration_seconds"] as? Double,85.0/24)
+    let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(inputs.compactMap { $0["frame_index"] as? Int },[0,71,84])
+    for task in [nil,"t2va","ref2va"] as [String?] {
+      manifest["task"]=task
+      XCTAssertThrowsError(try NativeH3Preparation.compose(request:body())) { error in
+        XCTAssertTrue(error.localizedDescription.contains("context"))
+      }
+    }
+    manifest["task"]="fl2va";manifest["format"]="weetodd-h3-continuation-v1"
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:body()))
   }
 
   func testMotionContextKeepsHashesAlignsSavedTailAndRejectsTampering() throws {
@@ -868,4 +1134,184 @@ final class NativeH3PreparationTests: XCTestCase {
     XCTAssertEqual((mapped["loras"] as! [[Any]])[0][0] as? String,
       turbo.path)
   }
+  func testMovieSourceIntervalsCannotHideOnOrdinaryOrDisabledAttachments() async throws {
+    let (root,original,runtime)=try fixture()
+    var baseline=original
+    let unused=MediaAsset(name:"Disabled stale adapter",kind:.lora,path:"/missing/unused.safetensors")
+    baseline.assets.append(unused)
+    var attachment=Attachment(assetID:unused.id,role:.lora);attachment.enabled=false
+    baseline.clips[0].attachments.append(attachment)
+    XCTAssertNoThrow(try NativeH3Preparation.compose(request:request(baseline,runtime)))
+    for durationField in [false,true] {
+      var project=baseline
+      if durationField { project.clips[0].attachments[0].sourceDurationSeconds=1 }
+      else { project.clips[0].attachments[0].sourceStartSeconds=0 }
+      let frozen=try request(project,runtime)
+      XCTAssertThrowsError(try NativeH3Preparation.compose(request:frozen)) {
+        XCTAssertTrue($0.localizedDescription.contains("Source movie interval fields"))
+      }
+      XCTAssertThrowsError(try NativeH3Preparation.describe(request:frozen)) {
+        XCTAssertTrue($0.localizedDescription.contains("Source movie interval fields"))
+      }
+      let destination=root.appendingPathComponent("rejected-movie-field-"+String(durationField))
+      do {
+        _ = try await NativeH3Preparation.prepareWithMedia(request:frozen,destination:destination)
+        XCTFail("Ordinary preparation silently ignored a movie interval")
+      } catch { XCTAssertTrue(error.localizedDescription.contains("Source movie interval fields")) }
+      XCTAssertFalse(FileManager.default.fileExists(atPath:destination.path))
+    }
+  }
+// Insert in existing NativeH3PreparationTests to reuse its bounded real headers.
+  func testEightSignedAdaptersWithExplicitDeferredQKVContract() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    for index in 0..<8 {
+      attachLoRA(try loraFile(root,name:"signed-\(index)"),profile:"standard",to:&project)
+      project.clips[0].attachments[index].strength=index==0 ? -2 : 0.5
+      project.clips[0].attachments[index].h3LoRA = .init(profile:.standard,qkvLayout:.nativeInterleaved,startAfterEvaluations:index==0 ? 2 : 0)
+    }
+    let recipe=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    let stack=try XCTUnwrap(recipe["loras"] as? [String:Any]);let adapters=try XCTUnwrap(stack["adapters"] as? [[String:Any]])
+    XCTAssertEqual(stack["version"] as? Int,1);XCTAssertEqual(adapters.count,8)
+    XCTAssertEqual(adapters[0]["strength"] as? Double,-2);XCTAssertEqual(adapters[0]["start_after_evaluations"] as? Int,2)
+    XCTAssertEqual(adapters[0]["qkv_layout"] as? String,"native_interleaved")
+    XCTAssertNil((recipe["components"] as? [String:Any])?["loras"])
+    project.clips[0].attachments[0].h3LoRA?.startAfterEvaluations=4
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    project.clips[0].attachments[0].h3LoRA?.startAfterEvaluations=0
+    attachLoRA(try loraFile(root,name:"ninth"),profile:"standard",to:&project)
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+  }
+  func testReferenceTimingSoundtrackAndGlobalNoiseAreFrozenSeparately() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    let profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="ref2va";definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    let movie=root.appendingPathComponent("reference.mov"),audio=root.appendingPathComponent("sound.wav")
+    try Data([1,2,3]).write(to:movie);try Data([4,5,6]).write(to:audio)
+    let asset=MediaAsset(name:"AV reference",kind:.video,path:movie.path);project.assets=[asset]
+    var input=Attachment(assetID:asset.id,role:.reference)
+    input.h3ReferencePlacement = .init(frame:.last,soundtrackPath:audio.path)
+    project.clips[0].attachments=[input];project.clips[0].generationSelection = .init(task:"ref2va")
+    project.clips[0].generationSelection?.h3Reference = .init(visualConditionStrength:0.3,audioConditionStrength:0.8)
+    let recipe=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    let config=recipe["config"] as! [String:Any],inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(config["visual_condition_strength"] as? Double,0.3);XCTAssertEqual(config["audio_condition_strength"] as? Double,0.8)
+    XCTAssertEqual(inputs[0]["frame_index"] as? Int,119);XCTAssertEqual(inputs[0]["strength"] as? Double,1)
+    XCTAssertEqual(inputs[0]["soundtrack_path"] as? String,audio.path)
+    XCTAssertEqual(inputs[0]["soundtrack_sha256"] as? String,SHA256.hash(data:Data([4,5,6])).map { String(format:"%02x",$0) }.joined())
+    let description=try NativeH3Preparation.describe(request:request(project,runtime));XCTAssertTrue((description["sourcePaths"] as! [String]).contains(audio.path))
+    project.clips[0].attachments[0].h3ReferencePlacement?.frame = .index(120)
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+  }
+  func testA2VAdmitsDistinctTimedImagesWithoutSortingReferenceOrder() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    let profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="ref2va";definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    let sound=root.appendingPathComponent("driver.wav");try Data([1]).write(to:sound)
+    var audio=MediaAsset(name:"Driver",kind:.audio,path:sound.path);audio.duration=5
+    project.assets=[audio];var driver=Attachment(assetID:audio.id,role:.audioDriver)
+    driver.audioSourceStart=0;driver.audioSourceDuration=5;project.clips[0].attachments=[driver]
+    for index in [2,0,1] {
+      let url=root.appendingPathComponent("image-\(index).png");try Data([UInt8(index+2)]).write(to:url)
+      let image=MediaAsset(name:"Anchor",kind:.image,path:url.path);project.assets.append(image)
+      project.clips[0].attachments.append(Attachment(assetID:image.id,role:.keyframe,time:Double(index)))
+    }
+    project.clips[0].generationSelection = .init(task:"a2v")
+    let recipe=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(inputs.dropFirst().compactMap { $0["frame_index"] as? Int },[48,0,24])
+    project.clips[0].attachments[3].time=0
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+  }
+
+  func testFunAcceptsSignedStandardBaseStreamLoRAWithoutChangingGuide() throws {
+    let(root,original,runtime)=try controlFixture();var project=original
+    let adapter=try loraFile(root);attachLoRA(adapter,profile:"standard",to:&project)
+    project.clips[0].attachments[1].strength = -0.5
+    project.clips[0].attachments[1].h3LoRA = .init(profile:.standard,qkvLayout:.contiguousQKV)
+    let result=try NativeH3Preparation.compose(request:request(project,runtime)),recipe=result["recipe"] as! [String:Any]
+    let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    XCTAssertEqual(inputs.count,1);XCTAssertEqual(inputs[0]["control_type"] as? String,"pose_skeleton")
+    XCTAssertEqual(inputs[0]["strength"] as? Double,0.75)
+    let adapters=(recipe["loras"] as! [String:Any])["adapters"] as! [[String:Any]]
+    XCTAssertEqual(adapters[0]["strength"] as? Double,-0.5)
+  }
+  func testAdvancedControlsRejectAutoProjectionBeforeMediaPublication() throws {
+    let(_,original,runtime)=try fixture();var project=original
+    project.clips[0].generationSelection?.h3Joint = .init(saveFullLatents:true)
+    project.clips[0].generationSelection?.projectionBackend="auto"
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime))) { error in
+      XCTAssertTrue(error.localizedDescription.contains("explicit MLX"))
+    }
+  }
+
+// Insert inside NativeH3PreparationTests, reusing its existing tiny native headers.
+  func testRefAndA2VSaveNativeTaskBoundContextVersion4WithoutPreoffsettingMedia() throws {
+    for task in ["ref2va","a2v"] {
+      let(root,original,runtime)=try fixture();var project=original
+      let profile=root.appendingPathComponent("h3.json")
+      var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+      var components=definition["components"] as! [String:Any];components["task"]="ref2va";definition["components"]=components
+      definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+      try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+      project.clips[0].generationSelection = .init(task:task);project.clips[0].duration=3
+      project.clips[0].continuity = .init(saveContext:true)
+      let imageURL=root.appendingPathComponent("identity.png");try Data([1]).write(to:imageURL)
+      let image=MediaAsset(name:"Identity",kind:.image,path:imageURL.path);project.assets=[image]
+      if task == "ref2va" {
+        var ref=Attachment(assetID:image.id,role:.reference);ref.h3ReferencePlacement = .init(frame:.last)
+        project.clips[0].attachments=[ref]
+      } else {
+        let audioURL=root.appendingPathComponent("driver.wav");try Data([2]).write(to:audioURL)
+        var sound=MediaAsset(name:"Driver",kind:.audio,path:audioURL.path);sound.duration=3.6;project.assets.append(sound)
+        var driver=Attachment(assetID:sound.id,role:.audioDriver);driver.audioSourceStart=0;driver.audioSourceDuration=3.6
+        project.clips[0].attachments=[driver,Attachment(assetID:image.id,role:.keyframe,time:71.0/24)]
+      }
+      let recipe=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+      let continuation=recipe["continuation"] as! [String:Any]
+      XCTAssertEqual(continuation["version"] as? Int,4);XCTAssertEqual(continuation["save_context"] as? Bool,true)
+      XCTAssertNil(continuation["source_context"])
+      let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+      if task == "ref2va" { XCTAssertEqual(inputs[0]["frame_index"] as? Int,72) }
+      else { XCTAssertEqual(inputs[1]["frame_index"] as? Int,71);XCTAssertNil(inputs[0]["frame_index"]) }
+    }
+  }
+  func testRefNativeContextLoadRejectsOtherTaskAndPreservesVisiblePlacement() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    let profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="ref2va";definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    let imageURL=root.appendingPathComponent("identity.png");try Data([1]).write(to:imageURL)
+    let image=MediaAsset(name:"Identity",kind:.image,path:imageURL.path);project.assets=[image]
+    var target=project.clips[0];target.generationSelection = .init(task:"ref2va");target.duration=3
+    target.generationWidth=64;target.generationHeight=64;target.continuity = .init(mode:"motion",saveContext:true)
+    var ref=Attachment(assetID:image.id,role:.reference);ref.h3ReferencePlacement = .init(frame:.index(71));target.attachments=[ref]
+    let directory=root.appendingPathComponent("ref-context");try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:false)
+    let payload=Data(count:7*2*2*96*4+2*37*32*4)
+    func hash(_ bytes:Data)->String { SHA256.hash(data:bytes).map {String(format:"%02x",$0)}.joined() }
+    try payload.write(to:directory.appendingPathComponent("latents.f32"))
+    var manifest:[String:Any]=["format":"weetodd-h3-swift-continuation-v2","task":"ref2va","contextFrames":22,"width":64,"height":64,
+      "generatedFrames":90,"publishedFrames":90,"overlapFrames":0,"identity":String(repeating:"c",count:64),"payloadBytes":payload.count,"payloadSHA256":hash(payload)]
+    let sourceMovie=root.appendingPathComponent("source.mp4");try Data([3]).write(to:sourceMovie)
+    var source=Clip(engine:.h3);source.sourcePath=sourceMovie.path;source.duration=3.75
+    func body() throws->[String:Any] {
+      let bytes=try JSONSerialization.data(withJSONObject:manifest),url=directory.appendingPathComponent("manifest.json");try bytes.write(to:url)
+      source.versions=[RenderVersion(path:sourceMovie.path,seed:1,prompt:"",recipePath:"",usableSourceIn:0,usableDuration:3.75,
+        continuationArtifact:.init(manifest:url.path,manifestSHA256:hash(bytes),payloadSHA256:hash(payload),payloadFilename:"latents.f32"))]
+      project.clips=[source,target];var body=try request(project,runtime);body["clipID"]=target.id.uuidString;return body
+    }
+    let recipe=try NativeH3Preparation.compose(request:body())["recipe"] as! [String:Any]
+    XCTAssertEqual((recipe["continuation"] as! [String:Any])["version"] as? Int,4)
+    XCTAssertEqual((recipe["config"] as! [String:Any])["duration_seconds"] as? Double,85.0/24)
+    XCTAssertEqual(((recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]])[0]["frame_index"] as? Int,71)
+    for wrong in [nil,"t2va","fl2va"] as [String?] { manifest["task"]=wrong;XCTAssertThrowsError(try NativeH3Preparation.compose(request:body())) }
+  }
+
 }

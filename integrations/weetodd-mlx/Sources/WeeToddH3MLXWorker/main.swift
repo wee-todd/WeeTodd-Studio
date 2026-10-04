@@ -111,9 +111,108 @@ import UniformTypeIdentifiers
     }
   }
 
+  private static func importContext(_ arguments: [String], session: H3PythonContinuationImporter.ImportSession? = nil) throws {
+    guard arguments.count == 11, arguments[1] == "--request",
+      arguments[3] == "--manifest", arguments[5] == "--manifest-sha",
+      arguments[7] == "--identity", arguments[9] == "--output" else {
+      throw invalid("Usage: WeeToddH3MLXWorker import-context --request ENVELOPE --manifest LEGACY_MANIFEST --manifest-sha SHA256 --identity EXPECTED_IDENTITY_JSON --output FRESH_DIRECTORY")
+    }
+    let envelope = try NativeVideoJobEnvelope.decode(readRequest(arguments[2]),
+      expectedEngine: .h3, expectedOutputDirectory: arguments[10])
+    let recipeData = try readRequest(envelope.recipePath)
+    try envelope.validateRecipe(recipeData)
+    guard var recipe = try JSONSerialization.jsonObject(with: recipeData) as? [String: Any] else {
+      throw invalid("Explicit Python-context import requires a native H3 recipe.")
+    }
+    let task = (recipe["components"] as? [String: Any])?["task"] as? String
+    let conditioning = recipe["conditioning"] as? [String: Any]
+    guard (task == "t2va" && conditioning?["task"] as? String == "t2v") ||
+      (task == "fl2va" && conditioning?["task"] as? String == "fflf") else {
+      throw invalid("Explicit Python-context import supports T2VA and FL2VA identities only.")
+    }
+    recipe.removeValue(forKey: "continuation")
+    let effectiveRecipe = try JSONSerialization.data(withJSONObject: recipe)
+    let text: H3T2VARequest?
+    let frames: H3FL2VARequest?
+    if task == "fl2va" {
+      let inputs = conditioning?["inputs"] as? [[String: Any]] ?? []
+      var source = 0
+      frames = try H3StudioRecipe.compileFL2VA(data: effectiveRecipe) { path, first, width, height in
+        let loaded = try H3FL2VAMedia.load(path: path, width: width, height: height, first: first)
+        guard source < inputs.count, inputs[source]["sha256"] as? String == loaded.sourceSHA256 else {
+          throw invalid("An import recipe endpoint source changed.")
+        }
+        source += 1
+        return loaded.image
+      }
+      text = nil
+    } else {
+      text = try H3StudioRecipe.compile(data: effectiveRecipe)
+      frames = nil
+    }
+    let manifestData = try readRequest(arguments[4])
+    guard let manifest = try JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
+      let count = manifest["context_frames"] as? NSNumber,
+      CFGetTypeID(count) != CFBooleanGetTypeID(),
+      count.doubleValue.rounded() == count.doubleValue,
+      H3Continuation.allowedContextFrames.contains(count.intValue) else {
+      throw invalid("The legacy context frame count is invalid.")
+    }
+    let imported: H3PythonContinuationImporter.Publication
+    if let frames {
+      imported = try H3PythonContinuationImporter.importToNative(
+        manifestURL: URL(fileURLWithPath: arguments[4]), expectedSHA256: arguments[6],
+        expectedIdentityJSON: readRequest(arguments[8]), request: frames,
+        contextFrames: count.intValue, output: URL(fileURLWithPath: arguments[10]), session: session)
+    } else if let text {
+      imported = try H3PythonContinuationImporter.importToNative(
+        manifestURL: URL(fileURLWithPath: arguments[4]), expectedSHA256: arguments[6],
+        expectedIdentityJSON: readRequest(arguments[8]), request: text,
+        task: "t2va", contextFrames: count.intValue,
+        output: URL(fileURLWithPath: arguments[10]), session: session)
+    } else { throw invalid("The context import task was not admitted.") }
+    try emit(["status": "success", "operation": "import-context", "inferenceExecuted": false,
+      "manifest": imported.manifestURL.path, "manifestSHA256": imported.manifestSHA256,
+      "payloadSHA256": imported.payloadSHA256, "originReceiptSHA256": imported.originReceiptSHA256,
+      "crossRuntimeGenerationParityQualified": false])
+  }
+
+  private static func importContextBatch(_ arguments: [String]) throws {
+    guard arguments.count == 3, arguments[1] == "--requests",
+      let root = try JSONSerialization.jsonObject(with: readRequest(arguments[2])) as? [String: Any],
+      Set(root.keys) == ["format", "jobs"],
+      root["format"] as? String == "weetodd-h3-python-context-import-batch-v1",
+      let jobs = root["jobs"] as? [[String]], (1...6).contains(jobs.count),
+      jobs.allSatisfy({ $0.count == 11 && $0.first == "import-context" }),
+      Set(jobs.map { URL(fileURLWithPath: $0[10]).standardizedFileURL.path }).count == jobs.count,
+      jobs.allSatisfy({ !FileManager.default.fileExists(atPath: $0[10]) }) else {
+      throw invalid("Explicit H3 batch import requires one to six fresh, distinct import-context jobs.")
+    }
+    let session = H3PythonContinuationImporter.ImportSession()
+    for job in jobs {
+      try Task.checkCancellation()
+      try session.checkUnchanged()
+      try importContext(job, session: session)
+      try session.checkUnchanged()
+    }
+    try emit(["status": "success", "operation": "import-context-batch",
+      "inferenceExecuted": false, "contextsImported": jobs.count,
+      "componentFilesHashed": session.filesHashed, "componentBytesHashed": session.bytesHashed,
+      "hashLeaseReuses": session.hashReuses, "componentBytesReuseValidated": session.bytesReuseValidated,
+      "crossRuntimeGenerationParityQualified": false])
+  }
+
   private static func execute() throws {
     let started = Date()
     let arguments = Array(CommandLine.arguments.dropFirst())
+    if arguments.first == "import-context-batch" {
+      try importContextBatch(arguments)
+      return
+    }
+    if arguments.first == "import-context" {
+      try importContext(arguments)
+      return
+    }
     guard arguments.count == 5,
       ["preflight", "render"].contains(arguments[0]),
       arguments[1] == "--request", arguments[3] == "--output" else {
@@ -134,11 +233,28 @@ import UniformTypeIdentifiers
       expectedOutputDirectory: arguments[4])
     let recipeData = try readRequest(envelope.recipePath)
     try envelope.validateRecipe(recipeData)
-    var recipe = try JSONSerialization.jsonObject(with: recipeData) as! [String: Any]
+    let motionRecipe = try H3MotionFidelityRecipe.prepare(data: recipeData)
+    let jointRefinement = try H3JointRefinementRecipe.prepare(data: motionRecipe?.ordinaryRecipe ?? recipeData)
+    let canvasAdmission = jointRefinement?.targetGeometry.canvasAdmission ?? H3CanvasAdmission.ordinary
+    let baseRecipeData = jointRefinement?.ordinaryRecipe ?? motionRecipe?.ordinaryRecipe ?? recipeData
+    var recipe = try JSONSerialization.jsonObject(with: baseRecipeData) as! [String: Any]
     let selectedTask = (recipe["components"] as? [String: Any])?["task"] as? String ?? "t2va"
     let conditioningTask = (recipe["conditioning"] as? [String: Any])?["task"] as? String ?? "t2v"
+    let refContinuation: H3Ref2VAContinuationRecipe.Prepared?
+    let flContinuation: H3FL2VAContinuationRecipe.Prepared?
     let continuation: H3Continuation.Plan?
-    if let fields = recipe.removeValue(forKey: "continuation") {
+    if selectedTask == "ref2va", recipe["continuation"] != nil {
+      let prepared = try H3Ref2VAContinuationRecipe.prepare(data: recipeData)
+      refContinuation = prepared; flContinuation = nil; continuation = prepared.plan
+      recipe = try JSONSerialization.jsonObject(with: prepared.sampledRecipe) as! [String: Any]
+    } else if selectedTask == "fl2va", recipe["continuation"] != nil {
+      refContinuation = nil
+      let prepared = try H3FL2VAContinuationRecipe.prepare(data: recipeData)
+      flContinuation = prepared
+      continuation = prepared.plan
+      recipe = try JSONSerialization.jsonObject(with: prepared.sampledRecipe) as! [String: Any]
+    } else if let fields = recipe.removeValue(forKey: "continuation") {
+      refContinuation = nil; flContinuation = nil
       let object = fields as? [String: Any]
       let saveNumber = object?["save_context"] as? NSNumber
       guard selectedTask == "t2va", conditioningTask == "t2v",
@@ -169,8 +285,9 @@ import UniformTypeIdentifiers
         sampleConfig["duration_seconds"] = min(Double(continuation!.generatedFrames) / 24, 15)
         recipe["config"] = sampleConfig
       }
-    } else { continuation = nil }
-    let reportedTask = continuation != nil ? "continuation" :
+    } else { continuation = nil; flContinuation = nil; refContinuation = nil }
+    let referenceRecipeData = refContinuation?.sampledRecipe ?? baseRecipeData
+    let reportedTask = motionRecipe != nil ? "motion_fidelity" : refContinuation != nil ? "ref2va_continuation" : flContinuation != nil ? "fl2va_continuation" : continuation != nil ? "continuation" :
       conditioningTask == "extension" ? "extension" :
       conditioningTask == "a2v" ? "a2v" :
       conditioningTask == "control" ? "control" : selectedTask
@@ -184,7 +301,7 @@ import UniformTypeIdentifiers
     let endpointRequest: H3FL2VARequest?
     let textRequest: H3T2VARequest?
     if selectedTask == "t2va" && conditioningTask == "control" {
-      textRequest = try H3StudioRecipe.compileControl(data: recipeData) {
+      textRequest = try H3StudioRecipe.compileControl(data: baseRecipeData) {
         path, expectedSHA256, geometry in
         let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
         try source.verify()
@@ -199,7 +316,7 @@ import UniformTypeIdentifiers
       stillRequest = nil
       endpointRequest = nil
     } else if selectedTask == "ref2va" && conditioningTask == "extension" {
-      stillRequest = try H3StudioRecipe.compileExtension(data: recipeData) {
+      stillRequest = try H3StudioRecipe.compileExtension(data: baseRecipeData) {
         path, expectedSHA256 in
         let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
         try source.verify()
@@ -219,22 +336,31 @@ import UniformTypeIdentifiers
       endpointRequest = nil
       textRequest = nil
     } else if selectedTask == "ref2va" && conditioningTask == "a2v" {
-      stillRequest = try H3StudioRecipe.compileA2V(data: recipeData) {
-        path, expectedSHA256, start, duration in
+      let inputItems = ((recipe["conditioning"] as? [String: Any])?["inputs"]
+        as? [[String: Any]]) ?? []
+      stillRequest = try H3StudioRecipe.compileA2V(data: referenceRecipeData,
+        driverTargetFrame: refContinuation?.plan.overlapFrames ?? 0,
+        visibleDurationSeconds: refContinuation?.plan.sourceManifest == nil ? nil
+          : refContinuation.map { Double($0.plan.publishedFrames) / 24 },
+        canvasAdmission: canvasAdmission) {
+        path, expectedSHA256, start, duration, geometry, controls in
         let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
         try source.verify()
         if duration == 0 {
-          let loaded = try H3StillReferenceMedia.load(path: path)
+          let loaded = try H3StillReferenceMedia.load(path: path,
+            outputGeometry: controls == nil ? nil : geometry,
+            pixelBudgetPercent: controls?.imagePixelBudgetPercent)
           guard loaded.sourceSHA256 == expectedSHA256 else {
             throw invalid("An H3 A2V opening image changed after preparation.")
           }
           sourceImages.append(["path": path, "sha256": expectedSHA256,
-            "kind": "image", "anchor": 0,
+            "kind": "image", "anchor": inputItems[sourceImages.count]["frame_index"] ?? "unknown",
             "preparedWidth": loaded.reference.width,
             "preparedHeight": loaded.reference.height,
             "preparedRGBSHA256": loaded.preparedSHA256,
-            "preparationPolicy": H3StillReferenceMedia.preparationPolicy,
-            "sourceOrientation": loaded.sourceOrientation])
+            "preparationPolicy": loaded.preparationPolicy,
+            "sourceOrientation": loaded.sourceOrientation,
+            "imagePixelBudgetPercent": loaded.reference.pixelBudgetPercent as Any? ?? NSNull()])
           return .image(loaded.reference)
         }
         let audio = try H3AudioReferenceMedia.load(path: path,
@@ -256,12 +382,14 @@ import UniformTypeIdentifiers
       endpointRequest = nil
       textRequest = nil
     } else if selectedTask == "ref2va" {
-      stillRequest = try H3StudioRecipe.compileMediaReferences(data: recipeData) {
-        path, kind, expectedSHA256 in
+      stillRequest = try H3StudioRecipe.compileMediaReferences(data: referenceRecipeData, canvasAdmission: canvasAdmission) {
+        path, kind, expectedSHA256, geometry, controls in
         let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
         try source.verify()
         if kind == "image" {
-          let image = try H3StillReferenceMedia.load(path: path)
+          let image = try H3StillReferenceMedia.load(path: path,
+            outputGeometry: controls == nil ? nil : geometry,
+            pixelBudgetPercent: controls?.imagePixelBudgetPercent)
           guard image.sourceSHA256 == expectedSHA256 else {
             throw invalid("An H3 reference image changed after recipe preparation.")
           }
@@ -271,8 +399,9 @@ import UniformTypeIdentifiers
             "preparedWidth": image.reference.width,
             "preparedHeight": image.reference.height,
             "preparedRGBSHA256": image.preparedSHA256,
-            "preparationPolicy": H3StillReferenceMedia.preparationPolicy,
-            "sourceOrientation": image.sourceOrientation])
+            "preparationPolicy": image.preparationPolicy,
+            "sourceOrientation": image.sourceOrientation,
+            "imagePixelBudgetPercent": image.reference.pixelBudgetPercent as Any? ?? NSNull()])
           return .image(image.reference)
         }
         if kind == "audio" {
@@ -285,19 +414,30 @@ import UniformTypeIdentifiers
           return .audio(audio)
         }
         let video = try H3VideoReferenceMedia.load(path: path,
-          ffmpeg: URL(fileURLWithPath: configuredFFmpeg))
+          ffmpeg: URL(fileURLWithPath: configuredFFmpeg),
+          outputGeometry: controls == nil ? nil : geometry, controls: controls)
         try source.verify()
         sourceImages.append(["path": path, "sha256": expectedSHA256,
           "kind": "video", "preparedFrames": video.reference.frameCount,
           "decodedFrames": video.decodedFrames,
           "soundtrackSamples": video.reference.audio?.frames ?? 0,
-          "width": video.reference.width, "height": video.reference.height])
+          "width": video.reference.width, "height": video.reference.height,
+          "persistentFrames": video.reference.persistentFrameCount,
+          "sourceLatentFrames": video.reference.sourceLatentFrames,
+          "sizePolicy": video.reference.controls?.videoSizePolicy?.rawValue as Any? ?? NSNull(),
+          "temporalDensity": video.reference.temporalDecision?.policy.rawValue as Any? ?? NSNull(),
+          "resolvedTemporalDensity": video.reference.temporalDecision?.density as Any? ?? NSNull(),
+          "persistentSourceFrameIndices": video.reference.temporalDecision?.indices as Any? ?? NSNull()])
         return .video(video.reference)
       }
       let inputItems = ((recipe["conditioning"] as? [String: Any])?["inputs"]
         as? [[String: Any]]) ?? []
-      guard inputItems.map({ $0["sha256"] as? String }) ==
-        sourceImages.map({ $0["sha256"] as? String }) else {
+      let expectedDigests: [String?] = inputItems.flatMap { input in
+        var digests: [String?] = [input["sha256"] as? String]
+        if input["soundtrack_path"] != nil { digests.append(input["soundtrack_sha256"] as? String) }
+        return digests
+      }
+      guard expectedDigests == sourceImages.map({ $0["sha256"] as? String }) else {
         throw invalid("An H3 reference image changed after recipe preparation.")
       }
       textRequest = nil
@@ -305,7 +445,7 @@ import UniformTypeIdentifiers
     } else if selectedTask == "fl2va" {
       let inputItems = ((recipe["conditioning"] as? [String: Any])?["inputs"]
         as? [[String: Any]]) ?? []
-      endpointRequest = try H3StudioRecipe.compileFL2VA(data: recipeData) {
+      endpointRequest = try H3StudioRecipe.compileFL2VA(data: flContinuation?.sampledRecipe ?? baseRecipeData, canvasAdmission: canvasAdmission) {
         path, first, width, height in
         let loaded = try H3FL2VAMedia.load(path: path,
           width: width, height: height, first: first)
@@ -322,11 +462,30 @@ import UniformTypeIdentifiers
       textRequest = nil
     } else {
       textRequest = try H3StudioRecipe.compile(
-        data: JSONSerialization.data(withJSONObject: recipe))
+        data: JSONSerialization.data(withJSONObject: recipe), canvasAdmission: canvasAdmission)
       stillRequest = nil
       endpointRequest = nil
     }
-    let admission: (geometry: H3Geometry, packedRows: Int, evaluations: Int)
+    let motionSource: H3MotionFidelityMedia.Source?
+    let motionAdmission: H3T2VARunner.Admission?
+    if let motionRecipe {
+      guard let textRequest, endpointRequest == nil, stillRequest == nil else {
+        throw invalid("Motion Fidelity requires a plain native H3 T2VA repair recipe.")
+      }
+      let source = try H3MotionFidelityMedia.inspect(path: motionRecipe.sourcePath,
+        sha256: motionRecipe.sourceSHA256, ffprobe: motionRecipe.ffprobe,
+        startSeconds: motionRecipe.sourceIn, durationSeconds: motionRecipe.durationSeconds,
+        settings: motionRecipe.settings)
+      motionSource = source
+      motionAdmission = try H3MotionFidelityRunner.preflight(base: textRequest,
+        source: source, settings: motionRecipe.settings)
+      sourceImages.append(["path": source.identity.path, "sha256": source.identity.sha256,
+        "kind": "motion_source", "sourceStartSeconds": source.startSeconds,
+        "sourceDurationSeconds": Double(source.frames) / 24,
+        "width": source.width, "height": source.height, "sourceFrames": source.frames,
+        "sourceAudioPreserved": true])
+    } else { motionSource = nil; motionAdmission = nil }
+    var admission: (geometry: H3Geometry, packedRows: Int, evaluations: Int)
     let continuationIdentity: String?
     var continuationRows: H3Continuation.Rows?
     if let continuation, let textRequest {
@@ -339,20 +498,78 @@ import UniformTypeIdentifiers
           width: textRequest.geometry.width, height: textRequest.geometry.height,
           identity: identity, loadRows: arguments[0] == "render")
       }
+    } else if let continuation, let endpointRequest {
+      let identity = try H3Continuation.fingerprint(endpointRequest)
+      continuationIdentity = identity
+      if let source = continuation.sourceManifest, let sourceHash = continuation.sourceSHA256 {
+        continuationRows = try H3Continuation.load(manifestURL: source,
+          expectedSHA256: sourceHash, contextFrames: continuation.contextFrames,
+          width: endpointRequest.base.geometry.width, height: endpointRequest.base.geometry.height,
+          identity: identity, loadRows: arguments[0] == "render", task: "fl2va")
+      }
+    } else if let continuation, let stillRequest {
+      let identity = try H3Continuation.fingerprint(stillRequest)
+      continuationIdentity = identity
+      if let source = continuation.sourceManifest, let sourceHash = continuation.sourceSHA256 {
+        continuationRows = try H3Continuation.load(manifestURL: source,
+          expectedSHA256: sourceHash, contextFrames: continuation.contextFrames,
+          width: stillRequest.geometry.width, height: stillRequest.geometry.height,
+          identity: identity, loadRows: arguments[0] == "render", task: "ref2va")
+      }
     } else { continuationIdentity = nil }
-    if let stillRequest {
-      let checked = try H3Ref2VAStillRunner.preflight(stillRequest)
+    let jointTask = stillRequest != nil ? "ref2va" : endpointRequest != nil ? "fl2va" : "t2va"
+    let jointIdentity: String?
+    var jointBaseRequest: H3T2VARequest?, jointVision: URL?
+    var fullInitialRows: H3JointLatentArtifact.Rows?
+    var jointSourceManifest: H3JointLatentArtifact.Manifest?
+    if jointRefinement != nil {
+      let base: H3T2VARequest
+      let vision: URL?
+      if let textRequest { base = textRequest; vision = nil }
+      else if let endpointRequest { base = endpointRequest.base; vision = endpointRequest.vision }
+      else if let stillRequest {
+        base = try H3T2VARequest(prompt: stillRequest.prompt,
+          width: stillRequest.geometry.width, height: stillRequest.geometry.height,
+          durationSeconds: min(Double(stillRequest.geometry.frames) / 24, 15),
+          seed: stillRequest.seed, requestedSteps: stillRequest.requestedSteps,
+          transformer: stillRequest.transformer, qwenPages: stillRequest.qwenPages,
+          tokenizer: stillRequest.tokenizer, videoVAE: stillRequest.videoVAE,
+          audioVAE: stillRequest.audioVAE, canvasAdmission: stillRequest.geometry.canvasAdmission)
+        vision = stillRequest.qwenVision
+      } else { throw invalid("Missing H3 initialized task request.") }
+      jointBaseRequest = base; jointVision = vision
+      let identity = try H3JointLatentArtifact.componentIdentity(base: base, task: jointTask, vision: vision)
+      jointIdentity = identity
+      if let source = jointRefinement!.sourceManifest, let digest = jointRefinement!.sourceSHA256 {
+        let loaded = try H3JointLatentArtifact.load(manifestURL: source, expectedSHA256: digest,
+          expectedTask: jointTask, expectedComponentIdentity: identity)
+        try H3JointRefinementRecipe.validateSource(loaded.0, prepared: jointRefinement!)
+        jointSourceManifest = loaded.0
+        fullInitialRows = loaded.1
+      }
+    } else { jointIdentity = nil }
+    if let motionAdmission {
+      admission = (motionAdmission.geometry, motionAdmission.packedRows, motionAdmission.evaluations)
+    } else if let stillRequest {
+      let checked = try H3Ref2VAStillRunner.preflight(stillRequest,
+        contextFrames: refContinuation?.plan.sourceManifest == nil ? 0 : refContinuation!.plan.contextFrames, refinement: jointRefinement?.controls)
       admission = (checked.geometry, checked.packedRows, checked.evaluations)
     } else if let endpointRequest {
-      let checked = try H3FL2VARunner.preflight(endpointRequest)
-      admission = (checked.geometry, checked.packedRows, checked.evaluations)
+      if let continuation, continuation.sourceManifest != nil {
+        let checked = try H3FL2VAContinuationRunner.preflight(endpointRequest,
+          contextFrames: continuation.contextFrames)
+        admission = (checked.geometry, checked.packedRows, checked.evaluations)
+      } else {
+        let checked = try H3FL2VARunner.preflight(endpointRequest, refinement: jointRefinement?.controls)
+        admission = (checked.geometry, checked.packedRows, checked.evaluations)
+      }
     } else if let textRequest {
       if let continuation, continuation.sourceManifest != nil {
         let checked = try H3ContinuationRunner.preflight(textRequest,
           contextFrames: continuation.contextFrames)
         admission = (checked.geometry, checked.packedRows, checked.evaluations)
       } else {
-        let checked = try H3T2VARunner.preflight(textRequest)
+        let checked = try H3T2VARunner.preflight(textRequest, refinement: jointRefinement?.controls)
         admission = (checked.geometry, checked.packedRows, checked.evaluations)
       }
     } else {
@@ -366,7 +583,7 @@ import UniformTypeIdentifiers
       try emit(["status": "success", "result": [
         "nativeRuntime": "swift-mlx", "jobID": envelope.jobID.uuidString,
         "task": reportedTask, "frames": admission.geometry.frames, "fps": 24,
-        "publishedFrames": continuation?.publishedFrames ?? admission.geometry.frames,
+        "publishedFrames": motionSource?.frames ?? continuation?.publishedFrames ?? admission.geometry.frames,
         "overlapFrames": continuation?.overlapFrames ?? 0,
         "packedRows": admission.packedRows,
         "evaluations": admission.evaluations,
@@ -375,17 +592,51 @@ import UniformTypeIdentifiers
       return
     }
 
+    let output = URL(fileURLWithPath: arguments[4]).standardizedFileURL
+    let parent = output.deletingLastPathComponent()
+    guard FileManager.default.fileExists(atPath: parent.path),
+      !FileManager.default.fileExists(atPath: output.path) else {
+      throw invalid("The H3 output parent must exist and the destination must be new.")
+    }
+
     let inferenceLease = try NativeInferenceLease.acquire {
       try? emit(["event": "progress", "stage": "waiting", "fraction": 0,
         "message": "Waiting for another local inference job"])
     }
     defer { inferenceLease.release() }
 
-    let output = URL(fileURLWithPath: arguments[4]).standardizedFileURL
-    let parent = output.deletingLastPathComponent()
-    guard FileManager.default.fileExists(atPath: parent.path),
-      !FileManager.default.fileExists(atPath: output.path) else {
-      throw invalid("The H3 output parent must exist and the destination must be new.")
+    Memory.clearCache()
+    Memory.peakMemory = Memory.activeMemory
+
+    var learnedReport: [String:Any]?
+    if let source = jointSourceManifest, let initial = fullInitialRows,
+      let checkpoint = jointRefinement?.learnedUpscaler,
+      let digest = jointRefinement?.learnedUpscalerHeaderSHA256, let base = jointBaseRequest {
+      let upscaled = try H3LearnedLatentUpscaler.upscale(rows: MLXArray(initial.video,
+        [1, try source.geometry.videoRows, 96]), source: source.geometry, target: admission.geometry,
+        checkpointURL: checkpoint, expectedHeaderSHA256: digest, videoVAE: base.videoVAE) {
+          completed,total in
+          try? emit(["event":"progress", "stage":"learned_spatial_upscale",
+            "fraction":H3WorkerProgress.fraction(stage:"learned_spatial_upscale",completed:completed,total:total,evaluations:admission.evaluations) ?? 0.01,
+            "completed":completed,"total":total,"message":"Upscaling H3 latents · \(completed)/\(total)"])
+        }
+      fullInitialRows = H3JointLatentArtifact.Rows(video: upscaled.videoRows.asArray(Float.self), audio: initial.audio)
+      try fullInitialRows!.validate(geometry: admission.geometry)
+      learnedReport = ["headerSHA256":upscaled.headerSHA256,"residentWeightBytes":upscaled.residentWeightBytes,
+        "maximumConvolutionWorkspaceBytes":upscaled.maximumConvolutionWorkspaceBytes,
+        "targetTilesPerConvolution":upscaled.targetTilesPerConvolution,"weightsReleasedBeforeTransformer":true,
+        "loadSeconds":upscaled.loadSeconds,"upscaleSeconds":upscaled.upscaleSeconds]
+      Stream.gpu.synchronize(); Memory.clearCache()
+      try emit(["event":"progress", "stage":"learned_spatial_weights_released", "completed":1,"total":1,"fraction":0.02])
+    }
+    if let source = jointSourceManifest, let initial = fullInitialRows,
+      let method = jointRefinement?.resizeMethod {
+      let resized = try H3SpatialLatentResize.rows(MLXArray(initial.video,
+        [1, try source.geometry.videoRows, 96]), source: source.geometry,
+        target: admission.geometry, method: method)
+      fullInitialRows = H3JointLatentArtifact.Rows(video: resized.asArray(Float.self), audio: initial.audio)
+      try fullInitialRows!.validate(geometry: admission.geometry)
+      Stream.gpu.synchronize(); Memory.clearCache()
     }
     let staging = parent.appendingPathComponent(".h3-staging-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: staging,
@@ -412,9 +663,7 @@ import UniformTypeIdentifiers
         "currentProcessFootprintBytes": usage?.currentPhysicalBytes ?? 0]
       phaseStarted = now
     }
-    Memory.clearCache()
-    Memory.peakMemory = Memory.activeMemory
-    let publishedFrames = continuation?.publishedFrames ?? admission.geometry.frames
+    let publishedFrames = motionSource?.frames ?? continuation?.publishedFrames ?? admission.geometry.frames
     let overlapFrames = continuation?.overlapFrames ?? 0
     let onFrame: (Int, Data) throws -> Void = { index, rgb in
       try Task.checkCancellation()
@@ -495,26 +744,67 @@ import UniformTypeIdentifiers
     }
     let result: (videoFrames: Int, audioSamplesPerChannel: Int, audioSampleRate: Int)
     var savedContextSHA256: String?,savedPayloadSHA256:String?
+    var savedJointSHA256: String?, savedJointPayloadSHA256: String?
     let onLatents: ([Float], [Float]) throws -> Void = { video, audio in
+      if let identity = jointIdentity, let base = jointBaseRequest {
+        guard try H3JointLatentArtifact.componentIdentity(base: base, task: jointTask, vision: jointVision) == identity else {
+          throw invalid("H3 refinement components changed during execution.")
+        }
+        if let source = jointRefinement?.sourceManifest, let digest = jointRefinement?.sourceSHA256 {
+          try H3JointLatentArtifact.verify(manifestURL: source, expectedSHA256: digest,
+            expectedTask: jointTask, expectedComponentIdentity: identity)
+        }
+      }
+      if jointRefinement?.saveFullLatents == true, let identity = jointIdentity {
+        let saved = try H3JointLatentArtifact.save(rows: .init(video: video, audio: audio),
+          geometry: admission.geometry, task: jointTask, componentIdentity: identity,
+          directory: staging.appendingPathComponent("joint-latents"))
+        savedJointSHA256 = saved.manifestSHA256; savedJointPayloadSHA256 = saved.payloadSHA256
+      }
       guard let continuation, continuation.saveContext,
         let identity = continuationIdentity else { return }
       let tail = try H3Continuation.tail(video: video, audio: audio,
         geometry: admission.geometry, contextFrames: continuation.contextFrames)
       let saved = try H3Continuation.save(tail, plan: continuation,
         width: admission.geometry.width, height: admission.geometry.height,
-        identity: identity, directory: staging.appendingPathComponent("continuation"))
+        identity: identity, directory: staging.appendingPathComponent("continuation"),
+        task: stillRequest != nil ? "ref2va" : endpointRequest == nil ? "t2va" : "fl2va")
       savedContextSHA256 = saved.sha256;savedPayloadSHA256=saved.payloadSHA256
     }
-    if let stillRequest {
+    var actualMotionPlan: H3MotionFidelityPlan?
+    if let motionRecipe, let source = motionSource, let textRequest {
+      let prepared = try H3MotionFidelityRunner.prepare(base: textRequest, source: source,
+        settings: motionRecipe.settings, ffmpeg: URL(fileURLWithPath: configuredFFmpeg),
+        scratch: staging.appendingPathComponent("motion-audio-scratch"), progress: onProgress)
+      actualMotionPlan = prepared.plan
+      let checked = try H3T2VARunner.preflight(prepared.request,
+        refinement: H3JointRefinement(strength: motionRecipe.settings.strength,
+          startVideoSigma: motionRecipe.settings.strength, evaluations: motionRecipe.settings.evaluations))
+      admission = (checked.geometry, checked.packedRows, prepared.plan.noop ? 0 : checked.evaluations)
+      try JSONEncoder().encode(prepared.plan).write(to: staging.appendingPathComponent("motion-plan.json"), options: .atomic)
+      let rendered = try H3MotionFidelityRunner.run(prepared, source: source,
+        onFrame: onFrame, onAudio: onAudio, onLatents: onLatents, progress: onProgress)
+      result = (rendered.videoFrames, rendered.audioSamplesPerChannel, rendered.audioSampleRate)
+    } else if let stillRequest {
       let rendered = try H3Ref2VAStillRunner.run(stillRequest,
-        onFrame: onFrame, onAudio: onAudio, progress: onProgress)
+        contextFrames: continuationRows == nil ? 0 : refContinuation!.plan.contextFrames,
+        context: continuationRows, initialRows: fullInitialRows, refinement: jointRefinement?.controls,
+        onFrame: onFrame, onAudio: onAudio,
+        onLatents: onLatents, progress: onProgress)
       result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
         rendered.audioSampleRate)
     } else if let endpointRequest {
-      let rendered = try H3FL2VARunner.run(endpointRequest,
-        onFrame: onFrame, onAudio: onAudio, progress: onProgress)
-      result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
-        rendered.audioSampleRate)
+      if let continuation, let rows = continuationRows {
+        let rendered = try H3FL2VAContinuationRunner.run(endpointRequest,
+          contextFrames: continuation.contextFrames, context: rows,
+          onFrame: onFrame, onAudio: onAudio, onLatents: onLatents, progress: onProgress)
+        result = (rendered.videoFrames, rendered.audioSamplesPerChannel, rendered.audioSampleRate)
+      } else {
+        let rendered = try H3FL2VARunner.run(endpointRequest,
+          initialRows: fullInitialRows, refinement: jointRefinement?.controls,
+          onFrame: onFrame, onAudio: onAudio, onLatents: onLatents, progress: onProgress)
+        result = (rendered.videoFrames, rendered.audioSamplesPerChannel, rendered.audioSampleRate)
+      }
     } else if let textRequest {
       if let continuation, let rows = continuationRows {
         let rendered = try H3ContinuationRunner.run(textRequest,
@@ -525,6 +815,7 @@ import UniformTypeIdentifiers
           rendered.audioSampleRate)
       } else {
         let rendered = try H3T2VARunner.run(textRequest,
+          initialRows: fullInitialRows, refinement: jointRefinement?.controls,
           onFrame: onFrame, onAudio: onAudio,
           onLatents: onLatents, progress: onProgress)
         result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
@@ -560,6 +851,30 @@ import UniformTypeIdentifiers
       "preflightSeconds": preflightSeconds,
       "seconds": Date().timeIntervalSince(started)]
     var completeMetadata = metadata
+    if let plan = actualMotionPlan, let source = motionSource {
+      completeMetadata["motionFidelity"] = ["version": 1,
+        "sourcePath": source.identity.path, "sourceSHA256": source.identity.sha256,
+        "sourceIn": source.startSeconds, "sourceDuration": Double(plan.sourceFrames) / 24,
+        "sourceFrames": plan.sourceFrames, "expandedFrames": plan.expandedFrames,
+        "paddedFrames": plan.paddedFrames, "recovery": plan.recovery,
+        "noop": plan.noop, "adaptiveAnalysisPerformed": plan.adaptiveAnalysisPerformed,
+        "sourceMediaInspected": true, "actualSamplingEvaluations": admission.evaluations,
+        "sourceAudioPreserved": true,
+        "planPath": output.appendingPathComponent("motion-plan.json").path]
+    }
+    if let savedJointSHA256, let savedJointPayloadSHA256 {
+      completeMetadata["jointLatentManifest"] = output.appendingPathComponent("joint-latents/manifest.json").path
+      completeMetadata["jointLatentManifestSHA256"] = savedJointSHA256
+      completeMetadata["jointLatentPayloadSHA256"] = savedJointPayloadSHA256
+    }
+    if let prepared = jointRefinement, let controls = prepared.controls {
+      completeMetadata["refinement"] = ["version": prepared.version, "mode": prepared.mode!,
+        "strength": controls.strength, "preserveAudio": controls.preserveAudio,
+        "sourceManifest": prepared.sourceManifest!.path, "sourceManifestSHA256": prepared.sourceSHA256!]
+    }
+
+    if let learnedReport { completeMetadata["learnedSpatialUpscaler"] = learnedReport }
+
     if let savedContextSHA256,let savedPayloadSHA256 {
       completeMetadata["continuationManifest"] = output
         .appendingPathComponent("continuation")
@@ -574,6 +889,7 @@ import UniformTypeIdentifiers
         to: staging.appendingPathComponent("result.json"),
         options: .withoutOverwriting)
     try Task.checkCancellation()
+    try motionSource?.identity.verify()
     try FileManager.default.moveItem(at: staging, to: output)
     published = true
     try emit(["status": "success", "result": H3WorkerReceipt.renderResult(

@@ -43,6 +43,8 @@ public enum H3StudioRecipe {
       (4...15).contains(duration) else {
       throw H3CheckpointError.invalid("Swift H3 external extension needs one full-strength audiovisual source, a 4–15 second Ref2VA window and the continuation prompt structure.")
     }
+    let noise = try H3ReferenceNoiseControls.parse(config)
+    removeReferenceNoise(&root)
     components.removeValue(forKey: "vision_encoder")
     components.removeValue(forKey: "allow_fl2va_weights_for_ref2va")
     components["task"] = "t2va"
@@ -67,13 +69,14 @@ public enum H3StudioRecipe {
       tokenizer: base.tokenizer, videoVAE: base.videoVAE,
       audioVAE: base.audioVAE, turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
-      additionalLoRAs: base.additionalLoRAs,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
+      additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
+      samplingMethod: base.samplingMethod, referenceNoise: noise)
   }
 
   /// Admit FL2VA's timed keyframe contract before reading any image.
   /// The text recipe validator still owns every shared execution control.
-  public static func compileFL2VA(data: Data,
+  public static func compileFL2VA(data: Data, canvasAdmission: H3CanvasAdmission = .ordinary,
     resolveImage: (String, Bool, Int, Int) throws -> H3StillReference) throws -> H3FL2VARequest {
     guard data.count <= 1024 * 1024,
       var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -119,12 +122,14 @@ public enum H3StudioRecipe {
       paths.append(path)
       anchors.append(anchor)
     }
+    let noise = try H3ReferenceNoiseControls.parse(root["config"] as? [String: Any] ?? [:])
+    removeReferenceNoise(&root)
     components.removeValue(forKey: "vision_encoder")
     components["task"] = "t2va"
     root["components"] = components
     root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [],
       "audio_policy": "generated"]
-    let base = try compile(data: JSONSerialization.data(withJSONObject: root))
+    let base = try compile(data: JSONSerialization.data(withJSONObject: root), canvasAdmission: canvasAdmission)
     var priorFrame = -1
     for anchor in anchors {
       let frame: Int
@@ -142,7 +147,7 @@ public enum H3StudioRecipe {
       try resolveImage(path, index == 0, base.geometry.width, base.geometry.height)
     }
     return try H3FL2VARequest(base: base, vision: URL(fileURLWithPath: vision),
-      images: images, anchors: anchors)
+      images: images, anchors: anchors, referenceNoise: noise)
   }
 
   /// Reuse the strict T2VA execution-control admission after removing only the
@@ -151,70 +156,33 @@ public enum H3StudioRecipe {
   public static func compileStillReferences(data: Data,
     resolveImage: (String) throws -> H3StillReference) throws -> H3Ref2VAStillRequest {
     guard data.count <= 1024 * 1024,
-      var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-      var components = root["components"] as? [String: Any],
-      components["task"] as? String == "ref2va",
-      components["allow_fl2va_weights_for_ref2va"] == nil ||
-        components["allow_fl2va_weights_for_ref2va"] as? Bool == false,
-      let vision = (components["vision_encoder"] as? String) ??
-        (components["text_encoder"] as? String),
-      vision.hasPrefix("/"),
+      let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
       let conditioning = root["conditioning"] as? [String: Any],
-      Set(conditioning.keys).isSubset(of: ["version", "task", "inputs", "audio_policy"]),
-      conditioning["version"] as? Int == 1,
-      conditioning["task"] as? String == "ref2va",
-      (conditioning["audio_policy"] as? String ?? "generated") == "generated",
       let inputs = conditioning["inputs"] as? [[String: Any]],
-      (1...9).contains(inputs.count) else {
-      throw H3CheckpointError.invalid("Swift H3 still Ref2VA needs one to nine ordered image inputs and generated audio.")
+      (1...9).contains(inputs.count), inputs.allSatisfy({ $0["kind"] as? String == "image" }) else {
+      throw H3CheckpointError.invalid("The still-only compiler needs one to nine image references.")
     }
-    var paths: [String] = []
-    _ = try ConditioningV1.inputs(conditioning, task: "ref2va", audioPolicy: "generated", count: 1...9)
-    var identities = Set<String>()
-    for input in inputs {
-      guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "strength", "sha256"]),
-        let identity = input["id"] as? String, !identity.isEmpty,
-        identities.insert(identity).inserted,
-        input["kind"] as? String == "image",
-        input["role"] as? String == "reference",
-        let path = input["path"] as? String, path.hasPrefix("/"),
-        !path.utf8.contains(0),
-        let digest = input["sha256"] as? String, digest.count == 64,
-        digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
-        (input["strength"] == nil || (input["strength"] as? NSNumber)
-          .map({ CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue == 1 }) == true)
-      else {
-        throw H3CheckpointError.invalid("Swift H3 still Ref2VA does not accept timed, weighted, or non-image references.")
-      }
-      paths.append(path)
+    return try compileMediaReferences(data: data) { path, kind, _ in
+      guard kind == "image" else { throw H3CheckpointError.invalid("The still-only resolver needs image references.") }
+      return .image(try resolveImage(path))
     }
-    components.removeValue(forKey: "vision_encoder")
-    components.removeValue(forKey: "allow_fl2va_weights_for_ref2va")
-    components["task"] = "t2va"
-    root["components"] = components
-    root["conditioning"] = ["version": 1, "task": "t2v",
-      "inputs": [], "audio_policy": "generated"]
-    let normalized = try JSONSerialization.data(withJSONObject: root)
-    let base = try compile(data: normalized)
-    let references = try paths.map(resolveImage)
-    return try H3Ref2VAStillRequest(prompt: base.prompt,
-      references: references, width: base.geometry.width,
-      height: base.geometry.height,
-      durationSeconds: base.durationSeconds,
-      seed: base.seed, requestedSteps: base.requestedSteps,
-      transformer: base.transformer, qwenPages: base.qwenPages,
-      qwenVision: URL(fileURLWithPath: vision), tokenizer: base.tokenizer,
-      videoVAE: base.videoVAE, audioVAE: base.audioVAE,
-      turboLoRA: base.turboLoRA,
-      turboLoRAStrength: base.turboLoRAStrength,
-      additionalLoRAs: base.additionalLoRAs,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
   }
 
   /// Admit ordered still, video and standalone audio Ref2VA media.
   /// An audio-bearing movie contributes both visual and sound references.
   public static func compileMediaReferences(data: Data,
     resolveReference: (String, String, String) throws -> H3Ref2VAReference) throws
+    -> H3Ref2VAStillRequest {
+    try compileMediaReferences(data: data) { path, kind, digest, _, controls in
+      guard controls == nil else {
+        throw H3CheckpointError.invalid("Reference preparation controls require a policy-aware media resolver.")
+      }
+      return try resolveReference(path, kind, digest)
+    }
+  }
+
+  public static func compileMediaReferences(data: Data, canvasAdmission: H3CanvasAdmission = .ordinary,
+    resolveReference: (String, String, String, H3Geometry, H3ReferencePreparationControls?) throws -> H3Ref2VAReference) throws
     -> H3Ref2VAStillRequest {
     guard data.count <= 1024 * 1024,
       var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -235,40 +203,79 @@ public enum H3StudioRecipe {
     }
     _ = try ConditioningV1.inputs(conditioning, task: "ref2va",
       audioPolicy: "generated", count: 1...12)
-    var paths: [(String, String, String)] = []
-    var images = 0
-    var videos = 0
-    var audios = 0
+    var paths: [(path: String, kind: String, digest: String, placement: Any?, sidecar: (String, String)?, controls: H3ReferencePreparationControls?)] = []
+    var images = 0, videos = 0, audios = 0
     for input in inputs {
       let kind = input["kind"] as? String ?? ""
       if kind == "image" { images += 1 }
       if kind == "video" { videos += 1 }
       if kind == "audio" { audios += 1 }
-      guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "strength", "sha256"]),
-        ["image", "video", "audio"].contains(kind),
-        input["role"] as? String == "reference",
-        let path = input["path"] as? String, path.hasPrefix("/"),
-        !path.utf8.contains(0),
-        let digest = input["sha256"] as? String, digest.count == 64,
-        digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
-        (input["strength"] == nil || (input["strength"] as? NSNumber)
-          .map({ CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue == 1 }) == true)
-      else {
-        throw H3CheckpointError.invalid("Swift H3 Ref2VA accepts full-strength image, video or audio references only.")
+      guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "strength", "sha256",
+          "frame_index", "soundtrack_path", "soundtrack_sha256", "image_pixel_budget_percent", "size_policy", "temporal_density"]),
+        ["image", "video", "audio"].contains(kind), input["role"] as? String == "reference",
+        let path = input["path"] as? String, path.hasPrefix("/"), !path.utf8.contains(0),
+        let digest = input["sha256"] as? String, validMediaDigest(digest),
+        input["strength"] == nil || (input["strength"] as? NSNumber).map({
+          CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue == 1 }) == true else {
+        throw H3CheckpointError.invalid("H3 Ref2VA needs full-strength hashed media and supported placement.")
       }
-      paths.append((path, kind, digest))
+      var sidecar: (String, String)?
+      if input["soundtrack_path"] != nil || input["soundtrack_sha256"] != nil {
+        guard kind == "video", let path = input["soundtrack_path"] as? String,
+          path.hasPrefix("/"), !path.utf8.contains(0),
+          let digest = input["soundtrack_sha256"] as? String, validMediaDigest(digest) else {
+          throw H3CheckpointError.invalid("A movie soundtrack sidecar needs its own absolute path and SHA256.")
+        }
+        sidecar = (path, digest); audios += 1
+      }
+      paths.append((path, kind, digest, input["frame_index"], sidecar,
+        try H3ReferencePreparationControls.parse(input, kind: kind)))
     }
-    guard images + videos > 0, images <= 9, videos <= 3, audios <= 3 else {
-      throw H3CheckpointError.invalid("Swift H3 Ref2VA needs a visual source and allows at most nine images, three videos and three audio sources.")
+    guard images <= 9, videos <= 3, audios <= 3,
+      images + videos > 0 || paths.allSatisfy({ $0.placement != nil }) else {
+      throw H3CheckpointError.invalid("H3 Ref2VA needs visual media or timed audio, at most nine images, three movies and three standalone audio/sidecar sources.")
     }
+    let noise = try H3ReferenceNoiseControls.parse(root["config"] as? [String: Any] ?? [:])
+    removeReferenceNoise(&root)
     components.removeValue(forKey: "vision_encoder")
     components.removeValue(forKey: "allow_fl2va_weights_for_ref2va")
     components["task"] = "t2va"
     root["components"] = components
     root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [],
       "audio_policy": "generated"]
-    let base = try compile(data: JSONSerialization.data(withJSONObject: root))
-    let references = try paths.map { try resolveReference($0.0, $0.1, $0.2) }
+    let base = try compile(data: JSONSerialization.data(withJSONObject: root), canvasAdmission: canvasAdmission)
+    // Validate every placement before resolving any media, including the last item.
+    let frames = try paths.map { try H3ReferencePlacement.frame($0.placement, frames: base.geometry.frames) }
+    let references = try zip(paths, frames).map { item, frame in
+      var reference = try resolveReference(item.path, item.kind, item.digest, base.geometry, item.controls)
+      switch (item.kind, reference) {
+      case ("image", .image), ("video", .video), ("audio", .audio): break
+      default: throw H3CheckpointError.invalid("A reference resolved to the wrong media kind.")
+      }
+      if let controls = item.controls {
+        switch reference {
+        case .image(let image):
+          guard image.pixelBudgetPercent == controls.imagePixelBudgetPercent else {
+            throw H3CheckpointError.invalid("The image resolver did not apply its declared reference pixel budget.")
+          }
+        case .video(let video):
+          guard video.controls == controls else {
+            throw H3CheckpointError.invalid("The movie resolver did not apply its declared reference policy.")
+          }
+        default: throw H3CheckpointError.invalid("Reference media policy resolved to an unsupported kind.")
+        }
+      }
+      if let sidecar = item.sidecar {
+        let resolved = try resolveReference(sidecar.0, "audio", sidecar.1, base.geometry, nil)
+        guard case .audio(let audio) = resolved, case .video(let video) = reference else {
+          throw H3CheckpointError.invalid("Movie soundtrack sidecar resolved to another media kind.")
+        }
+        reference = .video(H3VideoReference(rgb8: video.rgb8, frameCount: video.frameCount,
+          width: video.width, height: video.height, audio: audio,
+          controls: video.controls, temporalDecision: video.temporalDecision))
+      }
+      return try H3ReferencePlacement.placing(reference, frame: frame)
+    }
     return try H3Ref2VAStillRequest(prompt: base.prompt,
       mediaReferences: references, width: base.geometry.width,
       height: base.geometry.height, durationSeconds: base.durationSeconds,
@@ -278,16 +285,31 @@ public enum H3StudioRecipe {
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
-      additionalLoRAs: base.additionalLoRAs,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
+      additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
+      samplingMethod: base.samplingMethod, referenceNoise: noise, canvasAdmission: canvasAdmission)
   }
 
   /// An A2V driver is placed at frame zero of the target packed timeline.
   /// The source waveform conditions generated sound and motion; it is never
-  /// copied into the output movie. An optional opening still uses the same
-  /// target origin. Check the entire contract before resolving media.
+  /// copied into the output movie. Timed still anchors use their explicit generated-frame origin. Check the entire contract before resolving media.
   public static func compileA2V(data: Data,
+    driverTargetFrame: Int = 0, visibleDurationSeconds: Double? = nil,
     resolveReference: (String, String, Double, Double) throws -> H3Ref2VAReference)
+    throws -> H3Ref2VAStillRequest {
+    try compileA2V(data: data, driverTargetFrame: driverTargetFrame,
+      visibleDurationSeconds: visibleDurationSeconds) { path, digest, start, duration, _, controls in
+      guard controls == nil else {
+        throw H3CheckpointError.invalid("A2V image pixel budgets require a policy-aware media resolver.")
+      }
+      return try resolveReference(path, digest, start, duration)
+    }
+  }
+
+  public static func compileA2V(data: Data,
+    driverTargetFrame: Int = 0, visibleDurationSeconds: Double? = nil,
+    canvasAdmission: H3CanvasAdmission = .ordinary,
+    resolveReference: (String, String, Double, Double, H3Geometry, H3ReferencePreparationControls?) throws -> H3Ref2VAReference)
     throws -> H3Ref2VAStillRequest {
     guard data.count <= 1024 * 1024,
       var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -297,14 +319,20 @@ public enum H3StudioRecipe {
         components["allow_fl2va_weights_for_ref2va"] as? Bool == false,
       let conditioning = root["conditioning"] as? [String: Any],
       let inputs = try? ConditioningV1.inputs(conditioning,
-        task: "a2v", audioPolicy: "generated", count: 1...2),
+        task: "a2v", audioPolicy: "generated", count: 1...9),
       let config = root["config"] as? [String: Any],
       let duration = config["duration_seconds"] as? Double,
       duration.isFinite, (2.5...15).contains(duration) else {
-      throw H3CheckpointError.invalid("Swift H3 A2V needs one timed audio driver and an optional opening image.")
+      throw H3CheckpointError.invalid("Swift H3 A2V needs one timed audio driver and up to eight image anchors.")
+    }
+    let requiredAudioDuration = visibleDurationSeconds ?? duration
+    guard requiredAudioDuration.isFinite, (2.5...15).contains(requiredAudioDuration),
+      requiredAudioDuration <= duration + 0.001,
+      visibleDurationSeconds == nil || driverTargetFrame > 0 else {
+      throw H3CheckpointError.invalid("A2V visible audio interval needs a declared continuation overlap.")
     }
     var driver: (String, String, Double, Double)?
-    var image: (String, String)?
+    var images: [(String, String, Any, H3ReferencePreparationControls?)] = []
     for input in inputs {
       let role = input["role"] as? String
       let kind = input["kind"] as? String
@@ -322,18 +350,19 @@ public enum H3StudioRecipe {
           let start = input["source_start_seconds"] as? Double,
           let length = input["source_duration_seconds"] as? Double,
           start.isFinite, (0...86400).contains(start), length.isFinite,
-          length >= duration - 0.001, length <= 15 else {
+          length >= requiredAudioDuration - 0.001, length <= 15 else {
           throw H3CheckpointError.invalid("H3 A2V needs a bounded source interval covering the clip.")
         }
         driver = (path, digest, start, length)
-      } else if role == "keyframe" && kind == "image" && image == nil {
+      } else if role == "keyframe" && kind == "image" && images.count < 8 {
         guard Set(input.keys).isSubset(of: ["id", "kind", "role", "path", "sha256",
-          "strength", "frame_index"]), input["frame_index"] as? Int == 0 else {
-          throw H3CheckpointError.invalid("H3 A2V accepts one opening image at frame zero.")
+          "strength", "frame_index", "image_pixel_budget_percent"]), let placement = input["frame_index"] else {
+          throw H3CheckpointError.invalid("H3 A2V image anchors need an explicit generated-frame index.")
         }
-        image = (path, digest)
+        images.append((path, digest, placement,
+          try H3ReferencePreparationControls.parse(input, kind: "image")))
       } else {
-        throw H3CheckpointError.invalid("H3 A2V accepts one audio driver and at most one opening image.")
+        throw H3CheckpointError.invalid("H3 A2V accepts one audio driver and at most eight timed images.")
       }
     }
     guard let driver else { throw H3CheckpointError.invalid("H3 A2V audio driver is missing.") }
@@ -342,27 +371,41 @@ public enum H3StudioRecipe {
     guard let vision, vision.hasPrefix("/") else {
       throw H3CheckpointError.invalid("H3 A2V needs an installed Qwen encoder.")
     }
+    let noise = try H3ReferenceNoiseControls.parse(config)
+    removeReferenceNoise(&root)
     components.removeValue(forKey: "vision_encoder")
     components.removeValue(forKey: "allow_fl2va_weights_for_ref2va")
     components["task"] = "t2va"
     root["components"] = components
     root["conditioning"] = ["version": 1, "task": "t2v",
       "inputs": [], "audio_policy": "generated"]
-    let base = try compile(data: JSONSerialization.data(withJSONObject: root))
+    let base = try compile(data: JSONSerialization.data(withJSONObject: root), canvasAdmission: canvasAdmission)
+    guard (0..<base.geometry.frames).contains(driverTargetFrame) else {
+      throw H3CheckpointError.invalid("A2V driver position exceeds the sampled timeline.")
+    }
+    let placements = try images.map { try H3ReferencePlacement.frame($0.2, frames: base.geometry.frames)! }
+    guard Set(placements).count == placements.count else {
+      throw H3CheckpointError.invalid("A2V image anchor positions must be unique.")
+    }
     var references: [H3Ref2VAReference] = []
+    var imageIndex = 0
     for input in inputs {
-      if input["role"] as? String == "keyframe", let image {
-        let resolved = try resolveReference(image.0, image.1, 0, 0)
-        guard case .image(let still) = resolved else {
-          throw H3CheckpointError.invalid("H3 A2V opening image resolved to another media type.")
+      if input["role"] as? String == "keyframe" {
+        let image = images[imageIndex]
+        let frame = placements[imageIndex]
+        imageIndex += 1
+        let resolved = try resolveReference(image.0, image.1, 0, 0, base.geometry, image.3)
+        guard case .image(let still) = resolved,
+          still.pixelBudgetPercent == image.3?.imagePixelBudgetPercent else {
+          throw H3CheckpointError.invalid("H3 A2V image anchor resolved to another media type.")
         }
-        references.append(.timedImage(still, frame: 0))
+        references.append(.timedImage(still, frame: frame))
       } else {
-        let resolved = try resolveReference(driver.0, driver.1, driver.2, driver.3)
+        let resolved = try resolveReference(driver.0, driver.1, driver.2, driver.3, base.geometry, nil)
         guard case .audio(let sound) = resolved else {
           throw H3CheckpointError.invalid("H3 A2V driver resolved to another media type.")
         }
-        references.append(.timedAudio(sound, frame: 0))
+        references.append(.timedAudio(sound, frame: driverTargetFrame))
       }
     }
     return try H3Ref2VAStillRequest(prompt: base.prompt,
@@ -374,8 +417,9 @@ public enum H3StudioRecipe {
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
-      additionalLoRAs: base.additionalLoRAs,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
+      additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
+      samplingMethod: base.samplingMethod, referenceNoise: noise, canvasAdmission: canvasAdmission)
   }
 
   /// Admit one already-preprocessed structure guide and validate every ordinary
@@ -408,7 +452,7 @@ public enum H3StudioRecipe {
     root["components"] = components
     root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [], "audio_policy": "generated"]
     let base = try compile(data: JSONSerialization.data(withJSONObject: root))
-    guard base.loRAAdapters.isEmpty, base.geometry.width <= 2048,
+    guard base.geometry.width <= 2048,
       base.geometry.height <= 2048,
       base.geometry.frames * base.geometry.width * base.geometry.height * 3 <= 1024 * 1024 * 1024 else {
       throw H3CheckpointError.invalid("H3 Fun control requires dense sampling without LoRAs and a bounded guide canvas.")
@@ -419,11 +463,25 @@ public enum H3StudioRecipe {
       height: base.geometry.height, durationSeconds: base.durationSeconds,
       seed: base.seed, requestedSteps: base.requestedSteps,
       transformer: base.transformer, qwenPages: base.qwenPages, tokenizer: base.tokenizer,
-      videoVAE: base.videoVAE, audioVAE: base.audioVAE, funControl: control,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode)
+      videoVAE: base.videoVAE, audioVAE: base.audioVAE,
+      turboLoRA: base.turboLoRA, turboLoRAStrength: base.turboLoRAStrength,
+      additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
+      funControl: control,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
+      samplingMethod: base.samplingMethod)
   }
 
-  public static func compile(data: Data) throws -> H3T2VARequest {
+  private static func validMediaDigest(_ digest: String) -> Bool {
+    digest.utf8.count == 64 && digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) })
+  }
+  private static func removeReferenceNoise(_ root: inout [String: Any]) {
+    guard var config = root["config"] as? [String: Any] else { return }
+    config.removeValue(forKey: "visual_condition_strength")
+    config.removeValue(forKey: "audio_condition_strength")
+    root["config"] = config
+  }
+
+  public static func compile(data: Data, canvasAdmission: H3CanvasAdmission = .ordinary) throws -> H3T2VARequest {
     func emptyArray(_ object: [String: Any], _ key: String) -> Bool {
       guard let value = object[key] else { return true }
       guard let values = value as? [Any] else { return false }
@@ -449,7 +507,7 @@ public enum H3StudioRecipe {
     }
     func turboLoRAs(_ object: [String: Any]) -> [(URL, Float)]? {
       guard let entries = object["loras"] as? [[Any]],
-        (1...4).contains(entries.count) else { return nil }
+        (1...8).contains(entries.count) else { return nil }
       var adapters: [(URL, Float)] = []
       for pair in entries {
         guard pair.count == 2, let path = pair[0] as? String,
@@ -457,18 +515,46 @@ public enum H3StudioRecipe {
           let number = pair[1] as? NSNumber,
           CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
         let strength = number.floatValue
-        guard strength.isFinite, (0...2).contains(strength) else { return nil }
+        guard strength.isFinite, (-10...10).contains(strength) else { return nil }
         adapters.append((URL(fileURLWithPath: path), strength))
       }
       guard Set(adapters.map { $0.0.standardizedFileURL.path }).count == adapters.count
       else { return nil }
       return adapters
     }
+    func descriptorStack(_ value: Any?) throws -> [H3LoRAAdapter]? {
+      guard let value else { return nil }
+      guard let object = value as? [String: Any], Set(object.keys) == ["version", "adapters"],
+        let version = object["version"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(), version.doubleValue == 1,
+        let entries = object["adapters"] as? [[String: Any]], (1...8).contains(entries.count) else {
+        throw H3CheckpointError.invalid("H3 LoRA v1 requires one to eight validated adapter descriptors.")
+      }
+      return try entries.map { item in
+        guard Set(item.keys).isSubset(of: ["path", "strength", "profile", "adaln_input_grid", "qkv_layout", "start_after_evaluations"]),
+          let path = item["path"] as? String, path.hasPrefix("/"), !path.utf8.contains(0),
+          let strength = item["strength"] as? NSNumber, CFGetTypeID(strength) != CFBooleanGetTypeID(),
+          let profile = H3LoRAProfile(rawValue: item["profile"] as? String ?? "auto"),
+          let qkv = H3LoRAQKVLayout(rawValue: item["qkv_layout"] as? String ?? "auto"),
+          item["adaln_input_grid"] == nil || item["adaln_input_grid"] is NSNull,
+          item["profile"] == nil || item["profile"] is String,
+          item["qkv_layout"] == nil || item["qkv_layout"] is String else {
+          throw H3CheckpointError.invalid("Unsupported H3 LoRA descriptor, layout or input grid.")
+        }
+        let start: Int
+        if let n = item["start_after_evaluations"] as? NSNumber,
+          CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue.isFinite,
+          n.doubleValue.rounded() == n.doubleValue, (0...99).contains(n.doubleValue) { start = n.intValue }
+        else if item["start_after_evaluations"] == nil { start = 0 }
+        else { throw H3CheckpointError.invalid("Invalid H3 deferred LoRA activation.") }
+        return try H3LoRAAdapter(url: URL(fileURLWithPath: path), strength: strength.floatValue,
+          profile: profile, qkvLayout: qkv, startAfterEvaluations: start)
+      }
+    }
     guard data.count <= 1024 * 1024,
       let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
       Set(root.keys).isSubset(of: ["format", "engine", "candidate", "components",
         "config", "prompt", "conditioning", "ffmpeg", "block_residency",
-        "negative_prompt"]),
+        "negative_prompt", "loras"]),
       root["format"] as? String == "weetodd-headless-v2",
       root["engine"] as? String == "h3",
       oneOf(root, "negative_prompt", default: "", [""]),
@@ -511,7 +597,8 @@ public enum H3StudioRecipe {
       oneOf(config, "ffn_row_chunk_size", default: "automatic", ["automatic"]),
       oneOf(config, "projection_backend", default: "mlx", ["auto", "mlx"]),
       oneOf(config, "transformer_backend", default: "mlx", ["mlx"]),
-      oneOf(config, "sampling_method", default: "euler", ["euler"]),
+      oneOf(config, "sampling_method", default: "euler", ["euler", "res_multistep"]),
+      let samplingMethod = H3SamplingMethod(rawValue: config["sampling_method"] as? String ?? "euler"),
       oneOf(config, "inference_optimization", default: "off", ["off"]),
       zero(config, "paging_cache_gb"),
       let width = config["width"] as? Int,
@@ -519,7 +606,11 @@ public enum H3StudioRecipe {
       let duration = config["duration_seconds"] as? Double,
       let steps = config["steps"] as? Int,
       let seed = config["seed"] as? Int, (0...Int(UInt32.max)).contains(seed) else {
-      throw H3CheckpointError.invalid("Swift H3 currently admits only text-to-audiovisual Euler recipes with up to four distinct supported Turbo LoRAs and no unported controls.")
+      throw H3CheckpointError.invalid("Swift H3 currently admits only text-to-audiovisual Euler or res_multistep recipes with up to eight distinct compatible LoRAs and no unported controls.")
+    }
+    let explicit = try descriptorStack(root["loras"])
+    guard explicit == nil || emptyArray(component, "loras") else {
+      throw H3CheckpointError.invalid("Select either H3 component LoRA pairs or the explicit v1 descriptor stack.")
     }
     let adapters = turboLoRAs(component) ?? []
     let additional = try adapters.dropFirst().map {
@@ -535,8 +626,9 @@ public enum H3StudioRecipe {
       audioVAE: URL(fileURLWithPath: audio),
       turboLoRA: adapters.first?.0,
       turboLoRAStrength: adapters.first?.1 ?? 1,
-      additionalLoRAs: additional,
+      additionalLoRAs: additional, loRAAdapters: explicit,
       videoDecodeMemoryMode: H3VideoDecodeMemoryMode(rawValue:
-        config["memory_mode"] as? String ?? "normal"))
+        config["memory_mode"] as? String ?? "normal"),
+      samplingMethod: samplingMethod, canvasAdmission: canvasAdmission)
   }
 }

@@ -70,6 +70,7 @@ public enum MLXSceneMediaPublisher {
     plan: LTX25ScenePlan, videoCheckpoint: URL, audioCheckpoint: URL,
     ffmpeg: URL, output: URL, decodePlan: MLXSceneDecodeWindowPlan,
     decodeMode: MLXSceneDecodeMode,
+    diffusionVAE:MLXDiffusionVideoSettings?=nil,
     sourceAudio: MLXSourceAudioInterval.Prepared? = nil,
     preview: ((Int, Data) throws -> Void)? = nil,
     beforePublish: ((URL, [String: Any]) throws -> Void)? = nil,
@@ -98,7 +99,12 @@ public enum MLXSceneMediaPublisher {
         }
       }
     }
-    try admit(geometry: g, decodePlan: decodePlan)
+    let selected=try MLXVideoDecoderSelection(checkpoint:videoCheckpoint,settings:diffusionVAE)
+    if selected.isDiffusion {
+      guard decodePlan.overlapFrames == 0,decodeMode.maximumWindowFrames == nil else { throw LTXError.invalid("DiffVAE scene publication requires complete groups with internal tiling.") }
+      _ = try MLXDiffusionScenePublication.admit(geometry:g,plan:plan,strictBoundaries:sampled.strictBoundaries,
+        checkpoint:videoCheckpoint,settings:diffusionVAE,maximumWorkspaceBytes:decodePlan.admittedActivationBytes)
+    } else { try admit(geometry:g,decodePlan:decodePlan) }
     if case .single = decodeMode, decodePlan.latentRanges.count != 1,
       sampled.strictBoundaries.isEmpty {
       throw LTXError.invalid("Single-decode LTX scenes require one admitted video window.")
@@ -127,6 +133,14 @@ public enum MLXSceneMediaPublisher {
       width: g.width, height: g.height, frames: deliveredFrames(plan: plan), fps: g.fps)
     defer { writer.cancel() }
     try autoreleasepool {
+      if selected.isDiffusion {
+        try MLXDiffusionScenePublication.decode(sampled,plan:plan,checkpoint:videoCheckpoint,settings:diffusionVAE,
+          maximumWorkspaceBytes:decodePlan.admittedActivationBytes,
+          progress:{ try report("video_layers",$0,$1) }) { index,bytes in
+          try writer.append(bytes,frame:index);try preview?(index,bytes)
+          try report("video_decode",index+1,deliveredFrames(plan:plan))
+        }
+      } else {
       let decoder = try MLXVideoDecoder(checkpoint: videoCheckpoint)
       if !sampled.strictBoundaries.isEmpty {
         let routes = try strictFrameRoutes(plan: plan,
@@ -212,6 +226,7 @@ public enum MLXSceneMediaPublisher {
       }
       }
     }
+    }
     try writer.finish()
     let videoSeconds = Date().timeIntervalSince(videoStart)
     Memory.clearCache(); try report("video_weights_released", 1, 1)
@@ -257,9 +272,9 @@ public enum MLXSceneMediaPublisher {
     guard status == KERN_SUCCESS else {
       throw LTXError.invalid("Cannot measure Swift LTX scene process memory.")
     }
-    let metadata: [String: Any] = [
+    var metadata: [String: Any] = [
       "status":"complete","task":"scene","nativeRuntime":"swift-mlx",
-      "publication_mode":decodeMode.publicationMode,
+      "publication_mode":selected.isDiffusion ? "diffusion_internal_tiling_native_latent_chain":decodeMode.publicationMode,
       "video_decode_strategy":sampled.strictBoundaries.isEmpty
         ? "assembled-scene" : "separate-shot-windows-strict-image-cuts",
       "decode_window_latent_ranges":decodePlan.latentRanges.map { [$0.lowerBound,$0.upperBound] },
@@ -278,6 +293,7 @@ public enum MLXSceneMediaPublisher {
       "peak_process_footprint_bytes":memory.ledger_phys_footprint_peak,
       "process_memory_scope":"Swift process; external FFmpeg process excluded",
       "python_inference":false,"production_qualified":false]
+    metadata.merge(MLXNativeVideoDecoder.publicationMetadata(isDiffusion:selected.isDiffusion,settings:diffusionVAE)) { _,new in new }
     try JSONSerialization.data(withJSONObject: metadata,
       options: [.prettyPrinted, .sortedKeys]).write(
         to: staging.appendingPathComponent("report.json"),

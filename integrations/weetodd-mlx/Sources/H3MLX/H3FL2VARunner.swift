@@ -9,9 +9,11 @@ public struct H3FL2VARequest: Sendable {
   public let vision: URL
   public let images: [H3StillReference]
   public let anchors: [H3PackedLayout.Anchor]
+  public let referenceNoise: H3ReferenceNoiseControls?
 
   public init(base: H3T2VARequest, vision: URL,
-    images: [H3StillReference], anchors: [H3PackedLayout.Anchor]) throws {
+    images: [H3StillReference], anchors: [H3PackedLayout.Anchor],
+    referenceNoise: H3ReferenceNoiseControls? = nil) throws {
     guard base.funControl == nil, vision.isFileURL, vision.path.hasPrefix("/"),
       (1...8).contains(images.count), images.count == anchors.count,
       anchors.enumerated().allSatisfy({ index, anchor in
@@ -40,6 +42,7 @@ public struct H3FL2VARequest: Sendable {
     self.vision = vision
     self.images = images
     self.anchors = anchors
+    self.referenceNoise = referenceNoise
   }
 }
 
@@ -57,7 +60,10 @@ public enum H3FL2VARunner {
 
   public typealias Result = H3AVOutputDecoder.Result
 
-  public static func preflight(_ request: H3FL2VARequest) throws -> Admission {
+  public static func preflight(_ request: H3FL2VARequest, refinement: H3JointRefinement? = nil) throws -> Admission {
+    guard request.base.geometry.canvasAdmission == .ordinary || refinement != nil else {
+      throw H3CheckpointError.invalid("Expanded H3 canvas requires explicit initialized spatial refinement.")
+    }
     try Task.checkCancellation()
     let base = request.base
     let tokenizer = try H3QwenTokenizer(url: base.tokenizer)
@@ -65,10 +71,12 @@ public enum H3FL2VARunner {
       prompt: base.prompt, tokenizer: tokenizer).request
     let layout = try H3PackedLayout(geometry: base.geometry,
       textTags: qwen.tags, anchors: request.anchors)
-    let video = try H3Schedule(requestedSteps: base.requestedSteps, shift: 12)
-    let audio = try H3Schedule(requestedSteps: base.requestedSteps, shift: 3)
-    let rows = try H3RowSchedule(layout: layout, video: video, audio: audio)
-    guard rows.table.count <= 128, layout.tags.count <= 40_000 else {
+    let grids = try refinement?.schedules(requestedSteps: base.requestedSteps)
+    let video = try grids?.video ?? H3Schedule(requestedSteps: base.requestedSteps, shift: 12)
+    let audio = try grids?.audio ?? H3Schedule(requestedSteps: base.requestedSteps, shift: 3)
+    let rows = try H3RowSchedule(layout: layout, video: video, audio: audio,
+      visualConditionStrength: request.referenceNoise?.visual ?? 0.999)
+    guard rows.table.count <= 128, layout.tags.count <= base.geometry.maximumPackedRows else {
       throw H3CheckpointError.invalid("H3 FL2VA packed rows exceed engine admission.")
     }
     _ = try H3QwenCheckpointLayout.inspect(root: base.qwenPages)
@@ -83,8 +91,9 @@ public enum H3FL2VARunner {
     try H3VideoVAEEncoder.preflight(checkpointURL: base.videoVAE)
     _ = try H3AudioVAELayout(url: base.audioVAE)
     for adapter in base.loRAAdapters {
+      try adapter.validate(requestedSteps: video.timesteps.count + 1, samplingMethod: base.samplingMethod)
       _ = try H3LoRAFile(url: adapter.url, strength: adapter.strength,
-        requestedSteps: base.requestedSteps)
+        requestedSteps: video.timesteps.count + 1, samplingMethod: base.samplingMethod, qkvLayout: adapter.qkvLayout, profile: adapter.profile, startAfterEvaluations: adapter.startAfterEvaluations, requiresStandardProfile: refinement.map { $0.strength < 1 || $0.startVideoSigma != nil } ?? false)
     }
     return Admission(geometry: base.geometry, packedRows: layout.tags.count,
       evaluations: video.timesteps.count, textRows: qwen.tags.count,
@@ -92,13 +101,9 @@ public enum H3FL2VARunner {
       rowSchedule: rows)
   }
 
-  public static func run(_ request: H3FL2VARequest,
-    onFrame: (Int, Data) throws -> Void,
-    onAudio: ([Float], Int) throws -> Void,
-    progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
-    let admission = try preflight(request)
+  static func encodeText(_ request: H3FL2VARequest, admission: Admission,
+    progress: (String, Int, Int) -> Void) throws -> [Float] {
     let base = request.base
-    let geometry = admission.geometry
     let textRows = try autoreleasepool { () throws -> [Float] in
       let tokenizer = try H3QwenTokenizer(url: base.tokenizer)
       let visual = try H3FL2VAQwenFrames.prepare(images: request.images,
@@ -124,6 +129,12 @@ public enum H3FL2VARunner {
     progress("text_weights_released", 1, 1)
     try Task.checkCancellation()
 
+    return textRows
+  }
+
+  static func encodeKeyframes(_ request: H3FL2VARequest, admission: Admission,
+    progress: (String, Int, Int) -> Void) throws -> [Float] {
+    let base = request.base
     let conditionRows = try autoreleasepool { () throws -> [Float] in
       let metadata = try H3VideoVAELayout(url: base.videoVAE)
       MLXRandom.seed(42)
@@ -132,7 +143,7 @@ public enum H3FL2VARunner {
         try Task.checkCancellation()
         let latent = try H3VideoVAEEncoder.encodeKeyframe(
           checkpointURL: base.videoVAE, rgb8: Array(image.rgb8),
-          width: image.width, height: image.height)
+          width: image.width, height: image.height, canvasAdmission: base.geometry.canvasAdmission)
         pieces.append(try H3LatentCodec.videoEncoderRows(latents: latent,
           mean: metadata.latentsMean,
           standardDeviation: metadata.latentsStandardDeviation))
@@ -152,6 +163,25 @@ public enum H3FL2VARunner {
     progress("keyframe_video_weights_released", 1, 1)
     try Task.checkCancellation()
 
+    return conditionRows
+  }
+
+  public static func run(_ request: H3FL2VARequest,
+    initialRows: H3JointLatentArtifact.Rows? = nil, refinement: H3JointRefinement? = nil,
+    onFrame: (Int, Data) throws -> Void,
+    onAudio: ([Float], Int) throws -> Void,
+    onLatents: (([Float], [Float]) throws -> Void)? = nil,
+    progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
+    guard (initialRows == nil) == (refinement == nil) else {
+      throw H3CheckpointError.invalid("H3 refinement requires joint initial rows and controls.")
+    }
+    try initialRows?.validate(geometry: request.base.geometry)
+    let admission = try preflight(request, refinement: refinement)
+    let base = request.base
+    let geometry = admission.geometry
+    let textRows = try encodeText(request, admission: admission, progress: progress)
+    let conditionRows = try encodeKeyframes(request, admission: admission, progress: progress)
+
     let rawRows = try autoreleasepool { () throws -> ([Float], [Float]) in
       let state = try H3DiTState(checkpointURL: base.transformer,
         layout: admission.layout,
@@ -160,7 +190,7 @@ public enum H3FL2VARunner {
         timestepTable: admission.rowSchedule.table,
         turboLoRAURL: base.turboLoRA,
         turboLoRAStrength: base.turboLoRAStrength,
-        additionalLoRAs: base.additionalLoRAs) { completed, total in
+        additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters) { completed, total in
           progress("transformer_prepare", completed, total)
         }
       defer { state.unload() }
@@ -169,24 +199,35 @@ public enum H3FL2VARunner {
         videoLatentFrames: geometry.videoLatentFrames,
         latentHeight: geometry.height / 16,
         latentWidth: geometry.width / 16,
-        audioLatentFrames: geometry.audioLatentFrames)
+        audioLatentFrames: geometry.audioLatentFrames, canvasAdmission: geometry.canvasAdmission)
       let clean = MLXArray(conditionRows,
         [1, admission.layout.conditionVideoRows, 96])
-      let anchored = Float(0.999) * clean + Float(0.001) * noise.condition
-      let video = concatenated([anchored, noise.video], axis: 1)
+      // Default keeps the released literal .001; explicit strengths use the
+      // owned Python float32 complement without changing old recipe bytes.
+      let strength = request.referenceNoise?.visual ?? Float(0.999)
+      let noiseStrength = request.referenceNoise.map { Float(1) - $0.visual } ?? Float(0.001)
+      let anchored = strength * clean + noiseStrength * noise.condition
+      let targetVideo = try initialRows.map {
+        try H3JointRefinement.targetRows(noise.video, source: $0.video, prefix: 0, schedule: admission.videoSchedule, canvasAdmission: base.geometry.canvasAdmission)
+      } ?? noise.video
+      let initializedAudio = try initialRows.map {
+        try H3JointRefinement.targetRows(noise.audio, source: $0.audio, prefix: 0, schedule: admission.audioSchedule, canvasAdmission: base.geometry.canvasAdmission)
+      } ?? noise.audio
+      let video = concatenated([anchored, targetVideo], axis: 1)
       let sampled = try H3AVSampler.run(predictor: state,
         videoSchedule: admission.videoSchedule,
         audioSchedule: admission.audioSchedule,
         rowSchedule: admission.rowSchedule,
-        videoLatents: video, audioLatents: noise.audio,
+        videoLatents: video, audioLatents: initializedAudio,
+        samplingMethod: base.samplingMethod,
         progress: { completed, total in progress("sampling", completed, total) },
         blockProgress: { step, completed, total in
           progress("sampling_block_\(step)", completed, total)
         })
-      let targetVideo = sampled.video[0..<1,
+      let finalVideo = sampled.video[0..<1,
         admission.layout.conditionVideoRows..<sampled.video.shape[1], 0..<96]
-      let videoRows = targetVideo.asType(.float32).asArray(Float.self)
-      let audioRows = sampled.audio.asType(.float32).asArray(Float.self)
+      let videoRows = finalVideo.asType(.float32).asArray(Float.self)
+      let audioRows = refinement?.preserveAudio == true ? initialRows!.audio : sampled.audio.asType(.float32).asArray(Float.self)
       guard videoRows.allSatisfy(\.isFinite), audioRows.allSatisfy(\.isFinite) else {
         throw H3CheckpointError.invalid("H3 FL2VA sampled AV latents contain non-finite values.")
       }
@@ -195,6 +236,8 @@ public enum H3FL2VARunner {
     Stream.gpu.synchronize()
     Memory.clearCache()
     progress("transformer_weights_released", 1, 1)
+    try Task.checkCancellation()
+    try onLatents?(rawRows.0, rawRows.1)
     return try H3AVOutputDecoder.decode(videoRows: rawRows.0,
       audioRows: rawRows.1, geometry: geometry,
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,

@@ -15,11 +15,12 @@ public enum H3FL2VAMedia {
   }
 
   public static func load(path: String, width: Int, height: Int,
-    first: Bool) throws -> Loaded {
+    first: Bool, canvasAdmission: H3CanvasAdmission = .ordinary) throws -> Loaded {
     guard path.hasPrefix("/"), !path.utf8.contains(0),
-      width > 0, height > 0, width * height <= H3Geometry.maximumCanvasPixels else {
+      width > 0, height > 0, width * height <= canvasAdmission.maximumPixels else {
       throw H3CheckpointError.invalid("Invalid H3 FL2VA source or canvas.")
     }
+    if canvasAdmission == .spatialRefinement { try canvasAdmission.validate(width: width,height: height) }
     let fd = Darwin.open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK)
     guard fd >= 0 else { throw H3CheckpointError.invalid("Cannot open an H3 endpoint image.") }
     let file = FileHandle(fileDescriptor: fd, closeOnDealloc: true)

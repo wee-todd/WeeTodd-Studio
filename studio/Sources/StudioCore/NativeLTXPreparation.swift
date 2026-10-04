@@ -1,4 +1,5 @@
 import CryptoKit
+import CoreFoundation
 import Darwin
 import Foundation
 
@@ -143,40 +144,135 @@ public enum NativeLTXPreparation {
     let task = (recipe["conditioning"] as? [String: Any])?["task"] as? String ?? "t2v"
     let specialized=specialization(recipe)
     let authoredIngredients=specialized == "ingredients" && config["single_stage_sampler"] as? String == "euler_ancestral_cfg_pp"
+    let guided = guidedProfile(recipe)
+    let durationMode = config["duration_mode"] as? String ?? "manual"
+    let headPath = components["duration_head_path"] as? String ?? ""
+    let headSHA = headPath.hasPrefix("/") ? try? NativeLTXAutomaticDuration.validateHead(at:URL(fileURLWithPath:headPath)) : nil
     let ordinary = (config["pipeline_mode"] as? String ?? "distilled") == "distilled"
-      && (config["duration_mode"] as? String ?? "manual") == "manual"
+      && ["manual","automatic"].contains(durationMode)
       && config["stage1_steps"] as? Int == 8 && config["stage2_steps"] as? Int == 3
       && (config["stage1_sampler"] as? String ?? "euler_ancestral") == "euler_ancestral"
       && (components["ic_loras"] as? [Any] ?? []).isEmpty
       && (components["msr_lora_path"] as? String ?? "").isEmpty
       && (components["distilled_lora_path"] as? String ?? "").isEmpty
-      && (components["duration_head_path"] as? String ?? "").isEmpty
       && config["ic_lora_single_stage"] as? Bool != true && !["control", "ref2va"].contains(task)
+    let singleStage=(config["ic_lora_single_stage"] as? Bool ?? false) && specialized == nil && !guided
+    let singleStageMethod=LTX25SingleStageMethod(rawValue:config["stage1_sampler"] as? String ?? "")
+    let singleStageSchedule=LTX25NegativeSchedule(rawValue:config["cfg_pp_schedule"] as? String ?? "full")
+    let singleStageValid=singleStage && singleStageMethod != nil && singleStageSchedule != nil && config["stage1_steps"] as? Int == 8 && config["stage2_steps"] as? Int == 0
     let dfrEnabled=config["dfr_enabled"] as? Bool ?? false
     let adapter=config["dfr_detailing_lora_path"] as? String ?? ""
     let strength=(config["dfr_detailing_lora_strength"] as? NSNumber)?.doubleValue ?? 0
     let rounds=config["dfr_temporal_rounds"] as? Int ?? 0
     let temporal=config["dfr_temporal_upsampler_path"] as? String ?? ""
     let fps=(config["frame_rate"] as? NSNumber)?.doubleValue ?? 0
+    let automaticAvailable = specialized == nil && !dfrEnabled && headSHA != nil && (ordinary || guided)
     let dfrValid=ordinary && dfrEnabled && adapter.hasPrefix("/") && strength.isFinite && (0...3).contains(strength) && strength > 0
       && (0...2).contains(rounds) && (rounds == 0 ? temporal.isEmpty : temporal.hasPrefix("/") && fps*Double(1 << rounds) <= 120)
       && (config["dfr_prebaked_transformer_path"] as? String ?? "").isEmpty
       && (config["generated_keyframes"] as? Int ?? 0) == 0
       && (components["loras"] as? [Any] ?? []).isEmpty
-    return ["dfrEnabled": dfrValid,"referenceFamily": specialized ?? "ordinary",
-      "supportedTasks": specialized != nil ? [specialized == "msr" ? "ref2va" : "control"] : dfrValid ? ["t2v", "i2v", "fflf"] : ordinary && !dfrEnabled
+    return ["pipelineMode": config["pipeline_mode"] as? String ?? "distilled",
+      "durationMode":durationMode,"automaticDurationAvailable":automaticAvailable,
+      "automaticDuration": ["minimum_seconds":config["auto_duration_min_seconds"] ?? 1.0,
+        "maximum_seconds":config["auto_duration_max_seconds"] ?? 20.0],
+      "guidance": config.filter { ["audio_cfg_scale", "stg_scale", "video_rescale_scale", "audio_rescale_scale", "modality_scale", "stg_blocks", "stage1_sigmas"].contains($0.key) },
+      "experimentalGuidance": guided, "dfrEnabled": dfrValid,"referenceFamily": specialized ?? "ordinary",
+      "singleStageAvailable":(ordinary || singleStageValid) && !dfrEnabled && specialized == nil,
+      "singleStageEnabled":singleStageValid,
+      "ordinaryKeyframesAvailable":(ordinary || guided || singleStageValid) && !dfrEnabled && specialized == nil,
+      "supportedTasks": singleStageValid ? (singleStageMethod == .cfgpp ? ["t2v","i2v","fflf"]:["t2v","i2v","fflf","a2v"]) : durationMode == "automatic" ? automaticAvailable ? ["t2v","i2v","fflf"] : [] : guided ? ["t2v", "i2v", "fflf", "a2v"] : specialized != nil ? [specialized == "msr" ? "ref2va" : "control"] : dfrValid ? ["t2v", "i2v", "fflf"] : ordinary && !dfrEnabled
       ? ["t2v", "i2v", "fflf", "a2v", "extension"] : [],
-      "controls": ["evaluations": authoredIngredients ? 16 : config["stage1_steps"] ?? 8, "refinementSteps": ["msr","ingredients"].contains(specialized ?? "") ? 0 : config["stage2_steps"] ?? 3,
-        "cfg": config["video_cfg_scale"] ?? 1, "stepsEditable": false, "refinementStepsEditable": false,
-        "cfgEditable": false, "shiftEditable": false,
-        "stepsExplanation": authoredIngredients ? "Ingredients CFG++ uses eight steps and sixteen serial transformer evaluations." : ["msr","ingredients"].contains(specialized ?? "") ? "Swift reference sampling uses eight full-resolution evaluations." : "Swift distilled sampling uses the qualified 8 + 3 schedule.",
-        "cfgExplanation": "Distilled guidance is fixed.",
+      "controls": ["evaluations": singleStageValid ? (singleStageMethod == .cfgpp ? singleStageSchedule!.evaluationCount : 8) : authoredIngredients ? 16 : (config["stage1_steps"] as? Int ?? 8), "refinementSteps": ["msr","ingredients"].contains(specialized ?? "") ? 0 : config["stage2_steps"] ?? 3,
+        "cfg": config["video_cfg_scale"] ?? 1, "stepsEditable": guided, "refinementStepsEditable": false,
+        "cfgEditable": guided, "shiftEditable": false,
+        "stepsExplanation": singleStageValid ? "Eight full-resolution updates with no spatial upscale or refinement stage. CFG++ negative passes follow the selected schedule; terminal negative prediction is omitted." : guided ? "Guided steps are scheduler updates; guidance can require multiple transformer predictions per update. Refinement uses three deterministic steps. Experimental and not quality qualified." : authoredIngredients ? "Ingredients CFG++ uses eight steps and sixteen serial transformer evaluations." : ["msr","ingredients"].contains(specialized ?? "") ? "Swift reference sampling uses eight full-resolution evaluations." : "Swift distilled sampling uses the qualified 8 + 3 schedule.",
+        "cfgExplanation": guided ? "Video CFG; audio CFG is configured separately." : "Distilled guidance is fixed.",
         "shiftExplanation": "This native adapter does not expose a Shift override."],
       "presets": [
         ["id": "custom", "name": "Custom", "description": "Preserve imported recipe settings."],
         ["id": "balanced", "name": "Balanced", "description": "Preserve validated recipe sampling settings."],
         ["id": "speed", "name": "Speed", "description": "Keep the qualified recipe sampling settings."],
         ["id": "lowMemory", "name": "Low memory", "description": "Swift uses staged loading and bounded block residency."]]]
+  }
+  private static func guidedProfile(_ recipe: [String: Any]) -> Bool {
+    guard let config = recipe["config"] as? [String: Any],
+      let mode = LTX25GuidanceMode(rawValue: config["pipeline_mode"] as? String ?? ""),
+      let components = recipe["components"] as? [String: Any],
+      (components["distilled_lora_path"] as? String)?.hasPrefix("/") == true,
+      (components["ic_loras"] as? [Any] ?? []).isEmpty,
+      (components["msr_lora_path"] as? String ?? "").isEmpty,
+      ["manual","automatic"].contains(config["duration_mode"] as? String ?? "manual"),
+      (config["stage1_sampler"] as? String ?? (mode == .guided ? "euler_guided" : "res_2s_guided")) == (mode == .guided ? "euler_guided" : "res_2s_guided"),
+      config["stage2_steps"] as? Int == 3,
+      (config["stage2_sampler"] as? String ?? "euler") == "euler",
+      (config["dfr_enabled"] as? Bool ?? false) == false,
+      (config["ic_lora_single_stage"] as? Bool ?? false) == false,
+      !["ref2va", "control", "extension"].contains((recipe["conditioning"] as? [String: Any])?["task"] as? String ?? "t2v") else { return false }
+    return true
+  }
+
+  private static func guidedConfig(_ original: [String: Any], selection: GenerationSelection,
+    negativePrompt: String) throws -> [String: Any] {
+    guard let settings = selection.ltx25Guidance, settings.experimentalEnabled else {
+      throw unsupported("guided sampling requires explicit experimental opt-in")
+    }
+    var config = original
+    if let raw = original["stage1_steps"] {
+      guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+        number.doubleValue.isFinite, number.doubleValue.rounded() == number.doubleValue,
+        (1...64).contains(number.doubleValue) else { throw unsupported("guided stage-one updates must be an integer from 1 to 64") }
+    }
+    let mode = settings.mode, steps = selection.steps ?? (original["stage1_steps"] as? Int ?? (mode == .guided ? 30 : 15))
+    guard (1...64).contains(steps), selection.refinementSteps == nil || selection.refinementSteps == 3 else {
+      throw unsupported("guided stage one requires 1–64 updates and refinement remains three steps")
+    }
+    config["pipeline_mode"] = mode.rawValue
+    config["stage1_steps"] = steps; config["stage2_steps"] = 3
+    config["stage1_sampler"] = mode == .guided ? "euler_guided" : "res_2s_guided"
+    config["stage2_sampler"] = "euler"
+    let values: [(String, Double?, Double, ClosedRange<Double>)] = [
+      ("video_cfg_scale", selection.cfg, 3, 0...100),
+      ("audio_cfg_scale", settings.audioCFG, 7, 0...100),
+      ("stg_scale", settings.stgScale, mode == .guided ? 1 : 0, 0...100),
+      ("video_rescale_scale", settings.videoRescale, mode == .guided ? 0.7 : 0.45, 0...1),
+      ("audio_rescale_scale", settings.audioRescale, mode == .guided ? 0.7 : 1, 0...1),
+      ("modality_scale", settings.modalityScale, 3, 0...100)]
+    for (key, override, fallback, bounds) in values {
+      if let value = original[key], !(value is NSNumber) { throw unsupported("\(key) must be numeric") }
+      let inherited = original[key] as? NSNumber
+      guard inherited == nil || CFGetTypeID(inherited!) != CFBooleanGetTypeID() else { throw unsupported("\(key) must be numeric") }
+      let value = override ?? inherited?.doubleValue ?? fallback
+      guard value.isFinite, bounds.contains(value) else { throw unsupported("\(key) is outside its supported range") }
+      config[key] = value
+    }
+    if let raw = original["stg_blocks"] {
+      guard let values = raw as? [NSNumber], values.allSatisfy({
+        CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue.isFinite && $0.doubleValue.rounded() == $0.doubleValue
+      }) else { throw unsupported("STG blocks must be integer indices") }
+    }
+    let blocks = settings.stgBlocks ?? (original["stg_blocks"] as? [Int] ?? (mode == .guided ? [28] : []))
+    guard blocks.count <= 48, Set(blocks).count == blocks.count, blocks.allSatisfy({ (0..<48).contains($0) }) else {
+      throw unsupported("STG blocks must be unique indices from 0 to 47")
+    }
+    config["stg_blocks"] = blocks
+    if let raw = original["stage1_sigmas"], !(raw is NSNull) {
+      guard let values = raw as? [NSNumber], values.allSatisfy({ CFGetTypeID($0) != CFBooleanGetTypeID() }) else {
+        throw unsupported("custom sigmas must be a numeric array or null")
+      }
+    }
+    if settings.sigmas?.isEmpty == true { config["stage1_sigmas"] = NSNull() }
+    else if let sigmas = settings.sigmas ?? (original["stage1_sigmas"] as? [Double]) {
+      guard sigmas.count == steps + 1, sigmas.count <= 65,
+        sigmas.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+        sigmas[0] > 0, sigmas.last == 0,
+        zip(sigmas, sigmas.dropFirst()).allSatisfy({ $0 > $1 }) else {
+        throw unsupported("custom sigmas need one more point than updates, descending from (0,1] to zero")
+      }
+      config["stage1_sigmas"] = sigmas
+    }
+    config["negative_prompt"] = negativePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    return config
   }
   public static func catalog(directory: String) throws -> [[String: Any]] {
     guard !directory.isEmpty else { return [] }
@@ -216,8 +312,20 @@ public enum NativeLTXPreparation {
   }
   private static func composeScene(_ request: [String: Any], project: StudioProject,
     members: [Clip]) throws -> [String: Any] {
+    let versionTwo = NativeLTXSceneImageInputs.requiresVersionTwo(members)
+    guard members.allSatisfy({ $0.generationSelection?.ltx25Keyframes.map {
+      $0.experimentalEnabled && $0.generatedCount == 0
+    } ?? true }) else {
+      throw unsupported("continuous scenes accept timed images, not generated keyframe slots")
+    }
+    guard members.allSatisfy({ $0.generationSelection?.ltx25AutomaticDuration == nil }) else {
+      throw unsupported("automatic duration cannot change continuous-scene shot intervals; use manual timing")
+    }
+    guard members.allSatisfy({ $0.generationSelection?.ltx25Guidance == nil }) else {
+      throw unsupported("guided continuous-scene sampling is not admitted")
+    }
     guard (2...6).contains(members.count) else { throw unsupported("a scene needs two to six shots") }
-    var independent = project
+    var independent = versionTwo ? try NativeLTXSceneImageInputs.baseProject(project,members:members) : project
     let memberIDs = Set(members.map(\.id))
     for index in independent.clips.indices where memberIDs.contains(independent.clips[index].id) {
       independent.clips[index].continuity = ClipContinuity(mode: "independent")
@@ -226,19 +334,20 @@ public enum NativeLTXPreparation {
     for member in members {
       guard member.extensionDirection.isEmpty, member.extensionSource.isEmpty,
         member.audioDriverSelection == nil,
-        member.attachments.allSatisfy({ [.lora, .first, .audioDriver].contains($0.role) }) else {
-        throw unsupported("Swift continuous scenes accept a boundary image, one continuous source-audio driver and ordinary LoRAs")
+        member.attachments.allSatisfy({ (versionTwo ? [.lora,.first,.last,.keyframe,.audioDriver] : [.lora,.first,.audioDriver]).contains($0.role) }) else {
+        throw unsupported("Swift continuous scenes accept timed images, one continuous source-audio driver and ordinary LoRAs")
       }
       var one = request
       one["project"] = try object(independent)
       one["clipID"] = member.id.uuidString
       let composed = try compose(resolve(one))
       let recipe = composed["recipe"] as! [String: Any]
-      guard ((recipe["config"] as? [String: Any])?["dfr_enabled"] as? Bool ?? false) == false else {
-        throw unsupported("DFR does not support continuous scenes")
+      guard ((recipe["config"] as? [String: Any])?["dfr_enabled"] as? Bool ?? false) == false,
+        ((recipe["config"] as? [String: Any])?["pipeline_mode"] as? String ?? "distilled") == "distilled" else {
+        throw unsupported("DFR and guided sampling do not support continuous scenes")
       }
       let task = (recipe["conditioning"] as? [String: Any])?["task"] as? String
-      let hasImage = member.attachments.contains { $0.role == .first }
+      let hasImage = !versionTwo && member.attachments.contains { $0.role == .first }
       let hasAudio = member.attachments.contains { $0.role == .audioDriver }
       guard task == (hasAudio ? "a2v" : hasImage ? "fflf" : "t2v"),
         (((recipe["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]])?.count ?? 0) ==
@@ -311,6 +420,16 @@ public enum NativeLTXPreparation {
       conditioning["inputs"] = inputs
       content["conditioning"] = conditioning
     }
+    if versionTwo {
+      let globalAssets = try JSONDecoder().decode([MediaAsset].self,from:data(request["globalAssets"] ?? []))
+      let images = try NativeLTXSceneImageInputs.make(members:members,assets:project.assets+globalAssets,
+        segmentStarts:Array(boundaries.dropLast()),segmentFrames:lengths,fps:fps)
+      var conditioning = content["conditioning"] as! [String:Any]
+      let audio = (conditioning["inputs"] as! [[String:Any]]).filter { $0["role"] as? String == "audio_driver" }
+      conditioning["inputs"] = images+audio
+      conditioning["task"] = audio.isEmpty ? (images.isEmpty ? "t2v":"fflf") : "a2v"
+      content["conditioning"] = conditioning
+    }
     let sharedSound = members[0].soundscape.trimmingCharacters(in: .whitespacesAndNewlines)
     let sharedMusic = members[0].music.trimmingCharacters(in: .whitespacesAndNewlines)
     let segments: [[String: Any]] = zip(members, recipes).enumerated().map { index, pair in
@@ -321,7 +440,7 @@ public enum NativeLTXPreparation {
       var segment: [String: Any] = ["clip_id": member.id.uuidString, "prompt": prompt,
         "duration_seconds": member.duration,
         "seed": (recipe["config"] as! [String: Any])["seed"]!]
-      if index > 0,
+      if !versionTwo,index > 0,
         let image = ((recipe["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]])?
           .first(where: { $0["role"] as? String == "keyframe" }) {
         segment["image_input"] = image
@@ -332,7 +451,7 @@ public enum NativeLTXPreparation {
     guard ["single", "windowed"].contains(decodeMode) else {
       throw unsupported("choose Full decode or Bounded decode for the Swift scene")
     }
-    var scene: [String: Any] = ["version": 1, "segments": segments,
+    var scene: [String: Any] = ["version": versionTwo ? 2:1, "segments": segments,
       "overlap_frames": 25, "boundary_image_policy": "balanced",
       "soundscape": "", "music": ""]
     if decodeMode == "windowed" {
@@ -346,16 +465,19 @@ public enum NativeLTXPreparation {
         "duration": Double(range.1) / fps]
     }
     var report = reports[0]
-    report["scene"] = ["version": 1, "members": ranges,
+    report["scene"] = ["version": versionTwo ? 2:1, "members": ranges,
       "frame_rate": fps, "publication_mode": decodeMode == "windowed"
         ? "windowed_decode_native_latent_chain" : "single_decode_native_latent_chain"] as [String: Any]
     report["scenePlan"] = ["requested_durations": members.map(\.duration),
       "segment_frame_counts": lengths, "total_frames": boundaries.last! + 1]
     report["task"] = "scene"
     report["conditioning"] = ["frames": boundaries.last! + 1,
-      "inputs": recipes.reduce(0) { $0 + (((($1["conditioning"] as? [String: Any])?["inputs"] as? [Any])?.count) ?? 0) }]
+      "inputs": versionTwo ? (((content["conditioning"] as? [String:Any])?["inputs"] as? [Any])?.count ?? 0)
+        : recipes.reduce(0) { $0 + (((($1["conditioning"] as? [String: Any])?["inputs"] as? [Any])?.count) ?? 0) }]
     report["resolvedFingerprint"] = try fingerprint(content)
-    report["warnings"] = reports.flatMap { $0["warnings"] as? [String] ?? [] }
+    report["warnings"] = reports.flatMap { $0["warnings"] as? [String] ?? [] } +
+      (versionTwo ? ["Scene interior and terminal image anchors are experimental; visual quality is not qualified."] : [])
+    if versionTwo { report["productionQualified"] = false }
     return ["recipe": content, "report": report]
   }
   private static func resolve(_ request: [String: Any]) throws -> Context {
@@ -374,14 +496,33 @@ public enum NativeLTXPreparation {
       throw unsupported("this continuity, scene, music driver or extension direction is not yet ported")
     }
     let selection = clip.generationSelection
-    guard selection?.steps == nil, selection?.refinementSteps == nil, selection?.cfg == nil,
-      selection?.shift == nil, selection?.projectionBackend == nil, selection?.transformerBackend == nil else {
+    let guided = selection?.ltx25Guidance
+    let automatic = selection?.ltx25AutomaticDuration
+    let keyframes=selection?.ltx25Keyframes
+    let singleStage=selection?.ltx25SingleStage
+    if let singleStage {
+      guard singleStage.experimentalEnabled,guided == nil,automatic == nil,
+        clip.continuityMode == "independent",clip.extensionDirection.isEmpty,
+        singleStage.method == .cfgpp || singleStage.negativeSchedule == .full else {
+        throw unsupported("single-stage sampling needs explicit opt-in, an independent distilled shot, and a matching negative schedule")
+      }
+    }
+    if let keyframes {
+      guard keyframes.experimentalEnabled,(0...8).contains(keyframes.generatedCount),
+        clip.continuityMode == "independent",clip.extensionDirection.isEmpty else {
+        throw unsupported("ordinary keyframes require explicit experimental opt-in, 0–8 generated slots and an independent shot")
+      }
+    }
+    guard (guided != nil || (selection?.steps == nil && selection?.refinementSteps == nil && selection?.cfg == nil)),
+      selection?.h3SamplingMethod == nil,selection?.h3Reference == nil,selection?.h3Joint == nil,selection?.h3MotionFidelity == nil,
+      clip.attachments.allSatisfy({ $0.h3LoRA == nil && $0.h3ReferencePlacement == nil }),selection?.shift == nil,
+      selection?.projectionBackend == nil, selection?.transformerBackend == nil else {
       throw unsupported("sampling and backend overrides cannot change the qualified distilled schedule")
     }
     guard selection?.memoryPolicy == nil || selection?.memoryPolicy == "recipe" else {
       throw unsupported("explicit memory-policy overrides are not supported; Swift uses staged loading")
     }
-    guard clip.negativePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    guard guided != nil || singleStage?.method == .cfgpp || clip.negativePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw unsupported("distilled 8 + 3 sampling does not evaluate negative prompts; clear the negative prompt")
     }
     let frameSource = try clip.continuityMode == "frame" ? NativeLTXFrameSource(project: project, clip: clip) : nil
@@ -395,6 +536,12 @@ public enum NativeLTXPreparation {
       ? (clip.attachments.contains { [.last, .keyframe].contains($0.role) } ? "fflf" : "i2v")
       : selection?.task ?? clip.inferredTask
     guard ["t2v", "i2v", "fflf", "a2v", "extension","ref2va","control"].contains(task) else { throw unsupported("task \(task) is not yet ported") }
+    if automatic != nil {
+      guard automatic?.experimentalEnabled == true, ["t2v","i2v","fflf"].contains(task),
+        movieSource == nil, !project.isContinuousSceneMember(clip) else {
+        throw unsupported("automatic duration requires explicit experimental opt-in and an ordinary T2V, I2V or first/last shot; audio-driven, scene, extension and specialized controls require manual timing")
+      }
+    }
     guard clip.audioDriverSelection == nil || task == "a2v" else {
       throw unsupported("a prepared timeline audio driver requires the A2V task")
     }
@@ -402,6 +549,10 @@ public enum NativeLTXPreparation {
     var candidates = profiles.filter {
       (clip.profileID == "auto" || $0["id"] as? String == clip.profileID)
         && (($0["generation"] as? [String: Any])?["supportedTasks"] as? [String] ?? []).contains(task)
+        && (($0["generation"] as? [String: Any])?["pipelineMode"] as? String ?? "distilled") == (guided?.mode.rawValue ?? "distilled")
+        && (automatic == nil
+          ? (($0["generation"] as? [String:Any])?["durationMode"] as? String ?? "manual") == "manual"
+          : (($0["generation"] as? [String:Any])?["automaticDurationAvailable"] as? Bool == true))
     }
     if task == "control",clip.profileID == "auto" {
       let controls=clip.attachments.filter { $0.role == .control }.map(\.controlType)
@@ -427,13 +578,52 @@ public enum NativeLTXPreparation {
       }
     }
     guard let chosen = candidates.first, let profile = chosen["id"] as? String else {
-      throw StudioError.invalid("No compatible Swift LTX recipe is available. Import a distilled recipe or select Automatic.")
+      throw StudioError.invalid(automatic != nil
+        ? "No compatible automatic-duration profile is available. Link a valid LTX 2.5 duration head in native model setup and enable experimental automatic timing for an ordinary shot."
+        : guided == nil
+        ? "No compatible Swift LTX recipe is available. Import a distilled recipe or select Automatic."
+        : "No compatible Swift Dev guided recipe is available. Use model setup to link an unmerged Dev paged pack and the distilled refinement adapter, then select Automatic.")
     }
     let assets = try JSONDecoder().decode([MediaAsset].self, from: data(request["globalAssets"] ?? []))
     let selectedRecipe = try recipe(profile)
+    let selectedConfig=selectedRecipe["config"] as! [String:Any]
+    if let declared=selectedConfig["generated_keyframes"] {
+      guard let count=declared as? NSNumber,CFGetTypeID(count) != CFBooleanGetTypeID(),
+        count.doubleValue.isFinite,count.doubleValue.rounded()==count.doubleValue,
+        (0...8).contains(count.intValue),keyframes != nil || count.intValue == 0 else {
+        throw unsupported("profile generated-keyframe slots require explicit experimental keyframe controls")
+      }
+    }
+    if singleStage != nil {
+      guard specialization(selectedRecipe) == nil, !guidedProfile(selectedRecipe),
+        (selectedConfig["dfr_enabled"] as? Bool ?? false) == false,
+        ["t2v","i2v","fflf","a2v"].contains(task),singleStage?.method != .cfgpp || task != "a2v" else {
+        throw unsupported("single-stage sampling requires an ordinary distilled profile; CFG++ generates audio rather than freezing an A2V driver")
+      }
+    }
+    if keyframes != nil {
+      guard specialization(selectedRecipe) == nil,(selectedConfig["dfr_enabled"] as? Bool ?? false) == false,
+        ["t2v","i2v","fflf","a2v"].contains(task) else {
+        throw unsupported("ordinary keyframes do not combine with specialized, DFR, extension or scene recipes")
+      }
+    }
+    if automatic != nil, specialization(selectedRecipe) != nil {
+      throw unsupported("specialized reference/control profiles require manual duration")
+    }
+    if let guided {
+      guard guided.experimentalEnabled, guidedProfile(selectedRecipe),
+        frameSource == nil, movieSource == nil, !project.isContinuousSceneMember(clip) else {
+        throw unsupported("guided sampling requires explicit experimental opt-in and an ordinary Dev profile")
+      }
+      _ = try guidedConfig(selectedRecipe["config"] as! [String: Any], selection: selection!, negativePrompt: clip.negativePrompt)
+    }
     var warnings = selection?.preset == .speed
       ? [specialization(selectedRecipe) == nil || specialization(selectedRecipe) == "union" ? "Speed preserves the qualified 8 + 3 sampling schedule." : "Speed preserves eight full-resolution reference evaluations."] : []
-    if let inherited = (selectedRecipe["config"] as? [String: Any])?["negative_prompt"] as? String,
+    if guided != nil { warnings = ["Swift Dev guided sampling is experimental. Visual quality and performance are not qualified."] }
+    if automatic != nil { warnings.append("Automatic duration is experimental; the accepted take uses the predicted video interval. Audio-driven and continuous scenes require manual duration.") }
+    if keyframes != nil { warnings.append("Ordinary timed images and generated keyframes are experimental. Generated slots apply to stage one only; quality is not qualified.") }
+    if singleStage != nil { warnings = ["Full-resolution single-stage sampling is experimental until real-model qualification. The selected negative schedule controls actual transformer evaluations."] }
+    if guided == nil,singleStage == nil, let inherited = (selectedRecipe["config"] as? [String: Any])?["negative_prompt"] as? String,
       !inherited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       warnings.append("The selected profile's negative prompt is not evaluated by distilled Swift sampling and is omitted.")
     }
@@ -441,9 +631,60 @@ public enum NativeLTXPreparation {
       profile: profile, recipe: selectedRecipe, task: task, warnings: warnings,
       frameSource: frameSource, movieSource: movieSource)
   }
+  /// Resolve model paths only after admitting the actual movie editor intent.
+  /// The independent probe is never composed or rendered; its schedule and duration
+  /// do not become movie settings. The dedicated movie request owns all execution.
+  public static func componentsForMovie(request:[String:Any],settings:LTX25MovieUpscaleSettings)
+    throws -> (components:[String:String],profileID:String,selectionFingerprint:String,ffmpeg:URL) {
+    guard let value=request["project"],let clipID=request["clipID"] as? String else {
+      throw StudioError.invalid("Missing Studio movie preparation request.")
+    }
+    var project=try JSONDecoder().decode(StudioProject.self,from:data(value))
+    guard let index=project.clips.firstIndex(where:{ $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }) else {
+      throw StudioError.invalid("Select the movie upscale clip.")
+    }
+    let original=project.clips[index]
+    try NativeLTXMoviePreparation.validateEditor(clip:original,settings:settings,
+      isContinuousScene:project.isContinuousSceneMember(original))
+    guard original.generationSelection?.ltx25MovieUpscale == settings,
+      original.generationSelection?.task == "video_upscale" else {
+      throw StudioError.invalid("Movie settings must match the frozen editor task.")
+    }
+    project.clips[index].generationSelection=GenerationSelection(task:"t2v",preset:.custom)
+    project.clips[index].attachments=[]
+    var probe=request;probe["project"]=try object(project)
+    let context=try resolve(probe)
+    guard specialization(context.recipe)==nil,!guidedProfile(context.recipe) else {
+      throw StudioError.invalid("Source movie refinement needs ordinary native distilled model components.")
+    }
+    let movieProfileControls=NativeLTXDiffusionVAE.profileControls(context.recipe["config"] as? [String:Any] ?? [:])
+    guard movieProfileControls.isEmpty else { throw StudioError.invalid("Movie upscaling uses its explicit advanced decoder controls; select a profile without custom Diffusion VAE controls.") }
+    var modelComponents=context.recipe["components"] as! [String:Any]
+    guard (modelComponents["loras"] as? [Any] ?? []).isEmpty,
+      (modelComponents["stage_two_loras"] as? [Any] ?? []).isEmpty else {
+      throw StudioError.invalid("Movie upscaling cannot ignore adapters embedded in the selected profile.")
+    }
+    if let detail=(context.recipe["config"] as? [String:Any])?["dfr_detailing_lora_path"] as? String {
+      modelComponents["dfr_detailing_lora_path"]=detail
+    }
+    let paths=try NativeLTXMoviePreparation.components(from:modelComponents,
+      mode:settings.mode,pixelSpatialAdapterPath:settings.pixelSpatialAdapterPath)
+    let configured=context.runtime["ffmpegPath"] as? String ?? ""
+    let executable=configured.isEmpty ? [context.recipe["ffmpeg"] as? String ?? "","/opt/homebrew/bin/ffmpeg","/usr/local/bin/ffmpeg"].first {
+      !$0.isEmpty && FileManager.default.isExecutableFile(atPath:$0)
+    } ?? "" : configured
+    guard FileManager.default.isExecutableFile(atPath:executable) else {
+      throw StudioError.invalid("Select executable FFmpeg for native movie preparation.")
+    }
+    return (paths,context.profile,try fingerprint(context.recipe),URL(fileURLWithPath:try canonical(executable)))
+  }
+
   public static func describe(request: [String: Any]) throws -> [String: Any] {
+    if try NativeLTXMovieEditorPreparation.matches(request:request) { return try NativeLTXMovieEditorPreparation.describe(request:request) }
+    try NativeMovieIntervalAdmission.rejectInOrdinaryRequest(request)
     if let (project, members) = try sceneRequest(request) {
-      var independent = project
+      var independent = NativeLTXSceneImageInputs.requiresVersionTwo(members)
+        ? try NativeLTXSceneImageInputs.baseProject(project,members:members) : project
       for index in independent.clips.indices where members.contains(where: { $0.id == independent.clips[index].id }) {
         independent.clips[index].continuity = ClipContinuity(mode: "independent")
       }
@@ -458,9 +699,12 @@ public enum NativeLTXPreparation {
         let segments = scene?["segments"] as? [[String: Any]] ?? []
         let laterImages = try segments.compactMap { ($0["image_input"] as? [String: Any])?["path"] as? String }
           .map(canonical)
+        let images = (((composed["recipe"] as? [String:Any])?["conditioning"] as? [String:Any])?["inputs"] as? [[String:Any]] ?? [])
+          .filter { $0["kind"] as? String == "image" }
+        let rootImages = try images.compactMap { $0["path"] as? String }.map(canonical)
         let plannedSound = try members.compactMap { $0.musicSource?.path }.map(canonical)
         result["sourcePaths"] = Array(Set((result["sourcePaths"] as? [String] ?? []) +
-          laterImages + plannedSound)).sorted()
+          laterImages + rootImages + plannedSound)).sorted()
       } catch {
         result["readinessErrors"] = (result["readinessErrors"] as? [String] ?? []) + [error.localizedDescription]
       }
@@ -497,6 +741,7 @@ public enum NativeLTXPreparation {
       "warnings": context.warnings, "readinessErrors": errors]
   }
   public static func compose(request: [String: Any]) throws -> [String: Any] {
+    try NativeMovieIntervalAdmission.rejectInOrdinaryRequest(request)
     if let (project, members) = try sceneRequest(request) {
       return try composeScene(request, project: project, members: members)
     }
@@ -522,27 +767,69 @@ public enum NativeLTXPreparation {
     // Stored profile media/context never become hidden clip dependencies.
     content.removeValue(forKey: "continuation"); content.removeValue(forKey: "reference_images")
     var config = content["config"] as! [String: Any]
-    guard (config["duration_mode"] as? String ?? "manual") == "manual",
-      let fps = config["frame_rate"] as? Double, fps.isFinite, (1...120).contains(fps),
-      clip.duration.isFinite, clip.duration > 0, clip.duration <= 20,
+    let keyframes=clip.generationSelection?.ltx25Keyframes
+    let singleStage=clip.generationSelection?.ltx25SingleStage
+    let dimensionGrid=singleStage == nil ? 64:32
+    let automatic = clip.generationSelection?.ltx25AutomaticDuration
+    guard let fps = config["frame_rate"] as? Double, fps.isFinite, (1...120).contains(fps),
+      clip.duration.isFinite, clip.duration > 0, automatic != nil || clip.duration <= 20,
       (0...Int(UInt32.max)).contains(clip.seed), (64...4096).contains(clip.generationWidth),
-      (64...4096).contains(clip.generationHeight), clip.generationWidth % 64 == 0, clip.generationHeight % 64 == 0 else {
+      (64...4096).contains(clip.generationHeight), clip.generationWidth % dimensionGrid == 0, clip.generationHeight % dimensionGrid == 0 else {
       throw unsupported("invalid duration, frame rate, dimensions, seed or automatic duration")
     }
-    let additionalFrames = Int(ceil(clip.duration * fps / 8 - 1e-9)) * 8
+    var automaticPolicy: [String:Any]?
+    if let automatic {
+      guard automatic.experimentalEnabled, specialized == nil,
+        context.movieSource == nil, !context.project.isContinuousSceneMember(clip),
+        ["t2v","i2v","fflf"].contains(context.task),
+        let head = (content["components"] as? [String:Any])?["duration_head_path"] as? String else {
+        throw unsupported("automatic duration needs an ordinary shot and a compatible duration head")
+      }
+      let headPath = try canonical(head), sha = try NativeLTXAutomaticDuration.validateHead(at:URL(fileURLWithPath:headPath))
+      if let pin = (content["components"] as? [String:Any])?["duration_head_header_sha256"] {
+        guard pin as? String == sha else { throw StudioError.invalid("The duration-head header changed. Relink its native model profile before preparing automatic timing.") }
+      }
+      automaticPolicy = ["head_checkpoint_path":headPath,"head_header_sha256":sha,
+        "minimum_seconds":automatic.minimumSeconds,"maximum_seconds":automatic.maximumSeconds]
+      config["duration_mode"] = "automatic"
+      config["auto_duration_min_seconds"] = automatic.minimumSeconds
+      config["auto_duration_max_seconds"] = automatic.maximumSeconds
+    }
+    let additionalFrames = try automatic.map {
+      try NativeLTXAutomaticDuration.maximumFrames(minimumSeconds:$0.minimumSeconds,maximumSeconds:$0.maximumSeconds,fps:fps)-1
+    } ?? Int(ceil(clip.duration * fps / 8 - 1e-9)) * 8
     let contextFrames = context.movieSource == nil ? 0 : clip.continuityMode == "motion" ? 49 : 25
     let frames = contextFrames + additionalFrames + (context.movieSource == nil ? 1 : 0)
     if ["ingredients","crossview_ingredients"].contains(specialized ?? ""),frames<121 {
       throw StudioError.invalid("Ingredients needs at least 121 frames (five seconds at 24 fps).")
     }
     let duration = Double(additionalFrames) / fps
-    guard Double(frames - 1) / fps <= 20 else {
+    guard Double(frames - 1) / fps <= (automatic == nil ? 20 : 30) else {
       throw unsupported("rounded generation plus source context exceeds 20 seconds")
     }
     config["width"] = clip.generationWidth; config["height"] = clip.generationHeight
     config["seed"] = clip.seed; config["duration_seconds"] = duration
-    config["negative_prompt"] = ""
+    if let keyframes { config["generated_keyframes"]=keyframes.generatedCount }
+    if let selection = clip.generationSelection, selection.ltx25Guidance != nil {
+      config = try guidedConfig(config, selection: selection, negativePrompt: clip.negativePrompt)
+    } else { config["negative_prompt"] = "" }
+    if let singleStage {
+      config["ic_lora_single_stage"]=true;config["stage1_steps"]=8;config["stage2_steps"]=0
+      config["stage1_sampler"]=singleStage.method.rawValue;config["stage2_sampler"]="euler"
+      config["stage1_eta"]=singleStage.method == .euler ? 0:1;config["stage1_s_noise"]=1
+      config["ancestral_seed_offset"]=10000;config["cfg_pp_batched"]=false
+      config["cfg_pp_schedule"]=singleStage.negativeSchedule.rawValue
+      config["negative_prompt"]=singleStage.method == .cfgpp ? clip.negativePrompt:""
+    }
     var components = content["components"] as! [String: Any]
+    if let diffusion=clip.generationSelection?.ltx25DiffusionVAE {
+      guard let checkpoint=components["video_vae_path"] as? String else { throw StudioError.invalid("Diffusion VAE requires its selected native checkpoint.") }
+      config=try NativeLTXDiffusionVAE.apply(diffusion,checkpoint:URL(fileURLWithPath:checkpoint),config:config)
+    }
+    if let automaticPolicy {
+      components["duration_head_path"] = automaticPolicy["head_checkpoint_path"]
+      components["duration_head_header_sha256"] = automaticPolicy["head_header_sha256"]
+    }
     if let original = components["loras"], !(original is [[Any]]) {
       throw StudioError.invalid("Profile LoRAs must be an array of path/strength pairs.")
     }
@@ -561,18 +848,18 @@ public enum NativeLTXPreparation {
       inputs.append(["id": "continuity-" + clip.id.uuidString, "kind": "image", "role": "keyframe",
         "path": firstFramePath, "strength": 1.0, "frame_index": 0])
     }
-    let allowed: Set<MediaRole> = ["t2v", "extension"].contains(context.task) ? [] : context.task == "i2v" ? [.first]
-      : context.task == "a2v" ? [.audioDriver, .first] : context.task == "ref2va" ? [.reference]
+    let allowed: Set<MediaRole> = ["t2v", "extension"].contains(context.task) ? [] : context.task == "i2v" ? (keyframes == nil ? [.first] : [.first,.last,.keyframe])
+      : context.task == "a2v" ? (keyframes == nil ? [.audioDriver,.first] : [.audioDriver,.first,.last,.keyframe]) : context.task == "ref2va" ? [.reference]
       : context.task == "control" ? [.control] : [.first, .last, .keyframe]
     guard roles.isSubset(of: allowed) else { throw unsupported("attached media conflict with \(context.task); no inputs were discarded") }
-    if context.task == "i2v", !roles.contains(.first) { throw StudioError.invalid("Image to video requires a First frame image.") }
-    if context.task == "fflf", clip.generationSelection != nil, !roles.isSuperset(of: [.first, .last]) {
+    if context.task == "i2v", !roles.contains(.first),keyframes == nil || roles.isDisjoint(with:[.last,.keyframe]) { throw StudioError.invalid("Image to video requires an image attachment.") }
+    if context.task == "fflf", keyframes == nil,clip.generationSelection != nil, !roles.isSuperset(of: [.first, .last]) {
       throw StudioError.invalid("First and last frames requires First frame and Last frame images.")
     }
     if context.task == "a2v", attachments.filter({ $0.role == .audioDriver }).count != 1 {
       throw StudioError.invalid("Audio to video requires exactly one source audio attachment.")
     }
-    if context.task == "a2v", attachments.filter({ $0.role == .first }).count > 1 {
+    if context.task == "a2v", keyframes == nil,attachments.filter({ $0.role == .first }).count > 1 {
       throw StudioError.invalid("Audio to video accepts at most one opening-frame image.")
     }
     if specialized == "msr",!(1...5).contains(attachments.count) {
@@ -702,7 +989,19 @@ public enum NativeLTXPreparation {
     if inputs.filter({ $0["reference_role"] as? String == "background" }).count>1 {
       throw StudioError.invalid("MSR accepts at most one background image.")
     }
-    if !["a2v","extension","ref2va","control"].contains(context.task) {
+    if let keyframes {
+      let images=inputs.filter { $0["kind"] as? String == "image" }
+      let indices=images.map { $0["frame_index"] as? String == "last" ? frames-1 : $0["frame_index"] as! Int }
+      guard images.count<=8,Set(indices).count==indices.count,
+        indices.allSatisfy({ $0>=0 && $0<frames }),
+        context.task != "fflf" || !images.isEmpty,
+        keyframes.generatedCount == 0 || frames>=keyframes.generatedCount+2 else {
+        throw unsupported("ordinary keyframes require up to eight unique rounded input frames inside the model interval")
+      }
+      let plane=(clip.generationWidth/32)*(clip.generationHeight/32)
+      let rows=(additionalFrames/8+1+images.count-(indices.contains(0) ? 1 : 0)+keyframes.generatedCount)*plane
+      guard rows<=131072 else { throw unsupported("ordinary keyframe tokens exceed native video admission") }
+    } else if !["a2v","extension","ref2va","control"].contains(context.task) {
       let indices = inputs.map { $0["frame_index"] as? String == "last" ? frames - 1 : $0["frame_index"] as! Int }
       guard Set(indices).count == indices.count, indices.allSatisfy({ $0 == 0 || $0 == frames - 1 }),
         inputs.count <= 2, context.task == "t2v" || indices.contains(0) else {
@@ -763,9 +1062,17 @@ public enum NativeLTXPreparation {
     var report: [String: Any] = ["profile": URL(fileURLWithPath: context.profile).deletingPathExtension().lastPathComponent,
       "generation": descriptor(content), "resolvedFingerprint": try fingerprint(context.frameSource == nil ? content : identity),
       "selectionFingerprint": try fingerprint(context.recipe), "warnings": context.warnings, "task": task,
-      "nativeFPS": fps, "preserveEditorialDuration": true, "movieSettings": try object(clip.settings(in: context.project)),
+      "nativeFPS": fps, "preserveEditorialDuration": automatic == nil, "durationMode":automatic == nil ? "manual" : "automatic",
+      "movieSettings": try object(clip.settings(in: context.project)),
       "nativePreparation": "swift", "conditioning": ["frames": frames,
         "inputs": task == "extension" ? 1 : inputs.count]]
+    if clip.generationSelection?.ltx25Guidance != nil || clip.generationSelection?.ltx25SingleStage != nil { report["productionQualified"] = false }
+    if let automaticPolicy { report["automaticDuration"] = automaticPolicy; report["productionQualified"] = false }
+    if let keyframes {
+      report["ordinaryKeyframes"]=["generatedCount":keyframes.generatedCount,
+        "timedImageCount":inputs.filter { $0["kind"] as? String == "image" }.count,"generatedStages":[1]]
+      report["productionQualified"]=false
+    }
     if let source = context.frameSource { report["continuity"] = source.report }
     if let source = context.movieSource { report["continuity"] = source.report }
     return ["recipe": content, "report": report]
@@ -773,6 +1080,8 @@ public enum NativeLTXPreparation {
   /// Native media extraction runs off the UI thread. Publish the image, recipe
   /// and original editor request together; never rewrite stored attachments.
   public static func prepareWithMedia(request: [String: Any], destination: URL) async throws -> [String: Any] {
+    if try NativeLTXMovieEditorPreparation.matches(request:request) { return try await NativeLTXMovieEditorPreparation.prepare(request:request,destination:destination) }
+    try NativeMovieIntervalAdmission.rejectInOrdinaryRequest(request)
     if try sceneRequest(request) != nil { return try prepare(request: request, destination: destination) }
     let context = try resolve(request)
     if let family=specialization(context.recipe),["union","motion_track","crossview_warp","crossview_ingredients"].contains(family) {

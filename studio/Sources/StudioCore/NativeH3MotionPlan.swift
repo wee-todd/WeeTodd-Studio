@@ -2,7 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 
-/// Editor admission for the worker's existing v2 latent-continuation contract.
+/// Editor admission for task-bound native latent continuation: T2VA v2 and FL2VA v3.
 /// Model identity and latent-row decoding remain owned by the shared worker.
 struct NativeH3MotionPlan {
   let contract: [String:Any]
@@ -28,12 +28,17 @@ struct NativeH3MotionPlan {
   init?(project:StudioProject,clip:Clip) throws {
     let saving=project.shouldSaveContinuityContext(for:clip),motion=clip.continuityMode == "motion"
     guard saving || motion else { return nil }
-    guard ["t2v","t2va"].contains(clip.inferredTask),
-      clip.attachments.allSatisfy({ $0.role == .lora }),
+    let fl2va=["i2v","fflf"].contains(clip.inferredTask),reference=["ref2va","a2v"].contains(clip.inferredTask)
+    let task=fl2va ? "fl2va" : reference ? "ref2va" : "t2va"
+    let roles:Set<MediaRole>=fl2va ? [.first,.last,.keyframe,.lora]
+      : clip.inferredTask == "a2v" ? [.audioDriver,.first,.last,.keyframe,.lora]
+      : reference ? [.reference,.lora] : [.lora]
+    guard ["t2v","t2va","i2v","fflf","ref2va","a2v"].contains(clip.inferredTask),
+      clip.attachments.allSatisfy({ roles.contains($0.role) }),
       clip.duration.isFinite,(2.5...(saving && !motion ? 362.0/24 : 15)).contains(clip.duration),
       (32...1920).contains(clip.generationWidth),(32...1920).contains(clip.generationHeight),
       clip.generationWidth%32 == 0,clip.generationHeight%32 == 0 else {
-      throw StudioError.invalid("Swift H3 motion context requires text-to-video, matching canvases, and no media attachments.")
+      throw StudioError.invalid("Swift H3 motion context requires text-to-video, timed-image FL2VA or Ref2VA/A2V, matching canvases, and compatible task attachments.")
     }
     var context=22,sourcePath:String?,sourceHash:String?,dependency:[String:Any]=[:]
     if motion {
@@ -49,9 +54,11 @@ struct NativeH3MotionPlan {
       let bytes=try Self.read(artifact.manifest,limit:1024*1024)
       guard Self.hash(bytes)==artifact.manifestSHA256,
         let manifest=try JSONSerialization.jsonObject(with:bytes) as? [String:Any],
-        Set(manifest.keys)==["format","contextFrames","width","height","generatedFrames","publishedFrames",
+        Set(manifest.keys).subtracting(["task"])==["format","contextFrames","width","height","generatedFrames","publishedFrames",
           "overlapFrames","identity","payloadBytes","payloadSHA256"],
         manifest["format"] as? String == "weetodd-h3-swift-continuation-v2",
+        (manifest["task"] == nil || manifest["task"] as? String != nil),
+        (manifest["task"] as? String ?? "t2va") == task,
         let count=manifest["contextFrames"] as? Int,[5,22,39,56].contains(count),
         manifest["width"] as? Int == clip.generationWidth,manifest["height"] as? Int == clip.generationHeight,
         let generated=manifest["generatedFrames"] as? Int,(60...362).contains(generated),generated%17 == 5,
@@ -82,7 +89,7 @@ struct NativeH3MotionPlan {
     let published=motion && !saving ? requested : generated-overlap
     duration=motion && saving ? Double(published)/24 : min(clip.duration,15)
     publishedFrames=published
-    var fields:[String:Any]=["version":2,"context_frames":context,"save_context":saving]
+    var fields:[String:Any]=["version":reference ? 4 : fl2va ? 3 : 2,"context_frames":context,"save_context":saving]
     if let sourcePath,let sourceHash { fields["source_context"]=sourcePath;fields["source_manifest_sha256"]=sourceHash }
     contract=fields
     dependency["mode"]=motion ? "motion" : "independent";dependency["engine"]="h3"

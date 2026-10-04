@@ -21,8 +21,8 @@ public enum H3Noise {
   /// clean-frame augmentation, independent of the VAE posterior seed 42.
   public static func makeWithCondition(seed: UInt64, conditionRows: Int,
     videoLatentFrames: Int, latentHeight: Int, latentWidth: Int,
-    audioLatentFrames: Int) throws -> AnchoredRows {
-    guard (1...4096).contains(conditionRows),
+    audioLatentFrames: Int, canvasAdmission: H3CanvasAdmission = .ordinary) throws -> AnchoredRows {
+    guard (1...(canvasAdmission == .ordinary ? 4096 : canvasAdmission.maximumPackedRows)).contains(conditionRows),
       (7...128).contains(videoLatentFrames),
       (2...256).contains(latentHeight), latentHeight.isMultiple(of: 2),
       (2...256).contains(latentWidth), latentWidth.isMultiple(of: 2),
@@ -55,7 +55,8 @@ public enum H3Noise {
   /// Ref2VA initialization, kept separate from clean latent-tail continuation.
   static func makeReference(seed: UInt64, conditionVideo: [Float],
     conditionAudio: [Float], videoLatentFrames: Int, latentHeight: Int,
-    latentWidth: Int, audioLatentFrames: Int) throws -> Rows {
+    latentWidth: Int, audioLatentFrames: Int,
+    referenceNoise: H3ReferenceNoiseControls? = nil) throws -> Rows {
     guard conditionVideo.count.isMultiple(of: 96),
       conditionAudio.count.isMultiple(of: 32),
       conditionVideo.count / 96 + conditionAudio.count / 32 <= 40_000,
@@ -88,15 +89,25 @@ public enum H3Noise {
         videoLatentFrames: videoLatentFrames, latentHeight: latentHeight,
         latentWidth: latentWidth, audioLatentFrames: audioLatentFrames)
       noise = Rows(video: anchored.video, audio: anchored.audio)
-      let strength = Float(0.999)
+      let strength = referenceNoise?.visual ?? Float(0.999)
       let clean = MLXArray(conditionVideo, [1, conditionVideo.count / 96, 96])
       // Use the float32 complement, matching scheduler.scale_noise; literal
       // .001 rounds differently from 1 - Float(.999).
       let augmented = strength * clean + (Float(1) - strength) * anchored.condition
       video = concatenated([augmented, noise.video], axis: 1)
     }
-    let audio = conditionAudio.isEmpty ? noise.audio : concatenated([
-      MLXArray(conditionAudio, [1, conditionAudio.count / 32, 32]), noise.audio], axis: 1)
+    let audio: MLXArray
+    if conditionAudio.isEmpty { audio = noise.audio }
+    else {
+      var clean = MLXArray(conditionAudio, [1, conditionAudio.count / 32, 32])
+      let strength = referenceNoise?.audio ?? 1
+      if strength < 1 {
+        // Independent owned-Python audio key: target PRNG draws stay unchanged.
+        let keyed = MLXRandom.normal(clean.shape, key: MLXRandom.key(seed + 1)).asType(.float32)
+        clean = strength * clean + (Float(1) - strength) * keyed
+      }
+      audio = concatenated([clean, noise.audio], axis: 1)
+    }
     return Rows(video: video, audio: audio)
   }
 

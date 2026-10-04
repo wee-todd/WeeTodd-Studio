@@ -21,6 +21,8 @@ import StudioCore
   @Published var downloading = false
   @Published var downloadFraction = 0.0
   @Published var downloadStatus = ""
+  @Published var convertingTransformer = false
+  private var conversionAttempt = UUID()
   var nativeDownloadCatalogURL: URL?
   var readNativeDownloadToken: () async throws -> String? = {
     let saved = try await BackgroundCredential.read { try ModelDownloadToken.read() }
@@ -89,6 +91,8 @@ import StudioCore
   }
 
   func begin(_ preset: ModelSetupPreset) {
+    conversionAttempt = UUID()
+    convertingTransformer = false
     selectedPreset = preset
     roots = []
     selection = ModelSetupSelection()
@@ -126,7 +130,7 @@ import StudioCore
   }
 
   func createRecipe(store: StudioStore) async {
-    guard let preset = selectedPreset, selection.missingComponents(for: preset).isEmpty else {
+    guard !convertingTransformer, let preset = selectedPreset, selection.missingComponents(for: preset).isEmpty else {
       return
     }
     error = ""
@@ -176,6 +180,69 @@ import StudioCore
       captureLog(store.bridge)
       self.error = error.localizedDescription
     }
+  }
+
+  var rawDevTransformer: String? {
+    guard selectedPreset?.components.contains(where: { $0.key == "dev_transformer_path" }) == true,
+      let source = selection.components["dev_transformer_path"],
+      URL(fileURLWithPath: source).resolvingSymlinksInPath().lastPathComponent == NativeTransformerConversion.devSourceName else { return nil }
+    var directory: ObjCBool = false
+    return FileManager.default.fileExists(atPath: source, isDirectory: &directory) && !directory.boolValue ? source : nil
+  }
+
+  func convertDevTransformer(store: StudioStore, destination: URL) async {
+    guard !convertingTransformer, !store.bridge.busy, let source = rawDevTransformer,
+      let preset = selectedPreset, store.runtime.usesNativeLTX25 else { return }
+    let worker = store.runtime.ltx25WorkerPath
+    let attempt = UUID(); conversionAttempt = attempt; convertingTransformer = true
+    error = ""; resultPath = ""
+    defer {
+      if conversionAttempt == attempt { convertingTransformer = false; captureLog(store.bridge) }
+    }
+    func current() -> Bool {
+      conversionAttempt == attempt && selectedPreset?.id == preset.id &&
+        selection.components["dev_transformer_path"] == source && store.runtime.usesNativeLTX25 &&
+        store.runtime.ltx25WorkerPath == worker
+    }
+    do {
+      guard (try? FileManager.default.attributesOfItem(atPath: destination.path)) == nil else {
+        throw StudioError.invalid("Choose a new directory. Existing model pages are never overwritten.")
+      }
+      let request = try NativeTransformerConversion.request(source: source, destination: destination)
+      let admitted = try await store.bridge.invoke("ltx-native-preflight-transformer-conversion",
+        runtime: store.runtime, payload: request, output: destination)
+      let identity = try await Task.detached(priority: .userInitiated) {
+        try NativeTransformerConversion.capturedIdentity(admitted, source: source)
+      }.value
+      guard current() else { return }
+      let captured = try NativeTransformerConversion.request(source: source, destination: destination,
+        sourceIdentity: identity, requiresIdentity: true)
+      let result = try await store.bridge.invoke("ltx-native-convert-transformer",
+        runtime: store.runtime, payload: captured, output: destination)
+      let converted = try await Task.detached(priority: .userInitiated) {
+        try NativeTransformerConversion.completedDirectory(result, source: source,
+          destination: destination, sourceIdentity: identity)
+      }.value
+      guard current() else {
+        store.notice = "Native model pages were prepared at \(converted.path). The changed setup selection was preserved."
+        return
+      }
+      selection.components["dev_transformer_path"] = converted.path
+      selection.candidates["dev_transformer_path", default: []].append(converted.path)
+      if !roots.contains(converted.path) { roots.append(converted.path) }
+      warnings = ["Native Q8 pages prepared. Create Recipe to validate the complete Dev and refinement stack."]
+      store.notice = "Dev transformer pages prepared without Python. The original checkpoint is unchanged."
+    } catch is CancellationError {
+      if current() { warnings = ["Conversion cancelled. The raw source remains selected; retry with a fresh output directory."] }
+    } catch {
+      if current() { self.error = error.localizedDescription }
+    }
+  }
+
+  func cancelTransformerConversion(bridge: Bridge) {
+    conversionAttempt = UUID(); convertingTransformer = false
+    bridge.cancel()
+    warnings = ["Conversion cancelled. The raw source remains selected; retry with a fresh output directory."]
   }
 
   func useRecipeForSelectedClip(store: StudioStore) {

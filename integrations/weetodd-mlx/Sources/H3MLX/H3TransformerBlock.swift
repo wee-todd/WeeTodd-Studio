@@ -13,18 +13,21 @@ struct H3RotaryAngles {
 /// sequentially from the installed Comfy checkpoint and discarded after use.
 public enum H3TransformerBlock {
   static func prepareRotaryAngles(checkpointURL: URL,
-    positions: MLXArray) throws -> H3RotaryAngles {
+    positions: MLXArray, maximumRows: Int = 40_000) throws -> H3RotaryAngles {
     let layout = try H3CheckpointLayout(url: checkpointURL)
-    let file = try SafeTensorFile(url: checkpointURL)
-    let angles = try prepareRotaryAngles(file: file,
-      prefix: layout.prefix, positions: positions)
-    try file.checkUnchanged(at: checkpointURL)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let file = try SafeTensorFile(url: tensorURL)
+    let angles = try H3CheckpointSource.isPaged(checkpointURL)
+      ? prepareRotaryAngles(inverse: computedInverseFrequency(), positions: positions, maximumRows: maximumRows)
+      : prepareRotaryAngles(file: file, prefix: layout.prefix, positions: positions, maximumRows: maximumRows)
+    try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
     return angles
   }
 
   private static func prepareRotaryAngles(file: SafeTensorFile,
-    prefix: String, positions: MLXArray) throws -> H3RotaryAngles {
-    guard positions.ndim == 2, (1...40_000).contains(positions.shape[0]),
+    prefix: String, positions: MLXArray, maximumRows: Int = 40_000) throws -> H3RotaryAngles {
+    guard positions.ndim == 2, [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(positions.shape[0]),
       positions.shape[1] == 3, positions.dtype == .float32 else {
       throw H3CheckpointError.invalid("Invalid H3 rotary positions.")
     }
@@ -37,6 +40,20 @@ public enum H3TransformerBlock {
     // sine/cosine to the BF16 query dtype. Rounding frequencies first can
     // amplify phase error at later video positions.
     let inverse = MLXArray(try file.readFloat32(named: name, access: .buffered))
+    return try prepareRotaryAngles(inverse: inverse, positions: positions, maximumRows: maximumRows)
+  }
+
+  static func computedInverseFrequency() -> MLXArray {
+    let exponent = MLXArray((0..<16).map { Float(2 * $0) }) / Float(32)
+    return Float(1) / MLX.pow(MLXArray(Float(10_000)), exponent)
+  }
+
+  private static func prepareRotaryAngles(inverse: MLXArray,
+    positions: MLXArray, maximumRows: Int = 40_000) throws -> H3RotaryAngles {
+    guard positions.ndim == 2, [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(positions.shape[0]),
+      positions.shape[1] == 3, positions.dtype == .float32 else {
+      throw H3CheckpointError.invalid("Invalid H3 rotary positions.")
+    }
     let rows = positions.shape[0]
     let axisAngles = (0..<3).map { axis in
       positions[0..<rows, axis].asType(.float32).expandedDimensions(axis: 1)
@@ -67,11 +84,11 @@ public enum H3TransformerBlock {
     modulationIndices: MLXArray, positions: MLXArray,
     projectionMode: H3ProjectionMode = .weightDecoded,
     lora: (any H3LoRAApplying)? = nil,
-    rotaryAngles: H3RotaryAngles? = nil,
+    rotaryAngles: H3RotaryAngles? = nil, maximumRows: Int = 40_000,
     rowWindow: Int = 16384,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard (0..<50).contains(index), input.ndim == 3,
-      input.shape[0] == 1, (1...40_000).contains(input.shape[1]),
+      input.shape[0] == 1, [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(input.shape[1]),
       input.shape[2] == 5376, input.dtype == .bfloat16,
       modulation.ndim == 2, (1...128).contains(modulation.shape[0]),
       modulation.shape[1] == 96768, modulation.dtype == .bfloat16,
@@ -87,7 +104,8 @@ public enum H3TransformerBlock {
     }
     try Task.checkCancellation()
     let layout = try H3CheckpointLayout(url: checkpointURL)
-    let file = try SafeTensorFile(url: checkpointURL)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, block: index)
+    let file = try SafeTensorFile(url: tensorURL)
     let prefix = layout.prefix + "blocks.\(index)."
     let previousCacheLimit = Memory.cacheLimit
     Memory.cacheLimit = 128 * 1024 * 1024
@@ -113,8 +131,15 @@ public enum H3TransformerBlock {
     func project(_ activation: MLXArray, _ suffix: String,
       rows: Int, columns: Int, qkv: Bool = false) throws -> MLXArray {
       let base: MLXArray
-      if layout.curveRank != nil {
-        let name = prefix + suffix + ".weight"
+      let name = prefix + suffix + ".weight"
+      if file.tensors[name]?.dtype == "U32" {
+        let weight = try H3QwenQ8Projection(file: file, name: name)
+        guard weight.rows == rows, weight.columns == columns else {
+          throw H3CheckpointError.invalid("Paged H3 affine projection changed after admission.")
+        }
+        // Owned FL pages preserve head-major QKV rows, including quantized rows.
+        base = try weight.project(activation)
+      } else if layout.curveRank != nil {
         guard let descriptor = file.tensors[name], descriptor.dtype == "BF16",
           descriptor.shape == [UInt64(rows), UInt64(columns)] else {
           throw H3CheckpointError.invalid("Missing H3 FL2VA block projection: \(name)")
@@ -149,8 +174,11 @@ public enum H3TransformerBlock {
       return value
     }
     let count = input.shape[1]
-    let angles = try rotaryAngles ?? prepareRotaryAngles(
-      file: file, prefix: layout.prefix, positions: positions)
+    let angles: H3RotaryAngles
+    if let rotaryAngles { angles = rotaryAngles }
+    else if H3CheckpointSource.isPaged(checkpointURL) {
+      angles = try prepareRotaryAngles(inverse: computedInverseFrequency(), positions: positions, maximumRows: maximumRows)
+    } else { angles = try prepareRotaryAngles(file: file, prefix: layout.prefix, positions: positions, maximumRows: maximumRows) }
     guard angles.rows == count else {
       throw H3CheckpointError.invalid("H3 rotary rows differ from packed input.")
     }
@@ -158,8 +186,14 @@ public enum H3TransformerBlock {
       modulationIndices: modulationIndices, angles: angles,
       read: { try read(prefix + $0, shape: $1) },
       project: { try project($0, $1, rows: $2, columns: $3, qkv: $4) },
-      observe: observe)
-    try file.checkUnchanged(at: checkpointURL)
+      observe: { name,value in
+        if maximumRows == 64_000, UInt64(Memory.activeMemory) > H3CanvasAdmission.maximumStageBytes {
+          throw H3CheckpointError.invalid("H3 spatial block exceeded its 32 GiB active-memory budget.")
+        }
+        try observe(name,value)
+      })
+    try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
     try Task.checkCancellation()
     return output
   }

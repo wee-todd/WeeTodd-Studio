@@ -22,6 +22,7 @@ public enum H3AVSampler {
     videoSchedule: H3Schedule, audioSchedule: H3Schedule,
     rowSchedule: H3RowSchedule,
     videoLatents: MLXArray, audioLatents: MLXArray,
+    samplingMethod: H3SamplingMethod = .euler,
     progress: (Int, Int) -> Void = { _, _ in },
     blockProgress: (Int, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
     let layout = predictor.layout
@@ -41,6 +42,8 @@ public enum H3AVSampler {
         && $0.allSatisfy({ (0..<rowSchedule.table.count).contains(Int($0)) }) }) else {
       throw H3CheckpointError.invalid("Invalid synchronized H3 sampling inputs.")
     }
+    var videoStepper = H3SamplingStepper(schedule: videoSchedule, method: samplingMethod)
+    var audioStepper = H3SamplingStepper(schedule: audioSchedule, method: samplingMethod)
     var video = videoLatents
     var audio = audioLatents
     for index in 0..<steps {
@@ -57,7 +60,7 @@ public enum H3AVSampler {
         velocity.audio.dtype.isFloatingPoint else {
         throw H3CheckpointError.invalid("H3 predictor returned mismatched AV velocity rows.")
       }
-      let advancedVideo = try videoSchedule.advance(
+      let advancedVideo = try videoStepper.advance(
         sample: video[0..<1, conditionRows..<videoRows, 0..<96],
         velocity: velocity.video[0..<1, conditionRows..<videoRows, 0..<96]
           .asType(.float32), index: index)
@@ -65,7 +68,7 @@ public enum H3AVSampler {
         ? concatenated([video[0..<1, 0..<conditionRows, 0..<96],
             advancedVideo], axis: 1)
         : advancedVideo
-      audio = try audioSchedule.advance(sample: audio,
+      audio = try audioStepper.advance(sample: audio,
         velocity: velocity.audio.asType(.float32), index: index)
       eval(video, audio)
       progress(index + 1, steps)

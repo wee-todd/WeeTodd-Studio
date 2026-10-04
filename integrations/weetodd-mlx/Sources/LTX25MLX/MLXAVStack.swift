@@ -30,13 +30,18 @@ public final class MLXAVStack {
       compileGraph:compileGraph,videoAttentionGroups:videoAttentionGroups)
     count=blockCount;self.cacheBytes=cacheBytes
   }
+  func validatePerturbation(_ perturbation:MLXGuidancePerturbation) throws {
+    try perturbation.validate(blockCount:count)
+  }
   func admitPerTokenVideo() throws { try block.admitPerTokenVideo() }
   func admitPerTokenAudio() throws { try block.admitPerTokenAudio() }
   public func evaluate(_ inputs:[String:MLXArray],
     weights:(Int,String,[Int]) throws -> MLXWeight,
     adapters:(Int) throws -> [String:[MLXLoRA]] = { _ in [:] },
+    perturbation:MLXGuidancePerturbation = .none,
     progress:(Progress) throws -> Void = { _ in }) throws -> [String:MLXArray] {
     guard !running else { throw LTXError.invalid("MLX stack already executing.") }
+    try validatePerturbation(perturbation)
     try block.validateInputs(inputs)
     running=true
     let previousLimit=Memory.cacheLimit
@@ -56,7 +61,7 @@ public final class MLXAVStack {
       try block.setAdapters(adapters(index))
       loading += Date().timeIntervalSince(start)
       let computeStart=Date()
-      let output=try block.evaluate(current)
+      let output=try block.evaluate(current,perturbation:perturbation.block(index))
       computing += Date().timeIntervalSince(computeStart)
       current["video"]=output["video"]; current["audio"]=output["audio"]
       // MLX's cache limit is a target and can overshoot by an allocation.

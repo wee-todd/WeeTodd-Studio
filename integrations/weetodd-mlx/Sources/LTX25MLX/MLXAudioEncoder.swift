@@ -40,12 +40,12 @@ public final class MLXAudioEncoder {
     shapes["audio_vae.per_channel_statistics.std-of-means"] = [128]
     return shapes
   }
-  public static func latentFrames(melFrames: Int) throws -> Int {
-    guard (1...2011).contains(melFrames) else { throw LTXError.invalid("Audio mel frame count exceeds the native limit.") }
+  public static func latentFrames(melFrames: Int, maximumMelFrames: Int = 2011) throws -> Int {
+    guard (1...MLXAudioMelPlan.maximumMelFrames).contains(maximumMelFrames), (1...maximumMelFrames).contains(melFrames) else { throw LTXError.invalid("Audio mel frame count exceeds the native limit.") }
     return (melFrames + 3) / 4
   }
   public init(checkpoint: URL, maximumMelFrames: Int = 2011) throws {
-    guard (1...2011).contains(maximumMelFrames) else { throw LTXError.invalid("Invalid audio encoder frame limit.") }
+    guard (1...MLXAudioMelPlan.maximumMelFrames).contains(maximumMelFrames) else { throw LTXError.invalid("Invalid audio encoder frame limit.") }
     let file = try SafeTensorFile(url: checkpoint)
     guard file.metadata["model_version"] == "2.5.0" else {
       throw LTXError.invalid("Audio encoder requires a released LTX 2.5 checkpoint.")
@@ -87,15 +87,17 @@ public final class MLXAudioEncoder {
     return try finish(skip + second)
   }
   /// Input [1, 2, melFrames, 64], output [latentFrames, 128].
-  public func encode(mel: MLXArray, progress: (Int, Int) throws -> Void = { _, _ in }) throws -> MLXArray {
+  public func encode(mel: MLXArray, maximumOwnedBufferBytes: Int = 2*1024*1024*1024, progress: (Int, Int) throws -> Void = { _, _ in }) throws -> MLXArray {
     guard gate.try() else { throw LTXError.invalid("Audio encoder is already active.") }
     defer { Stream.gpu.synchronize(); Memory.clearCache(); gate.unlock() }
     guard mel.dtype == .float32, mel.shape.count == 4, mel.shape[0] == 1,
-      mel.shape[1] == 2, mel.shape[3] == 64, mel.shape[2] <= maximumMelFrames,
-      MLX.isFinite(mel).all().item(Bool.self) else {
+      mel.shape[1] == 2, mel.shape[3] == 64, (1...maximumMelFrames).contains(mel.shape[2]) else {
       throw LTXError.invalid("Audio encoder requires finite stereo Float32 mel frames.")
     }
-    let expected = try Self.latentFrames(melFrames: mel.shape[2])
+    let admission=try MLXAudioEncodePlan(melFrames:mel.shape[2],maximumMelFrames:maximumMelFrames,maximumOwnedBufferBytes:maximumOwnedBufferBytes)
+    try Task.checkCancellation()
+    guard MLX.isFinite(mel).all().item(Bool.self) else { throw LTXError.invalid("Audio encoder requires finite mel frames.") }
+    let expected=admission.latentFrames
     let prefix = "audio_vae.encoder."
     var x = try convolution(mel.transposed(0, 2, 3, 1)[0], prefix + "conv_in.conv")
     var completed = 0

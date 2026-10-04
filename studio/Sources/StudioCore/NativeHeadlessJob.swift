@@ -2,6 +2,7 @@ import AVFoundation
 import CryptoKit
 import Darwin
 import Foundation
+import CoreFoundation
 
 /// Immutable native movie jobs freeze the same headless recipes consumed by Studio and ComfyUI.
 /// This host owns sequential execution and finishing; the existing Swift worker owns inference.
@@ -68,10 +69,66 @@ public struct NativeHeadlessJob: Codable {
         }
       } else if let items = value as? [Any] { items.forEach { inputs($0, parent: parent) } }
     }
-    var ripplePaths = Set<String>()
+    var ripplePaths = Set<String>(), h3Paths = Set<String>()
+    var h3Digests:[String:String]=[:]
+    func h3Input(_ path:String,_ expected:String?=nil) throws {
+      let canonical=try Self.canonicalSource(path)
+      if let expected {
+        guard expected.utf8.count==64,expected.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+          (h3Digests[canonical] == nil || h3Digests[canonical] == expected) else {
+          throw StudioError.invalid("An H3 frozen input digest changed during export: \(path)")
+        }
+        h3Digests[canonical]=expected
+      }
+      paths.insert(canonical);h3Paths.insert(canonical)
+    }
+    func h3Artifact(_ fields:[String:Any],key:String,payload:String) throws {
+      guard let path=fields[key] else { return }
+      guard let path=path as? String,let digest=fields["source_manifest_sha256"] as? String else {
+        throw StudioError.invalid("An H3 artifact needs its frozen manifest path and digest.")
+      }
+      try h3Input(path,digest)
+      let canonical=try Self.canonicalSource(path)
+      let size=try FileManager.default.attributesOfItem(atPath:canonical)[.size] as? NSNumber
+      guard let size,size.uint64Value>0,size.uint64Value<=1024*1024 else {
+        throw StudioError.invalid("An H3 frozen manifest exceeds its bounded metadata admission.")
+      }
+      guard try Self.fileHash(URL(fileURLWithPath:canonical))==digest else {
+        throw StudioError.invalid("An H3 frozen manifest digest changed during export: \(path)")
+      }
+      guard let manifest=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:canonical))) as? [String:Any],
+        let payloadSHA=manifest["payloadSHA256"] as? String else {
+        throw StudioError.invalid("An H3 frozen manifest has no bounded payload identity.")
+      }
+      // Preserve the worker's sibling lookup; canonicalize each existing file separately.
+      try h3Input(URL(fileURLWithPath:path).deletingLastPathComponent().appendingPathComponent(payload).path,payloadSHA)
+    }
     for recipe in recipes.values {
       let raw = try JSONSerialization.jsonObject(with: recipe.bytes) as! [String: Any]
       inputs(raw)
+      if recipe.engine == "h3" {
+        let conditioning=raw["conditioning"] as? [String:Any]
+        for input in conditioning?["inputs"] as? [[String:Any]] ?? [] {
+          if let path=input["soundtrack_path"] {
+            guard let path=path as? String,let digest=input["soundtrack_sha256"] as? String else {
+              throw StudioError.invalid("An H3 movie sidecar needs its own frozen path and digest.")
+            }
+            try h3Input(path,digest)
+          }
+        }
+        if let motion=raw["motion_fidelity"] as? [String:Any],let path=motion["source_video"] {
+          guard let path=path as? String,let digest=motion["source_sha256"] as? String else {
+            throw StudioError.invalid("H3 Motion Fidelity needs its frozen source movie digest.")
+          }
+          try h3Input(path,digest)
+        }
+        if let fields=raw["refinement"] as? [String:Any] {
+          try h3Artifact(fields,key:"source_manifest",payload:"joint-latents.f32")
+        }
+        if let fields=raw["continuation"] as? [String:Any] {
+          try h3Artifact(fields,key:"source_context",payload:"latents.f32")
+        }
+      }
       if try NativeHeadlessRipple.draft(recipe) != nil {
         for key in ["source_path", "guide_path", "first_reference_path"] { ripplePaths.insert(raw[key] as! String) }
         for reference in try NativeHeadlessRipple.references(raw) { ripplePaths.insert(reference["path"] as! String) }
@@ -81,11 +138,28 @@ public struct NativeHeadlessJob: Codable {
       }
     }
     paths.formUnion(ripplePaths)
-    sources = try paths.sorted().map { path in
+    let canonicalPaths=Set(try paths.map(Self.canonicalSource))
+    let hashedPaths=h3Paths.union(try ripplePaths.map(Self.canonicalSource))
+    sources = try canonicalPaths.sorted().map { path in
       var source = try Source.capture(path)
-      if ripplePaths.contains(path) { source.sha256 = try Self.fileHash(URL(fileURLWithPath: path)) }
+      if hashedPaths.contains(path) {
+        source.sha256 = try Self.fileHash(URL(fileURLWithPath:path))
+        if let expected=h3Digests[path],source.sha256 != expected {
+          throw StudioError.invalid("An H3 frozen input digest changed during export: \(path)")
+        }
+      }
       return source
     }
+  }
+  // All source paths already exist. OS canonical identity avoids duplicate aliases
+  // and /var vs /private/var re-aliasing by Foundation URL normalization.
+  private static func canonicalSource(_ path:String) throws -> String {
+    guard path.hasPrefix("/"),path.utf8.count<=4096,!path.utf8.contains(0),
+      let resolved=Darwin.realpath(path,nil) else {
+      throw StudioError.invalid("Relink the native job input: \(path)")
+    }
+    defer { free(resolved) }
+    return String(cString:resolved)
   }
   public static func validateFinishing(_ project: StudioProject) throws {
     try project.settings.validate()
@@ -162,7 +236,10 @@ public struct NativeHeadlessJob: Codable {
       let report = try JSONSerialization.jsonObject(with: recipe.report) as? [String: Any],
       let raw = report["scene"] else { return nil }
     let scene = try JSONDecoder().decode(Scene.self, from: JSONSerialization.data(withJSONObject: raw))
-    guard scene.version == 1, scene.frameRate.isFinite, scene.frameRate > 0,
+    guard (1...2).contains(scene.version),scene.frameRate.isFinite,scene.frameRate > 0,
+      let document=try JSONSerialization.jsonObject(with:recipe.bytes) as? [String:Any],
+      let frozenScene=document["scene"] as? [String:Any],let frozenVersion=frozenScene["version"] as? NSNumber,
+      CFGetTypeID(frozenVersion) != CFBooleanGetTypeID(),frozenVersion.doubleValue==Double(scene.version),
       ["single_decode_native_latent_chain", "windowed_decode_native_latent_chain"].contains(scene.publicationMode) else {
       throw StudioError.invalid("Native job has an invalid prepared scene report.")
     }
@@ -257,13 +334,20 @@ public enum NativeHeadlessExecutor {
   }
   /// CLI event protocol matches the ordinary Studio/Comfy worker handoff.
   public static func worker(_ executable: String, recipe: URL, output: URL, mode: String,
-    cancellation: NativeHeadlessCancellation, emit: (Data) -> Void) throws -> [String: Any] {
+    cancellation: NativeHeadlessCancellation, emit: (Data) -> Void, ffmpeg: String? = nil) throws -> [String: Any] {
     try cancellation.check()
     guard !FileManager.default.fileExists(atPath: output.path) else { throw StudioError.invalid("Native worker output already exists.") }
     let bytes = try Data(contentsOf: recipe), engine = (try JSONSerialization.jsonObject(with: bytes) as? [String: Any])?["engine"] as? String
     let id = UUID().uuidString
-    let envelope: [String: Any] = ["version": 1, "jobID": id, "engine": engine ?? "",
+    var envelope: [String: Any] = ["version": 1, "jobID": id, "engine": engine ?? "",
       "recipePath": recipe.path, "recipeSHA256": NativeHeadlessJob.hash(bytes), "outputDirectory": output.path]
+    if let ffmpeg {
+      guard ffmpeg.hasPrefix("/"), ffmpeg.utf8.count <= 4096, !ffmpeg.utf8.contains(0),
+        FileManager.default.isExecutableFile(atPath: ffmpeg) else {
+        throw StudioError.invalid("Native worker FFmpeg must be an executable absolute local path.")
+      }
+      envelope["ffmpegPath"] = ffmpeg
+    }
     let request = output.deletingLastPathComponent().appendingPathComponent(".\(id).request.json")
     try JSONSerialization.data(withJSONObject: envelope).write(to: request)
     defer { try? FileManager.default.removeItem(at: request) }
@@ -350,6 +434,11 @@ public enum NativeHeadlessExecutor {
         guard state.mediaSHA256[id] == (try? NativeHeadlessJob.fileHash(URL(fileURLWithPath: path))) else {
           throw StudioError.invalid("A completed native take changed. Preserve it and use a new output directory.")
         }
+        guard let clip = state.project.clips.first(where: { $0.id.uuidString == id }),
+          let version = clip.versions.last(where: { $0.path == path }) else {
+          throw StudioError.invalid("A completed native take lost its accepted version identity.")
+        }
+        try version.jointLatentArtifact?.verify()
       }
     }
     for (id, path) in state.completed {
@@ -369,7 +458,7 @@ public enum NativeHeadlessExecutor {
     let resumedGenerations = state.completed.count
     var newlyGenerated = 0
     let call: Worker = customWorker ?? { executable, recipe, destination, mode in
-      try worker(executable, recipe: recipe, output: destination, mode: mode, cancellation: cancellation, emit: emit)
+      try worker(executable, recipe: recipe, output: destination, mode: mode, cancellation: cancellation, emit: emit, ffmpeg: job.ffmpeg)
     }
     let recipeRoot = output.appendingPathComponent("recipes")
     try FileManager.default.createDirectory(at: recipeRoot, withIntermediateDirectories: true)
@@ -450,19 +539,38 @@ public enum NativeHeadlessExecutor {
         guard available.isFinite, available > 0 else { throw StudioError.invalid("Native worker returned no usable interval.") }
         if result["use_complete_duration"] as? Bool == true { updated.duration = available }
         else { updated.duration = min(clip.duration, available) }
-        try await inspect(clip: updated, requireAudio: true)
+        let isMovie = report["task"] as? String == "video_upscale"
+        let measured = try await inspect(clip: updated, requireAudio: true, measureMovie: isMovie || report["task"] as? String == "motion_fidelity")
+        if isMovie {
+          guard measured["frames"] as? Int == report["sourceFrames"] as? Int else {
+            throw StudioError.invalid("Source-movie output frame count differs from its frozen preparation.")
+          }
+        }
+        let movieDuration = try NativeLTXMovieAcceptance.duration(prepared: report, result: result, media: measured)
+        let motionDuration=try NativeH3MotionFidelityAcceptance.duration(prepared:report,result:result,media:measured)
+        let completeDuration=motionDuration ?? movieDuration
+        if let completeDuration { updated.sourceIn = 0; updated.duration = completeDuration }
+        let usableDuration = completeDuration ?? available
         let composed = try JSONSerialization.jsonObject(with: recipe.bytes) as? [String: Any]
         var version = RenderVersion(path: path, seed: clip.seed,
           prompt: composed?["prompt"] as? String ?? clip.prompt, recipePath: frozen.path,
           stats: stats, generationSettings: descriptor, resolvedFingerprint: fingerprint,
-          usableSourceIn: updated.sourceIn, usableDuration: available)
+          usableSourceIn: updated.sourceIn, usableDuration: usableDuration)
         if let raw = result["continuation_artifact"] {
           version.continuationArtifact = try JSONDecoder().decode(ContinuationArtifact.self, from: JSONSerialization.data(withJSONObject: raw))
+        }
+        if clip.engine == .h3 {
+          version.jointLatentArtifact = try H3JointLatentArtifact.adopt(metadata:result["metadata"] as? [String:Any] ?? [:])
         }
         updated.versions.append(version); updated.renderedSignature = recipe.signature
         state.project.clips[index] = updated
         var asset = MediaAsset(name: clip.name + " render", kind: .video, path: path, scope: .clip, owner: clip.id)
-        asset.duration = try await AVURLAsset(url: URL(fileURLWithPath: path)).load(.duration).seconds
+        guard let measuredDuration=measured["duration"] as? Double else { throw StudioError.invalid("Native movie inspection returned no duration.") }
+        asset.duration = completeDuration ?? measuredDuration
+        if completeDuration != nil {
+          guard let measuredFPS=measured["fps"] as? Double else { throw StudioError.invalid("Native movie inspection returned no frame rate.") }
+          asset.fps=measuredFPS
+        }
         state.project.assets.append(asset)
       }
       state.completed[id] = path
@@ -546,8 +654,10 @@ public enum NativeHeadlessExecutor {
     let muxer = project.settings.format == .mp4 ? "mp4" : "mov"
     guard muxers.contains(muxer) else { throw StudioError.invalid("FFmpeg is missing the " + muxer + " movie muxer.") }
   }
-  private static func inspect(clip: Clip, requireAudio: Bool = false) async throws {
-    let asset = AVURLAsset(url: URL(fileURLWithPath: clip.sourcePath))
+  @discardableResult
+  private static func inspect(clip: Clip, requireAudio: Bool = false, measureMovie: Bool = false) async throws -> [String: Any] {
+    let url = URL(fileURLWithPath: clip.sourcePath)
+    let asset = AVURLAsset(url: url)
     let duration = try await asset.load(.duration).seconds
     if requireAudio {
       guard !(try await asset.loadTracks(withMediaType: .audio)).isEmpty else {
@@ -558,6 +668,16 @@ public enum NativeHeadlessExecutor {
       duration.isFinite, duration + 0.05 >= clip.sourceIn + clip.duration else {
       throw StudioError.invalid("The accepted native take does not cover its frozen editorial interval.")
     }
+    guard measureMovie else { return ["duration": duration] }
+    // Reuse compressed-sample timing inspection: exact visible count/cadence
+    // and preferred-transform canvas, without decoding or retaining movie RGB.
+    let clock = try await NativeMovieFrozenMedia.videoClock(url)
+    let tracks = try await asset.loadTracks(withMediaType: .video)
+    guard let track = tracks.first else { throw StudioError.invalid("Native movie has no video track.") }
+    let videoDuration = try await track.load(.timeRange).duration.seconds
+    guard videoDuration.isFinite, videoDuration > 0 else { throw StudioError.invalid("Native movie has no finite video interval.") }
+    return ["duration": duration, "videoDuration": videoDuration, "frames": clock.times.count,
+      "fps": clock.fps, "width": clock.width, "height": clock.height]
   }
   private static func finish(project: StudioProject, ffmpeg: String, movie: URL,
     cancellation: NativeHeadlessCancellation) async throws {

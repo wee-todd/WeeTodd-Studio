@@ -13,12 +13,20 @@ public enum H3AVOutputDecoder {
   public static func decode(videoRows: [Float], audioRows: [Float],
     geometry: H3Geometry, videoVAE: URL, audioVAE: URL,
     videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil,
+    publicationAudio: H3AudioReference? = nil,
     onFrame: (Int, Data) throws -> Void,
     onAudio: ([Float], Int) throws -> Void,
     progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
     guard videoRows.count == geometry.videoRows * 96,
       audioRows.count == geometry.audioRows * 32 else {
       throw H3CheckpointError.invalid("H3 decoded AV row lengths disagree with geometry.")
+    }
+    if let publicationAudio {
+      guard publicationAudio.frames > 0, publicationAudio.frames <= 480_000,
+        publicationAudio.samples.count == publicationAudio.frames * 2,
+        publicationAudio.samples.allSatisfy(\.isFinite) else {
+        throw H3CheckpointError.invalid("Invalid original soundtrack publication interval.")
+      }
     }
     try Task.checkCancellation()
     let videoLayout = try H3VideoVAELayout(url: videoVAE)
@@ -53,6 +61,12 @@ public enum H3AVOutputDecoder {
     progress("video_weights_released", 1, 1)
     try Task.checkCancellation()
 
+    if let publicationAudio {
+      try onAudio(publicationAudio.samples, 32_000)
+      progress("source_audio_preserved", 1, 1)
+      return Result(videoFrames: written, audioSamplesPerChannel: publicationAudio.frames,
+        audioSampleRate: 32_000)
+    }
     let audioLayout = try H3AudioVAELayout(url: audioVAE)
     let audio = try H3LatentCodec.audioDecoderInput(
       rows: MLXArray(audioRows, [1, geometry.audioRows, 32]),

@@ -879,5 +879,218 @@
         "target": "LICENSE"
       }
     ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-duration-head",
+      "name": "LTX 2.5 automatic-duration head \u00b7 Swift",
+      "description": "Official small BF16 head for explicitly experimental automatic duration. Swift verifies its architecture and uses the file directly; no Python or conversion. Manual timing remains unchanged.",
+      "downloadBytes": 3901166,
+      "requiredDiskBytes": 24579548,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.5/tree/2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+      "licenseURL": "https://github.com/Lightricks/LTX-2/blob/9ec55f9f22798a3198d9c923856824821bc3317e/LICENSE-2_x",
+      "licenseNotice": "Retains the LTX-2.x Community License and its eligibility/use restrictions. Review the official license before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "tasks": [
+        "t2v",
+        "i2v",
+        "fflf"
+      ],
+      "components": [
+        "duration_head_path"
+      ]
+    },
+    "kind": "ltx25-duration-head",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "model_patches/ltx-2.5-duration-head-bf16.safetensors",
+        "target": "model_patches/ltx-2.5-duration-head-bf16.safetensors",
+        "size": 3843690,
+        "sha256": "2ec71e4206ed365d015f00c05a48caccfb0ee862986809d06ae376c09f5d9190"
+      },
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "README.md",
+        "target": "README.md",
+        "size": 27077,
+        "sha256": "934251c54a75ab81ab649177870e5dcbfe205285ad8469c9d0a2f3d36009ef1a"
+      },
+      {
+        "repo": "Lightricks/LTX-2",
+        "revision": "9ec55f9f22798a3198d9c923856824821bc3317e",
+        "filename": "LICENSE-2_x",
+        "target": "LICENSE-2_x",
+        "provider": "github",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-dev-source",
+      "name": "LTX 2.5 Dev BF16 source \u00b7 Swift Q8 preparation",
+      "description": "Official unmerged Dev transformer for experimental guided sampling. After download, choose Prepare Q8 Pages; native Swift conversion is required before recipe creation. Existing compatible source weights are reused in place; distilled pages are not substituted.",
+      "downloadBytes": 42018248060,
+      "requiredDiskBytes": 84053273336,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.5/tree/2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+      "licenseURL": "https://github.com/Lightricks/LTX-2/blob/9ec55f9f22798a3198d9c923856824821bc3317e/LICENSE-2_x",
+      "licenseNotice": "Retains the LTX-2.x Community License and its eligibility/use restrictions. Review the official license before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "tasks": [
+        "t2v",
+        "i2v",
+        "fflf"
+      ],
+      "components": [
+        "dev_transformer_path"
+      ]
+    },
+    "kind": "ltx25-dev-source",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors",
+        "target": "diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors",
+        "size": 42018190584,
+        "sha256": "792a2bad501ca03262c0bc2ce7a2949e85b142ce18e30894aad5bc849c8e7584"
+      },
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "README.md",
+        "target": "README.md",
+        "size": 27077,
+        "sha256": "934251c54a75ab81ab649177870e5dcbfe205285ad8469c9d0a2f3d36009ef1a"
+      },
+      {
+        "repo": "Lightricks/LTX-2",
+        "revision": "9ec55f9f22798a3198d9c923856824821bc3317e",
+        "filename": "LICENSE-2_x",
+        "target": "LICENSE-2_x",
+        "provider": "github",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-distilled-adapter",
+      "name": "LTX 2.5 distillation adapter \u00b7 Swift guided refinement",
+      "description": "Official rank450 BF16 adapter required by the second stage of experimental Dev guided sampling. Used directly by Swift; no Python or adapter conversion. Separate unmerged Dev Q8 pages remain required.",
+      "downloadBytes": 8899947044,
+      "requiredDiskBytes": 17816671304,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.5/tree/2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+      "licenseURL": "https://github.com/Lightricks/LTX-2/blob/9ec55f9f22798a3198d9c923856824821bc3317e/LICENSE-2_x",
+      "licenseNotice": "Retains the LTX-2.x Community License and its eligibility/use restrictions. Review the official license before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "tasks": [
+        "t2v",
+        "i2v",
+        "fflf"
+      ],
+      "components": [
+        "distilled_lora_path"
+      ]
+    },
+    "kind": "ltx25-distilled-adapter",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors",
+        "target": "loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors",
+        "size": 8899889568,
+        "sha256": "86370bbf79a9eb4edaa158907e2b48a5188fe4c5dc8ce30c7eb8f2f131a9bbf5"
+      },
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "README.md",
+        "target": "README.md",
+        "size": 27077,
+        "sha256": "934251c54a75ab81ab649177870e5dcbfe205285ad8469c9d0a2f3d36009ef1a"
+      },
+      {
+        "repo": "Lightricks/LTX-2",
+        "revision": "9ec55f9f22798a3198d9c923856824821bc3317e",
+        "filename": "LICENSE-2_x",
+        "target": "LICENSE-2_x",
+        "provider": "github",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-diffusion-vae",
+      "name": "LTX 2.5 one-step Diffusion VAE \u00b7 Swift",
+      "description": "Official BF16 one-step decoder with the compatible convolutional encoder. Explicit experimental native decoder choice; uses bounded staged Swift execution with no Python or conversion. Convolutional VAE defaults stay unchanged.",
+      "downloadBytes": 1472280822,
+      "requiredDiskBytes": 2961338860,
+      "sourceURL": "https://huggingface.co/Lightricks/LTX-2.5/tree/2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+      "licenseURL": "https://github.com/Lightricks/LTX-2/blob/9ec55f9f22798a3198d9c923856824821bc3317e/LICENSE-2_x",
+      "licenseNotice": "Retains the LTX-2.x Community License and its eligibility/use restrictions. Review the official license before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "tasks": [
+        "t2v",
+        "i2v",
+        "fflf",
+        "a2v",
+        "ref2va",
+        "control",
+        "extension",
+        "video_upscale"
+      ],
+      "components": [
+        "video_vae_path"
+      ]
+    },
+    "kind": "ltx25-diffusion-vae",
+    "files": [
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "vae/ltx-2.5-video-vae-bf16.safetensors",
+        "target": "vae/ltx-2.5-video-vae-bf16.safetensors",
+        "size": 1472223346,
+        "sha256": "847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3"
+      },
+      {
+        "repo": "Lightricks/LTX-2.5",
+        "revision": "2356ce76915d6c48d313d7e8b25900e1dd3abaa8",
+        "filename": "README.md",
+        "target": "README.md",
+        "size": 27077,
+        "sha256": "934251c54a75ab81ab649177870e5dcbfe205285ad8469c9d0a2f3d36009ef1a"
+      },
+      {
+        "repo": "Lightricks/LTX-2",
+        "revision": "9ec55f9f22798a3198d9c923856824821bc3317e",
+        "filename": "LICENSE-2_x",
+        "target": "LICENSE-2_x",
+        "provider": "github",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451"
+      }
+    ]
   }
 ]

@@ -23,6 +23,9 @@ struct GenerationInspector: View {
     guard let profile = store.profiles.first(where: {
       $0.id == clip.profileID && $0.engine == clip.engine.rawValue
     }) else { return true }
+    if clip.inferredTask == "video_upscale" { return false }
+    if clip.engine == .ltx25, store.runtime.usesNativeLTX25,
+      (profile.generation?.pipelineMode ?? "distilled") != (clip.generationSelection?.ltx25Guidance?.mode.rawValue ?? "distilled") { return true }
     return profile.generation.map { !$0.supportedTasks.contains(clip.inferredTask) } ?? false
   }
   func edit(_ body: @escaping (inout GenerationSelection) -> Void) {
@@ -45,7 +48,7 @@ struct GenerationInspector: View {
           Text($0.label).tag($0)
         }
       }
-      if clip.reviewUsesSourceVideo {
+      if clip.reviewUsesSourceVideo || clip.inferredTask == "video_upscale" {
         LabeledContent("Task", value: clip.displayTask)
       } else {
         Picker("Task", selection: Binding(get: { clip.inferredTask }, set: { task in
@@ -66,6 +69,26 @@ struct GenerationInspector: View {
       } else {
         Text(store.validationErrors[clip.id] == nil ? "Loading model settings…" : "Choose a compatible model to view settings").font(.caption2).foregroundStyle(.secondary)
       }
+      if clip.engine == .h3, store.runtime.usesNativeH3 {
+        Picker("Sampler", selection: Binding(get: {
+          clip.generationSelection?.h3SamplingMethod?.rawValue
+            ?? (store.generationDescriptions[clip.id]?["generation"] as? [String: Any])?["samplingMethod"] as? String ?? "euler"
+        }, set: { value in edit { $0.h3SamplingMethod = NativeH3SamplingMethod(rawValue: value) } })) {
+          ForEach(NativeH3SamplingMethod.allCases) { Text($0.label).tag($0.rawValue) }
+        }
+        H3CreativeInspector(clip:clip)
+        if ["t2v","t2va"].contains(clip.inferredTask) || clip.generationSelection?.h3MotionFidelity != nil {
+          H3MotionFidelityInspector(clip:clip)
+        }
+        if clip.generationSelection?.h3SamplingMethod == .resMultistep {
+          Text("Experimental multistep sampling. Turbo adapters require Euler.").font(.caption2).foregroundStyle(.secondary)
+        }
+      }
+      if clip.engine == .ltx25, store.runtime.usesNativeLTX25 {
+        DiffusionVAEInspector(clip:clip)
+        if clip.inferredTask == "video_upscale" { MovieUpscaleInspector(clip:clip) }
+        else { guidedControls; automaticDurationControls; singleStageControls; ordinaryKeyframeControls }
+      }
       ForEach(store.generationDescriptions[clip.id]?["warnings"] as? [String] ?? [], id: \.self) { warning in
         Text(warning).font(.caption2).foregroundStyle(.secondary)
       }
@@ -80,7 +103,9 @@ struct GenerationInspector: View {
       Button("Set up or repair models…") { store.showRuntime = true }
       if clip.engine == .ltx25 {
         Text(store.runtime.usesNativeLTX25
-          ? "Renderer: Swift MLX · distilled 8 + 3 steps · decoded previews"
+          ? (clip.inferredTask == "video_upscale" ? "Renderer: Swift MLX · source movie 2× · decoded previews" : clip.generationSelection?.ltx25Guidance == nil
+            ? "Renderer: Swift MLX · distilled 8 + 3 steps · decoded previews"
+            : "Renderer: Swift MLX · experimental Dev guidance · decoded previews")
           : "Renderer: Python MLX")
           .font(.caption2).foregroundStyle(.secondary)
       }
@@ -131,6 +156,55 @@ struct GenerationInspector: View {
         await store.describeGeneration()
       }
   }
+  @ViewBuilder var singleStageControls:some View {
+    let available=(store.generationDescriptions[clip.id]?["generation"] as? [String:Any])?["singleStageAvailable"] as? Bool ?? false
+    if available || clip.generationSelection?.ltx25SingleStage != nil {
+      DisclosureGroup("Full-resolution single-stage sampling") {
+        Toggle("Use single-stage sampling",isOn:Binding(get:{ clip.generationSelection?.ltx25SingleStage != nil },set:{ enabled in
+          edit { $0.ltx25SingleStage=enabled ? LTX25SingleStageSettings():nil }
+        })).disabled(!available && clip.generationSelection?.ltx25SingleStage == nil)
+        if let settings=clip.generationSelection?.ltx25SingleStage {
+          Toggle("Enable experimental execution",isOn:Binding(get:{ settings.experimentalEnabled },set:{ enabled in edit { $0.ltx25SingleStage?.experimentalEnabled=enabled } }))
+          Picker("Sampler",selection:Binding(get:{ settings.method },set:{ method in edit {
+            $0.ltx25SingleStage?.method=method
+            if method != .cfgpp { $0.ltx25SingleStage?.negativeSchedule = .full }
+          } })) {
+            ForEach(LTX25SingleStageMethod.allCases) { Text($0.label).tag($0) }
+          }
+          if settings.method == .cfgpp {
+            Picker("Negative passes",selection:Binding(get:{ settings.negativeSchedule },set:{ schedule in edit { $0.ltx25SingleStage?.negativeSchedule=schedule } })) {
+              ForEach(LTX25NegativeSchedule.allCases) { Text("\($0.label) — \($0.evaluationCount) evaluations").tag($0) }
+            }
+            Text("Uses the clip's negative prompt. CFG++ generates audio; it cannot freeze an A2V driver.").font(.caption2).foregroundStyle(.secondary)
+          }
+          Text("Eight updates at the output resolution, with no spatial upscale or second stage. Supports ordinary timed images and generated slots. Experimental; real-model quality is not qualified.").font(.caption2).foregroundStyle(.secondary)
+        }
+      }
+    }
+  }
+  @ViewBuilder var ordinaryKeyframeControls:some View {
+    let available=(store.generationDescriptions[clip.id]?["generation"] as? [String:Any])?["ordinaryKeyframesAvailable"] as? Bool ?? false
+    if available || clip.generationSelection?.ltx25Keyframes != nil {
+      DisclosureGroup("Timed images and generated keyframes") {
+        Toggle("Use experimental keyframes",isOn:Binding(get:{ clip.generationSelection?.ltx25Keyframes != nil },set:{ enabled in
+          edit { $0.ltx25Keyframes=enabled ? LTX25KeyframeSettings() : nil }
+        })).disabled(!available && clip.generationSelection?.ltx25Keyframes == nil)
+        if let settings=clip.generationSelection?.ltx25Keyframes {
+          Toggle("Enable experimental execution",isOn:Binding(get:{ settings.experimentalEnabled },set:{ enabled in
+            edit { $0.ltx25Keyframes?.experimentalEnabled=enabled }
+          }))
+          Stepper("Generated keyframes: \(settings.generatedCount)",value:Binding(get:{ settings.generatedCount },set:{ count in
+            edit { $0.ltx25Keyframes?.generatedCount=count }
+          }),in:0...8).disabled(!settings.experimentalEnabled)
+          Text("Attach up to eight images with First, Last or Keyframe roles; set each keyframe's time in its attachment controls. Generated slots apply to stage one only. Experimental; visual quality is not qualified.")
+            .font(.caption2).foregroundStyle(.secondary)
+          if clip.generationSelection?.ltx25AutomaticDuration != nil {
+            Text("Automatic timing resolves Last frame and generated slots after duration prediction. Numeric keyframes must fit the predicted interval.").font(.caption2).foregroundStyle(.secondary)
+          }
+        }
+      }
+    }
+  }
   @ViewBuilder func controls(_ controls: GenerationControls) -> some View {
     if let steps = controls.evaluations {
       HStack {
@@ -146,7 +220,7 @@ struct GenerationInspector: View {
           .disabled(!controls.refinementStepsEditable)
       }
     }
-    if !controls.stepsEditable && !controls.stepsExplanation.isEmpty {
+    if !controls.stepsExplanation.isEmpty {
       Text(controls.stepsExplanation).font(.caption2).foregroundStyle(.secondary)
     }
     if controls.cfg != nil {
@@ -168,6 +242,80 @@ struct GenerationInspector: View {
           set: { value in edit { $0.shift = value } }), format: .number)
       } else { Spacer(); Text(controls.shift.map { String($0) } ?? "Unavailable").foregroundStyle(.secondary) }
       }.help(controls.shiftExplanation)
+    }
+  }
+
+  func guidanceNumber(_ key: WritableKeyPath<LTX25GuidanceSettings, Double?>, wireKey: String, fallback: Double) -> Binding<Double> {
+    Binding(get: { clip.generationSelection?.ltx25Guidance?[keyPath: key]
+      ?? ((store.generationDescriptions[clip.id]?["generation"] as? [String: Any])?["guidance"] as? [String: Any])?[wireKey] as? Double ?? fallback },
+      set: { value in edit { $0.ltx25Guidance?[keyPath: key] = value } })
+  }
+  var inheritedGuidance: [String: Any] {
+    ((store.generationDescriptions[clip.id]?["generation"] as? [String: Any])?["guidance"] as? [String: Any]) ?? [:]
+  }
+  @ViewBuilder var guidedControls: some View {
+    Picker("Generation mode", selection: Binding(get: {
+      clip.generationSelection?.ltx25Guidance?.mode.rawValue ?? "distilled"
+    }, set: { value in edit {
+      $0.ltx25Guidance = LTX25GuidanceMode(rawValue: value).map { LTX25GuidanceSettings(mode: $0) }
+      $0.steps = nil; $0.refinementSteps = nil; $0.cfg = nil
+    } })) {
+      Text("Fast distilled · 8 + 3").tag("distilled")
+      ForEach(LTX25GuidanceMode.allCases) { Text($0.label).tag($0.rawValue) }
+    }
+    if let guidance = clip.generationSelection?.ltx25Guidance {
+      Toggle("Enable experimental Dev guidance", isOn: Binding(get: { guidance.experimentalEnabled },
+        set: { value in edit { $0.ltx25Guidance?.experimentalEnabled = value } }))
+      Text("Requires a compatible Dev profile and the official distilled refinement adapter. Quality and performance are unqualified. The negative prompt is evaluated in this mode.")
+        .font(.caption2).foregroundStyle(.secondary)
+      DisclosureGroup("Advanced guidance") {
+        HStack { Text("Audio CFG"); TextField("Audio CFG", value: guidanceNumber(\.audioCFG, wireKey: "audio_cfg_scale", fallback: 7), format: .number) }
+        HStack { Text("STG"); TextField("STG", value: guidanceNumber(\.stgScale, wireKey: "stg_scale", fallback: guidance.mode == .guided ? 1 : 0), format: .number) }
+        HStack { Text("Video rescale"); TextField("Video rescale", value: guidanceNumber(\.videoRescale, wireKey: "video_rescale_scale", fallback: guidance.mode == .guided ? 0.7 : 0.45), format: .number) }
+        HStack { Text("Audio rescale"); TextField("Audio rescale", value: guidanceNumber(\.audioRescale, wireKey: "audio_rescale_scale", fallback: guidance.mode == .guided ? 0.7 : 1), format: .number) }
+        HStack { Text("Modality guidance"); TextField("Modality guidance", value: guidanceNumber(\.modalityScale, wireKey: "modality_scale", fallback: 3), format: .number) }
+        TextField("STG block indices, comma separated", text: Binding(get: {
+          (guidance.stgBlocks ?? inheritedGuidance["stg_blocks"] as? [Int] ?? (guidance.mode == .guided ? [28] : [])).map(String.init).joined(separator: ",")
+        }, set: { text in edit {
+          let parts = text.split(separator: ",", omittingEmptySubsequences: false)
+          let values = parts.compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+          $0.ltx25Guidance?.stgBlocks = text.isEmpty ? [] : values.count == parts.count ? values : [-1]
+        } }))
+        TextField("Custom sigmas (blank: adaptive)", text: Binding(get: {
+          (guidance.sigmas ?? inheritedGuidance["stage1_sigmas"] as? [Double])?.map { String($0) }.joined(separator: ",") ?? ""
+        }, set: { text in edit {
+          let parts = text.split(separator: ",", omittingEmptySubsequences: false)
+          let values = parts.compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+          $0.ltx25Guidance?.sigmas = text.isEmpty ? [] : values.count == parts.count && values.allSatisfy(\.isFinite) ? values : [-1]
+        } }))
+        Text("Sigmas need updates + 1 points, strictly descending from (0,1] to zero. Invalid entries prevent preparation.").font(.caption2).foregroundStyle(.secondary)
+      }
+    }
+  }
+  @ViewBuilder var automaticDurationControls: some View {
+    Picker("Duration", selection: Binding(get: {
+      clip.generationSelection?.ltx25AutomaticDuration == nil ? "manual" : "automatic"
+    }, set: { mode in edit {
+      $0.ltx25AutomaticDuration = mode == "automatic" ? LTX25AutomaticDurationSettings() : nil
+    } })) {
+      Text("Manual shot duration").tag("manual")
+      Text("Automatic (experimental)").tag("automatic")
+    }
+    if let automatic = clip.generationSelection?.ltx25AutomaticDuration {
+      Toggle("Enable experimental automatic duration", isOn: Binding(get:{ automatic.experimentalEnabled },
+        set:{ value in edit { $0.ltx25AutomaticDuration?.experimentalEnabled=value } }))
+      HStack {
+        Text("Minimum seconds")
+        TextField("Minimum seconds",value:Binding(get:{automatic.minimumSeconds},
+          set:{value in edit { $0.ltx25AutomaticDuration?.minimumSeconds=value }}),format:.number)
+      }
+      HStack {
+        Text("Maximum seconds")
+        TextField("Maximum seconds",value:Binding(get:{automatic.maximumSeconds},
+          set:{value in edit { $0.ltx25AutomaticDuration?.maximumSeconds=value }}),format:.number)
+      }
+      Text("Requires the LTX 2.5 duration head. Bounds are 0.25–30 seconds on the 8k+1 frame grid. Only ordinary text/image/first-last shots are supported. The accepted take adopts its predicted video duration; source audio, scenes, extensions and specialized controls require manual timing.")
+        .font(.caption2).foregroundStyle(.secondary)
     }
   }
 }

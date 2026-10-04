@@ -2,6 +2,105 @@ import XCTest
 @testable import StudioCore
 
 final class NativeModelSetupControlTests: XCTestCase {
+  func testAutomaticHeadDiscoveryLinksInPlaceAndKeepsManualSetupDefault() throws {
+    let root=try directory();defer { try? FileManager.default.removeItem(at:root) }
+    let head=try NativeLTXAutomaticDurationTests.headFixture(at:root)
+    let preset=try XCTUnwrap(NativeModelSetup.catalog().first { $0.id == "swift-ltx25-auto-duration" })
+    let scan=try NativeModelSetup.scan(presetID:preset.id,roots:[root.path])
+    XCTAssertEqual(scan.candidates["duration_head_path"],[head.path])
+    var selected=["duration_head_path":head.path]
+    for field in preset.components where selected[field.key] == nil {
+      let file=root.appendingPathComponent(field.key)
+      if field.kind == "directory" { try FileManager.default.createDirectory(at:file,withIntermediateDirectories:true) }
+      else { try Data([0]).write(to:file) }
+      selected[field.key]=file.path
+    }
+    let recipe=try NativeModelSetup.recipe(preset:preset,selected:selected,memoryMode:.automatic)
+    XCTAssertNil((recipe["config"] as? [String:Any])?["duration_mode"])
+    let components=recipe["components"] as! [String:Any]
+    XCTAssertEqual(components["duration_head_path"] as? String,head.path)
+    XCTAssertEqual(components["duration_head_header_sha256"] as? String,try NativeLTXAutomaticDuration.validateHead(at:head))
+  }
+  func testRawDevDiscoveryRequiresDeclaredSourceButNeverPretendsRawIsRunnablePages() throws {
+    let root=try directory();defer { try? FileManager.default.removeItem(at:root) }
+    let config=try JSONSerialization.data(withJSONObject:["transformer":["num_layers":48,"cross_attention_dim":4096,"audio_cross_attention_dim":2048]])
+    var header:[String:Any] = ["__metadata__":["model_version":"2.5.0","config":String(data:config,encoding:.utf8)!]]
+    for index in 0..<48 { header["model.diffusion_model.transformer_blocks.\(index).attn1.to_q.weight"]=["dtype":"BF16","shape":[4096,4096]] }
+    for index in 48..<4349 { header["other_\(index)"] = ["dtype":"BF16","shape":[1]] }
+    let raw=try write(root,name:"ltx-2.5-22b-dev-transformer-bf16",header:header)
+    _ = try write(root,name:"ltx-2.5-22b-distilled-transformer-bf16",header:header)
+    let scan=try NativeModelSetup.scan(presetID:"swift-ltx25-guided",roots:[root.path])
+    XCTAssertEqual(scan.candidates["dev_transformer_path"],[raw.path])
+    let preset=try XCTUnwrap(NativeModelSetup.catalog().first { $0.id == "swift-ltx25-guided" })
+    var selected=["dev_transformer_path":raw.path]
+    for field in preset.components where selected[field.key] == nil {
+      let file=root.appendingPathComponent(field.key)
+      if field.kind == "directory" { try FileManager.default.createDirectory(at:file,withIntermediateDirectories:true) }
+      else { try Data([0]).write(to:file) };selected[field.key]=file.path
+    }
+    XCTAssertThrowsError(try NativeModelSetup.recipe(preset:preset,selected:selected,memoryMode:.automatic))
+  }
+  func testInstalledDevPackAndDistilledRefinementHeaderWhenProvided() throws {
+    guard let dev = ProcessInfo.processInfo.environment["WEETODD_LTX25_DEV_PAGES"],
+      let helper = ProcessInfo.processInfo.environment["WEETODD_LTX25_DISTILLED_HELPER"] else {
+      throw XCTSkip("Opt-in existing Dev manifest and bounded refinement header; no tensor reads")
+    }
+    let scan = try NativeModelSetup.scan(presetID: "swift-ltx25-guided", roots: [dev, helper])
+    XCTAssertEqual(scan.candidates["dev_transformer_path"], [URL(fileURLWithPath: dev).resolvingSymlinksInPath().path])
+    XCTAssertEqual(scan.candidates["distilled_lora_path"], [URL(fileURLWithPath: helper).resolvingSymlinksInPath().path])
+  }
+  func devPack(_ root: URL, name: String, source: String = "ltx-2.5-22b-dev-transformer-bf16.safetensors", baked: Bool = false) throws -> URL {
+    let pack = root.appendingPathComponent(name)
+    try FileManager.default.createDirectory(at: pack.appendingPathComponent("pages"), withIntermediateDirectories: true)
+    try Data([0]).write(to: pack.appendingPathComponent("pages/fixed.safetensors"))
+    var metadata: [String: Any] = ["model_version": "2.5.0", "config": ["transformer": [:]]]
+    if baked { metadata["weetodd_baked_loras"] = "[]" }
+    let manifest: [String: Any] = ["format": "weetodd-ltx25-transformer-paged-q8-v1", "kind": "transformer",
+      "source": source, "bits": 8, "group_size": 64, "num_layers": 48,
+      "layers": Array(repeating: [:] as [String: Any], count: 48), "metadata": metadata,
+      "fixed": ["file": "pages/fixed.safetensors"]]
+    try JSONSerialization.data(withJSONObject: manifest).write(to: pack.appendingPathComponent("paged_manifest.json"))
+    return pack
+  }
+  func distilledHelperHeader() -> [String: Any] {
+    var header: [String: Any] = ["__metadata__": ["model_version": "2.5.0", "lora_rank": "450", "lora_alpha": "450"]]
+    for index in 0..<1660 {
+      let rank = index % 2 == 0 ? 32 : 450
+      let stem = "diffusion_model.target_\(index)"
+      header[stem + ".lora_A.weight"] = ["dtype": "BF16", "shape": [rank, 512]]
+      header[stem + ".lora_B.weight"] = ["dtype": "BF16", "shape": [512, rank]]
+    }
+    return header
+  }
+  func testGuidedSetupUsesUnmergedDevProvenanceAndVariableRankRefinementHelper() throws {
+    let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+    let dev = try devPack(root, name: "not-a-model-name")
+    _ = try devPack(root, name: "dev-misleading-name", source: "ltx-2.5-22b-distilled-transformer-bf16.safetensors")
+    _ = try devPack(root, name: "merged-dev", baked: true)
+    let helper = try write(root, name: "arbitrary-helper", header: distilledHelperHeader())
+    for mode in LTX25GuidanceMode.allCases {
+      let id = "swift-ltx25-" + mode.rawValue
+      let preset = try XCTUnwrap(NativeModelSetup.catalog().first { $0.id == id })
+      let scan = try NativeModelSetup.scan(presetID: id, roots: [root.path])
+      XCTAssertEqual(scan.candidates["dev_transformer_path"], [dev.path])
+      XCTAssertEqual(scan.candidates["distilled_lora_path"], [helper.path])
+      var selected = ["dev_transformer_path": dev.path, "distilled_lora_path": helper.path]
+      for field in preset.components where selected[field.key] == nil {
+        let url = root.appendingPathComponent(field.key)
+        if field.kind == "directory" { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+        else { try Data([0]).write(to: url) }
+        selected[field.key] = url.path
+      }
+      let recipe = try NativeModelSetup.recipe(preset: preset, selected: selected, memoryMode: .automatic)
+      let config = recipe["config"] as! [String: Any], components = recipe["components"] as! [String: Any]
+      XCTAssertEqual(config["pipeline_mode"] as? String, mode.rawValue)
+      XCTAssertEqual(config["stage1_steps"] as? Int, mode == .guided ? 30 : 15)
+      XCTAssertEqual(config["stage2_steps"] as? Int, 3)
+      XCTAssertEqual(components["transformer_path"] as? String, dev.path)
+      XCTAssertNil(components["dev_transformer_path"])
+      XCTAssertEqual(components["distilled_lora_path"] as? String, helper.path)
+    }
+  }
   func directory() throws -> URL {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

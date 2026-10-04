@@ -21,7 +21,8 @@ public enum H3TokenRefiner {
         observe: { _, _ in })
     }
     let layout = try H3CheckpointLayout(url: checkpointURL)
-    let file = try SafeTensorFile(url: checkpointURL)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let file = try SafeTensorFile(url: tensorURL)
     let name = layout.prefix + "token_refiner.final_norm.weight"
     guard let descriptor = file.tensors[name], descriptor.dtype == "BF16",
       descriptor.shape == [5376] else {
@@ -32,7 +33,8 @@ public enum H3TokenRefiner {
     }
     let result = MLXFast.rmsNorm(value, weight: weight, eps: 1e-5)
     eval(result)
-    try file.checkUnchanged(at: checkpointURL)
+    try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
     try Task.checkCancellation()
     return result
   }
@@ -53,7 +55,8 @@ public enum H3TokenRefiner {
     }
     try Task.checkCancellation()
     let layout = try H3CheckpointLayout(url: checkpointURL)
-    let file = try SafeTensorFile(url: checkpointURL)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let file = try SafeTensorFile(url: tensorURL)
     let prefix = layout.prefix + "token_refiner.blocks.\(index)."
     let previousCacheLimit = Memory.cacheLimit
     Memory.cacheLimit = 128 * 1024 * 1024
@@ -133,7 +136,8 @@ public enum H3TokenRefiner {
     let output = residual + feed
     eval(output)
     try observe("output", output)
-    try file.checkUnchanged(at: checkpointURL)
+    try file.checkUnchanged(at: tensorURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL)
     try Task.checkCancellation()
     return output
   }

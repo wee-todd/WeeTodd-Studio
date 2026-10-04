@@ -8,6 +8,12 @@ final class H3WeightedDiTState {
     case audiovisual(H3PackedLayout)
     case references(H3ReferenceLayout)
 
+    var maximumPackedRows: Int {
+      switch self {
+      case .audiovisual(let value): value.maximumPackedRows
+      case .references(let value): value.maximumPackedRows
+      }
+    }
     var tags: [Int32] {
       switch self {
       case .audiovisual(let value): value.tags
@@ -50,7 +56,7 @@ final class H3WeightedDiTState {
   private let layout: Layout
   private let blockCount: Int
   private let projectionMode: H3ProjectionMode
-  private let lora: (any H3LoRAApplying)?
+  private let lora: H3LoRAStack?
   private var text: MLXArray?
   private var timeEmbeddings: MLXArray?
   private var modulations: [MLXArray]?
@@ -74,6 +80,7 @@ final class H3WeightedDiTState {
     projectionMode: H3ProjectionMode = .weightDecoded,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
+    loRAAdapters: [H3LoRAAdapter]? = nil,
     funControl: H3FunControlCondition? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     let textRows = layout.textRows
@@ -83,16 +90,16 @@ final class H3WeightedDiTState {
       (1...128).contains(timestepTable.count),
       timestepTable.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
       zip(timestepTable, timestepTable.dropFirst()).allSatisfy({ $0 < $1 }),
-      (1...40_000).contains(layout.tags.count) else {
+      [40_000, 64_000].contains(layout.maximumPackedRows),
+      (1...layout.maximumPackedRows).contains(layout.tags.count) else {
       throw H3CheckpointError.invalid("Invalid H3 denoiser preparation request.")
     }
     if let funControl {
       guard blockCount == 50, case .audiovisual(let packed) = layout,
         packed.conditionVideoRows == 0,
         funControl.guideRows.shape == [1, layout.videoRows, 96],
-        funControl.strength.isFinite, (0...1).contains(funControl.strength),
-        turboLoRAURL == nil, additionalLoRAs.isEmpty else {
-        throw H3CheckpointError.invalid("H3 Fun control requires an unmodified dense T2VA transformer and matching guide rows.")
+        funControl.strength.isFinite, (0...1).contains(funControl.strength) else {
+        throw H3CheckpointError.invalid("H3 Fun control requires a compatible dense T2VA transformer and matching guide rows.")
       }
       _ = try H3FunControlLayout(url: funControl.checkpoint,
         base: H3CheckpointLayout(url: checkpointURL))
@@ -106,7 +113,8 @@ final class H3WeightedDiTState {
       adapters.insert(try H3LoRAAdapter(url: turboLoRAURL,
         strength: turboLoRAStrength), at: 0)
     }
-    self.lora = try adapters.isEmpty ? nil : H3LoRAStack(adapters: adapters)
+    let effective = loRAAdapters ?? adapters
+    self.lora = try effective.isEmpty ? nil : H3LoRAStack(adapters: effective)
     self.text = nil
     self.timeEmbeddings = nil
     self.modulations = nil
@@ -140,6 +148,8 @@ final class H3WeightedDiTState {
     progress(blockCount, blockCount)
   }
 
+  private var completedEvaluations = 0
+
   public func predict(videoLatents: MLXArray, audioLatents: MLXArray,
     timestepIndices: [Int32], progress: (Int, Int) -> Void = { _, _ in }) throws
     -> H3FinalLayer.Output {
@@ -159,6 +169,8 @@ final class H3WeightedDiTState {
       Stream.gpu.synchronize()
       Memory.clearCache()
     }
+    lora?.evaluation = completedEvaluations
+    defer { lora?.evaluation = nil }
     let video = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
       kind: .video, input: videoLatents).asType(.bfloat16)
     let audio = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
@@ -166,7 +178,7 @@ final class H3WeightedDiTState {
     let packed = try layout.pack(text: text, video: video, audio: audio,
       timestepIndices: timestepIndices)
     let rotaryAngles = try H3TransformerBlock.prepareRotaryAngles(
-      checkpointURL: checkpointURL, positions: packed.positions)
+      checkpointURL: checkpointURL, positions: packed.positions, maximumRows: layout.maximumPackedRows)
     let control = try funControl?.initialize(hidden: packed.embeddings,
       targetIndices: packed.videoIndices)
     let controlBlock: ((Int, MLXArray) throws -> (MLXArray, MLXArray))? = funControl.map { state in
@@ -184,13 +196,15 @@ final class H3WeightedDiTState {
           index: index, input: input, modulation: modulations[index],
           modulationIndices: packed.modulationIndices,
           positions: packed.positions, projectionMode: projectionMode,
-          lora: lora, rotaryAngles: rotaryAngles, observe: { _, _ in })
+          lora: lora, rotaryAngles: rotaryAngles, maximumRows: layout.maximumPackedRows, observe: { _, _ in })
       }, controlBlock: controlBlock, progress: progress)
-    return try H3FinalLayer.evaluate(checkpointURL: checkpointURL,
+    let result = try H3FinalLayer.evaluate(checkpointURL: checkpointURL,
       input: value, timeEmbeddings: timeEmbeddings,
       timestepIndices: packed.timestepIndices,
       videoIndices: packed.videoIndices,
-      audioIndices: packed.audioIndices)
+      audioIndices: packed.audioIndices, maximumRows: layout.maximumPackedRows, observe: { _, _ in })
+    completedEvaluations += 1
+    return result
   }
 
   public func unload() {

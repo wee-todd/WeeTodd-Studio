@@ -17,6 +17,82 @@ private final class ModelResponseProtocol: URLProtocol, @unchecked Sendable {
 }
 
 final class NativeModelDownloadsTests: XCTestCase {
+  func durationCatalog(_ root:URL, compatible:Bool=true) throws -> (URL,URL) {
+    let source=try NativeLTXAutomaticDurationTests.headFixture(at:root,wrongShape:!compatible)
+    let payload=try Data(contentsOf:source)
+    let descriptor:[String:Any] = ["id":"duration-fixture","name":"Duration head","description":"Fixture",
+      "downloadBytes":payload.count,"requiredDiskBytes":payload.count,"sourceURL":"https://huggingface.co/fixture/model",
+      "licenseURL":"https://huggingface.co/fixture/model/README.md","outputKind":"directory",
+      "engines":["ltx25"],"tasks":["t2v","i2v","fflf"],"components":["duration_head_path"]]
+    let file:[String:Any] = ["repo":"fixture/model","revision":String(repeating:"a",count:40),
+      "filename":"model_patches/ltx-2.5-duration-head-bf16.safetensors",
+      "target":"model_patches/ltx-2.5-duration-head-bf16.safetensors","size":payload.count,
+      "sha256":SHA256.hash(data:payload).map { String(format:"%02x",$0) }.joined()]
+    let catalog=root.appendingPathComponent("duration-catalog.json")
+    try JSONSerialization.data(withJSONObject:[["descriptor":descriptor,"kind":"ltx25-duration-head","files":[file]]]).write(to:catalog)
+    return (catalog,source)
+  }
+  func testDurationHeadPackageReusesVerifiedSmallFileWithoutPythonOrCopy() async throws {
+    let root=try directory();defer { try? FileManager.default.removeItem(at:root) }
+    let (catalog,source)=try durationCatalog(root)
+    let package=try XCTUnwrap(NativeModelDownloads.catalog(at:catalog).first)
+    XCTAssertEqual(package.kind,"ltx25-duration-head")
+    let final=try await NativeModelDownloads.prepare(id:package.descriptor.id,catalog:catalog,
+      destination:root.appendingPathComponent("library"),existingRoots:[source.path],token:nil,
+      progress:{ _,_ in },transfer:{ _,_,_,_ in XCTFail("Verified compatible head should be linked in place");throw CancellationError() })
+    let installed=final.appendingPathComponent(package.files[0].target)
+    XCTAssertEqual(try NativeLTXAutomaticDuration.validateHead(at:installed),try NativeLTXAutomaticDuration.validateHead(at:source))
+    XCTAssertEqual(try FileManager.default.attributesOfItem(atPath:installed.path)[.systemFileNumber] as? NSNumber,
+      try FileManager.default.attributesOfItem(atPath:source.path)[.systemFileNumber] as? NSNumber)
+  }
+  func testDurationHeadChecksumAloneCannotPublishIncompatibleArchitecture() async throws {
+    let root=try directory();defer { try? FileManager.default.removeItem(at:root) }
+    let (catalog,source)=try durationCatalog(root,compatible:false), library=root.appendingPathComponent("library")
+    do {
+      _ = try await NativeModelDownloads.prepare(id:"duration-fixture",catalog:catalog,destination:library,
+        existingRoots:[source.path],token:nil,progress:{ _,_ in },transfer:{ _,_,_,_ in XCTFail("No download needed");throw CancellationError() })
+      XCTFail("Reject a checksum-valid incompatible head before publication")
+    } catch { XCTAssertTrue(error.localizedDescription.contains("Duration-head")) }
+    XCTAssertFalse(FileManager.default.fileExists(atPath:library.appendingPathComponent("duration-fixture").path))
+  }
+  func testDevSourceChecksumCannotRelabelOtherWeightsForGuidedRecipes() async throws {
+    let root=try directory();defer { try? FileManager.default.removeItem(at:root) }
+    let (catalog,source)=try durationCatalog(root)
+    var records=try JSONSerialization.jsonObject(with:Data(contentsOf:catalog)) as! [[String:Any]]
+    records[0]["kind"]="ltx25-dev-source"
+    var descriptor=records[0]["descriptor"] as! [String:Any]
+    descriptor["components"]=["dev_transformer_path"];records[0]["descriptor"]=descriptor
+    try JSONSerialization.data(withJSONObject:records).write(to:catalog)
+    let library=root.appendingPathComponent("library")
+    do {
+      _ = try await NativeModelDownloads.prepare(id:"duration-fixture",catalog:catalog,destination:library,
+        existingRoots:[source.path],token:nil,progress:{ _,_ in },transfer:{ _,_,_,_ in XCTFail("No download needed");throw CancellationError() })
+      XCTFail("A checksum does not make duration/distilled weights an unmerged Dev source")
+    } catch { XCTAssertTrue(error.localizedDescription.contains("Dev source is incompatible")) }
+    XCTAssertFalse(FileManager.default.fileExists(atPath:library.appendingPathComponent("duration-fixture").path))
+  }
+  func testInstalledDevAndDistillationSourcesAdmitOnlyHeadersWhenProvided() throws {
+    guard let dev=ProcessInfo.processInfo.environment["WEETODD_LTX25_DEV_SOURCE"],
+      let adapter=ProcessInfo.processInfo.environment["WEETODD_LTX25_DISTILLED_ADAPTER"] else {
+      throw XCTSkip("Opt-in installed Dev and rank450 adapter headers; no large payload checks or conversion")
+    }
+    try NativeModelSetup.validateDevSource(at:URL(fileURLWithPath:dev))
+    try NativeModelSetup.validateDistilledAdapter(at:URL(fileURLWithPath:adapter))
+  }
+  func testInstalledOfficialDurationHeadMatchesCatalogAndHeaderWhenProvided() throws {
+    guard let path=ProcessInfo.processInfo.environment["WEETODD_LTX25_DURATION_HEAD"] else {
+      throw XCTSkip("Opt-in existing 3.8 MiB head checksum and bounded header; no download or prediction")
+    }
+    let repository=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let packages=try NativeModelDownloads.catalog(at:repository.appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json"))
+    let package=try XCTUnwrap(packages.first { $0.descriptor.id == "ltx25-duration-head" })
+    let file=try XCTUnwrap(package.files.first { $0.target.hasSuffix(".safetensors") })
+    XCTAssertEqual(file.size,3_843_690)
+    XCTAssertEqual(file.sha256,"2ec71e4206ed365d015f00c05a48caccfb0ee862986809d06ae376c09f5d9190")
+    XCTAssertTrue(try NativeModelDownloads.verified(URL(fileURLWithPath:path),file:file))
+    XCTAssertEqual(try NativeLTXAutomaticDuration.validateHead(at:URL(fileURLWithPath:path)),
+      "56c3e16072a34fe2d97a492e3c9ebf32c28eeb5791565e8e8914ac0aabfafb68")
+  }
   let bytes = Data("fixture-model".utf8)
   func fixture(_ root: URL) throws -> (URL, NativeModelDownloadFile) {
     let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
@@ -156,7 +232,7 @@ final class NativeModelDownloadsTests: XCTestCase {
     let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
     let catalog = try NativeModelDownloads.catalog(at: source)
-    XCTAssertEqual(catalog.count, 19)
+    XCTAssertEqual(catalog.count, 23)
     let audio=try XCTUnwrap(catalog.first { $0.kind == "h3-audio-vae" })
     XCTAssertEqual(audio.descriptor.components,["audio_vae"])
     XCTAssertTrue(audio.files.contains { $0.filename == "audio_vae.safetensors" && $0.size == 605254808 })
@@ -165,6 +241,24 @@ final class NativeModelDownloadsTests: XCTestCase {
     XCTAssertEqual(catalog.filter { $0.kind == "h3-native-support" }.count, 2)
     XCTAssertEqual(catalog.filter { $0.kind == "h3-native-control" }.count, 2)
     XCTAssertEqual(catalog.filter { $0.kind == "ltx25-adapter" }.count, 8)
+    let duration=try XCTUnwrap(catalog.first { $0.kind == "ltx25-duration-head" })
+    XCTAssertEqual(duration.descriptor.components,["duration_head_path"])
+    XCTAssertEqual(duration.files.filter { $0.target.hasSuffix(".safetensors") }.count,1)
+    let dev=try XCTUnwrap(catalog.first { $0.kind == "ltx25-dev-source" })
+    XCTAssertEqual(dev.descriptor.components,["dev_transformer_path"])
+    XCTAssertEqual(dev.files.first?.filename,"diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors")
+    XCTAssertEqual(dev.files.first?.size,42_018_190_584)
+    XCTAssertEqual(dev.files.first?.sha256,"792a2bad501ca03262c0bc2ce7a2949e85b142ce18e30894aad5bc849c8e7584")
+    XCTAssertTrue(dev.descriptor.description.contains("Prepare Q8 Pages"))
+    let refinement=try XCTUnwrap(catalog.first { $0.kind == "ltx25-distilled-adapter" })
+    XCTAssertEqual(refinement.descriptor.components,["distilled_lora_path"])
+    XCTAssertEqual(refinement.files.first?.size,8_899_889_568)
+    XCTAssertEqual(refinement.files.first?.sha256,"86370bbf79a9eb4edaa158907e2b48a5188fe4c5dc8ce30c7eb8f2f131a9bbf5")
+    let diffusion=try XCTUnwrap(catalog.first { $0.kind == "ltx25-diffusion-vae" })
+    XCTAssertEqual(diffusion.descriptor.components,["video_vae_path"])
+    XCTAssertEqual(diffusion.files.first?.filename,"vae/ltx-2.5-video-vae-bf16.safetensors")
+    XCTAssertEqual(diffusion.files.first?.size,1_472_223_346)
+    XCTAssertEqual(diffusion.files.first?.sha256,"847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3")
     for preset in NativeModelSetup.catalog() {
       for component in preset.components {
         XCTAssertTrue(catalog.contains { $0.descriptor.supports(engine:preset.engine, task:preset.task, component:component.key) },

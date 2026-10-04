@@ -89,7 +89,7 @@ final class MLXRippleRequestTests: XCTestCase {
   }
 
   func testRippleMemoryAdmissionIncludesAppendedGuideAndVAE() throws {
-    let request = try decode(base())
+    let request = try decode(decoderRequestBase(base()))
     let generous = try MLXStudioMemoryPlan(ripple: request,
       physicalMemory: 128 * 1024 * 1024 * 1024,
       recommendedWorkingSet: 96 * 1024 * 1024 * 1024)

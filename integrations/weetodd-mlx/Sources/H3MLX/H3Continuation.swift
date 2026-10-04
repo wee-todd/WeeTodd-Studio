@@ -61,6 +61,7 @@ public enum H3Continuation {
 
   private struct Manifest: Codable {
     let format: String
+    let task: String?
     let contextFrames: Int
     let width: Int
     let height: Int
@@ -132,6 +133,9 @@ public enum H3Continuation {
     var records: [String] = ["h3-swift-continuation-v2", "24", "32000",
       String(request.geometry.width), String(request.geometry.height),
       String(request.requestedSteps)]
+    if request.samplingMethod != .euler {
+      records.append("sampling_method=" + request.samplingMethod.rawValue)
+    }
     let components = [request.transformer, request.qwenPages, request.tokenizer,
       request.videoVAE, request.audioVAE] + request.loRAAdapters.map(\.url)
     for component in components {
@@ -175,15 +179,100 @@ public enum H3Continuation {
     }
     for adapter in request.loRAAdapters {
       records.append("lora|\(adapter.url.path)|\(adapter.strength)")
+      if adapter.qkvLayout != .auto || adapter.profile != .auto || adapter.startAfterEvaluations != 0 {
+        records.append("lora_controls|\(adapter.qkvLayout.rawValue)|\(adapter.profile.rawValue)|\(adapter.startAfterEvaluations)")
+      }
+    }
+    return digest(Data(records.joined(separator: "\n").utf8))
+  }
+
+  /// FL identity includes the vision tower and task; it cannot alias a T2VA tail.
+  public static func fingerprint(_ request: H3FL2VARequest) throws -> String {
+    let root = request.vision.resolvingSymlinksInPath().standardizedFileURL
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
+      throw H3CheckpointError.invalid("Missing FL2VA continuation vision component.")
+    }
+    var files: [URL] = []
+    if isDirectory.boolValue {
+      guard let iterator = FileManager.default.enumerator(at: root,
+        includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else {
+        throw H3CheckpointError.invalid("Cannot inventory FL2VA vision component.")
+      }
+      for case let file as URL in iterator {
+        try Task.checkCancellation()
+        guard files.count < 10_000,
+          try file.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else {
+          throw H3CheckpointError.invalid("Unsafe FL2VA vision component tree.")
+        }
+        if try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true { files.append(file) }
+      }
+    } else { files = [root] }
+    guard !files.isEmpty else { throw H3CheckpointError.invalid("Empty FL2VA vision component.") }
+    var records = ["h3-swift-continuation-v2|fl2va", try fingerprint(request.base), root.path]
+    if let noise = request.referenceNoise {
+      records.append("visual_condition_strength=" + String(noise.visual))
+      records.append("audio_condition_strength=" + String(noise.audio))
+    }
+    for file in files.sorted(by: { $0.path < $1.path }) {
+      let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey])
+      guard let size = values.fileSize, let modified = values.contentModificationDate,
+        let created = values.creationDate else { throw H3CheckpointError.invalid("Cannot fingerprint FL2VA vision component.") }
+      records.append("\(file.path)|\(size)|\(modified.timeIntervalSince1970)|\(created.timeIntervalSince1970)")
+    }
+    return digest(Data(records.joined(separator: "\n").utf8))
+  }
+
+  public static func fingerprint(_ request: H3Ref2VAStillRequest) throws -> String {
+    let base = try H3T2VARequest(prompt: request.prompt,
+      width: request.geometry.width, height: request.geometry.height,
+      durationSeconds: min(Double(request.geometry.frames) / 24, 15), seed: request.seed,
+      requestedSteps: request.requestedSteps, transformer: request.transformer,
+      qwenPages: request.qwenPages, tokenizer: request.tokenizer,
+      videoVAE: request.videoVAE, audioVAE: request.audioVAE,
+      turboLoRA: request.turboLoRA, turboLoRAStrength: request.turboLoRAStrength,
+      additionalLoRAs: request.additionalLoRAs, loRAAdapters: request.loRAAdapters,
+      videoDecodeMemoryMode: request.videoDecodeMemoryMode, samplingMethod: request.samplingMethod)
+    let root = request.qwenVision.resolvingSymlinksInPath().standardizedFileURL
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
+      throw H3CheckpointError.invalid("Missing Ref2VA continuation vision component.")
+    }
+    var files: [URL] = []
+    if isDirectory.boolValue {
+      guard let iterator = FileManager.default.enumerator(at: root,
+        includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else {
+        throw H3CheckpointError.invalid("Cannot inventory Ref2VA vision component.")
+      }
+      for case let file as URL in iterator {
+        try Task.checkCancellation()
+        guard files.count < 10_000,
+          try file.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else {
+          throw H3CheckpointError.invalid("Unsafe Ref2VA vision component tree.")
+        }
+        if try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true { files.append(file) }
+      }
+    } else { files = [root] }
+    guard !files.isEmpty else { throw H3CheckpointError.invalid("Empty Ref2VA vision component.") }
+    var records = ["h3-swift-continuation-v2|ref2va", try fingerprint(base), root.path]
+    if let noise = request.referenceNoise {
+      records.append("visual_condition_strength=" + String(noise.visual))
+      records.append("audio_condition_strength=" + String(noise.audio))
+    }
+    for file in files.sorted(by: { $0.path < $1.path }) {
+      let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey])
+      guard let size = values.fileSize, let modified = values.contentModificationDate,
+        let created = values.creationDate else { throw H3CheckpointError.invalid("Cannot fingerprint Ref2VA vision component.") }
+      records.append("\(file.path)|\(size)|\(modified.timeIntervalSince1970)|\(created.timeIntervalSince1970)")
     }
     return digest(Data(records.joined(separator: "\n").utf8))
   }
 
   public static func save(_ rows: Rows, plan: Plan, width: Int, height: Int,
-    identity: String, directory: URL) throws -> (manifest: URL, sha256: String, payloadSHA256:String) {
+    identity: String, directory: URL, task: String = "t2va") throws -> (manifest: URL, sha256: String, payloadSHA256:String) {
     let expected = try shape(contextFrames: plan.contextFrames,
       width: width, height: height)
-    guard plan.saveContext, plan.tailTrimFrames == 0,
+    guard ["t2va", "fl2va", "ref2va"].contains(task), plan.saveContext, plan.tailTrimFrames == 0,
       validSHA256(identity), rows.video.count == expected.videoFloats,
       rows.audio.count == expected.audioFloats,
       rows.video.allSatisfy(\.isFinite), rows.audio.allSatisfy(\.isFinite),
@@ -199,6 +288,7 @@ public enum H3Continuation {
       throw H3CheckpointError.invalid("H3 continuation payload exceeds 64 MiB.")
     }
     let manifest = Manifest(format: "weetodd-h3-swift-continuation-v2",
+      task: task == "t2va" ? nil : task,
       contextFrames: plan.contextFrames, width: width, height: height,
       generatedFrames: plan.generatedFrames, publishedFrames: plan.publishedFrames,
       overlapFrames: plan.overlapFrames, identity: identity,
@@ -224,7 +314,7 @@ public enum H3Continuation {
 
   public static func load(manifestURL: URL, expectedSHA256: String,
     contextFrames: Int, width: Int, height: Int, identity: String,
-    loadRows: Bool = true) throws -> Rows? {
+    loadRows: Bool = true, task: String = "t2va") throws -> Rows? {
     let manifestAttributes = try manifestURL.resourceValues(forKeys: [.fileSizeKey,
       .isRegularFileKey, .isSymbolicLinkKey])
     guard manifestURL.isFileURL, validSHA256(expectedSHA256),
@@ -238,6 +328,7 @@ public enum H3Continuation {
     guard digest(manifestData) == expectedSHA256,
       let manifest = try? JSONDecoder().decode(Manifest.self, from: manifestData),
       manifest.format == "weetodd-h3-swift-continuation-v2",
+      ["t2va", "fl2va", "ref2va"].contains(task), (manifest.task ?? "t2va") == task,
       manifest.contextFrames == contextFrames,
       manifest.width == width, manifest.height == height,
       manifest.identity == identity,

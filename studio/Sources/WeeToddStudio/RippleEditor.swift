@@ -59,6 +59,7 @@ struct RippleEditor: View {
                 VStack(alignment: .leading, spacing: 16) {
                   Text("Render settings").font(.headline)
                   Text("Native LTX 2.5 · Ripple adapter").font(.caption).foregroundStyle(.secondary)
+                  DiffusionVAEOptionsControl(settings:field(\.diffusionVAE))
                   TextField("Optional direction for the restyled clip", text: field(\.prompt), axis: .vertical)
                     .lineLimit(4...10).textFieldStyle(.roundedBorder)
                   HStack {

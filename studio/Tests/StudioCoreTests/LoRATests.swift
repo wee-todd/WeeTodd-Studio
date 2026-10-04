@@ -59,7 +59,7 @@ final class LoRATests: XCTestCase {
     XCTAssertNotNil(p.assets.first { $0.id == attachment.assetID })
   }
   func testInvalidMembersAndStrengths() {
-    for strength in [Double.nan, .infinity, -0.1, 2.1] {
+    for strength in [Double.nan, .infinity, -10.1, 10.1] {
       XCTAssertThrowsError(try LoRAMember(asset: asset(.h3), strength: strength).validate(for: .h3))
     }
     XCTAssertThrowsError(
@@ -92,4 +92,20 @@ final class LoRATests: XCTestCase {
     XCTAssertNotEqual(signature, p.clips[0].generationFingerprint)
     XCTAssertEqual(p, try JSONDecoder().decode(StudioProject.self, from: JSONEncoder().encode(p)))
   }
+  func testSignedH3GroupRetainsDeferredLayoutAndOtherEnginesKeepTheirBounds() throws {
+    let settings=H3LoRASettings(profile:.standard,qkvLayout:.nativeInterleaved,startAfterEvaluations:2)
+    let member=LoRAMember(asset:asset(.h3),strength:-2,enabled:false,h3Settings:settings)
+    try member.validate(for:.h3)
+    var project=StudioProject();let clip=Clip(engine:.h3);project.clips=[clip]
+    try project.applyLoRAs([member],to:clip.id,groupName:"Signed")
+    XCTAssertEqual(project.clips[0].attachments[0].h3LoRA,settings)
+    let group=try project.loraGroupSnapshot(for:clip.id,name:"Saved")
+    let decoded=try JSONDecoder().decode(LoRAGroup.self,from:JSONEncoder().encode(group))
+    XCTAssertEqual(decoded.members[0].h3Settings,settings);XCTAssertEqual(decoded.members[0].strength,-2)
+    XCTAssertFalse(decoded.members[0].isEnabled)
+    XCTAssertThrowsError(try LoRAMember(asset:asset(.ltx25),strength:-0.1).validate(for:.ltx25))
+    XCTAssertThrowsError(try LoRAMember(asset:asset(.ltx25),strength:2.1).validate(for:.ltx25))
+    XCTAssertThrowsError(try LoRAMember(asset:asset(.ltx25),h3Settings:settings).validate(for:.ltx25))
+  }
+
 }

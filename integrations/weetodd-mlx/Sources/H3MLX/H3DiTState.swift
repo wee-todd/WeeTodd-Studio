@@ -14,12 +14,13 @@ public final class H3DiTState {
     projectionMode: H3ProjectionMode = .weightDecoded,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
+    loRAAdapters: [H3LoRAAdapter]? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     try self.init(checkpointURL: checkpointURL, layout: layout,
       textEmbeddings: textEmbeddings, timestepTable: timestepTable,
       blockCount: 50, projectionMode: projectionMode,
       turboLoRAURL: turboLoRAURL, turboLoRAStrength: turboLoRAStrength,
-      additionalLoRAs: additionalLoRAs,
+      additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters,
       progress: progress)
   }
 
@@ -28,6 +29,7 @@ public final class H3DiTState {
     projectionMode: H3ProjectionMode = .weightDecoded,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
+    loRAAdapters: [H3LoRAAdapter]? = nil,
     funControl: H3FunControlCondition? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     self.layout = layout
@@ -36,7 +38,7 @@ public final class H3DiTState {
       timestepTable: timestepTable, blockCount: blockCount,
       projectionMode: projectionMode, turboLoRAURL: turboLoRAURL,
       turboLoRAStrength: turboLoRAStrength,
-      additionalLoRAs: additionalLoRAs, funControl: funControl, progress: progress)
+      additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters, funControl: funControl, progress: progress)
   }
 
   public func predict(videoLatents: MLXArray, audioLatents: MLXArray,
@@ -62,12 +64,13 @@ public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
     projectionMode: H3ProjectionMode = .weightDecoded,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
+    loRAAdapters: [H3LoRAAdapter]? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     try self.init(checkpointURL: checkpointURL, layout: layout,
       textEmbeddings: textEmbeddings, timestepTable: timestepTable,
       blockCount: 50, projectionMode: projectionMode,
       turboLoRAURL: turboLoRAURL, turboLoRAStrength: turboLoRAStrength,
-      additionalLoRAs: additionalLoRAs,
+      additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters,
       progress: progress)
   }
 
@@ -76,6 +79,7 @@ public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
     projectionMode: H3ProjectionMode = .weightDecoded,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
+    loRAAdapters: [H3LoRAAdapter]? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     self.layout = layout
     core = try H3WeightedDiTState(checkpointURL: checkpointURL,
@@ -83,7 +87,7 @@ public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
       timestepTable: timestepTable, blockCount: blockCount,
       projectionMode: projectionMode, turboLoRAURL: turboLoRAURL,
       turboLoRAStrength: turboLoRAStrength,
-      additionalLoRAs: additionalLoRAs, progress: progress)
+      additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters, progress: progress)
   }
 
   public func predict(videoLatents: MLXArray, audioLatents: MLXArray,

@@ -43,7 +43,8 @@ public enum NativeModelDownloads {
   public static func catalog(at url: URL) throws -> [NativeModelDownloadPackage] {
     let bytes = try bounded(url, limit: 8 * 1024 * 1024)
     let kinds: Set<String> = ["h3-qwen", "ltx25", "h3-video-vae", "h3-audio-vae", "h3-dt-tokenizer",
-      "h3-direct-transformer", "h3-native-support", "h3-native-control", "ltx25-adapter"]
+      "h3-direct-transformer", "h3-native-support", "h3-native-control", "ltx25-adapter",
+      "ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae"]
     var packages = try JSONDecoder().decode([NativeModelDownloadPackage].self, from: bytes)
       .filter { kinds.contains($0.kind) }
     // Direct Swift checkpoints have a different admission contract from the
@@ -78,6 +79,16 @@ public enum NativeModelDownloads {
       }
       guard total <= 512 * 1_073_741_824, total == package.descriptor.downloadBytes else {
         throw StudioError.invalid("Native model package size differs from its catalog.")
+      }
+      if ["ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae"].contains(package.kind) {
+        let key = package.kind == "ltx25-duration-head" ? "duration_head_path"
+          : package.kind == "ltx25-dev-source" ? "dev_transformer_path" : package.kind == "ltx25-diffusion-vae" ? "video_vae_path" : "distilled_lora_path"
+        let weights = package.files.filter { $0.target.hasSuffix(".safetensors") }
+        guard package.descriptor.engines == ["ltx25"], package.descriptor.components == [key],
+          weights.count == 1,
+          package.kind != "ltx25-duration-head" || weights[0].size <= 16 * 1024 * 1024 else {
+          throw StudioError.invalid("Invalid native LTX component package.")
+        }
       }
     }
     for index in packages.indices where packages[index].kind == "h3-qwen" {
@@ -229,11 +240,26 @@ public enum NativeModelDownloads {
           || (error as NSError).underlyingPOSIXCode == Int(EXDEV) else { throw error }
         try fm.createSymbolicLink(at: output, withDestinationURL: source!)
       }
+      // Validate the private staging link before publishing. The pinned target
+      // retains the official source identity even when reused weights were renamed.
+      if file.target.hasSuffix(".safetensors") {
+        if package.kind == "ltx25-diffusion-vae" {
+          _ = try NativeLTXDiffusionVAE.validate(at:output)
+        } else if package.kind == "ltx25-duration-head" {
+          _ = try NativeLTXAutomaticDuration.validateHead(at: output)
+        } else if package.kind == "ltx25-dev-source" {
+          try NativeModelSetup.validateDevSource(at: output)
+        } else if package.kind == "ltx25-distilled-adapter" {
+          try NativeModelSetup.validateDistilledAdapter(at: output)
+        }
+      }
       done += file.size
     }
     try Task.checkCancellation()
     let provenance: [String: Any] = ["format": "weetodd-model-setup-v1", "id": id,
-      "converter": "preconverted", "nativeRuntime": "swift", "include_vision": package.kind == "h3-qwen",
+      "converter": ["ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae"].contains(package.kind) ? "none" : "preconverted",
+      "requiresNativePageConversion": package.kind == "ltx25-dev-source",
+      "nativeRuntime": "swift", "include_vision": package.kind == "h3-qwen",
       "sources": try JSONSerialization.jsonObject(with: JSONEncoder().encode(package.files))]
     try JSONSerialization.data(withJSONObject: provenance, options: [.prettyPrinted, .sortedKeys])
       .write(to: staging.appendingPathComponent("setup_provenance.json"), options: .withoutOverwriting)

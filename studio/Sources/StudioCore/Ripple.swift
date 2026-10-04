@@ -28,6 +28,7 @@ public struct RippleDraft: Codable, Equatable {
   public var height = 448
   public var seed = 42
   public static let defaultPrompt = "Use the reference video for motion, timing, camera movement, composition, and unchanged scene content, while consistently propagating the visual edit established in the first frame throughout the video."
+  public var diffusionVAE:LTX25DiffusionVAESettings?
   public var prompt = RippleDraft.defaultPrompt
   public var loraStrength: Double = 1.35
   public var audioPolicy: RippleAudioPolicy = .preserve

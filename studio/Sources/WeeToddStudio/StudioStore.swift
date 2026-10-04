@@ -224,7 +224,9 @@ struct BridgeResponseBuffer {
       fraction = 1; message = "Swift preparation complete"
       return try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
     }
-    let nativeLTX = ["ltx-native-render", "ltx-native-preflight"].contains(command)
+    let conversionVerb = ["ltx-native-preflight-transformer-conversion": "preflight-transformer-conversion",
+      "ltx-native-convert-transformer": "convert-transformer"][command]
+    let nativeLTX = ["ltx-native-render", "ltx-native-preflight"].contains(command) || conversionVerb != nil
     let nativeH3 = ["h3-native-render", "h3-native-preflight"].contains(command)
     if nativeLTX || nativeH3 {
       workerEventsPath = nil; workerEventsTruncated = false; workerEventsArchiveError = nil
@@ -276,7 +278,14 @@ struct BridgeResponseBuffer {
     try FileManager.default.createDirectory(
       at: input.deletingLastPathComponent(), withIntermediateDirectories: true)
     var body = payload
-    if nativeLTX || nativeH3 {
+    if let conversionVerb {
+      body = try NativeTransformerConversion.request(source: payload["source_path"] as? String ?? "",
+        destination: output!, sourceIdentity: payload["source_identity"] as? [String: Any],
+        requiresIdentity: conversionVerb == "convert-transformer")
+      guard NSDictionary(dictionary: body).isEqual(to: payload) else {
+        throw StudioError.invalid("Native transformer conversion transport differs from its validated request.")
+      }
+    } else if nativeLTX || nativeH3 {
       body = try nativeH3
         ? NativeVideoJobRequest.h3(payload: payload, runtime: runtime, output: output!)
         : NativeVideoJobRequest.ltx(payload: payload, runtime: runtime, output: output!)
@@ -299,7 +308,7 @@ struct BridgeResponseBuffer {
     log = ""
     let task = Process()
     task.executableURL = URL(fileURLWithPath: nativeH3 ? runtime.h3WorkerPath! : nativeLTX ? runtime.ltx25WorkerPath! : runtime.pythonPath)
-    task.arguments = nativeLTX || nativeH3 ? [command.hasSuffix("render") ? "render" : "preflight", "--request", input.path]
+    task.arguments = nativeLTX || nativeH3 ? [conversionVerb ?? (command.hasSuffix("render") ? "render" : "preflight"), "--request", input.path]
       : [runtime.root + "/scripts/studio_bridge.py", command, "--request", input.path]
     if let output { task.arguments! += ["--output", output.path] }
     task.currentDirectoryURL = nativeLTX || nativeH3 ? input.deletingLastPathComponent() : URL(fileURLWithPath: runtime.root)
@@ -958,6 +967,26 @@ extension Encodable {
       select(c.id)
     }
   }
+  func createLTXMovieUpscaleCopy() async {
+    guard !operationBusy, let source=selectedClip,!source.sourcePath.isEmpty else { return }
+    let session=documentSessionID,projectID=project.id,requestID=UUID()
+    activeNativeRequest=requestID
+    defer { if activeNativeRequest==requestID { activeNativeRequest=nil } }
+    do {
+      let measured=try await NativeLTXMoviePreparation.inspectSource(URL(fileURLWithPath:source.sourcePath))
+      guard documentSessionID==session,project.id==projectID,selectedClipID==source.id,
+        selectedClip==source else { throw StudioError.invalid("The source clip changed while inspecting its movie. Create the copy again.") }
+      var media=MediaAsset(name:source.name+" source",kind:.video,path:source.sourcePath,scope:.clip,owner:source.id)
+      media.duration=measured["duration"] as? Double ?? 0;media.fps=measured["fps"] as? Double ?? 0
+      let copy=try NativeLTXMovieClipCopy.create(source:source,media:media)
+      change { project in
+        guard let index=project.clips.firstIndex(where:{ $0.id==source.id }) else { return }
+        project.clips.insert(copy.clip,at:index+1);project.assets.append(copy.asset)
+      }
+      select(copy.clip.id)
+      notice="Created a separate LTX 2× copy. Enable its experimental movie controls, then prepare."
+    } catch { self.error=error.localizedDescription }
+  }
   func addTitle() {
     var t = TitleOverlay()
     t.start =
@@ -996,15 +1025,16 @@ extension Encodable {
     panel.canChooseFiles = false
     panel.canCreateDirectories = true
     guard panel.runModal() == .OK, let folder = panel.url else { return }
-    do {
+    Task { do {
       let bundle = folder.appendingPathComponent(
         project.name + "-" + String(UUID().uuidString.prefix(6)))
       let media = bundle.appendingPathComponent("Media")
       try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
-      var p = project
+      let snapshot=project,globals=globalAssets
+      var p = try await Task.detached {try ProjectStorage.collectH3CreativeMedia(snapshot,to:media)}.value
       var copied: [String: String] = [:]
       let used = Set(p.clips.flatMap { $0.attachments.map(\.assetID) } + p.audio.map(\.assetID))
-      for var asset in globalAssets where used.contains(asset.id) {
+      for var asset in globals where used.contains(asset.id) {
         asset.scope = .project
         p.assets.append(asset)
       }
@@ -1044,6 +1074,17 @@ extension Encodable {
             p.clips[i].motionResult!.recipePath = try collect(recipe)
           }
         }
+        if let source=p.clips[i].generationSelection?.h3MotionFidelity?.sourceVideo {
+          p.clips[i].generationSelection?.h3MotionFidelity?.sourceVideo=try collect(source)
+        }
+        if var saved=p.clips[i].savedNativeGenerations {
+          for key in Array(saved.keys) {
+            if let source=saved[key]?.selection?.h3MotionFidelity?.sourceVideo {
+              saved[key]?.selection?.h3MotionFidelity?.sourceVideo=try collect(source)
+            }
+          }
+          p.clips[i].savedNativeGenerations=saved
+        }
         p.clips[i].extensionSource = try collect(p.clips[i].extensionSource)
         p.clips[i].depthDirectory = try collect(p.clips[i].depthDirectory)
         p.clips[i].motionDirectory = try collect(p.clips[i].motionDirectory)
@@ -1062,17 +1103,24 @@ extension Encodable {
           }
         }
       }
+      for i in p.clips.indices {
+        for j in p.clips[i].attachments.indices {
+          if let soundtrack=p.clips[i].attachments[j].h3ReferencePlacement?.soundtrackPath {
+            p.clips[i].attachments[j].h3ReferencePlacement?.soundtrackPath=try collect(soundtrack)
+          }
+        }
+      }
       for i in p.audio.indices { p.audio[i].path = try collect(p.audio[i].path) }
       try p.mapRipplePaths(collect)
       try p.mapMusicSourcePaths(collect)
       try p.mapVoicePaths(collect)
       // Collected media have new identities; rebuild drivers from these portable sources.
       for i in p.clips.indices where p.clips[i].audioDriverSelection != nil { p.clips[i].audioDriverMixKey = nil }
-      let target = bundle.appendingPathComponent(project.name + ".weetodd")
+      let target = bundle.appendingPathComponent(snapshot.name + ".weetodd")
       try ProjectStorage.write(p, to: target)
       notice = "Collected \(copied.count) media files. Model weights remain shared."
       NSWorkspace.shared.activateFileViewerSelecting([target])
-    } catch { self.error = error.localizedDescription }
+    } catch { self.error = error.localizedDescription } }
   }
   func saveRuntime(reloadProfiles: Bool = true) {
     do {
@@ -1178,6 +1226,7 @@ extension Encodable {
     let key = generationRequestKey(for: clip)
     let session = documentSessionID
     do {
+      if clip.inferredTask == "video_upscale", !runtime.usesNativeLTX25 { throw StudioError.invalid("Source movie upscaling requires Swift LTX 2.5. Enable its native runtime.") }
       let command = clip.engine == .ltx25 && runtime.usesNativeLTX25 ? "ltx-native-describe"
         : clip.engine == .h3 && runtime.usesNativeH3 ? "h3-native-describe" : "describe-generation"
       var result = try await descriptionBridge.independent().invoke(command, runtime: runtime, payload: try payload())
@@ -1232,6 +1281,7 @@ extension Encodable {
         (leader.continuity?.sceneDecodeMode ?? "single") != "single" {
         throw StudioError.invalid("Bounded scene decoding requires Swift LTX 2.5. Enable it or choose Full decode.")
       }
+      if clip.inferredTask == "video_upscale", !settings.usesNativeLTX25 { throw StudioError.invalid("Source movie upscaling requires Swift LTX 2.5. Enable its native runtime.") }
       let body = try payload()
       let nativeLTX = clip.engine == .ltx25 && settings.usesNativeLTX25
       let nativeH3 = clip.engine == .h3 && settings.usesNativeH3
@@ -1358,7 +1408,22 @@ extension Encodable {
         throw StudioError.invalid("The extension returned no new frames.")
       }
       let metadata = r["metadata"] as? [String: Any] ?? [:]
+      let jointArtifact:H3JointLatentArtifact?
+      if nativeH3 {
+        let bytes=try JSONSerialization.data(withJSONObject:metadata)
+        jointArtifact=try await Task.detached {
+          try H3JointLatentArtifact.adopt(metadata:JSONSerialization.jsonObject(with:bytes) as? [String:Any] ?? [:])
+        }.value
+      } else {jointArtifact=nil}
       let generationConfig = metadata["generation"] as? [String: Any] ?? [:]
+      let automaticDuration = try nativeLTX ? NativeLTXAutomaticDurationAcceptance.duration(
+        prepared: prepared, result: r,
+        measuredVideoDuration: info["videoDuration"] as? Double ?? info["duration"] as? Double ?? 0,
+        measuredContainerDuration: info["duration"] as? Double ?? 0,
+        measuredFPS: info["fps"] as? Double ?? 0) : nil
+      let movieDuration=try nativeLTX ? NativeLTXMovieAcceptance.duration(prepared:prepared,result:r,media:info) : nil
+      let motionDuration=try nativeH3 ? NativeH3MotionFidelityAcceptance.duration(prepared:prepared,result:r,media:info) : nil
+      if let motionDuration {renderedStart=0;renderedDuration=motionDuration}
       let preserveEditorialDuration = (prepared?["preserveEditorialDuration"] as? Bool)
         ?? ([Engine.ltx23, .ltx25].contains(c.engine) && c.extensionSource.isEmpty
           && c.extensionDirection.isEmpty && c.continuityMode != "motion"
@@ -1374,8 +1439,8 @@ extension Encodable {
       }
       let stillCurrent = current == c && signature(for: current) == submittedSignature
       var finishedClip = c
-      finishedClip.duration = nativeH3 && continuationArtifact != nil && r["use_complete_duration"] as? Bool == true
-        ? renderedDuration : preserveEditorialDuration ? c.duration : min(c.duration, renderedDuration)
+      finishedClip.duration = motionDuration ?? movieDuration ?? automaticDuration ?? (nativeH3 && continuationArtifact != nil && r["use_complete_duration"] as? Bool == true
+        ? renderedDuration : preserveEditorialDuration ? c.duration : min(c.duration, renderedDuration))
       let finishedSignature = signature(for: finishedClip)
       change { p in
         guard let i = p.clips.firstIndex(where: { $0.id == c.id }) else { return }
@@ -1383,7 +1448,7 @@ extension Encodable {
           RenderVersion(path: video, seed: c.seed, prompt: prompt, recipePath: path,
                         stats: RenderStats(result: r), generationSettings: generationSettings,
                         resolvedFingerprint: resolvedFingerprint, usableSourceIn: renderedStart,
-                        usableDuration: renderedDuration, continuationArtifact: continuationArtifact))
+                        usableDuration: renderedDuration, continuationArtifact: continuationArtifact,jointLatentArtifact:jointArtifact))
         if stillCurrent && !tooShort {
           p.clips[i].sourcePath = video
           p.clips[i].sourceIn = renderedStart
@@ -1392,7 +1457,7 @@ extension Encodable {
         }
         var asset = MediaAsset(
           name: c.name + " render", kind: .video, path: video, scope: .clip, owner: c.id)
-        asset.duration = preserveEditorialDuration ? mediaDuration : min(c.duration, renderedDuration)
+        asset.duration = motionDuration ?? movieDuration ?? automaticDuration ?? (preserveEditorialDuration ? mediaDuration : min(c.duration, renderedDuration))
         p.assets.append(asset)
       }
       if tooShort {

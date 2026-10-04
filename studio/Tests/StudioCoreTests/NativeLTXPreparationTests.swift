@@ -5,6 +5,178 @@ import CryptoKit
 @testable import StudioCore
 
 final class NativeLTXPreparationTests: XCTestCase {
+  func automaticFixture() throws -> (URL,StudioProject,[String:Any]) {
+    let (root,original,runtime)=try fixture(), head=try NativeLTXAutomaticDurationTests.headFixture(at:root)
+    let file=root.appendingPathComponent("model.json")
+    var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:file)) as! [String:Any]
+    var components=recipe["components"] as! [String:Any]
+    components["duration_head_path"]=head.path
+    components["duration_head_header_sha256"]=try NativeLTXAutomaticDuration.validateHead(at:head)
+    recipe["components"]=components
+    try JSONSerialization.data(withJSONObject:recipe).write(to:file)
+    var project=original
+    project.clips[0].generationSelection?.ltx25AutomaticDuration=LTX25AutomaticDurationSettings(experimentalEnabled:true,minimumSeconds:0.25,maximumSeconds:30)
+    return(root,project,runtime)
+  }
+  func testAutomaticDurationFreezesHeaderAndMaximumAdmissionWithoutChangingEditorOrManualDefaults() throws {
+    let (_,original,runtime)=try automaticFixture()
+    let snapshot=original,encoder=JSONEncoder();encoder.outputFormatting = [.sortedKeys]
+    let before=try encoder.encode(original)
+    let output=try NativeLTXPreparation.compose(request:request(original,runtime))
+    let recipe=output["recipe"] as! [String:Any], config=recipe["config"] as! [String:Any], report=output["report"] as! [String:Any]
+    XCTAssertEqual(config["duration_mode"] as? String,"automatic")
+    XCTAssertEqual(config["auto_duration_min_seconds"] as? Double,0.25)
+    XCTAssertEqual(config["auto_duration_max_seconds"] as? Double,30)
+    XCTAssertEqual((report["conditioning"] as? [String:Any])?["frames"] as? Int,713)
+    XCTAssertEqual(report["preserveEditorialDuration"] as? Bool,false)
+    XCTAssertEqual(((recipe["components"] as! [String:Any])["duration_head_header_sha256"] as? String)?.count,64)
+    XCTAssertEqual(original,snapshot)
+    XCTAssertEqual(try encoder.encode(original),before)
+    var manual=original;manual.clips[0].generationSelection?.ltx25AutomaticDuration=nil
+    let manualOutput=try NativeLTXPreparation.compose(request:request(manual,runtime))
+    let manualRecipe=manualOutput["recipe"] as! [String:Any], manualConfig=manualRecipe["config"] as! [String:Any]
+    XCTAssertNil(manualConfig["duration_mode"])
+    XCTAssertEqual((manualOutput["report"] as? [String:Any])?["preserveEditorialDuration"] as? Bool,true)
+  }
+  func testAutomaticRequiresOptInHeadPinAndSupportedOneShotBeforeConditioning() throws {
+    let (root,original,runtime)=try automaticFixture()
+    var project=original;project.clips[0].generationSelection?.ltx25AutomaticDuration?.experimentalEnabled=false
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project=original;project.clips[0].generationSelection?.ltx25AutomaticDuration?.minimumSeconds=2.4
+    project.clips[0].generationSelection?.ltx25AutomaticDuration?.maximumSeconds=2.5
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project=original;project.clips[0].generationSelection?.task="a2v"
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime))) {
+      XCTAssertTrue($0.localizedDescription.contains("require manual timing"))
+    }
+    project=original
+    var follower=project.clips[0];follower.id=UUID()
+    follower.continuity=ClipContinuity(mode:"scene",sourceClipID:project.clips[0].id)
+    project.clips.append(follower)
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime))) {
+      XCTAssertTrue($0.localizedDescription.contains("continuous-scene shot intervals"))
+    }
+    let file=root.appendingPathComponent("model.json")
+    var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:file)) as! [String:Any]
+    var components=recipe["components"] as! [String:Any];components["duration_head_header_sha256"]=String(repeating:"b",count:64)
+    recipe["components"]=components;try JSONSerialization.data(withJSONObject:recipe).write(to:file)
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(original,runtime))) {
+      XCTAssertTrue($0.localizedDescription.contains("duration-head header changed"))
+    }
+  }
+  func guidedFixture(_ mode: LTX25GuidanceMode) throws -> (URL, StudioProject, [String: Any]) {
+    let (root, original, runtime) = try fixture()
+    let url = root.appendingPathComponent("model.json")
+    var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    var config = recipe["config"] as! [String: Any]
+    config["pipeline_mode"] = mode.rawValue
+    config["stage1_steps"] = mode == .guided ? 30 : 15
+    config["stage1_sampler"] = mode == .guided ? "euler_guided" : "res_2s_guided"
+    config["video_cfg_scale"] = 3.0; config["audio_cfg_scale"] = 7.0
+    recipe["config"] = config
+    var components = recipe["components"] as! [String: Any]
+    components["distilled_lora_path"] = "/models/official-distilled-helper.safetensors"
+    recipe["components"] = components
+    recipe["conditioning"] = ["version": 1, "task": "t2v", "inputs": []]
+    try JSONSerialization.data(withJSONObject: recipe).write(to: url)
+    var project = original
+    project.clips[0].generationSelection?.ltx25Guidance = LTX25GuidanceSettings(mode: mode, experimentalEnabled: true)
+    return (root, project, runtime)
+  }
+
+  func testGuidedModesPreserveNegativeAndAdvancedSettingsWithoutPython() throws {
+    for mode in LTX25GuidanceMode.allCases {
+      let (_, original, runtime) = try guidedFixture(mode)
+      var project = original
+      project.clips[0].negativePrompt = "  blur, extra fingers  "
+      project.clips[0].generationSelection?.steps = 12
+      project.clips[0].generationSelection?.cfg = 4
+      project.clips[0].generationSelection?.ltx25Guidance?.audioCFG = 8
+      project.clips[0].generationSelection?.ltx25Guidance?.stgScale = 0.5
+      project.clips[0].generationSelection?.ltx25Guidance?.stgBlocks = [0, 28, 47]
+      let snapshot=project,encoder=JSONEncoder();encoder.outputFormatting = [.sortedKeys]
+      let before = try encoder.encode(project)
+      let result = try NativeLTXPreparation.compose(request: request(project, runtime))
+      let recipe = result["recipe"] as! [String: Any], config = recipe["config"] as! [String: Any]
+      XCTAssertEqual(config["pipeline_mode"] as? String, mode.rawValue)
+      XCTAssertEqual(config["stage1_steps"] as? Int, 12)
+      XCTAssertEqual(config["stage2_steps"] as? Int, 3)
+      XCTAssertEqual(config["negative_prompt"] as? String, "blur, extra fingers")
+      XCTAssertEqual(config["video_cfg_scale"] as? Double, 4)
+      XCTAssertEqual(config["audio_cfg_scale"] as? Double, 8)
+      XCTAssertEqual(config["stg_scale"] as? Double, 0.5)
+      XCTAssertEqual(config["stg_blocks"] as? [Int], [0, 28, 47])
+      XCTAssertEqual(project,snapshot)
+      XCTAssertEqual(try encoder.encode(project), before)
+      let controls = (result["report"] as! [String: Any])["generation"] as! [String: Any]
+      XCTAssertTrue(((controls["controls"] as! [String: Any])["stepsEditable"] as? Bool) == true)
+      XCTAssertTrue((result["report"] as! [String: Any])["productionQualified"] as? Bool == false)
+    }
+  }
+
+  func testGuidedAdmissionRequiresExplicitOptInAndCompatibleMode() throws {
+    let (_, original, runtime) = try guidedFixture(.guided)
+    var project = original
+    project.clips[0].generationSelection?.ltx25Guidance?.experimentalEnabled = false
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    project.clips[0].generationSelection?.ltx25Guidance = nil
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    project = original
+    project.clips[0].generationSelection?.ltx25Guidance?.audioCFG = .nan
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    project = original
+    project.clips[0].generationSelection?.ltx25Guidance?.stgBlocks = [28, 28]
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    project = original
+    project.clips[0].generationSelection?.refinementSteps = 4
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    let (_, distilled, distilledRuntime) = try fixture()
+    var incompatible = distilled
+    incompatible.clips[0].generationSelection?.ltx25Guidance = LTX25GuidanceSettings(mode: .guided, experimentalEnabled: true)
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(incompatible, distilledRuntime)))
+  }
+
+  func testGuidedCustomSigmasRetainPartialNoiseAndRejectInvalidSchedules() throws {
+    let (_, original, runtime) = try guidedFixture(.guided)
+    var project = original
+    project.clips[0].generationSelection?.steps = 2
+    project.clips[0].generationSelection?.ltx25Guidance?.sigmas = [0.8, 0.3, 0]
+    let recipe = try NativeLTXPreparation.compose(request: request(project, runtime))["recipe"] as! [String: Any]
+    XCTAssertEqual((recipe["config"] as! [String: Any])["stage1_sigmas"] as? [Double], [0.8, 0.3, 0])
+    for sigmas in [[1.0, 0], [1, 0.5, 0.1], [1, 1, 0], [0, 0.5, 0], [1.1, 0.5, 0]] {
+      project.clips[0].generationSelection?.ltx25Guidance?.sigmas = sigmas
+      XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)))
+    }
+  }
+
+  func testGuidedProfileRejectsMalformedInheritedGuidanceBeforePublication() throws {
+    for (key, value) in [("stage1_steps", true as Any), ("stage1_steps", 30.5 as Any),
+      ("audio_cfg_scale", true as Any), ("stg_blocks", [true] as Any),
+      ("stage1_sigmas", "adaptive" as Any), ("video_rescale_scale", 2 as Any)] {
+      let (root, project, runtime) = try guidedFixture(.guided)
+      let url = root.appendingPathComponent("model.json")
+      var recipe = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+      var config = recipe["config"] as! [String: Any]; config[key] = value; recipe["config"] = config
+      try JSONSerialization.data(withJSONObject: recipe).write(to: url)
+      XCTAssertThrowsError(try NativeLTXPreparation.compose(request: request(project, runtime)), key)
+    }
+  }
+
+  func testGuidedAdaptiveOverrideClearsProfileSigmasExplicitly() throws {
+    let (root, original, runtime) = try guidedFixture(.guided)
+    let url = root.appendingPathComponent("model.json")
+    var definition = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    var config = definition["config"] as! [String: Any]
+    config["stage1_steps"] = 2; config["stage1_sigmas"] = [0.8, 0.3, 0]
+    definition["config"] = config
+    try JSONSerialization.data(withJSONObject: definition).write(to: url)
+    let inherited = try NativeLTXPreparation.compose(request: request(original, runtime))["recipe"] as! [String: Any]
+    XCTAssertEqual((inherited["config"] as! [String: Any])["stage1_sigmas"] as? [Double], [0.8, 0.3, 0])
+    var project = original; project.clips[0].generationSelection?.ltx25Guidance?.sigmas = []
+    let adaptive = try NativeLTXPreparation.compose(request: request(project, runtime))["recipe"] as! [String: Any]
+    XCTAssertTrue((adaptive["config"] as! [String: Any])["stage1_sigmas"] is NSNull)
+  }
+
   func specializedControlProfile(_ root: URL, family: String) throws {
     let file = root.appendingPathComponent("model.json")
     var recipe = try JSONSerialization.jsonObject(with:Data(contentsOf:file)) as! [String:Any]
@@ -488,7 +660,6 @@ final class NativeLTXPreparationTests: XCTestCase {
     let unsupported: [(String, String, Any)] = [
       ("components", "msr_lora_path", "/models/msr.safetensors"),
       ("components", "distilled_lora_path", "/models/distilled.safetensors"),
-      ("components", "duration_head_path", "/models/duration.safetensors"),
       ("config", "stage1_steps", 7),
       ("config", "duration_mode", "automatic"),
       ("config", "stage1_sampler", "euler"),
@@ -982,4 +1153,31 @@ final class NativeLTXPreparationTests: XCTestCase {
     XCTAssertEqual((motion["report"] as? [String: Any])?["task"] as? String, "extension")
   }
 
+  func testMovieSourceIntervalsCannotHideOnOrdinaryOrDisabledAttachments() async throws {
+    let (root,original,runtime)=try fixture()
+    var baseline=original
+    let unused=MediaAsset(name:"Disabled stale adapter",kind:.lora,path:"/missing/unused.safetensors")
+    baseline.assets.append(unused)
+    var attachment=Attachment(assetID:unused.id,role:.lora);attachment.enabled=false
+    baseline.clips[0].attachments.append(attachment)
+    XCTAssertNoThrow(try NativeLTXPreparation.compose(request:request(baseline,runtime)))
+    for durationField in [false,true] {
+      var project=baseline
+      if durationField { project.clips[0].attachments[0].sourceDurationSeconds=1 }
+      else { project.clips[0].attachments[0].sourceStartSeconds=0 }
+      let frozen=try request(project,runtime)
+      XCTAssertThrowsError(try NativeLTXPreparation.compose(request:frozen)) {
+        XCTAssertTrue($0.localizedDescription.contains("Source movie interval fields"))
+      }
+      XCTAssertThrowsError(try NativeLTXPreparation.describe(request:frozen)) {
+        XCTAssertTrue($0.localizedDescription.contains("Source movie interval fields"))
+      }
+      let destination=root.appendingPathComponent("rejected-movie-field-"+String(durationField))
+      do {
+        _ = try await NativeLTXPreparation.prepareWithMedia(request:frozen,destination:destination)
+        XCTFail("Ordinary preparation silently ignored a movie interval")
+      } catch { XCTAssertTrue(error.localizedDescription.contains("Source movie interval fields")) }
+      XCTAssertFalse(FileManager.default.fileExists(atPath:destination.path))
+    }
+  }
 }

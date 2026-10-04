@@ -175,21 +175,32 @@ final class NativeHeadlessJobTests: XCTestCase {
   }
   func testNativeSceneUsesOneWorkerAndReopensSharedTakeWithExactRanges() async throws {
     let root = try directory(), media = try movie(root), worker = try worker(root, fixture: media)
-    for mode in ["single_decode_native_latent_chain", "windowed_decode_native_latent_chain"] {
+    for (version,mode) in [1,2].flatMap({ version in
+      ["single_decode_native_latent_chain","windowed_decode_native_latent_chain"].map { (version,$0) }
+    }) {
       var project = project(); project.clips[0].duration = 0.5
       var second = project.clips[0]; second.id = UUID(); second.continuity = .init(mode: "scene", sourceClipID: project.clips[0].id)
       project.clips.append(second)
       let members = [ContinuousSceneMember(clipID: project.clips[0].id, sourceIn: 0, duration: 0.5),
         ContinuousSceneMember(clipID: second.id, sourceIn: 0.5, duration: 0.5)]
       let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(members))
-      let scene: [String: Any] = ["version": 1, "members": encoded, "frame_rate": 24, "publication_mode": mode]
-      let bytes = try recipe(.ltx25, extra: ["scene": ["version": 1, "segments": project.clips.map { ["clip_id": $0.id.uuidString] }]])
+      let scene: [String: Any] = ["version": version, "members": encoded, "frame_rate": 24, "publication_mode": mode]
+      let bytes = try recipe(.ltx25, extra: ["scene": ["version": version, "segments": project.clips.map { ["clip_id": $0.id.uuidString] }]])
       let record = NativeHeadlessJob.Recipe(engine: "ltx25", bytes: bytes, signature: "scene-frozen",
         report: try JSONSerialization.data(withJSONObject: ["scene": scene]))
       let job = try NativeHeadlessJob(project: project, recipes: [project.clips[0].id.uuidString: record],
         workers: ["ltx25": worker.path], ffmpeg: ffmpeg)
+      var mismatched=scene;mismatched["version"]=version == 1 ? 2:1
+      let wrongReport=NativeHeadlessJob.Recipe(engine:"ltx25",bytes:bytes,signature:"wrong-report",
+        report:try JSONSerialization.data(withJSONObject:["scene":mismatched]))
+      XCTAssertThrowsError(try job.scene(wrongReport))
+      var document=try JSONSerialization.jsonObject(with:bytes) as! [String:Any]
+      var frozenScene=document["scene"] as! [String:Any];frozenScene["version"]=true;document["scene"]=frozenScene
+      let booleanVersion=NativeHeadlessJob.Recipe(engine:"ltx25",bytes:try JSONSerialization.data(withJSONObject:document),
+        signature:"boolean-version",report:record.report)
+      XCTAssertThrowsError(try job.scene(booleanVersion))
       var calls: [String] = []
-      let output = root.appendingPathComponent(mode)
+      let output = root.appendingPathComponent(mode+"-v\(version)")
       let sceneResult = try await NativeHeadlessExecutor.run(job: job, output: output, emit: { _ in }, worker: { _, recipe, target, action in
         calls.append(action); XCTAssertEqual(try Data(contentsOf: recipe), bytes)
         if action == "preflight" { return [:] }
@@ -307,6 +318,88 @@ final class NativeHeadlessJobTests: XCTestCase {
     await XCTAssertThrowsErrorAsync { _ = try await NativeHeadlessExecutor.run(job: job, output: root.appendingPathComponent("out"),
       worker: { _, _, _, _ in calls += 1; return [:] }) }
     XCTAssertEqual(calls, 0)
+  }
+  private func movieJob(_ root:URL,worker:URL) throws -> (job:NativeHeadlessJob,metadata:[String:Any]) {
+    let source=root.appendingPathComponent("original-source.mp4")
+    try process(ffmpeg,["-v","error","-f","lavfi","-i","testsrc2=s=32x32:r=24:d=0.375",
+      "-c:v","libx264","-pix_fmt","yuv420p","-an","-y",source.path])
+    let rgb=root.appendingPathComponent("original-source.rgb24")
+    try Data(repeating:31,count:32*32*9*3).write(to:rgb)
+    let sourceSHA=try NativeHeadlessJob.fileHash(source),rgbSHA=try NativeHeadlessJob.fileHash(rgb)
+    let components=["video_checkpoint":"/model/video","spatial_upscaler_checkpoint":"/model/upscaler"]
+    let body:[String:Any]=["version":1,"engine":"ltx25","task":"video_upscale",
+      "source":["path":source.path,"sha256":sourceSHA,"rgb_path":rgb.path,"rgb_sha256":rgbSHA,"width":32,"height":32,
+        "frames":9,"fps":24,"start_seconds":0,"duration_seconds":0.375],
+      "components":components,"mode":"latent_only","size_policy":"strict_32","output_directory":"/future/original-take",
+      "prompt":"","seed":7654,"refinement_strength":0.35,"anchors":"none","anchor_strength":0.7,"pixel_strength":1,
+      "reference_images":[],"reference_image_sha256":[:] as [String:String],"audio_policy":"silence","audio_source":NSNull(),
+      "maximum_audio_drift_seconds":0.05,"chunking":false,"chunk_frame_megapixel_budget":260,"resume":false,"keep_chunks":false]
+    let wrapper:[String:Any]=["format":"weetodd-headless-v2","engine":"ltx25","prompt":"","config":[:] as [String:Any],
+      "components":components,"conditioning":["task":"video_upscale","inputs":[
+        ["kind":"video","path":source.path,"sha256":sourceSHA],["kind":"rgb24","path":rgb.path,"sha256":rgbSHA]]],"movie_upscale":body]
+    let report:[String:Any]=["task":"video_upscale","sourceFrames":9,"fps":24,"width":64,"height":64,
+      "sourceMovieSHA256":sourceSHA,"sourceRGBSHA256":rgbSHA]
+    var p=project();p.clips[0].duration=5
+    let record=NativeHeadlessJob.Recipe(engine:"ltx25",bytes:try JSONSerialization.data(withJSONObject:wrapper,options:.sortedKeys),
+      signature:"movie-frozen",report:try JSONSerialization.data(withJSONObject:report,options:.sortedKeys))
+    let job=try NativeHeadlessJob(project:p,recipes:[p.clips[0].id.uuidString:record],workers:["ltx25":worker.path],ffmpeg:ffmpeg)
+    let metadata:[String:Any]=["task":"video_upscale","pythonModelInference":false,"frames":9,"fps":24,"width":64,"height":64,
+      "source_movie_sha256":sourceSHA,"source_rgb_sha256":rgbSHA]
+    return (job,metadata)
+  }
+  func testMovieHeadlessAdoptsExactMeasuredVisibleIntervalAndResumesWithoutWorker() async throws {
+    let root=try directory(),media=try movie(root,duration:0.375),binary=try worker(root,fixture:media)
+    let contract=try movieJob(root,worker:binary),output=root.appendingPathComponent("accepted-movie")
+    var calls:[String]=[]
+    let result=try await NativeHeadlessExecutor.run(job:contract.job,output:output,worker:{ _,frozen,target,action in
+      calls.append(action);XCTAssertEqual(try Data(contentsOf:frozen),contract.job.recipes.values.first?.bytes)
+      if action == "preflight" { return [:] }
+      try FileManager.default.createDirectory(at:target,withIntermediateDirectories:false)
+      let take=target.appendingPathComponent("render.mp4");try FileManager.default.copyItem(at:media,to:take)
+      return ["video":take.path,"nativeRuntime":"swift-mlx","use_complete_duration":true,"usable_source_in":0,
+        "usable_duration":0.375,"metadata":contract.metadata]
+    })
+    XCTAssertEqual(calls,["preflight","render"]);XCTAssertEqual(result["newlyGenerated"] as? Int,1)
+    let reopened=try ProjectStorage.read(output.appendingPathComponent("result.weetodd")),clip=try XCTUnwrap(reopened.clips.first)
+    XCTAssertEqual(clip.sourceIn,0);XCTAssertEqual(clip.duration,0.375)
+    XCTAssertEqual(clip.versions.last?.usableSourceIn,0);XCTAssertEqual(clip.versions.last?.usableDuration,0.375)
+    XCTAssertEqual(reopened.assets.last?.duration,0.375);XCTAssertEqual(reopened.assets.last?.fps,24)
+    XCTAssertEqual(clip.versions.last?.recipePath,output.appendingPathComponent("recipes/\(clip.id.uuidString).json").path)
+    let resumed=try await NativeHeadlessExecutor.run(job:contract.job,output:output,resume:true,worker:{ _,_,_,_ in
+      XCTFail("Movie resume must not invoke inference or preflight again");return [:]
+    })
+    XCTAssertEqual(resumed["newlyGenerated"] as? Int,0);XCTAssertEqual(resumed["resumedGenerations"] as? Int,1)
+  }
+  func testMovieHeadlessRejectsForeignMetadataAndActualWrongFrameIntervalWithoutPublishingProject() async throws {
+    let root=try directory(),media=try movie(root,duration:0.5),binary=try worker(root,fixture:media)
+    let contract=try movieJob(root,worker:binary)
+    // The actual 12-frame video cannot be accepted as the frozen nine-frame source,
+    // even when every worker timing/canvas/hash claim repeats the expected values.
+    let output=root.appendingPathComponent("wrong-visible-interval")
+    await XCTAssertThrowsErrorAsync { _ = try await NativeHeadlessExecutor.run(job:contract.job,output:output,worker:{ _,_,target,action in
+      if action == "preflight" { return [:] }
+      try FileManager.default.createDirectory(at:target,withIntermediateDirectories:false)
+      let take=target.appendingPathComponent("render.mp4");try FileManager.default.copyItem(at:media,to:take)
+      return ["video":take.path,"nativeRuntime":"swift-mlx","use_complete_duration":true,"usable_source_in":0,
+        "usable_duration":0.375,"metadata":contract.metadata]
+    }) }
+    XCTAssertFalse(FileManager.default.fileExists(atPath:output.appendingPathComponent("result.weetodd").path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath:output.appendingPathComponent("take-\(contract.job.project.clips[0].id)").path))
+    let validRoot=root.appendingPathComponent("valid-nine-frames")
+    try FileManager.default.createDirectory(at:validRoot,withIntermediateDirectories:false)
+    let valid=try movie(validRoot,duration:0.375)
+    let validClock=try await NativeMovieFrozenMedia.videoClock(valid)
+    XCTAssertEqual(validClock.times.count,9)
+    var wrong=contract.metadata;wrong["source_movie_sha256"]=String(repeating:"a",count:64)
+    let foreign=root.appendingPathComponent("foreign-source-receipt")
+    await XCTAssertThrowsErrorAsync { _ = try await NativeHeadlessExecutor.run(job:contract.job,output:foreign,worker:{ _,_,target,action in
+      if action == "preflight" { return [:] }
+      try FileManager.default.createDirectory(at:target,withIntermediateDirectories:false)
+      let take=target.appendingPathComponent("render.mp4");try FileManager.default.copyItem(at:valid,to:take)
+      return ["video":take.path,"nativeRuntime":"swift-mlx","use_complete_duration":true,"usable_source_in":0,
+        "usable_duration":0.375,"metadata":wrong]
+    }) }
+    XCTAssertFalse(FileManager.default.fileExists(atPath:foreign.appendingPathComponent("result.weetodd").path))
   }
 }
 

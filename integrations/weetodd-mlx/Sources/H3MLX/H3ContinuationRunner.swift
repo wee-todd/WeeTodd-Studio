@@ -47,7 +47,7 @@ public enum H3ContinuationRunner {
     _ = try H3AudioVAELayout(url: request.audioVAE)
     for adapter in request.loRAAdapters {
       _ = try H3LoRAFile(url: adapter.url, strength: adapter.strength,
-        requestedSteps: request.requestedSteps)
+        requestedSteps: request.requestedSteps, samplingMethod: request.samplingMethod, qkvLayout: adapter.qkvLayout, profile: adapter.profile, startAfterEvaluations: adapter.startAfterEvaluations)
     }
     return Admission(geometry: request.geometry, packedRows: layout.tags.count,
       evaluations: video.timesteps.count, textRows: qwen.tags.count,
@@ -82,7 +82,7 @@ public enum H3ContinuationRunner {
         timestepTable: admission.rowSchedule.table,
         turboLoRAURL: request.turboLoRA,
         turboLoRAStrength: request.turboLoRAStrength,
-        additionalLoRAs: request.additionalLoRAs) { completed, total in
+        additionalLoRAs: request.additionalLoRAs, loRAAdapters: request.loRAAdapters) { completed, total in
           progress("transformer_prepare", completed, total)
         }
       defer { state.unload() }
@@ -103,6 +103,7 @@ public enum H3ContinuationRunner {
         audioSchedule: admission.audioSchedule,
         rowSchedule: admission.rowSchedule,
         videoLatents: video, audioLatents: audio,
+        samplingMethod: request.samplingMethod,
         progress: { done, total in progress("sampling", done, total) },
         blockProgress: { step, done, total in
           progress("sampling_block_\(step)", done, total)

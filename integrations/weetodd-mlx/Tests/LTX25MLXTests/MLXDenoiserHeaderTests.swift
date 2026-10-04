@@ -1,10 +1,32 @@
 import Foundation
 import XCTest
 import LTX25Engine
-import LTX25MLX
+@testable import LTX25MLX
 import InferenceTestSupport
 
 final class MLXDenoiserHeaderTests: XCTestCase {
+  func testGeneratedOrdinarySlotsAdmitInstalledMarkerBeforeSampling() throws {
+    let env=ProcessInfo.processInfo.environment
+    guard let transformer=env["WEETODD_LTX_MARKER_TRANSFORMER"],
+      let upscaler=env["WEETODD_LTX_MARKER_UPSCALER"],
+      let statistics=env["WEETODD_LTX_MARKER_STATISTICS"] else {
+      throw XCTSkip("Installed transformer/upscaler header qualification is explicit.")
+    }
+    let recipe=try DistilledTwoStageRecipe(width:768,height:448,frames:25,fps:24,seed:3)
+    let guidance=try env["WEETODD_LTX_MARKER_DEV_ADAPTER"].map {
+      try MLXGuidedSampling(mode:.guidedHQ,steps:15,stg:0,
+        videoRescale:0.45,audioRescale:1,stgBlocks:[],distilledAdapterPath:$0)
+    }
+    let runner=try MLXDistilledSamplingRunner(recipe:recipe,
+      transformerRoot:URL(fileURLWithPath:transformer),
+      upscalerCheckpoint:URL(fileURLWithPath:upscaler),
+      statisticsCheckpoint:URL(fileURLWithPath:statistics),
+      ordinaryAnchors:[.init(frame:0,strength:1),.init(frame:7,strength:1)],
+      generatedKeyframes:2,noisePolicy:.releasedMLX,guidedSampling:guidance,
+      maximumActivationBytes:32*1024*1024*1024)
+    // Qualify the actual two-stage source providers, not just the marker math.
+    XCTAssertEqual(runner.admittedKeyframeMarkers,[true,false])
+  }
   private func fixture(denoiser: Bool = false, _ body: (URL, [String: Any], AVBlockConfiguration) throws -> Void) throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

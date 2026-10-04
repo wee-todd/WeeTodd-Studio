@@ -52,7 +52,7 @@ public enum NativeRipplePreparation {
     throw StudioError.invalid("Install FFmpeg or select it in Runtime Settings.")
   }
 
-  private static func profile(_ runtime: [String: Any]) throws -> [String: String] {
+  private static func profile(_ runtime: [String: Any]) throws -> (components:[String:String],diffusion:[String:Any]) {
     let selected = (runtime["rippleProfileID"] as? String ?? "").trimmingCharacters(in: .whitespaces)
     let folder = runtime["profilesDirectory"] as? String ?? ""
     let candidates: [URL]
@@ -99,7 +99,7 @@ public enum NativeRipplePreparation {
         }
         resolved[key] = URL(fileURLWithPath: expanded).standardizedFileURL.resolvingSymlinksInPath().path
       }
-      if valid { return resolved }
+      if valid { return (resolved,NativeLTXDiffusionVAE.profileControls(config)) }
     }
     throw StudioError.invalid("Select a plain installed LTX 2.5 distilled profile for Ripple.")
   }
@@ -113,7 +113,8 @@ public enum NativeRipplePreparation {
     }
     let adapter = try regular(runtime["rippleAdapterPath"] as? String ?? "",
       label: "author adapter")
-    let components = try profile(runtime)
+    let selected = try profile(runtime)
+    let components=selected.components
     let ffmpeg = try executable(runtime)
     let raw = try draft.bridgeObject()
     let inspection = try await NativeRippleMedia.inspect(raw)
@@ -122,6 +123,7 @@ public enum NativeRipplePreparation {
       inspection["height"] as? Int == draft.height else {
       throw StudioError.invalid("Ripple inspection differs from the current draft.")
     }
+    let diffusion=try NativeLTXDiffusionVAE.resolvedWire(draft.diffusionVAE,profile:selected.diffusion,checkpoint:URL(fileURLWithPath:components["video_vae_path"]!))
     let sourceHash = try digest(draft.sourcePath)
     if let expected = draft.sourceSHA256, expected != sourceHash {
       throw StudioError.invalid("The Ripple source movie differs from the saved take.")
@@ -157,7 +159,7 @@ public enum NativeRipplePreparation {
     }
     let transformer = components["transformer_path"]!
     let prompt = draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-    let request: [String: Any] = [
+    var request: [String: Any] = [
       "version": 1, "engine": "ltx25", "task": "ripple",
       "gemma_root": components["text_encoder_path"]!, "transformer_root": transformer,
       "connector_checkpoint": transformer + "/pages/fixed.safetensors",
@@ -177,6 +179,7 @@ public enum NativeRipplePreparation {
       },
       "audio_policy": draft.audioPolicy.rawValue,
       "ffmpeg_path": ffmpeg, "output_directory": output.path]
+    if let diffusion { request["diffusion_vae"]=diffusion }
     let recipe = directory.appendingPathComponent("ripple-request.json")
     try JSONSerialization.data(withJSONObject: request, options: [.prettyPrinted, .sortedKeys])
       .write(to: recipe, options: .withoutOverwriting)
