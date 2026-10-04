@@ -788,7 +788,7 @@
     "descriptor": {
       "id": "ltx25-ingredients-reference-official",
       "name": "LTX 2.5 Ingredients \u00b7 Rank-128 adapter",
-      "description": "Official full-resolution static reference-sheet adapter, described by Lightricks as rank 128 with the same video attention and feed-forward projection family. Swift requires the complete 480-pair tensor signature and full-resolution metadata before generation. Source weights need Hugging Face gated access; this release header has not been qualified here.",
+      "description": "Official LTX 2.5 full-resolution static reference-sheet adapter. The pinned release passed Swift header preflight with all 480 rank-128 video attention and feed-forward pairs. Start at strength 1.0 with a described black-background sheet, 768 by 448 pixels, 121 frames and 24 fps. Hugging Face access approval is required. Structural admission does not qualify generated scene quality.",
       "downloadBytes": 1308843514,
       "requiredDiskBytes": 1577278970,
       "sourceURL": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Ingredients/tree/12040e4091ac2008d3906a594e31a7fb1ab9d546",

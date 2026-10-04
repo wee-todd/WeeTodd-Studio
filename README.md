@@ -82,8 +82,12 @@ mode passed the same declared tiny numerical limits; it is not BF16/RGB byte par
 benchmark. The default convolutional VAE remains unchanged. Studio, headless and saved-recipe
 Swift nodes preserve native DiffVAE selection and settings; the legacy typed composable Comfy generator
 still uses its maintained Python model pipeline. MSR V2's audio/speaker/reference-audio
-architecture is not implemented; native VDN remains unavailable. An authenticated header request for the gated new official 2.5 Ingredients adapter returned 403;
-that variant remains unqualified. This does not disable the supported 2.3 adapter, which the current authored 2.5 example also uses.
+architecture is not implemented; native VDN remains unavailable. Owner-approved access allowed the
+new official 2.5 Ingredients adapter to pass its pinned payload hash and installed Swift header preflight.
+The first 121-frame native take omitted the second character. A clearer two-shot prompt included
+both identities with the unchanged default and experimental CFG++ samplers; framing and audiovisual
+acceptance remain open. The supported 2.3 adapter remains available, and the current
+authored 2.5 example also uses it.
 The retained 2.3 collage failure has no proven engine cause. See the [current Studio controls](studio/README.md#current-swift-controls-and-qualification)
 and [implementation status](STATUS.md) for the qualified scope and remaining restrictions.
 
@@ -1699,7 +1703,9 @@ Pixel-Spatial, and MSR layouts remain recognizable after arbitrary file renaming
 unknown reference adapter reports `unclassified_reference_conditioning` and cannot silently enter
 a task-specific pipeline. Guarded Ingredients admission also accepts compatible LTX 2.5
 rank-128 full-resolution sheet adapters after complete tensor/header checks; the pinned official
-2.5 package's authenticated header request returned 403, so that variant remains unqualified. Licon MSR V2 is
+2.5 package was retrieved after access approval on October 4. Its pinned SHA-256 and all 480
+rank-128 projection pairs passed installed Swift-worker header preflight. Scene quality requires
+separate visual qualification. Licon MSR V2 is
 structurally different: its actual header has 1,152 rank-128 pairs across 48 blocks, additional
 audio attention/feed-forward and video-to-audio targets, and five audio-slot embedding tensors.
 The current V1 route supports 480 video pairs and five visual-slot tensors, without V2's
@@ -1729,7 +1735,8 @@ The experimental Swift headless Ingredients route uses a strict version-6 reques
 `task="ingredients"` and an `ingredients_sheet` containing `path`, `source_sha256`,
 `adapter_path`, `adapter_strength`, and `reference_strength`. The worker checks the
 frozen source and complete rank-128 adapter before loading weights, fits the one sheet
-to the output canvas, repeats it across at least 121 frames, then VAE-encodes and
+to the output canvas, VAE-encodes one frozen RGB still, repeats its normalized latents
+across the guide timeline for at least 121 output frames, and
 appends the full-resolution reference group during one eight-evaluation distilled
 stage. It publishes a synchronized audio stream and video. One 512 × 256 result
 completed; the sheet's subject designs appeared, but the output duplicated one
@@ -1739,7 +1746,15 @@ Swift route now accepts one described Ingredients sheet, preserves its strength 
 identity, and passed installed-worker generation, previews, acceptance and reopening without
 Python. Its dedicated setup preset uses one adapter at strength 1.2 for legacy 2.3 metadata
 or 1.0 for compatible 2.5 metadata, eight full-resolution evaluations and no spatial upscaler.
-The optional 2.5 package remains gated and has not been header-qualified with available access.
+New 2.5 Ingredients setups use 768 × 448, five seconds and 24 fps. Existing saved recipes and
+legacy 2.3 setup settings remain unchanged.
+The optional 2.5 package requires Hugging Face access approval. Its released payload passed installed
+Swift-worker header preflight. At 768 × 448, 121 frames and 24 fps, a clearer two-shot prompt retained
+both character roles with the existing deterministic default and experimental CFG++ sampler.
+The default took 220.86 observer seconds and peaked at 5.22 GB in the Swift process, excluding FFmpeg.
+The sixteen-prediction CFG++ take took 431.07 observer seconds and peaked at 5.22 GB.
+These are qualification observations, not a matched engine-speed benchmark. Framing, lighting and
+human audiovisual acceptance remain open; the tests do not establish Dev-base recipe parity.
 An explicitly selected `config.single_stage_sampler: "euler_ancestral_cfg_pp"` compiles to
 version 11: eight updates, sixteen serial predictions, Float32 sampler state and BF16 model
 inputs. It requires reference strength 1 and retains a separate native seeded-noise policy.

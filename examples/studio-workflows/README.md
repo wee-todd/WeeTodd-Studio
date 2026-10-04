@@ -125,9 +125,12 @@ StudioStore.load without invoking a worker. The learned H3 latent upscaler/full
 2 MP path now has a bounded functional result under explicit spatial-v2 admission; ordinary
 1 MP/40,000-row limits remain separate. Native LTX Diffusion VAE passed scoped CPU/numerical and actual retained 89-frame decoder
 qualification; the default Conv decoder is unchanged. Legacy typed composable Comfy generation
-uses its Python pipeline; saved-recipe Swift execution can carry native DiffVAE controls. MSR V2 architectural conditioning remains unsupported; authenticated
-403 limits only the new official 2.5 Ingredients variant, while supported 2.3 output remains
-scene-quality rejected without a proven engine cause. The historical 31-check route ledger and
+uses its Python pipeline; saved-recipe Swift execution can carry native DiffVAE controls. MSR V2
+architectural conditioning remains unsupported. The official 2.5 Ingredients payload passed its
+pinned hash and installed Swift header preflight after access approval. Its first 121-frame native
+take omitted the second character. A clearer two-shot prompt retained both characters with the
+unchanged default and experimental CFG++ samplers; human audiovisual acceptance remains open.
+The retained supported 2.3 collage failure has no proven engine cause. The historical 31-check route ledger and
 the remaining feature inventory retain separate scopes.
 
 ## Try the examples

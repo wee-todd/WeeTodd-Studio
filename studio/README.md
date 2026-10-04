@@ -1106,11 +1106,16 @@ Existing recipes retain their deterministic sampling. The new option is not a qu
 contract/numerical tests and real-model visual acceptance are separate checks.
 Ordinary LoRAs, DFR and audio drivers cannot be combined with these single-adapter profiles.
 Ingredients setup admits compatible 2.5 full-resolution rank-128 sheet adapters after complete
-header/shape checks and starts them at strength 1.0; legacy 2.3 starts at 1.2. The pinned official
-2.5 download is gated; an authenticated header request returned 403, so that new variant remains
-unqualified. The current authored 2.5 example uses the supported 2.3 Ingredients adapter at 1.3
-with distilled eight-step CFG++; denied access to the new variant is not a diagnosed cause of
-the retained 2.3 collage failure.
+header/shape checks and starts them at strength 1.0; legacy 2.3 starts at 1.2.
+New 2.5 Ingredients setups use the trained 768 × 448 canvas, five seconds and 24 fps.
+Legacy 2.3 setup and existing saved recipes retain their prior settings. The pinned official
+2.5 download requires Hugging Face approval. After owner-approved access, its actual payload hash,
+all 480 projection pairs and installed Swift-worker header preflight passed. The first 121-frame
+take omitted the second character. A clearer two-shot prompt retained both characters with the
+unchanged eight-forward default and experimental sixteen-forward CFG++ sampler. Framing, lighting
+and human audiovisual acceptance remain open. These tests do not establish Dev-base recipe parity. The current authored
+2.5 example uses the supported 2.3 Ingredients adapter at 1.3 with distilled eight-step CFG++;
+the retained 2.3 collage failure still has no proven engine cause.
 The current MSR V1 contract has 480 video pairs and five visual-slot tensors. The actual MSR V2
 header has 1,152 pairs, extra audio/video-to-audio targets and five audio-slot tensors; V2's
 sparse-speaker/reference-audio contracts are not implemented and its files are explicitly rejected.

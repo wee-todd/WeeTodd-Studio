@@ -186,7 +186,7 @@ final class NativeModelSetupControlTests: XCTestCase {
     _ = try write(root,name:"new-version-wrong-time",header:valid)
     XCTAssertEqual(try NativeModelSetup.scan(presetID:"swift-ltx25-ingredients",roots:[root.path]).candidates["ingredients_lora_path"],[admitted.path])
   }
-  func testIngredientsRecipeDefaultsStrengthFromBoundedMetadataRatherThanFilename() throws {
+  func testIngredientsRecipeDefaultsStrengthAndCanvasFromMetadataRatherThanFilename() throws {
     let root = try directory();defer { try? FileManager.default.removeItem(at:root) }
     let preset = try XCTUnwrap(NativeModelSetup.catalog().first { $0.id == "swift-ltx25-ingredients" })
     var selected: [String:String] = [:]
@@ -202,6 +202,12 @@ final class NativeModelSetupControlTests: XCTestCase {
       let stack = (recipe["components"] as! [String:Any])["ic_loras"] as! [[Any]]
       XCTAssertEqual(stack[0][0] as? String,adapter.path)
       XCTAssertEqual(stack[0][1] as? Double,strength)
+      let config = recipe["config"] as! [String:Any]
+      XCTAssertEqual(config["width"] as? Int,768)
+      XCTAssertEqual(config["height"] as? Int,version.hasPrefix("2.5") ? 448 : 512)
+      XCTAssertEqual(config["duration_seconds"] as? Double,5)
+      XCTAssertEqual(config["frame_rate"] as? Double,24)
+      XCTAssertNil(config["single_stage_sampler"],"Existing deterministic sampling must remain the default")
     }
   }
   func testH3DiscoveryRejectsRootlessOfficialAndPackedAffineCheckpointLayouts() throws {

@@ -56,7 +56,11 @@ Swift nodes preserve native DiffVAE selection and settings; the legacy typed com
 still uses its maintained Python model pipeline. MSR V2 remains structurally
 unimplemented (audio/speaker/reference-audio conditioning); it is not interchangeable with V1.
 The optional VDN checkpoint family is not implemented by native Swift H3.
-Authenticated 403 blocks the new official 2.5 Ingredients adapter variant only. The current authored
+Owner-approved access allowed the official 2.5 Ingredients payload and installed Swift header
+preflight to pass. The first 121-frame native take omitted the second character. A prompt-only
+follow-up retained both characters; the same prompt also retained both with Studio's unchanged
+eight-forward default in 220.86 observer seconds at a 5.22 GB Swift-process peak, excluding FFmpeg.
+Framing, lighting and human audiovisual acceptance remain open. The current authored
 2.5 workflow uses supported 2.3 Ingredients 1.3/distilled 8 CFG++; its retained native collage failure
 is unapproved and has no proven engine cause. Prefix/one-projection witnesses are not full sampler parity.
 
@@ -367,9 +371,14 @@ A separate same-guide/checkpoint encoder comparison reduced MLX stage peak from 
 versus 11.13 seconds. This control-guide-only optimization does not establish a new
 whole-generation speed or memory result; the full render above predates it.
 
-Native adapter admission 2026-10-02: compatible LTX 2.5 Ingredients full-resolution
-rank-128 sheet adapters now have guarded structural admission and a pinned gated
-package; actual official 2.5 tensor-header qualification is blocked by current access.
+Native adapter admission 2026-10-04: the official LTX 2.5 Ingredients package was
+retrieved after access approval. Its payload matches the catalog SHA-256. All 960 BF16
+tensors form the complete 480-pair rank-128 signature, with model version 2.5 and
+full-resolution reference metadata. Installed Swift-worker header preflight passed.
+Generated scene quality and Dev-base recipe parity remain separate qualification states.
+New 2.5 Ingredients setup now selects the trained 768 × 448 canvas from bounded metadata;
+legacy 2.3 setup and saved recipes keep their prior settings. A focused regression reproduced
+the generic 512-pixel setup height, then passed for both 2.5 tags and both legacy version tags.
 The inspected MSR V2 header contains 1,152 rank-128 pairs and audio attention/feed-forward,
 video-to-audio targets plus five audio-slot tensors. Current V1 supports 480 video
 pairs and five visual-slot tensors without V2 sparse-speaker/absolute audio-slot/

@@ -139,7 +139,7 @@ public enum NativeModelSetup {
       family,task,label,key,adapter in
       ModelSetupPreset(id:"swift-ltx25-"+family,name:"LTX 2.5 · "+label+" · Swift",engine:"ltx25",task:task,
         description: family == "ingredients"
-          ? "Experimental single-stage reference-sheet generation. LTX 2.5 adapters start at strength 1.0; legacy LTX 2.3 adapters retain 1.2. Attach a described sheet and prepare the clip for Swift worker preflight."
+          ? "Experimental single-stage reference-sheet generation. LTX 2.5 adapters start at strength 1.0 and their trained 768 by 448 canvas; legacy LTX 2.3 adapters retain strength 1.2 and their existing canvas. Attach a described sheet and prepare the clip for Swift worker preflight."
           : "Experimental single-stage reference generation. Link installed components, attach described images and prepare the clip for Swift worker preflight. Identity and audio quality remain under qualification.",
         components:ltx.filter { $0.key != "spatial_upscaler_path" }+[component(key,adapter,["file"])])
     }
@@ -251,7 +251,13 @@ public enum NativeModelSetup {
         let msr=preset.id == "swift-ltx25-msr",key=msr ? "msr_lora_path" : "ingredients_lora_path"
         guard let adapter=components[key] as? String else { throw StudioError.invalid("Choose the dedicated reference adapter.") }
         if !msr { components.removeValue(forKey:key) }
-        let strength=msr ? 1.0 : NativeModelInspector.ingredientsDefaultStrength(URL(fileURLWithPath:adapter))
+        let strength:Double
+        if msr { strength=1.0 }
+        else {
+          let defaults=NativeModelInspector.ingredientsDefaults(URL(fileURLWithPath:adapter))
+          strength=defaults.strength
+          config["width"]=defaults.width;config["height"]=defaults.height
+        }
         components["ic_loras"]=[[adapter,strength]];components["spatial_upscaler_path"]=""
         if msr { components["msr_lora_strength"]=strength }
         config["ic_lora_single_stage"]=true
@@ -293,9 +299,12 @@ public enum NativeModelSetup {
 }
 
 private enum NativeModelInspector {
-  static func ingredientsDefaultStrength(_ url: URL) -> Double {
+  static func ingredientsDefaults(_ url: URL) -> (strength:Double,width:Int,height:Int) {
     let metadata = (try? header(url)["__metadata__"]) as? [String:String] ?? [:]
-    return ["2.5","2.5.0"].contains(metadata["model_version"] ?? "") ? 1.0 : 1.2
+    // The released 2.5 adapter is trained at 768x448. Keep legacy 2.3
+    // setup and all saved recipes unchanged; filenames do not select defaults.
+    return ["2.5","2.5.0"].contains(metadata["model_version"] ?? "")
+      ? (1.0,768,448) : (1.2,768,512)
   }
   private static func document(_ url: URL) throws -> [String: Any] {
     let size = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
