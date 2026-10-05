@@ -45,9 +45,10 @@ def test_workflow_profile_validates_all_shipped_definitions():
 def test_native_profiles_include_both_swift_packages():
     checks = plan("--profile", "studio", "--profile", "remote")
     swift = [c for c in checks if c[0] == "swift"]
-    assert ["swift", "test", "--package-path", "studio", "--jobs", "2"] in swift
-    assert ["swift", "test", "--package-path", "integrations/drawthings-client",
+    assert ["swift", "test", "--build-system", "native", "--package-path", "studio",
             "--jobs", "2"] in swift
+    assert ["swift", "test", "--build-system", "native", "--package-path",
+            "integrations/drawthings-client", "--jobs", "2"] in swift
 
 
 def test_failed_check_stops_before_later_commands(tmp_path):
@@ -65,10 +66,17 @@ def test_failed_check_stops_before_later_commands(tmp_path):
 def test_core_includes_swift_inference_contract_and_metal_tests_once():
     checks = plan("--profile", "core", "--profile", "studio", "--profile", "core")
     inference = [c for c in checks if "integrations/weetodd-inference" in c]
-    assert inference == [["swift", "test", "--package-path", "integrations/weetodd-inference",
-                         "--jobs", "2"]]
+    assert inference == [["swift", "test", "--build-system", "native", "--package-path",
+                          "integrations/weetodd-inference", "--jobs", "2"]]
 
 
 def test_core_includes_separate_mlx_worker_tests_once():
     checks = plan("--profile", "core")
     assert checks.count(["bash", "integrations/weetodd-mlx/scripts/test.sh"]) == 1
+
+
+def test_mlx_release_build_and_test_pin_the_same_engine():
+    script = (ROOT / "integrations/weetodd-mlx/scripts/test.sh").read_text()
+    commands = [line for line in script.splitlines() if line.startswith("swift ")]
+    assert len(commands) == 2
+    assert all("--build-system native" in line for line in commands)

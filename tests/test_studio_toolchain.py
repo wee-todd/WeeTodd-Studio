@@ -63,7 +63,7 @@ def test_selected_xcode_keeps_compiler_sdk_and_plugins_together(xcode, monkeypat
     assert selected.env['TOOLCHAINS'] == 'XcodeDefault'
     assert selected.env['SDKROOT'] == str(sdk)
     assert selected.env['SWIFT_EXEC'] == str(swift.with_name('swiftc'))
-    assert selected.build_arguments == ['--sdk', str(sdk), '-Xswiftc',
+    assert selected.build_arguments == ['--build-system', 'native', '--sdk', str(sdk), '-Xswiftc',
         '-external-plugin-path', '-Xswiftc', f'{plugin}#{server}']
     probe = next(command for command, _ in calls if '-typecheck' in command)
     assert probe[0] == str(swift.with_name('swiftc'))
@@ -117,3 +117,60 @@ def test_swift_driver_symlink_name_is_preserved(xcode):
     swift.unlink()
     swift.symlink_to(frontend.name)
     assert packager.prepare_swift_toolchain(app).swift == swift
+
+
+def test_metal_compile_and_link_probe_uses_selected_sdk_without_hiding_component(xcode):
+    app, dev, _, sdk, _, _, calls = xcode
+    packager.prepare_swift_toolchain(app)
+    metal = [(command, kwargs) for command, kwargs in calls if "metal" in command]
+    linker = [(command, kwargs) for command, kwargs in calls if "metallib" in command]
+    assert len(metal) == len(linker) == 1
+    assert "-c" in metal[0][0] and "-std=metal3.2" in metal[0][0]
+    for _, kwargs in metal + linker:
+        assert "TOOLCHAINS" not in kwargs["env"]
+        assert kwargs["env"]["DEVELOPER_DIR"] == str(dev)
+        assert kwargs["env"]["SDKROOT"] == str(sdk)
+
+
+@pytest.mark.parametrize("tool", ["metal", "metallib"])
+def test_missing_metal_component_or_linker_fails_before_swift_compilation(xcode, monkeypatch, tool):
+    app, *_, calls = xcode
+    previous = packager.subprocess.run
+
+    def missing_metal(command, **kwargs):
+        if tool in command:
+            return subprocess.CompletedProcess(command, 1, stdout="",
+                stderr="cannot execute tool due to missing Metal Toolchain")
+        return previous(command, **kwargs)
+
+    monkeypatch.setattr(packager.subprocess, "run", missing_metal)
+    with pytest.raises(RuntimeError, match="Metal.*preflight failed") as error:
+        packager.prepare_swift_toolchain(app)
+    assert "downloadComponent MetalToolchain" in str(error.value)
+    assert not any("-typecheck" in command for command, _ in calls)
+
+
+@pytest.mark.parametrize("module", ["build_h3_worker", "build_ltx_worker", "build_h3_mlx_worker",
+                                   "build_drawthings_client"])
+def test_standalone_worker_builds_keep_the_packaged_artifact_layout(module, tmp_path, monkeypatch):
+    builder = importlib.import_module(module)
+    commands = []
+
+    class BuildIntercepted(Exception):
+        pass
+
+    def intercept(command, **kwargs):
+        commands.append(command)
+        raise BuildIntercepted
+
+    monkeypatch.setattr(builder.subprocess, "run", intercept)
+    with pytest.raises(BuildIntercepted):
+        if module == "build_drawthings_client":
+            monkeypatch.setattr(sys, "argv", [module, "--output", str(tmp_path / "distribution")])
+            builder.main()
+        else:
+            builder.build_worker(tmp_path)
+    command = commands[0]
+    assert command[1] == "build"
+    assert "--build-system" in command
+    assert command[command.index("--build-system") + 1] == "native"

@@ -88,6 +88,35 @@ def prepare_swift_toolchain(xcode: Path | None = None) -> SwiftToolchain:
     print(f"Building with {version.replace(chr(10), ' · ')} · macOS SDK {sdk_version}\n"
           f"Swift: {swift}\n{read([str(swift), '--version'])}", flush=True)
     with tempfile.TemporaryDirectory(prefix="weetodd-swiftui-preflight-") as temporary:
+        # The native SwiftPM route uses our separately built, pinned MLX kernels.
+        # Newer Swift Build engines compile package Metal resources through a
+        # different tool-discovery route and use a different artifact layout.
+        metal_env = env.copy()
+        metal_env.pop("TOOLCHAINS", None)
+        shader = Path(temporary) / "MetalProbe.metal"
+        air = Path(temporary) / "MetalProbe.air"
+        library = Path(temporary) / "MetalProbe.metallib"
+        shader.write_text(
+            "#include <metal_stdlib>\nusing namespace metal;\n"
+            "kernel void probe(device float *out [[buffer(0)]], "
+            "uint i [[thread_position_in_grid]]) { out[i] = 0; }\n"
+        )
+        for stage, command in (
+            ("compiler", ["/usr/bin/xcrun", "-sdk", "macosx", "metal", "-std=metal3.2",
+                          "-mmacosx-version-min=14.0", "-c", str(shader), "-o", str(air)]),
+            ("linker", ["/usr/bin/xcrun", "-sdk", "macosx", "metallib", str(air),
+                        "-o", str(library)]),
+        ):
+            result = subprocess.run(command, env=metal_env, capture_output=True,
+                                    text=True, timeout=120)
+            if result.returncode:
+                raise RuntimeError(
+                    f"Metal {stage} preflight failed before building Studio. "
+                    "Complete the selected Xcode's Metal Toolchain setup. "
+                    "Use Xcode Settings > Components or, with this Xcode selected, "
+                    "xcodebuild -downloadComponent MetalToolchain.\n"
+                    + (result.stderr + result.stdout)[:6000]
+                )
         probe = Path(temporary) / "MacroProbe.swift"
         probe.write_text(
             "import SwiftUI\nimport Observation\n"
@@ -109,7 +138,7 @@ def prepare_swift_toolchain(xcode: Path | None = None) -> SwiftToolchain:
                 "Use --xcode to select a complete Xcode installation and finish its component "
                 f"setup.\n{result.stderr[:6000]}"
             )
-    return SwiftToolchain(swift, env, ["--sdk", str(sdk),
+    return SwiftToolchain(swift, env, ["--build-system", "native", "--sdk", str(sdk),
         *[item for argument in plugin_arguments for item in ("-Xswiftc", argument)]])
 
 

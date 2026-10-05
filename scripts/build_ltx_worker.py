@@ -11,7 +11,7 @@ from pathlib import Path
 from build_h3_worker import digest
 
 
-def build_worker(root, *, swift="swift", env=None, build_arguments=()):
+def build_worker(root, *, swift="swift", env=None, build_arguments=("--build-system", "native")):
     package = Path(root) / "integrations/weetodd-mlx"
     subprocess.run([str(swift), "build", "--package-path", str(package), "-c", "release",
                     "--product", "WeeToddLTXWorker", "--jobs", "2",

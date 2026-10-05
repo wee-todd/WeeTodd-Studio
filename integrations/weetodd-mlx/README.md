@@ -161,7 +161,8 @@ and the raw runtime string must be distinguished in measurements.
 bash integrations/weetodd-mlx/scripts/test.sh
 ```
 
-SwiftPM does not compile MLX's Metal resources. The helper builds the required non-JIT kernels
+SwiftPM's explicitly selected `native` build system does not compile MLX's Metal resources.
+The helper builds the required non-JIT kernels
 from the exact resolved dependency with fast math disabled and places `mlx.metallib` beside the
 CLI and XCTest binaries. Remaining kernels use MLX's own JIT. Studio's packager bundles the
 workers and this library; qualification on the minimum supported OS and a clean Mac remains work.

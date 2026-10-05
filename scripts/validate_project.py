@@ -98,14 +98,15 @@ def build_checks(project: Path, profiles: list[str], python: str) -> list[list[s
         lint_paths = {p for p in lint_paths if not p.startswith("src/")}
     checks.append([python, "-m", "ruff", "check", *sorted(lint_paths)])
     if "core" in selected:
-        checks.append(["swift", "test", "--package-path", "integrations/weetodd-inference",
-                       "--jobs", "2"])
+        checks.append(["swift", "test", "--build-system", "native", "--package-path",
+                       "integrations/weetodd-inference", "--jobs", "2"])
         checks.append(["bash", "integrations/weetodd-mlx/scripts/test.sh"])
     if "studio" in selected:
-        checks.append(["swift", "test", "--package-path", "studio", "--jobs", "2"])
-    if "remote" in selected:
-        checks.append(["swift", "test", "--package-path", "integrations/drawthings-client",
+        checks.append(["swift", "test", "--build-system", "native", "--package-path", "studio",
                        "--jobs", "2"])
+    if "remote" in selected:
+        checks.append(["swift", "test", "--build-system", "native", "--package-path",
+                       "integrations/drawthings-client", "--jobs", "2"])
     return checks
 
 

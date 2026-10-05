@@ -19,7 +19,7 @@ def digest(path):
         return value.hexdigest()
 
 
-def build_worker(root, *, swift="swift", env=None, build_arguments=()):
+def build_worker(root, *, swift="swift", env=None, build_arguments=("--build-system", "native")):
     package = Path(root) / "integrations/h3-native-worker"
     subprocess.run(
         [

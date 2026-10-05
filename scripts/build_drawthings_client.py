@@ -50,7 +50,8 @@ subprocess.run(["swift", "package", "--package-path", str(package), "resolve"], 
 for pin in json.loads((package / "Package.resolved").read_text())["pins"]:
     subprocess.run(["swift", "package", "--package-path", str(package), "edit", pin["identity"],
                     "--path", str(root / "dependencies" / pin["identity"])], check=True)
-subprocess.run(["swift", "build", "--package-path", str(package), "-c", "release",
+subprocess.run(["swift", "build", "--build-system", "native", "--package-path", str(package),
+                "-c", "release",
                 "--product", "WeeToddDrawThings"], check=True)
 print(package / ".build/release/WeeToddDrawThings")
 '''
@@ -108,7 +109,8 @@ def main():
     args = parser.parse_args()
     scratch = (args.scratch_path or root / "integrations/drawthings-client/.build").resolve()
     subprocess.run(
-        ["swift", "build", "--package-path", str(root / "integrations/drawthings-client"),
+        ["swift", "build", "--build-system", "native", "--package-path",
+         str(root / "integrations/drawthings-client"),
          "--scratch-path", str(scratch), "-c", "release", "--product", "WeeToddDrawThings"],
         check=True,
     )

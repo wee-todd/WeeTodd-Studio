@@ -133,7 +133,8 @@ No second exported V2 generation or saved V2 ComfyUI graph was run. Voice likene
 naturalness and lip synchronization remain unreviewed. The official 2.5 Ingredients payload passed its
 pinned hash and installed Swift header preflight after access approval. Its first 121-frame native
 take omitted the second character. A clearer two-shot prompt retained both characters with the
-unchanged default and experimental CFG++ samplers; human audiovisual acceptance remains open.
+unchanged default and experimental CFG++ samplers. The default two-character take received
+human audiovisual approval on 2026-10-04; other compositions and CFG++ quality remain separate.
 The retained supported 2.3 collage failure has no proven engine cause. The historical 31-check route ledger and
 the remaining feature inventory retain separate scopes.
 

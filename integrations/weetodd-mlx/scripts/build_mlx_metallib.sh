@@ -1,5 +1,6 @@
 #!/bin/bash
-# SwiftPM does not compile Metal resources. Build the non-JIT kernels from the
+# The explicitly selected native SwiftPM build system does not compile Metal
+# resources. Build the non-JIT kernels from the
 # exact resolved MLX source; the remainder are supplied by MLX's JIT backend.
 set -euo pipefail
 package_root="$(cd "$(dirname "$0")/.." && pwd)"

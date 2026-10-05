@@ -599,9 +599,11 @@ open "studio/.build/WeeTodd Studio.app"
 ```
 
 The build resolves the Swift compiler, macOS SDK and platform macro plugins from one Xcode
-installation. It compiles a small `@State`, `@Binding` and `@Observable` probe before building
-Studio, so missing SwiftUI macros produce an early toolchain error. Shell overrides for a
-separately installed Swift compiler or SDK do not override the selected Xcode.
+installation. Before building Studio, it compiles and links a tiny Metal kernel and compiles a
+small `@State`, `@Binding` and `@Observable` probe. Missing Metal components or SwiftUI macros
+produce an early toolchain error. Metal tools resolve through the selected Xcode's `xcrun`
+without a `TOOLCHAINS` override, allowing Apple's separately installed Metal Toolchain to resolve.
+Shell overrides for a separately installed Swift compiler or SDK do not override the selected Xcode.
 
 Selection order is `--xcode`, then `DEVELOPER_DIR`, then `xcode-select -p`. For example:
 
@@ -611,13 +613,29 @@ python3 scripts/build_studio_app.py --configuration release --xcode /Application
 
 This does not change the system-wide developer directory. A single Xcode installation is enough;
 keeping multiple versions is optional. The argument also accepts an Xcode `Contents/Developer`
-directory. Open a newly installed Xcode and complete its component setup before building.
+directory. Open a newly installed Xcode and complete its license and component setup before
+building. If the Metal preflight reports a missing toolchain, install **Metal Toolchain** in
+Xcode Settings > Components, or use `xcodebuild -downloadComponent MetalToolchain` with that
+Xcode selected. See [Apple's component setup guide](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components).
 
 **Xcode 27:** Apple changed SwiftUI's `@State` to a macro, which requires the matching platform
 plugin. The build supplies that plugin search path explicitly. Updating Xcode does not change
-Studio's macOS 14 deployment target or require a Swift 6 language-mode migration. The last
-completed release qualification used Xcode 26.4; full Xcode 27 build and test qualification is
-pending an installed Xcode 27 toolchain. See [Apple's State documentation](https://developer.apple.com/documentation/SwiftUI/State)
+Studio's macOS 14 deployment target or require a Swift 6 language-mode migration. The
+2026-10-05 release build passed with Xcode 27.0, Swift 6.4 and macOS SDK 27.0 on macOS 27.0
+after license and Metal component setup. Packaged signature verification, an isolated GUI
+launch and the packaged MSR V2 worker preflight passed. Combined core/Studio/remote validation
+passed 3,264 Python tests (six skips). Swift executed 1,990 tests: 1,808 passed and
+182 optional tests were skipped, with zero failures. No model generation or performance benchmark was repeated for this packaging update.
+Clean-Mac distribution and macOS 14 runtime qualification remain separate.
+Swift 6.4 also changed SwiftPM's
+default to SwiftBuild. Studio's app and worker builds, optional Draw Things helper and its
+corresponding-source rebuild script, validation profiles and MLX test script
+explicitly select `--build-system native`, preserving the existing `.build/release` packaging
+and custom Metal-library build. This selects the build system, not an inference backend or
+older compiler. Swift 6.4 still supports this compatibility mode but warns that the option is
+deprecated. Future build-system migration must qualify MLX Metal-tool discovery and artifact
+paths before removing the selection. See [Swift 6.4's release notes](https://www.swift.org/blog/swift-6.4-released/),
+[Apple's State documentation](https://developer.apple.com/documentation/SwiftUI/State)
 and [Xcode system requirements](https://developer.apple.com/xcode/system-requirements/) for the
 build host requirements of the Xcode version you install.
 
@@ -880,7 +898,8 @@ hardlinked on the same volume or linked across volumes; keep the original files 
 Cancellation preserves partial downloads without publishing an incomplete package. Progress
 and **Cancel** appear in the setup window. The native path uses a Studio Keychain token or
 `HF_TOKEN`; it never writes the token into download state, provenance or logs.
-The merged native catalog has 23 pinned packages, including the duration head, raw Dev transformer, distilled refinement adapter and one-step Diffusion VAE.
+The merged native catalog has 24 pinned packages, including the duration head, raw Dev transformer,
+distilled refinement adapter, one-step Diffusion VAE and MSR V2 adapter.
 It also includes direct H3 transformer/support, Qwen, video VAE, folded audio VAE and tokenizer, plus
 supported task adapters. This field coverage does not establish every checkpoint/task combination;
 source terms, gating and structural admission still apply to every file. H3 image/endpoint tasks
@@ -2052,7 +2071,7 @@ it becomes an available Motion Fidelity clip option.
   a project/job. Disposable decoded-audio and preview-mix caches have automatic bounded eviction;
   saved driver/export artifacts remain durable.
 
-Run `swift test --package-path studio` and
+Run `swift test --build-system native --package-path studio` and
 `python -m pytest -q tests/test_studio_bridge.py tests/test_studio_packaging.py tests/test_studio_lora.py` before packaging.
 The packaging tests exercise a source tree without `.agents/`, stale-bundle replacement, and failure
 preservation without downloading Python or installing models.

@@ -1,5 +1,23 @@
 # WeeTodd Studio implementation status
 
+Xcode 27 source-build compatibility follow-up, 2026-10-05: app/worker packaging and validation
+explicitly retain SwiftPM's `native` build system after Swift 6.4 changed the default to
+SwiftBuild. A tiny Metal compile/link preflight now precedes the existing SwiftUI macro probe
+and full app build, reporting missing Metal components before expensive compilation.
+47 focused tests pass across toolchain selection, app/helper packaging, validation routing
+and README contracts. The README now places setup before expandable qualification history.
+Standalone worker builders, the optional Draw Things helper and its corresponding-source
+rebuild script also retain the native build system and expected artifact paths.
+After license and Metal component setup, the release app built successfully with Xcode 27.0,
+Swift 6.4 and macOS SDK 27.0 on macOS 27.0. Its packaged signature, isolated GUI launch and
+packaged MSR V2 worker preflight passed. Combined core/Studio/remote validation passed:
+3,264 Python tests (six skips), 208 shared Swift tests (ten skips), 751 MLX tests (121 skips),
+972 Studio tests (47 skips) and 59 Draw Things tests (four skips), with zero failures.
+The Swift totals are 1,808 passed and 182 skipped across 1,990 executed tests.
+The explicit native build-system option is supported but deprecated in Swift 6.4; future
+SwiftBuild adoption needs separate Metal discovery and packaging qualification. This build
+and launch check does not establish new model quality, speed, memory or clean-Mac qualification.
+
 Current Swift feature scope 2026-10-04: native H3/LTX defaults and the previously qualified
 Studio/CLI/saved-Comfy route/lifecycle evidence remain distinct from new creative contracts.
 The original 31-item migration ledger has 29 completed checks; matched performance and broad
@@ -41,7 +59,7 @@ continuation, reference mixture or new refinement. Saved-tail formats/imports re
 source and model identities. Existing composable ComfyUI engines remain separate from the
 recipe-backed native Swift worker.
 
-Native setup offers 23 pinned packages, including Dev source, its rank-450 refinement adapter,
+At that checkpoint, native setup offered 23 pinned packages, including Dev source, its rank-450 refinement adapter,
 the duration head and one-step Diffusion VAE. Raw Dev-to-Q8 conversion is native, bounded, cancellable and atomic;
 one actual installed conversion took 170.4 seconds and Studio adoption checks passed.
 Gemma/other source conversion routes and full clean-machine acquisition remain separately qualified.

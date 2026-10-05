@@ -1,5 +1,6 @@
 """Shipping must work without private skills and preserve the last usable bundle."""
 
+import ast
 import importlib
 import json
 import plistlib
@@ -230,6 +231,17 @@ def test_optional_drawthings_distribution_includes_editable_source_and_verifies_
         assert "helper/Package.swift" in names
         assert "rebuild.py" in names
         assert not any(".git" in Path(name).parts for name in names)
+        rebuild = ast.parse(archive.extractfile("rebuild.py").read().decode())
+        builds = [node.args[0] for node in ast.walk(rebuild)
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                  and node.func.attr == "run" and node.args
+                  and isinstance(node.args[0], ast.List)
+                  and len(node.args[0].elts) >= 2
+                  and isinstance(node.args[0].elts[1], ast.Constant)
+                  and node.args[0].elts[1].value == "build"]
+        assert len(builds) == 1
+        flags = [item.value for item in builds[0].elts if isinstance(item, ast.Constant)]
+        assert flags[flags.index("--build-system") + 1] == "native"
     monkeypatch.setattr(packager.subprocess, "run", skip_codesign)
     app = packager.package_app(source, "release", distribution)
     assert (app / "Contents/MacOS/WeeToddDrawThings").read_text() == "helper fixture"

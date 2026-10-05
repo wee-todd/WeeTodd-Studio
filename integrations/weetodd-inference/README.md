@@ -45,8 +45,8 @@ A failed event alone never proves that a worker released its memory.
 Run on Apple Silicon macOS with Swift 6 and a Metal device:
 
 ```bash
-swift test --package-path integrations/weetodd-inference
-swift build --package-path integrations/weetodd-inference -c release
+swift test --build-system native --package-path integrations/weetodd-inference
+swift build --build-system native --package-path integrations/weetodd-inference -c release
 ```
 
 The core project validation profile also runs these Swift tests. Metal tests report a skip when no
@@ -169,7 +169,7 @@ Use the exporter's `--device cpu`/`--device gpu` options to reproduce the refere
 
 ```bash
 WEETODD_DENOISER_WEIGHTS=PAGED_ROOT WEETODD_DENOISER_TRACE=FIXTURE_PREFIX \
-  swift test --package-path integrations/weetodd-inference -c release --filter InstalledDenoiserTests
+  swift test --build-system native --package-path integrations/weetodd-inference -c release --filter InstalledDenoiserTests
 ```
 
 `WEETODD_DENOISER_TRACE_STACK=1` additionally checks the stack; adding
@@ -260,7 +260,7 @@ bounded dense checkpoint mapping window to 4 MiB. Output conditioning remained b
 identical. The read-window change adds no persistent weight cache or second raw payload copy.
 
 ```bash
-swift build --package-path integrations/weetodd-inference -c release
+swift build --build-system native --package-path integrations/weetodd-inference -c release
 integrations/weetodd-inference/.build/release/WeeToddLTXSamplingProbe \
   GPU_FIXTURE_PREFIX CPU_FIXTURE_PREFIX PAGED_ROOT 2 REPORT.json
 integrations/weetodd-inference/.build/release/WeeToddLTXPipelineProbe --preflight REQUEST.json
