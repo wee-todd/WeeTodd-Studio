@@ -36,6 +36,28 @@ final class NativeH3VDNTests: XCTestCase {
     ["project":try JSONSerialization.jsonObject(with:JSONEncoder().encode(project)),
      "runtime":runtime,"clipID":project.clips[0].id.uuidString,"globalAssets":[]]
   }
+  func testFastH3ProfilesExposeFrozenFourEvaluationsAndRejectOverrides() throws {
+    let(root,base,original,runtime)=try fixture()
+    for variant in ["dense-v1","vsa-v1"] {
+      var recipe = base;recipe.removeValue(forKey:"vdn");recipe.removeValue(forKey:"loras")
+      recipe["fasth3"] = ["variant":variant]
+      var config = recipe["config"] as! [String:Any];config["steps"] = 5;recipe["config"] = config
+      try save(recipe,root)
+      let catalog = try NativeH3Preparation.catalog(directory:root.path)
+      let generation = try XCTUnwrap(catalog.first?["generation"] as? [String:Any])
+      XCTAssertEqual(generation["fasth3"] as? Bool,true)
+      let controls = try XCTUnwrap(generation["controls"] as? [String:Any])
+      XCTAssertEqual(controls["evaluations"] as? Int,4);XCTAssertEqual(controls["stepsEditable"] as? Bool,false)
+      let result = try NativeH3Preparation.compose(request:request(original,runtime))
+      XCTAssertEqual(((result["recipe"] as? [String:Any])?["fasth3"] as? [String:String])?["variant"],variant)
+      var changed = original;changed.clips[0].generationSelection = .init(task:"t2v")
+      changed.clips[0].generationSelection!.steps = 8
+      XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(changed,runtime)))
+      changed = original;changed.clips[0].profileID = "auto"
+      XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(changed,runtime)))
+    }
+  }
+
   func testCatalogAdmitsVDNWithFrozenControlsAndCompleteSourceIdentity() throws {
     let(root,recipe,project,runtime)=try fixture()
     let catalog=try NativeH3Preparation.catalog(directory:root.path)
@@ -85,8 +107,8 @@ final class NativeH3VDNTests: XCTestCase {
     let(root,_,_,_)=try fixture()
     let preset=try XCTUnwrap(NativeModelSetup.catalog().first { $0.id=="swift-h3-vdn8" })
     XCTAssertEqual(Set(preset.components.filter { $0.importOnly == true }.map(\.key)),["vdn_transformer","vdn_stage","vdn_input_grid"])
-    XCTAssertTrue(NativeModelSetup.catalog().filter { $0.id != preset.id }.flatMap(\.components).allSatisfy { $0.importOnly != true })
-    XCTAssertFalse(NativeModelSetup.catalog().contains { $0.id=="swift-h3-vdn50" })
+    XCTAssertTrue(NativeModelSetup.catalog().filter { $0.id != preset.id && $0.id != "swift-h3-vdn50" && !$0.id.hasPrefix("swift-h3-fast-") }.flatMap(\.components).allSatisfy { $0.importOnly != true })
+    XCTAssertTrue(NativeModelSetup.catalog().contains { $0.id=="swift-h3-vdn50" })
     var selected:[String:String]=[:]
     for field in preset.components {
       let url=root.appendingPathComponent(field.key=="vdn_stage" ? "stage-dmd-step-250":field.key)
@@ -106,4 +128,32 @@ final class NativeH3VDNTests: XCTestCase {
     selected["vdn_stage"]=root.path
     XCTAssertThrowsError(try NativeModelSetup.recipe(preset:preset,selected:selected,memoryMode:.lowerMemory))
   }
+  func testFiftyStepProfileHasSingleAdapterAndFiftyFrozenEvaluations() throws {
+    let(root,original,originalProject,runtime)=try fixture()
+    var recipe=original
+    let stage="/models/vdn/stage-b-step-2000"
+    var fields=recipe["vdn"] as! [String:Any]
+    fields["stage"]="stage-b-step-2000";fields["checkpoint"]=stage
+    fields["model_spec"]=stage+"/model_spec.json";fields["linear_branch"]=stage+"/linear_branch/model.safetensors"
+    fields["default_adapter"]=stage+"/adapters/default/adapter_model.safetensors"
+    fields["turbo_adapter"]=NSNull();fields["schedule_points"]=51;recipe["vdn"]=fields
+    var config=recipe["config"] as! [String:Any];config["steps"]=51;recipe["config"]=config
+    recipe["loras"]=["version":1,"adapters":[["path":fields["default_adapter"]!,"strength":1,
+      "profile":"standard","qkv_layout":"contiguous_qkv","start_after_evaluations":0]]]
+    try save(recipe,root)
+    let catalog=try NativeH3Preparation.catalog(directory:root.path)
+    XCTAssertEqual(catalog.count,1)
+    XCTAssertEqual(catalog.first?["name"] as? String,"MiniMax H3 · VDN 50-step · Swift")
+    let generation=try XCTUnwrap(catalog.first?["generation"] as? [String:Any])
+    XCTAssertEqual((generation["controls"] as? [String:Any])?["evaluations"] as? Int,50)
+    var project=originalProject
+    project.clips[0].generationSelection = .init(task:"t2v");project.clips[0].generationSelection!.steps=50
+    XCTAssertNoThrow(try NativeH3Preparation.compose(request:request(project,runtime)))
+    project.clips[0].generationSelection!.steps=8
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    let sources=NativeH3VDNProfile.sources(recipe)
+    XCTAssertFalse(sources.contains { $0.contains("turbo") })
+    XCTAssertNotNil(NativeModelSetup.catalog().first { $0.id=="swift-h3-vdn50" })
+  }
+
 }

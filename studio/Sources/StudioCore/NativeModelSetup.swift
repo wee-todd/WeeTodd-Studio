@@ -171,7 +171,18 @@ public enum NativeModelSetup {
         component("vdn_transformer","Original pruned H3 Q8 pages",["directory"],importOnly:true),
         component("vdn_stage","VDN stage-dmd-step-250 folder",["directory"],importOnly:true),
         component("vdn_input_grid","Original-width H3 SiLU timestep grid",["file"],importOnly:true)])
-    return ordinary + [h3Fun,vdn] + dfr + references + [union] + controls + [crossviewIngredients] + guided + automaticDuration
+    let vdn50=ModelSetupPreset(id:"swift-h3-vdn50",name:"MiniMax H3 · VDN 50-step · Swift",engine:"h3",task:"t2v",
+      description:"Experimental fifty-evaluation text-to-video with the released standard VDN adapter and stage-b-step-2000. Reuse installed H3 Q8 pages. References, continuity and extra LoRAs are unavailable; the worker validates the complete stack.",
+      components:h3.filter { $0.key != "transformer" } + [
+        component("vdn_transformer","Original pruned H3 Q8 pages",["directory"],importOnly:true),
+        component("vdn_stage","VDN stage-b-step-2000 folder",["directory"],importOnly:true)])
+    let fast = [("dense","dense-v1"),("vsa","vsa-v1")].map { label,variant in
+      ModelSetupPreset(id:"swift-h3-fast-"+label,name:"MiniMax H3 · FastH3 "+label.uppercased()+" · Swift",engine:"h3",task:"t2v",
+        description:"Experimental Preview v1 text-to-audiovisual generation with four Euler evaluations. Reuse existing affine Q8 pages in place. No extra LoRAs, reference inputs or continuity; the worker validates the named trained checkpoint.",
+        components:h3.filter { $0.key != "transformer" } + [
+          component("fast_"+label+"_transformer","FastH3 "+variant+" Q8 pages",["directory"],importOnly:true)])
+    }
+    return ordinary + [h3Fun,vdn,vdn50] + fast + dfr + references + [union] + controls + [crossviewIngredients] + guided + automaticDuration
   }
 
   public static func recipe(preset: ModelSetupPreset, selected: [String: String],
@@ -288,24 +299,34 @@ public enum NativeModelSetup {
     let controlFamilies = ["swift-ltx25-motion-track": "motion_track",
       "swift-ltx25-crossview": "crossview_warp", "swift-ltx25-crossview-ingredients": "crossview_ingredients"]
     if let family = controlFamilies[preset.id] { conditioning["control_family"] = family }
-    if preset.id=="swift-h3-vdn8" {
+    if preset.id.hasPrefix("swift-h3-fast-") {
+      let sparse = preset.id == "swift-h3-fast-vsa"
+      components["transformer"] = components.removeValue(forKey:sparse ? "fast_vsa_transformer":"fast_dense_transformer")
+      config["steps"] = 5;config["width"] = 672;config["height"] = 384;config["duration_seconds"] = 5.0
+      return ["format":"weetodd-headless-v2","engine":"h3","candidate":preset.id,
+        "components":components,"config":config,"fasth3":["variant":sparse ? "vsa-v1":"dense-v1"],
+        "prompt":"A continuous scene with synchronized sound.","conditioning":conditioning]
+    }
+    if ["swift-h3-vdn8","swift-h3-vdn50"].contains(preset.id) {
+      let turbo=preset.id=="swift-h3-vdn8",points=preset.id=="swift-h3-vdn8" ? 9:51
+      let stageName=turbo ? "stage-dmd-step-250":"stage-b-step-2000"
       let stage=URL(fileURLWithPath:components.removeValue(forKey:"vdn_stage") as! String)
-      guard stage.lastPathComponent=="stage-dmd-step-250" else {
-        throw StudioError.invalid("Choose the released stage-dmd-step-250 VDN folder for eight-step generation.")
+      guard stage.lastPathComponent==stageName else {
+        throw StudioError.invalid("Choose the released \(stageName) VDN folder for this preset.")
       }
-      let grid=components.removeValue(forKey:"vdn_input_grid") as! String
+      let grid=components.removeValue(forKey:"vdn_input_grid") as? String
       components["transformer"]=components.removeValue(forKey:"vdn_transformer")
       let paths=[stage.appendingPathComponent("adapters/default/adapter_model.safetensors").path,
         stage.appendingPathComponent("adapters/turbo/adapter_model.safetensors").path]
-      config["steps"]=9;config["width"]=672;config["height"]=384;config["duration_seconds"]=5.0
+      config["steps"]=points;config["width"]=672;config["height"]=384;config["duration_seconds"]=5.0
       let fields:[String:Any]=["repository":stage.deletingLastPathComponent().path,"checkpoint":stage.path,
         "model_spec":stage.appendingPathComponent("model_spec.json").path,
         "linear_branch":stage.appendingPathComponent("linear_branch/model.safetensors").path,
-        "default_adapter":paths[0],"turbo_adapter":paths[1],"schedule_points":9,
-        "stage":"stage-dmd-step-250","inference_backend":"verified"]
-      let adapters:[[String:Any]]=paths.enumerated().map { index,path in
+        "default_adapter":paths[0],"turbo_adapter":turbo ? paths[1] as Any:NSNull(),"schedule_points":points,
+        "stage":stageName,"inference_backend":"verified"]
+      let adapters:[[String:Any]]=Array(paths.prefix(turbo ? 2:1)).enumerated().map { index,path in
         ["path":path,"strength":1.0,"profile":index==0 ? "standard":"turbo","qkv_layout":"contiguous_qkv",
-         "start_after_evaluations":0,"adaln_input_grid":index==1 ? grid:NSNull()]
+         "start_after_evaluations":0,"adaln_input_grid":index==1 ? grid! as Any:NSNull()]
       }
       return ["format":"weetodd-headless-v2","engine":"h3","candidate":preset.id,
         "components":components,"config":config,"vdn":fields,"loras":["version":1,"adapters":adapters],
@@ -413,6 +434,16 @@ private enum NativeModelInspector {
   static func matches(_ url: URL, key: String, engine: String, task: String) throws -> Bool {
     let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     if engine == "h3" {
+      if ["fast_dense_transformer","fast_vsa_transformer"].contains(key) {
+        guard directory,let manifest = try? document(url.appendingPathComponent("paged_manifest.json")),
+          manifest["format"] as? String == "weetodd-h3-paged-v1",manifest["num_blocks"] as? Int == 50,
+          let fixed = manifest["fixed"] as? [String:Any],fixed["file"] as? String == "pages/fixed.safetensors",
+          let tensors = try? header(url.appendingPathComponent("pages/fixed.safetensors")) else { return false }
+        let sparse = key == "fast_vsa_transformer"
+        return manifest["source"] as? String == "FastVideo/FastVideo-FastH3-4-step-Preview-v1-"+(sparse ? "VSA":"Dense")+"-DataFree"
+          && tensors["adaln_t_table"] == nil
+          && (tensors["token_refiner.blocks.0.attn.qkv_proj.weight"] as? [String:Any])?["dtype"] as? String == "U32"
+      }
       if key=="vdn_transformer" {
         guard directory,let manifest=try? document(url.appendingPathComponent("paged_manifest.json")),
           manifest["format"] as? String == "weetodd-h3-paged-v1",manifest["num_blocks"] as? Int == 50,
@@ -427,11 +458,11 @@ private enum NativeModelInspector {
           && (tensors["silu_t_emb_grid"] as? [String:Any])?["dtype"] as? String == "BF16"
       }
       if key=="vdn_stage" {
-        guard directory,url.lastPathComponent=="stage-dmd-step-250",
+        guard directory,["stage-dmd-step-250","stage-b-step-2000"].contains(url.lastPathComponent),
           let spec=try? document(url.appendingPathComponent("model_spec.json")),spec["format_version"] as? Int == 2,
           let tensors=try? header(url.appendingPathComponent("linear_branch/model.safetensors")),
           tensors.keys.filter({ $0 != "__metadata__" }).count==800 else { return false }
-        for name in ["default","turbo"] {
+        for name in (url.lastPathComponent=="stage-dmd-step-250" ? ["default","turbo"]:["default"]) {
           guard (try? document(url.appendingPathComponent("adapters/\(name)/adapter_config.json")))?["type"] as? String == "lora",
             FileManager.default.fileExists(atPath:url.appendingPathComponent("adapters/\(name)/adapter_model.safetensors").path) else { return false }
         }

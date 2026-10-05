@@ -98,7 +98,7 @@ public enum H3FinalLayer {
     func outputHead(_ suffix: String, rows: Int) throws -> MLXArray {
       let weight = try read(suffix + ".weight", shape: [rows, 5376],
         dtype: layout.curveRank == nil ? "BF16" : "F32").asType(.float32)
-      let bias = try read(suffix + ".bias", shape: [rows], dtype: "F32")
+      let bias = try read(suffix + ".bias", shape: [rows], dtype: layout.fastVariant == nil ? "F32" : "BF16").asType(.float32)
       let projected = addMM(bias, normalized.asType(.float32), weight.T)
       eval(projected)
       return projected

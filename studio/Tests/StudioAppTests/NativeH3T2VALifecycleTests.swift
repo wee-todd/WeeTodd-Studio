@@ -95,7 +95,7 @@ final class NativeH3T2VALifecycleTests: XCTestCase {
     guard store.error == nil else { throw StudioError.invalid(store.error!) }
     let prepared = URL(fileURLWithPath: try XCTUnwrap(store.preparedRecipe))
     let preparedRecipe = try JSONSerialization.jsonObject(with: Data(contentsOf: prepared)) as! [String: Any]
-    for key in ["config", "components", "conditioning"] + (profile["vdn"] == nil ? []:["vdn","loras"]) {
+    for key in ["config", "components", "conditioning"] + (profile["vdn"] == nil ? []:["vdn","loras"]) + (profile["fasth3"] == nil ? []:["fasth3"]) {
       guard NSDictionary(dictionary: try XCTUnwrap(preparedRecipe[key] as? [String: Any]))
         .isEqual(to: try XCTUnwrap(profile[key] as? [String: Any])) else {
         throw StudioError.invalid("T2VA preparation changed the frozen \(key); stop before generation.")
@@ -149,9 +149,16 @@ final class NativeH3T2VALifecycleTests: XCTestCase {
     let receiptURL = takeDirectory.appendingPathComponent("result.json")
     let receipt = try JSONSerialization.jsonObject(with: Data(contentsOf: receiptURL)) as! [String: Any]
     if profile["vdn"] != nil {
-      guard let vdn=receipt["vdn"] as? [String:Any],vdn["variant"] as? String == "8_step",
-        vdn["adapterStack"] as? [String] == ["default","turbo"],vdn["schedulePoints"] as? Int == 9 else {
+      guard let vdn=receipt["vdn"] as? [String:Any],vdn["variant"] as? String == ((profile["config"] as? [String:Any])?["steps"] as? Int == 51 ? "50_step":"8_step"),
+        vdn["adapterStack"] as? [String] == ((profile["config"] as? [String:Any])?["steps"] as? Int == 51 ? ["default"]:["default","turbo"]),
+        vdn["schedulePoints"] as? Int == (profile["config"] as? [String:Any])?["steps"] as? Int else {
         throw StudioError.invalid("The Studio VDN take lost its selected stage or mandatory adapter stack.")
+      }
+    }
+    if let fields = profile["fasth3"] as? [String:Any] {
+      guard let fast = receipt["fasth3"] as? [String:Any],fast["variant"] as? String == fields["variant"] as? String,
+        fast["evaluations"] as? Int == 4 else {
+        throw StudioError.invalid("The FastH3 take lost its trained variant or four-evaluation schedule.")
       }
     }
     guard receipt["status"] as? String == "complete", receipt["task"] as? String == "t2va",
@@ -176,7 +183,7 @@ final class NativeH3T2VALifecycleTests: XCTestCase {
       "requestedDuration": original.duration, "modelFrames": modelFrames,
       "modelDuration": Double(modelFrames) / 24, "seed": original.seed,
       "renderAndAcceptanceSeconds": Date().timeIntervalSince(started), "otherClipsUnchanged": true,
-      "scope": profile["vdn"] == nil ? "Actual new ordinary T2VA Studio lifecycle only; no inferred Comfy acceptance or visual quality approval." : "Actual new eight-step VDN T2VA Studio lifecycle; exact recipe and adapters retained; no inference from this to other tasks or fifty-step support."]
+      "scope": profile["fasth3"] != nil ? "Actual new selected FastH3 T2VA Studio lifecycle; exact trained variant and four-evaluation schedule retained; no inferred quality approval or support for other tasks." : profile["vdn"] == nil ? "Actual new ordinary T2VA Studio lifecycle only; no inferred Comfy acceptance or visual quality approval." : "Actual new selected VDN T2VA Studio lifecycle; exact released schedule and adapters retained; no inference from this to other variants or tasks."]
     try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
       .write(to: root.appendingPathComponent("studio-qualification.json"))
   }

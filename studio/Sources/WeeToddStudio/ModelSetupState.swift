@@ -257,9 +257,13 @@ import StudioCore
     let recipePath = resultPath
     store.editClip {
       $0.profileID = recipePath
-      if preset.id=="swift-h3-vdn8" {
+      if preset.id.hasPrefix("swift-h3-fast-") {
+        if $0.generationSelection == nil { $0.generationSelection = GenerationSelection(task:"t2v") }
+        $0.generationSelection?.steps = 4;$0.generationSelection?.h3SamplingMethod = .euler
+      }
+      if ["swift-h3-vdn8","swift-h3-vdn50"].contains(preset.id) {
         if $0.generationSelection==nil { $0.generationSelection=GenerationSelection(task:"t2v") }
-        $0.generationSelection?.steps=8;$0.generationSelection?.h3SamplingMethod = .euler
+        $0.generationSelection?.steps=preset.id=="swift-h3-vdn8" ? 8:50;$0.generationSelection?.h3SamplingMethod = .euler
       }
     }
     error = ""

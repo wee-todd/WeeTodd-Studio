@@ -37,7 +37,7 @@ public enum H3InputProjection {
     let stem = layout.prefix + kind.rawValue
     let weightName = stem + ".weight"
     let biasName = stem + ".bias"
-    let biasDtype = kind == .condition ? "BF16" : "F32"
+    let biasDtype = kind == .condition || layout.fastVariant != nil ? "BF16" : "F32"
     let weightDtype = layout.curveRank != nil && kind != .condition ? "F32" : "BF16"
     guard let weightInfo = file.tensors[weightName],
       weightInfo.dtype == weightDtype,
@@ -53,7 +53,7 @@ public enum H3InputProjection {
         : MLXArray(bytes, [5376, kind.columns], type: UInt16.self).view(dtype: .bfloat16)
     }
     let bias = try file.withTensorBytes(named: biasName) { bytes in
-      kind == .condition
+      biasDtype == "BF16"
         ? MLXArray(bytes, [5376], type: UInt16.self).view(dtype: .bfloat16)
         : MLXArray(bytes, [5376], type: Float.self)
     }
@@ -61,7 +61,7 @@ public enum H3InputProjection {
     if kind == .condition {
       result = addMM(bias, input.asType(.bfloat16), weight.T)
     } else {
-      result = addMM(bias, input.asType(.float32), weight.asType(.float32).T)
+      result = addMM(bias.asType(.float32), input.asType(.float32), weight.asType(.float32).T)
     }
     eval(result)
     try file.checkUnchanged(at: tensorURL)

@@ -243,6 +243,7 @@ public struct GenerationDescriptor: Codable, Equatable {
   public var pipelineMode: String? = nil
   public var samplingMethod: String? = nil
   public var vdn: Bool? = nil
+  public var fasth3: Bool? = nil
 }
 
 public struct AccelerationSettings: Codable, Equatable {

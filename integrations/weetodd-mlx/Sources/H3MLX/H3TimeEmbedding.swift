@@ -77,9 +77,9 @@ public enum H3TimeEmbedding {
       }
     }
     let firstWeight = try read("time_embedder.proj_in.weight", shape: [5376, 256], dtype: "BF16")
-    let firstBias = try read("time_embedder.proj_in.bias", shape: [5376], dtype: "F32")
+    let firstBias = try read("time_embedder.proj_in.bias", shape: [5376], dtype: layout.fastVariant == nil ? "F32" : "BF16")
     let secondWeight = try read("time_embedder.proj_out.weight", shape: [2688, 5376], dtype: "BF16")
-    let secondBias = try read("time_embedder.proj_out.bias", shape: [2688], dtype: "F32")
+    let secondBias = try read("time_embedder.proj_out.bias", shape: [2688], dtype: layout.fastVariant == nil ? "F32" : "BF16")
     let indices = MLXArray((0..<128).map(Float.init))
     let exponent = (-Float(log(10_000.0)) * indices) / Float(128)
     let frequencies = MLX.exp(exponent)

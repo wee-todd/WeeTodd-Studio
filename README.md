@@ -445,13 +445,18 @@ Swift nodes preserve native DiffVAE selection and settings; the legacy typed com
 still uses its maintained Python model pipeline. Swift MSR V2 supports one to five images
 and up to two image-linked voice references. Clean audio prefixes generate a new soundtrack
 rather than copying reference audio. Native VDN has an experimental Swift T2VA worker
-route with released hybrid attention and mandatory original/Turbo adapters. Eight-step pruned
+route with released hybrid attention and stage-specific mandatory adapters. Eight-step pruned
 H3 requires the original-width SiLU timestep input grid; unpruned H3 uses its own encoder.
-Studio offers an explicitly selected experimental eight-step T2VA preset with guided in-place
-setup and fixed Euler/adapter settings. The reviewed original-Q8 boxing take was human-approved
-on 2026-10-04. Endpoint/reference combinations, the fifty-step Studio route, broader audiovisual
-quality and matched performance remain unqualified. The existing typed VDN ComfyUI graphs
-retain their maintained Python engine. Owner-approved access allowed the
+Studio offers explicitly selected experimental eight- and fifty-evaluation T2VA presets,
+with guided in-place setup and fixed released Euler/adapter settings. The reviewed original-Q8
+eight-step boxing take was human-approved on 2026-10-04. FastH3 Preview v1 also has explicit
+Swift dense and trained-VSA T2VA presets with four evaluations and existing affine-Q8 pages.
+These specialized presets are excluded from Automatic and reject unsupported mixtures before
+weighted work. Actual variant/host evidence is recorded in [STATUS](STATUS.md); endpoint/reference
+combinations, broader quality and matched performance are separate qualifications. Swift excludes
+Python approximation caches/forecasting and Python-only optimizer switches; unsupported settings
+fail rather than silently changing inference. The existing typed VDN and cache-enabled composable
+ComfyUI graphs retain their maintained Python engines. Owner-approved access allowed the
 new official 2.5 Ingredients adapter to pass its pinned payload hash and installed Swift header preflight.
 The first 121-frame native take omitted the second character. A clearer two-shot prompt included
 both identities with the unchanged default and experimental CFG++ samplers. The official
@@ -2185,6 +2190,11 @@ Preflight verifies the stage-one adapter, stage-two adapter, and selected Pixel-
 
 ## FastH3 production profile
 
+The composable ComfyUI profiles in this section use the maintained Python plus MLX engine.
+Swift's explicit Dense and VSA presets execute the complete fifty-block student through Studio
+or the saved-recipe Swift node. Swift does not expose the forty-layer approximation or the
+earlier compact indexed Metal consumer. See [current Swift controls](studio/README.md#current-swift-controls-and-qualification).
+
 Use the [FastH3 compact indexed Metal workflow](workflows/performance/t2v/h3_fasth3_compact_vsa_performance.json)
 for the native FastH3 VSA student. FastH3's DiT is approximately 35.05B parameters; the 22B label
 seen in LTX 2.5 material does not describe H3. The workflow applies five schedule points and four
@@ -2362,12 +2372,13 @@ video/audio decode, and mux; shared text encoding is excluded. Peaks are MLX all
 
 ## VDN-H3 experimental integration
 
-Studio provides **MiniMax H3 · VDN 8-step · Swift** under **Settings → Model
-setup**. It links compatible pruned Q8 pages, the released stage and original-width timestep grid
-in place, validates them with the Swift worker and requires explicit recipe selection. Its
-eight Euler evaluations and two strength-1 adapters are fixed; references, extra LoRAs and
-continuity are rejected. Fifty-step native admission remains worker-only. See
-[guided setup](studio/README.md#guided-model-setup).
+Studio provides explicit **MiniMax H3 · VDN 8-step · Swift** and **VDN 50-step · Swift**
+presets under **Settings → Model setup**. Both link installed components in place and require
+explicit selection. The eight-evaluation variant uses `stage-dmd-step-250`, two strength-1
+adapters and the original-width timestep grid. The fifty-evaluation variant uses
+`stage-b-step-2000` and only its standard strength-1 adapter. References, extra LoRAs and
+continuity are rejected. See [guided setup](studio/README.md#guided-model-setup) and
+[qualification status](STATUS.md) for actual variant and host evidence.
 
 The maintained composable ComfyUI route below uses its separate Python engine. Use the
 [saved UI workflow](workflows/balance/t2v/h3_vdn_8_step_experimental.json) or its

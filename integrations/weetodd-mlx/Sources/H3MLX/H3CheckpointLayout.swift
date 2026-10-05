@@ -12,7 +12,13 @@ public struct H3TensorInfo: Sendable, Equatable {
 
 /// Inspects the existing direct Comfy checkpoint in place. This does not map or
 /// copy the giant transformer weights; a sampler may stream each checked tensor.
+public enum H3FastVariant: String, Sendable, Codable {
+  case denseV1 = "dense-v1"
+  case vsaV1 = "vsa-v1"
+}
+
 public struct H3CheckpointLayout: Sendable {
+  public let fastVariant: H3FastVariant?
   public let prefix: String
   public let blockCount: Int
   public let quantizedProjections: Int
@@ -73,7 +79,8 @@ public struct H3CheckpointLayout: Sendable {
     try self.init(tensors: tensors, pagedAffine: false, computedRotary: false)
   }
 
-  init(tensors: [String: H3TensorInfo], pagedAffine: Bool, computedRotary: Bool) throws {
+  init(tensors: [String: H3TensorInfo], pagedAffine: Bool, computedRotary: Bool,
+    fastVariant: H3FastVariant? = nil) throws {
     let candidates = ["model.diffusion_model.", "diffusion_model.", ""]
       .filter { tensors[$0 + "video_patch_proj.weight"] != nil }
     guard candidates.count == 1 else {
@@ -82,7 +89,7 @@ public struct H3CheckpointLayout: Sendable {
     let root = candidates[0]
     let curved = root.isEmpty && tensors["adaln_t_table"] ==
       H3TensorInfo(dtype: "F32", shape: [1001, 64])
-    guard !root.isEmpty || curved else {
+    guard !root.isEmpty || curved || (fastVariant != nil && pagedAffine && computedRotary) else {
       throw H3CheckpointError.invalid("Rootless H3 requires the released FL2VA AdaLN curve.")
     }
     func require(_ suffix: String, _ shape: [UInt64], _ dtypes: Set<String> = ["BF16", "F16"]) throws {
@@ -91,16 +98,17 @@ public struct H3CheckpointLayout: Sendable {
         throw H3CheckpointError.invalid("Missing or incompatible H3 tensor: \(suffix)")
       }
     }
+    let ioBiasTypes: Set<String> = fastVariant == nil ? ["F32"] : ["BF16"]
     try require("video_patch_proj.weight", [5376, 96], curved ? ["F32"] : ["BF16", "F16"])
-    try require("video_patch_proj.bias", [5376], ["F32"])
+    try require("video_patch_proj.bias", [5376], ioBiasTypes)
     try require("audio_patch_proj.weight", [5376, 32], curved ? ["F32"] : ["BF16", "F16"])
-    try require("audio_patch_proj.bias", [5376], ["F32"])
+    try require("audio_patch_proj.bias", [5376], ioBiasTypes)
     try require("condition_proj.weight", [5376, 5120])
     try require("condition_proj.bias", [5376])
     try require("final_layer.video_out.weight", [96, 5376], curved ? ["F32"] : ["BF16", "F16"])
-    try require("final_layer.video_out.bias", [96], ["F32"])
+    try require("final_layer.video_out.bias", [96], ioBiasTypes)
     try require("final_layer.audio_out.weight", [32, 5376], curved ? ["F32"] : ["BF16", "F16"])
-    try require("final_layer.audio_out.bias", [32], ["F32"])
+    try require("final_layer.audio_out.bias", [32], ioBiasTypes)
     try require("final_layer.norm.weight", [5376])
     try require("final_layer.adaln_proj.linear.weight", [10752, curved ? 64 : 2688],
       curved ? ["F32"] : ["BF16", "F16"])
@@ -108,12 +116,12 @@ public struct H3CheckpointLayout: Sendable {
       curved ? ["F32"] : ["BF16", "F16"])
     if !curved {
       try require("time_embedder.proj_in.weight", [5376, 256])
-      try require("time_embedder.proj_in.bias", [5376], ["F32"])
+      try require("time_embedder.proj_in.bias", [5376], ioBiasTypes)
       try require("time_embedder.proj_out.weight", [2688, 5376])
-      try require("time_embedder.proj_out.bias", [2688], ["F32"])
+      try require("time_embedder.proj_out.bias", [2688], ioBiasTypes)
     }
     if !computedRotary { try require("rope.inv_freq", [16], ["F32"]) }
-    guard !pagedAffine || curved else { throw H3CheckpointError.invalid("Paged affine H3 requires the FL2VA64 architecture.") }
+    guard !pagedAffine || curved || fastVariant != nil else { throw H3CheckpointError.invalid("Paged affine H3 requires the FL2VA64 architecture.") }
     try require("token_refiner.final_norm.weight", [5376])
     for index in 0..<2 {
       let base = "token_refiner.blocks.\(index)."
@@ -128,7 +136,14 @@ public struct H3CheckpointLayout: Sendable {
         ("attn.out_proj.weight", [5376, 7168]),
         ("mlp.fc1.weight", [28672, 5376]),
         ("mlp.fc2.weight", [5376, 14336]),
-      ] { try require(base + name, shape) }
+      ] {
+        if fastVariant != nil {
+          let stem = base + String(name.dropLast(".weight".count))
+          try require(base + name, [shape[0], shape[1] / 4], ["U32"])
+          try require(stem + ".scales", [shape[0], shape[1] / 64], ["BF16"])
+          try require(stem + ".biases", [shape[0], shape[1] / 64], ["BF16"])
+        } else { try require(base + name, shape) }
+      }
     }
 
     let projections: [(String, [UInt64])] = [
@@ -147,6 +162,11 @@ public struct H3CheckpointLayout: Sendable {
       }
       try require(block + "adaln_proj.linear.bias", [96768],
         curved ? ["F32"] : ["BF16", "F16"])
+      if fastVariant == .vsaV1 {
+        try require(block + "attn.gate_compress.weight", [7168, 5376], ["BF16"])
+      } else if tensors[root + block + "attn.gate_compress.weight"] != nil {
+        throw H3CheckpointError.invalid("A dense H3 checkpoint cannot contain a trained VSA branch.")
+      }
       for (name, shape) in projections {
         let base = root + "blocks.\(index)." + name
         guard let weight = tensors[base + ".weight"], weight.shape == ((pagedAffine && weight.dtype == "U32") ? [shape[0], shape[1] / 4] : shape) else {
@@ -157,7 +177,7 @@ public struct H3CheckpointLayout: Sendable {
         case "F16" where !curved: break
         case "BF16" where curved && name != "adaln_proj.linear": break
         case "F32" where curved && name == "adaln_proj.linear": break
-        case "U32" where pagedAffine && name != "adaln_proj.linear":
+        case "U32" where pagedAffine && (name != "adaln_proj.linear" || fastVariant != nil):
           guard tensors[base + ".scales"] == H3TensorInfo(dtype: "BF16", shape: [shape[0], shape[1] / 64]),
             tensors[base + ".biases"] == H3TensorInfo(dtype: "BF16", shape: [shape[0], shape[1] / 64]) else {
             throw H3CheckpointError.invalid("Incomplete paged affine H3 metadata: \(base)")
@@ -174,6 +194,7 @@ public struct H3CheckpointLayout: Sendable {
         }
       }
     }
+    self.fastVariant = fastVariant
     prefix = root
     curveRank = curved ? 64 : nil
     blockCount = 50

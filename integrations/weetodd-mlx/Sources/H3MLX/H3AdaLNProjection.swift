@@ -49,6 +49,21 @@ public enum H3AdaLNProjection {
     try H3CheckpointSource.checkUnchanged(checkpointURL)
       return result
     }
+    if layout.fastVariant != nil {
+      let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, block: blockIndex)
+      let file = try SafeTensorFile(url: tensorURL)
+      let projection = try H3QwenQ8Projection(file: file, name: name)
+      let bias = try file.withTensorBytes(named: layout.prefix + "blocks.\(blockIndex).adaln_proj.linear.bias") {
+        MLXArray($0, [96768], type: UInt16.self).view(dtype: .bfloat16)
+      }
+      let activated = silu(timeEmbeddings.asType(.float32)).asType(.bfloat16)
+      let result = try projection.project(activated) + bias
+      eval(result)
+      try file.checkUnchanged(at: tensorURL)
+      try H3CheckpointSource.checkUnchanged(checkpointURL)
+      try Task.checkCancellation()
+      return result
+    }
     let rotated: H3ComfyRotatedProjection?
     if projectionMode == .activationRotated {
       let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, block: blockIndex)

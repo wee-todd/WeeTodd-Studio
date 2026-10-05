@@ -266,8 +266,8 @@ final class NativeModelDownloadsTests: XCTestCase {
     for preset in NativeModelSetup.catalog() {
       for component in preset.components {
         if component.importOnly == true {
-          XCTAssertEqual(preset.id,"swift-h3-vdn8")
-          XCTAssertTrue(["vdn_transformer","vdn_stage","vdn_input_grid"].contains(component.key))
+          XCTAssertTrue(["swift-h3-vdn8","swift-h3-vdn50","swift-h3-fast-dense","swift-h3-fast-vsa"].contains(preset.id))
+          XCTAssertTrue(["vdn_transformer","vdn_stage","vdn_input_grid","fast_dense_transformer","fast_vsa_transformer"].contains(component.key))
           XCTAssertFalse(catalog.contains { $0.descriptor.supports(engine:preset.engine,task:preset.task,component:component.key) })
           continue
         }

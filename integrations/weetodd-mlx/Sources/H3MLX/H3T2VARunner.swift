@@ -23,6 +23,7 @@ public struct H3T2VARequest: Sendable {
   public let loRAAdapters: [H3LoRAAdapter]
   public let funControl: H3FunControlGuide?
   public let vdn:H3VDNSelection?
+  public let fastVariant:H3FastVariant?
 
   public init(prompt: String, width: Int, height: Int,
     durationSeconds: Double, seed: UInt64, requestedSteps: Int,
@@ -32,7 +33,7 @@ public struct H3T2VARequest: Sendable {
     additionalLoRAs: [H3LoRAAdapter] = [],
     loRAAdapters: [H3LoRAAdapter]? = nil,
     funControl: H3FunControlGuide? = nil,
-    vdn:H3VDNSelection? = nil,
+    vdn:H3VDNSelection? = nil,fastVariant:H3FastVariant? = nil,
     videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil,
     samplingMethod: H3SamplingMethod = .euler,
     canvasAdmission: H3CanvasAdmission = .ordinary) throws {
@@ -98,6 +99,14 @@ public struct H3T2VARequest: Sendable {
         throw H3CheckpointError.invalid("VDN requires its released Euler schedule, mandatory adapter stack and ordinary T2VA canvas, without other controls.")
       }
     }
+    if fastVariant != nil {
+      guard requestedSteps == 5,samplingMethod == .euler,effective.isEmpty,
+        turboLoRA == nil,additionalLoRAs.isEmpty,funControl == nil,
+        vdn == nil,canvasAdmission == .ordinary else {
+        throw H3CheckpointError.invalid("FastH3 Preview v1 requires four Euler evaluations without adapters or controls.")
+      }
+    }
+    self.fastVariant = fastVariant
     self.vdn=vdn
   }
 }
@@ -140,6 +149,10 @@ public enum H3T2VARunner {
     }
     _ = try H3QwenCheckpointLayout.inspect(root: request.qwenPages)
     let transformer = try H3CheckpointLayout(url: request.transformer)
+    guard transformer.fastVariant == request.fastVariant,
+      request.fastVariant == nil || refinement == nil else {
+      throw H3CheckpointError.invalid("FastH3 checkpoint and explicit recipe variant must match; initialized refinement is unavailable.")
+    }
     if let vdn=request.vdn {
       guard refinement == nil,
         transformer.curveRank == nil ? vdn.adalnInputGrid == nil :

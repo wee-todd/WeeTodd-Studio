@@ -76,6 +76,29 @@ final class H3StudioRecipeTests: XCTestCase {
       "config": config, "conditioning": conditioning])
   }
 
+  func testExactNativePolicyRejectsApproximationAndRetainedPageControls() throws {
+    XCTAssertNoThrow(try H3StudioRecipe.compile(data:recipe(controls:["inference_optimization":"off","paging_cache_gb":0])))
+    for policy in ["compiled","compiled_adaln","automatic","automatic_speed","balanced","speed"] {
+      XCTAssertThrowsError(try H3StudioRecipe.compile(data:recipe(controls:["inference_optimization":policy])))
+    }
+    for key in ["blockcache","easycache","trajectory_forecast","forecast_strength"] {
+      XCTAssertThrowsError(try H3StudioRecipe.compile(data:recipe(controls:[key:1])))
+    }
+    XCTAssertThrowsError(try H3StudioRecipe.compile(data:recipe(controls:["paging_cache_gb":4])))
+  }
+
+  func testFastRecipeVariantSurvivesAndRejectsUnqualifiedCombinations() throws {
+    var root = try JSONSerialization.jsonObject(with:recipe()) as! [String:Any]
+    for name in ["dense-v1","vsa-v1"] {
+      root["fasth3"] = ["variant":name]
+      XCTAssertEqual(try H3FastStudioRecipe.compile(data:JSONSerialization.data(withJSONObject:root)).fastVariant?.rawValue,name)
+      var changed = root;changed["loras"] = ["adapters":[]]
+      XCTAssertThrowsError(try H3FastStudioRecipe.compile(data:JSONSerialization.data(withJSONObject:changed)))
+      changed = root;changed["fasth3"] = ["variant":name,"sparsity":0.8]
+      XCTAssertThrowsError(try H3FastStudioRecipe.compile(data:JSONSerialization.data(withJSONObject:changed)))
+    }
+  }
+
   func testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs() throws {
     let request = try H3StudioRecipe.compile(data: recipe())
     XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)

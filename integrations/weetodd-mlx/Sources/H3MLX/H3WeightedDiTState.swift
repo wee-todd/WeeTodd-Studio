@@ -63,6 +63,7 @@ final class H3WeightedDiTState {
   private var modulationLoRAInputs: MLXArray?
   private var funControl: H3FunControlState?
   private let vdn:H3VDNRuntime?
+  private let fastTiles:H3FastTiles?
 
   var isResident: Bool {
     text != nil && timeEmbeddings != nil && modulations != nil
@@ -126,6 +127,15 @@ final class H3WeightedDiTState {
       }
       self.vdn=try H3VDNRuntime(selection:vdn,packed:packed)
     } else { self.vdn=nil }
+    let checkpointLayout = try H3CheckpointLayout(url:checkpointURL)
+    if checkpointLayout.fastVariant != nil {
+      guard blockCount == 50,funControl == nil,effective.isEmpty,vdn == nil,
+        case .audiovisual(let packed) = layout,packed.conditionVideoRows == 0 else {
+        throw H3CheckpointError.invalid("FastH3 requires unmasked T2VA without additional adapters or controls.")
+      }
+      self.fastTiles = checkpointLayout.fastVariant == .vsaV1
+        ? try H3FastTiles(prefixSegments:[packed.audioStart,packed.videoStart-packed.audioStart],videoGrid:packed.videoGrid) : nil
+    } else { self.fastTiles = nil }
     self.lora = try effective.isEmpty ? nil : H3LoRAStack(adapters: effective)
     let application: (any H3LoRAApplying)?
     if let vdn = self.vdn { application = vdn.lora } else { application = self.lora }
@@ -217,7 +227,7 @@ final class H3WeightedDiTState {
           index: index, input: input, modulation: modulations[index],
           modulationIndices: packed.modulationIndices,
           positions: packed.positions, projectionMode: projectionMode,
-          lora: application, rotaryAngles: rotaryAngles, maximumRows: layout.maximumPackedRows,vdn:vdn,observe: { _, _ in })
+          lora: application, rotaryAngles: rotaryAngles, maximumRows: layout.maximumPackedRows,vdn:vdn,fastTiles:fastTiles,observe: { _, _ in })
       }, controlBlock: controlBlock, progress: progress)
     let result = try H3FinalLayer.evaluate(checkpointURL: checkpointURL,
       input: value, timeEmbeddings: timeEmbeddings,

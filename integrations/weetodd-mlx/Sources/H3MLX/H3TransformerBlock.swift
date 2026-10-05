@@ -12,6 +12,17 @@ struct H3RotaryAngles {
 /// One released H3 diffusion block. The five quantized projections are loaded
 /// sequentially from the installed Comfy checkpoint and discarded after use.
 public enum H3TransformerBlock {
+  static func trainedCompressionGate(_ input:MLXArray,weight:MLXArray,heads:Int,headWidth:Int) -> MLXArray {
+    // The trained correction is signed and unbounded, including an exact zero
+    // for zero weights. A sigmoid changes the checkpoint's attention function.
+    matmul(input,weight.T).reshaped([1,input.shape[1],heads,headWidth]).transposed(0,2,1,3)
+  }
+  static func validateTrainedAttentionGeometry(variant:H3FastVariant?,tiles:H3FastTiles?,rows:Int) throws {
+    guard variant != .vsaV1 || tiles?.rows == rows,
+      tiles == nil || variant == .vsaV1 else {
+      throw H3CheckpointError.invalid("Trained FastH3 VSA requires explicit matching tile geometry; use its T2VA runner.")
+    }
+  }
   static func prepareRotaryAngles(checkpointURL: URL,
     positions: MLXArray, maximumRows: Int = 40_000) throws -> H3RotaryAngles {
     let layout = try H3CheckpointLayout(url: checkpointURL)
@@ -85,7 +96,7 @@ public enum H3TransformerBlock {
     projectionMode: H3ProjectionMode = .weightDecoded,
     lora: (any H3LoRAApplying)? = nil,
     rotaryAngles: H3RotaryAngles? = nil, maximumRows: Int = 40_000,
-    rowWindow: Int = 16384, vdn: H3VDNRuntime? = nil,
+    rowWindow: Int = 16384, vdn: H3VDNRuntime? = nil,fastTiles:H3FastTiles? = nil,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard (0..<50).contains(index), input.ndim == 3,
       input.shape[0] == 1, [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(input.shape[1]),
@@ -98,12 +109,13 @@ public enum H3TransformerBlock {
       positions.dtype == .float32 else {
       throw H3CheckpointError.invalid("Invalid H3 diffusion block inputs.")
     }
+    let layout = try H3CheckpointLayout(url: checkpointURL)
+    try validateTrainedAttentionGeometry(variant:layout.fastVariant,tiles:fastTiles,rows:input.shape[1])
     let indices = modulationIndices.asArray(Int32.self)
     guard indices.allSatisfy({ (0..<(modulation.shape[0] * 3)).contains(Int($0)) }) else {
       throw H3CheckpointError.invalid("H3 modulation index exceeds the timestep table.")
     }
     try Task.checkCancellation()
-    let layout = try H3CheckpointLayout(url: checkpointURL)
     let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, block: index)
     let file = try SafeTensorFile(url: tensorURL)
     let prefix = layout.prefix + "blocks.\(index)."
@@ -182,17 +194,29 @@ public enum H3TransformerBlock {
     guard angles.rows == count else {
       throw H3CheckpointError.invalid("H3 rotary rows differ from packed input.")
     }
+    let hybrid: ((MLXArray,MLXArray,MLXArray,MLXArray,MLXArray) throws -> MLXArray)?
+    if let fastTiles {
+      guard layout.fastVariant == .vsaV1,vdn == nil else {
+        throw H3CheckpointError.invalid("FastH3 VSA geometry requires its trained checkpoint.")
+      }
+      hybrid = { first,_,query,key,value in
+        let weight = try read(prefix + "attn.gate_compress.weight",shape:[7168,5376])
+        let gate = trainedCompressionGate(first,weight:weight,heads:56,headWidth:128)
+        let attended = try H3FastAttention.evaluate(query:query,key:key,value:value,gate:gate,tiles:fastTiles)
+          .transposed(0,2,1,3).reshaped([1,count,7168])
+        return try project(attended,"attn.out_proj",rows:5376,columns:7168)
+      }
+    } else if let runtime = vdn {
+      hybrid = { first,qkv,query,key,value in
+        try runtime.attention(block:index,input:first,qkv:qkv,query:query,key:key,value:value,
+          project:{ try project($0,"attn.out_proj",rows:5376,columns:7168) })
+      }
+    } else { hybrid = nil }
     let output = try evaluateKernel(input: input, modulation: modulation,
       modulationIndices: modulationIndices, angles: angles,
       read: { try read(prefix + $0, shape: $1) },
       project: { try project($0, $1, rows: $2, columns: $3, qkv: $4) },
-      hybridAttention: vdn.map { runtime in
-        { first, qkv, query, key, value in
-          try runtime.attention(block: index, input: first, qkv: qkv,
-            query: query, key: key, value: value,
-            project: { try project($0, "attn.out_proj", rows: 5376, columns: 7168) })
-        }
-      },
+      hybridAttention:hybrid,
       observe: { name,value in
         if maximumRows == 64_000, UInt64(Memory.activeMemory) > H3CanvasAdmission.maximumStageBytes {
           throw H3CheckpointError.invalid("H3 spatial block exceeded its 32 GiB active-memory budget.")

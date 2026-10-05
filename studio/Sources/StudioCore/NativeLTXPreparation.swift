@@ -451,8 +451,12 @@ public enum NativeLTXPreparation {
     guard ["single", "windowed"].contains(decodeMode) else {
       throw unsupported("choose Full decode or Bounded decode for the Swift scene")
     }
+    let boundaryPolicy = members[0].continuity?.boundaryImagePolicy ?? "balanced"
+    guard ["balanced", "strict"].contains(boundaryPolicy) else {
+      throw unsupported("choose Balanced or Strict image boundaries for the Swift scene")
+    }
     var scene: [String: Any] = ["version": versionTwo ? 2:1, "segments": segments,
-      "overlap_frames": 25, "boundary_image_policy": "balanced",
+      "overlap_frames": 25, "boundary_image_policy": boundaryPolicy,
       "soundscape": "", "music": ""]
     if decodeMode == "windowed" {
       scene["decode_mode"] = "windowed"

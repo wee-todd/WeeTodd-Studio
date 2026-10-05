@@ -185,7 +185,9 @@ public enum H3Ref2VAStillRunner {
         throw H3CheckpointError.invalid("The H3 visual conditioner needs a vision tower.")
       }
     }
-    _ = try H3CheckpointLayout(url: request.transformer)
+    guard try H3CheckpointLayout(url:request.transformer).fastVariant == nil else {
+      throw H3CheckpointError.invalid("FastH3 Preview v1 does not support reference-conditioned generation.")
+    }
     _ = try H3VideoVAELayout(url: request.videoVAE)
     _ = try H3AudioVAELayout(url: request.audioVAE)
     if !prepared.layout.conditionAudioIndices.isEmpty {

@@ -239,6 +239,8 @@ import UniformTypeIdentifiers
     let baseRecipeData = jointRefinement?.ordinaryRecipe ?? motionRecipe?.ordinaryRecipe ?? recipeData
     var recipe = try JSONSerialization.jsonObject(with: baseRecipeData) as! [String: Any]
     let hasVDN = recipe["vdn"] != nil
+    let hasFastH3 = recipe["fasth3"] != nil
+    if hasFastH3 { _ = try H3FastStudioRecipe.compile(data:recipeData) }
     if hasVDN {
       // Validate the untouched source before wrappers can strip a control.
       _ = try H3VDNStudioRecipe.compile(data: recipeData)
@@ -471,6 +473,7 @@ import UniformTypeIdentifiers
     } else {
       let textData = try JSONSerialization.data(withJSONObject: recipe)
       textRequest = hasVDN ? try H3VDNStudioRecipe.compile(data: textData)
+        : hasFastH3 ? try H3FastStudioRecipe.compile(data:textData)
         : try H3StudioRecipe.compile(data: textData, canvasAdmission: canvasAdmission)
       stillRequest = nil
       endpointRequest = nil
@@ -860,6 +863,10 @@ import UniformTypeIdentifiers
       "preflightSeconds": preflightSeconds,
       "seconds": Date().timeIntervalSince(started)]
     var completeMetadata = metadata
+    if let variant = textRequest?.fastVariant {
+      completeMetadata["fasth3"] = ["variant":variant.rawValue,"evaluations":4,
+        "attention":variant == .vsaV1 ? "trained-vsa-64-90":"dense"]
+    }
     if let vdn = textRequest?.vdn {
       completeMetadata["vdn"] = ["variant": vdn.variant.rawValue,
         "stage": vdn.stage.path, "attention": "hybrid_v2",

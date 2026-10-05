@@ -4,6 +4,7 @@ import SwiftUI
 struct GenerationInspector: View {
   @EnvironmentObject var store: StudioStore
   var clip: Clip
+  var isFastH3:Bool { descriptor?.fasth3 == true || store.profiles.first(where: { $0.id==clip.profileID })?.generation?.fasth3 == true }
   var isVDN:Bool { descriptor?.vdn == true || store.profiles.first(where: { $0.id==clip.profileID })?.generation?.vdn == true }
   var descriptor: GenerationDescriptor? {
     guard let result = store.generationDescriptions[clip.id],
@@ -16,7 +17,7 @@ struct GenerationInspector: View {
   }
   var tasks: [String] {
     if let selected=store.profiles.first(where: { $0.id==clip.profileID && $0.engine==clip.engine.rawValue }),
-      selected.generation?.vdn == true { return ["t2v"] }
+      (selected.generation?.vdn == true || selected.generation?.fasth3 == true) { return ["t2v"] }
     let supported = store.profiles.filter { $0.engine == clip.engine.rawValue }
       .flatMap { $0.generation?.supportedTasks ?? [] }
     return Array(Set(supported + [clip.inferredTask])).sorted()
@@ -73,7 +74,7 @@ struct GenerationInspector: View {
         Text(store.validationErrors[clip.id] == nil ? "Loading model settings…" : "Choose a compatible model to view settings").font(.caption2).foregroundStyle(.secondary)
       }
       if clip.engine == .h3, store.runtime.usesNativeH3 {
-        let vdn=isVDN
+        let vdn=isVDN || isFastH3
         Picker("Sampler", selection: Binding(get: {
           clip.generationSelection?.h3SamplingMethod?.rawValue
             ?? (store.generationDescriptions[clip.id]?["generation"] as? [String: Any])?["samplingMethod"] as? String ?? "euler"
@@ -82,7 +83,7 @@ struct GenerationInspector: View {
         }
         .disabled(vdn)
         if vdn {
-          Text("VDN · Eight Euler evaluations · Original and Turbo adapters at strength 1. Text-to-video only.").font(.caption2).foregroundStyle(.secondary)
+          Text(isFastH3 ? "FastH3 · Four Euler evaluations. Independent text-to-audiovisual only." : "VDN · Fixed Euler schedule and released adapters at strength 1. Text-to-video only.").font(.caption2).foregroundStyle(.secondary)
         } else { H3CreativeInspector(clip:clip) }
         if !vdn && (["t2v","t2va"].contains(clip.inferredTask) || clip.generationSelection?.h3MotionFidelity != nil) {
           H3MotionFidelityInspector(clip:clip)
@@ -117,9 +118,9 @@ struct GenerationInspector: View {
           .font(.caption2).foregroundStyle(.secondary)
       }
       if clip.engine == .h3 {
-        if isVDN {
-          Text("VDN uses the shared MLX worker with staged unloading and no retained page cache.").font(.caption2).foregroundStyle(.secondary)
-          Button("Reset incompatible VDN overrides") {
+        if isVDN || isFastH3 {
+          Text("This model uses the shared MLX worker with staged unloading and no retained page cache.").font(.caption2).foregroundStyle(.secondary)
+          Button("Reset incompatible model overrides") {
             store.editClip { $0.generationSelection?.resetOverrides();$0.h3PagingCacheGB=nil }
           }
         } else {

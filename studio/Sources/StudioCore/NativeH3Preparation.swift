@@ -140,6 +140,10 @@ public enum NativeH3Preparation {
     return number.doubleValue.isFinite && (0...1).contains(number.doubleValue)
   }
   private static func supported(_ recipe: [String: Any]) -> Bool {
+    if recipe["fasth3"] != nil {
+      guard let ordinary = try? NativeH3FastProfile.ordinary(recipe) else { return false }
+      return supported(ordinary)
+    }
     if recipe["vdn"] != nil {
       guard let packet=try? NativeH3VDNProfile.packet(recipe) else { return false }
       return supported(packet.ordinary)
@@ -199,13 +203,13 @@ public enum NativeH3Preparation {
     let modelTask = (recipe["components"] as? [String: Any])?["task"] as? String
     let task = (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
       : modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"
-    let vdn=recipe["vdn"] != nil
-    return ["samplingMethod": config["sampling_method"] as? String ?? "euler", "vdn":vdn,
+    let vdn=recipe["vdn"] != nil,fast=recipe["fasth3"] != nil
+    return ["samplingMethod": config["sampling_method"] as? String ?? "euler", "vdn":vdn,"fasth3":fast,
       "supportedTasks": task == "ref2va" ? ["ref2va", "a2v", "extension"] : [task], "controls": [
       "evaluations": max(0, (config["steps"] as? Int ?? 20) - 1),
-      "stepsEditable": !vdn, "refinementStepsEditable": false,
+      "stepsEditable": !vdn && !fast, "refinementStepsEditable": false,
       "cfgEditable": false, "shiftEditable": false,
-      "stepsExplanation": vdn ? "VDN requires eight Euler evaluations and both released adapters at strength 1." : "H3 uses one fewer model evaluation than sigma grid points.",
+      "stepsExplanation": fast ? "FastH3 Preview v1 requires four Euler evaluations." : vdn ? "VDN requires its released Euler evaluation count and full-strength adapter stack." : "H3 uses one fewer model evaluation than sigma grid points.",
       "cfgExplanation": "Guidance is distilled into H3.",
       "shiftExplanation": "Swift H3 does not expose a Shift override."],
       "presets": [["id": "custom", "name": "Custom", "description": "Use the admitted profile settings."]]]
@@ -221,7 +225,7 @@ public enum NativeH3Preparation {
       try Task.checkCancellation()
       guard let recipe = try? profile(url.path), supported(recipe) else { return nil }
       return ["id": try canonical(url.path),
-        "name": recipe["vdn"] != nil ? "MiniMax H3 · VDN 8-step · Swift" : url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " "),
+        "name": recipe["fasth3"] != nil ? "MiniMax H3 · FastH3 \((recipe["fasth3"] as? [String:Any])?["variant"] as? String ?? "") · Swift" : recipe["vdn"] != nil ? "MiniMax H3 · VDN \(((recipe["config"] as? [String:Any])?["steps"] as? Int ?? 9)-1)-step · Swift" : url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " "),
         "engine": "h3", "task": (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
           : (recipe["components"] as? [String: Any])?["task"] as? String == "ref2va"
           ? "ref2va" : (recipe["components"] as? [String: Any])?["task"] as? String == "fl2va"
@@ -288,13 +292,14 @@ public enum NativeH3Preparation {
       : ["i2v", "fflf"].contains(task) ? "fflf" : "t2v"
     guard let chosen = profiles.first(where: {
       $0["task"] as? String == catalogTask &&
-        (clip.profileID == "auto" ? ($0["generation"] as? [String:Any])?["vdn"] as? Bool != true : $0["id"] as? String == clip.profileID)
+        (clip.profileID == "auto" ? (($0["generation"] as? [String:Any])?["vdn"] as? Bool != true && ($0["generation"] as? [String:Any])?["fasth3"] as? Bool != true) : $0["id"] as? String == clip.profileID)
     }),
       let path = chosen["id"] as? String else {
       throw unsupported("no compatible \(catalogTask) profile is installed")
     }
     let recipe = try profile(path)
     guard supported(recipe) else { throw unsupported("the selected profile changed or contains unported settings") }
+    if recipe["fasth3"] != nil { try NativeH3FastProfile.validate(clip:clip,project:project,motion:motion,recipe:recipe) }
     if recipe["vdn"] != nil { try NativeH3VDNProfile.validate(clip:clip,project:project,motion:motion,recipe:recipe) }
     return (project, clip, runtime, path, recipe,motion)
   }

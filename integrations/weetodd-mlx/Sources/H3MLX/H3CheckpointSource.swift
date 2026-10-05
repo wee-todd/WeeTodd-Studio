@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import TensorIO
 
-/// Header-only routing for the owned mixed-affine FL export. No weights are
+/// Header-only routing for owned mixed-affine FL and pinned FastH3 pages. No weights are
 /// copied or retained; each existing weighted operation opens its active page.
 enum H3CheckpointSource {
   private struct Identity: Equatable {
@@ -30,6 +30,9 @@ enum H3CheckpointSource {
     let source_tensor_bytes: UInt64
     let fixed: Page
     let blocks: [Page]
+    let source_revision: String?
+    let attention: String?
+    let sampling: [String: Int]?
   }
   final class Paged {
     let root: URL
@@ -69,6 +72,49 @@ enum H3CheckpointSource {
         guard let n = object?[key] as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return false }
         return !n.boolValue
       }
+      let fast: H3FastVariant?
+      switch manifest.source {
+      case "FastVideo/FastVideo-FastH3-4-step-Preview-v1-Dense-DataFree": fast = .denseV1
+      case "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree": fast = .vsaV1
+      default: fast = nil
+      }
+      var expected = Set<String>()
+      if let fast {
+        let vsa = fast == .vsaV1
+        guard manifest.format == "weetodd-h3-paged-v1", manifest.num_blocks == 50,
+          manifest.blocks.count == 50,
+          manifest.source_revision == (vsa ? "b65818d41939b5085451074fe8ca8b799f8d4921" : "f624f08c6c279ab43534c003e556fc5b295b6558"),
+          manifest.source_tensor_bytes == (vsa ? 70_099_582_760 : 66_246_059_536),
+          manifest.attention == (vsa ? "vsa_h3_64_90" : "dense"),
+          manifest.sampling == ["schedule_points":5,"transformer_evaluations":4],
+          Set(quant?.keys.map { $0 } ?? []) == ["bits","group_size","quantize_core","quantize_adaln","adaln_bits","overrides"],
+          (quant?["overrides"] as? [String:Any])?.isEmpty == true,
+          number(quant,"bits",equals:8), number(quant,"group_size",equals:64), number(quant,"adaln_bits",equals:8),
+          (quant?["quantize_core"] as? NSNumber).map({ CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue }) == true,
+          (quant?["quantize_adaln"] as? NSNumber).map({ CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue }) == true,
+          number(config,"hidden_size",equals:5376),number(config,"num_layers",equals:50),
+          number(config,"token_refiner_num_layers",equals:2),number(config,"num_attention_heads",equals:56),
+          number(config,"attention_head_dim",equals:128),number(config,"ffn_hidden_size",equals:14336),
+          number(config,"latents_dim",equals:24),number(config,"audio_latents_dim",equals:32),
+          (config?["patch_size"] as? [Int]) == [1,2,2],number(config,"text_dim",equals:5120),
+          number(config,"timestep_input_dim",equals:256),number(config,"time_embed_hidden_size",equals:5376),
+          number(config,"time_embed_dim",equals:2688),number(config,"rope_inv_freq_len",equals:16),
+          number(config,"rope_theta",equals:10000),number(config,"norm_eps",equals:1e-5),
+          number(config,"qk_norm_eps",equals:1e-5),number(config,"final_norm_eps",equals:1e-5),
+          vsa ? (config?["vsa_gate"] as? Bool) == true : config?["vsa_gate"] == nil else {
+          throw H3CheckpointError.invalid("Unsupported FastH3 release, architecture or affine recipe.")
+        }
+        for index in 0..<50 {
+          for suffix in ["attn.qkv_proj","attn.out_proj","mlp.fc1","mlp.fc2","adaln_proj.linear"] {
+            expected.insert("blocks.\(index).\(suffix)")
+          }
+        }
+        for index in 0..<2 {
+          for suffix in ["attn.qkv_proj","attn.out_proj","mlp.fc1","mlp.fc2"] {
+            expected.insert("token_refiner.blocks.\(index).\(suffix)")
+          }
+        }
+      } else {
       guard manifest.format == "weetodd-h3-paged-v1", manifest.num_blocks == 50,
         manifest.blocks.count == 50, manifest.source_tensor_bytes <= 64 * 1024 * 1024 * 1024, ["q8_extended", "q8_conservative"].contains(manifest.source),
         quant?["format"] as? String == "minimax-h3-mlx-mixed-quant",
@@ -84,7 +130,6 @@ enum H3CheckpointSource {
         let overrides = quant?["overrides"] as? [String: Any] else {
         throw H3CheckpointError.invalid("Unsupported paged H3 architecture or quantization recipe.")
       }
-      var expected = Set<String>()
       for index in 0..<50 {
         for suffix in ["attn.qkv_proj", "attn.out_proj", "mlp.fc1", "mlp.fc2"] {
           if index >= 38 || (manifest.source == "q8_extended" && index >= 21 && suffix.hasPrefix("mlp.")) {
@@ -94,6 +139,7 @@ enum H3CheckpointSource {
       }
       guard Set(overrides.keys) == expected, overrides.keys.allSatisfy({ number(overrides, $0, equals: 8) }) else {
         throw H3CheckpointError.invalid("Paged H3 quantization overrides do not match its named profile.")
+      }
       }
       var headers: [String: H3TensorInfo] = [:], bytes: UInt64 = 0
       func page(_ record: Page, name: String, index: Int?) throws -> URL {
@@ -108,8 +154,8 @@ enum H3CheckpointSource {
         let expectedCount: Int
         if let index {
           let affine = expected.filter { $0.hasPrefix("blocks.\(index).") }.count
-          expectedCount = 10 + 2 * affine
-        } else { expectedCount = 31 }
+          expectedCount = fast == nil ? 10 + 2 * affine : (fast == .vsaV1 ? 21 : 20)
+        } else { expectedCount = fast == nil ? 31 : 50 }
         guard file.tensors.count == expectedCount, record.tensor_count == expectedCount,
           tensorBytes == record.tensor_bytes else {
           throw H3CheckpointError.invalid("Paged H3 tensor count or payload bytes differ from its manifest.")
@@ -130,11 +176,11 @@ enum H3CheckpointSource {
       blocks = try manifest.blocks.enumerated().map {
         try page($0.element, name: String(format: "pages/block-%03d.safetensors", $0.offset), index: $0.offset)
       }
-      guard bytes == manifest.source_tensor_bytes,
+      guard (fast == nil ? bytes == manifest.source_tensor_bytes : bytes == (fast == .vsaV1 ? 39_120_840_192 : 35_267_323_392)),
         Set(headers.filter { $0.value.dtype == "U32" }.keys) == Set(expected.map { $0 + ".weight" }) else {
         throw H3CheckpointError.invalid("Paged H3 affine payloads differ from the quantization recipe.")
       }
-      layout = try H3CheckpointLayout(tensors: headers, pagedAffine: true, computedRotary: true)
+      layout = try H3CheckpointLayout(tensors: headers, pagedAffine: true, computedRotary: true, fastVariant: fast)
       identities = pinned
       try checkUnchanged()
     }

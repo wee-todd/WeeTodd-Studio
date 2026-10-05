@@ -9,6 +9,7 @@ public struct H3PackedLayout: Sendable {
   public let conditionVideoRows: Int
   public let audioStart: Int
   public let videoStart: Int
+  let videoGrid: [Int]
 
   public init(geometry: H3Geometry, textTags: [Int32], anchors: [Anchor]) throws {
     guard !textTags.isEmpty, textTags.allSatisfy({ $0 == 0 || $0 == 1 }) else {
@@ -18,6 +19,7 @@ public struct H3PackedLayout: Sendable {
     let latentWidth = geometry.width / 16
     let heightPatches = latentHeight / 2
     let widthPatches = latentWidth / 2
+    videoGrid = [geometry.videoLatentFrames, heightPatches, widthPatches]
     let rowsPerFrame = heightPatches * widthPatches
     let (conditionRows, overflow) = anchors.count.multipliedReportingOverflow(by: rowsPerFrame)
     guard !overflow else { throw H3GeometryError.invalid("H3 keyframe rows overflow Int.") }

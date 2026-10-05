@@ -36,6 +36,20 @@ final class NativeLTXSceneImagePreparationTests:XCTestCase {
   private func images(_ result:[String:Any]) -> [[String:Any]] {
     ((result["recipe"] as! [String:Any])["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
   }
+  func testSceneLeaderBoundaryPolicyReachesWorkerWithoutMemberOverrides() throws {
+    let(root,original,runtime)=try fixture();var project = original
+    try append(0,role:.first,clip:0,root:root,project:&project)
+    try append(0,role:.first,clip:1,root:root,project:&project)
+    for index in project.clips.indices { project.clips[index].generationSelection?.task = "i2v" }
+    project.clips[0].continuity = .init(boundaryImagePolicy:"strict")
+    let output = try NativeLTXPreparation.compose(request:body(project,runtime))
+    XCTAssertEqual(((output["recipe"] as! [String:Any])["scene"] as! [String:Any])["boundary_image_policy"] as? String,"strict")
+    project.clips[0].continuity?.boundaryImagePolicy = "balanced"
+    project.clips[1].continuity?.boundaryImagePolicy = "strict"
+    let changed = try NativeLTXPreparation.compose(request:body(project,runtime))
+    XCTAssertEqual(((changed["recipe"] as! [String:Any])["scene"] as! [String:Any])["boundary_image_policy"] as? String,"balanced")
+  }
+
   func testVersionTwoGlobalOrderSymbolicLastSourceIdentityAndProjectAreFrozen() throws {
     let(root,original,runtime)=try fixture();var project=original
     try append(0,role:.last,clip:1,root:root,project:&project)

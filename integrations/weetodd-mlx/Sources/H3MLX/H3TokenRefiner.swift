@@ -79,12 +79,22 @@ public enum H3TokenRefiner {
     }
     func project(_ activation: MLXArray, _ suffix: String,
       rows: Int, columns: Int, qkv: Bool = false) throws -> MLXArray {
-      var weight = try read(suffix + ".weight", shape: [rows, columns])
-      if qkv {
-        weight = H3QKVRowOrder.forHeadMajorAttention(weight,
-          heads: 56, headWidth: 128, groupedSource: layout.curveRank == nil)
+      let base: MLXArray
+      if layout.fastVariant != nil {
+        let projection = try H3QwenQ8Projection(file: file, name: prefix + suffix + ".weight")
+        guard projection.rows == rows, projection.columns == columns else {
+          throw H3CheckpointError.invalid("FastH3 text projection changed after admission.")
+        }
+        // Owned FastH3 pages already retain per-head QKV row order.
+        base = try projection.project(activation)
+      } else {
+        var weight = try read(suffix + ".weight", shape: [rows, columns])
+        if qkv {
+          weight = H3QKVRowOrder.forHeadMajorAttention(weight,
+            heads: 56, headWidth: 128, groupedSource: layout.curveRank == nil)
+        }
+        base = matmul(activation, weight.T)
       }
-      let base = matmul(activation, weight.T)
       let value = try lora?.apply(base: base, input: activation,
         target: "diffusion_model.token_refiner.blocks.\(index).\(suffix)",
         reorderQKV: qkv) ?? base

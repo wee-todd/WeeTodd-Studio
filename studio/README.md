@@ -58,22 +58,43 @@ Explicit spatial-v2 refinement has separate bounds: longest edge 1920, shortest 
 pixels 1920 × 1088, at most 64,000 complete packed rows and a 32 GiB estimated stage budget.
 A learned 1920 × 1088, 73-frame target completed and sampled stills were coherent; full motion/audio,
 user approval, clean performance and maximum-duration/max-canvas combinations remain unqualified.
-The learned upscaler is separate from spatial interpolation. FastH3 remains unavailable through this Swift route. VDN has a separate experimental Swift T2VA
-worker route, including released named adapters and explicit timestep-grid support for pruned
-weights. Studio exposes the eight-step T2VA variant through explicit guided setup and recipe
-selection; it is excluded from Automatic. Eight Euler evaluations, both strength-1 adapters and
-staged MLX unloading are fixed. Unsupported references, extra LoRAs, continuation, memory/backend
-overrides and latent/motion controls reject before generation. The original-Q8 boxing take was
-human-approved on 2026-10-04; endpoint/reference combinations, fifty-step Studio selection and
-broader production quality remain unqualified.
-The packaged VDN8 StudioStore route passed a new 672 × 384, 124-frame generation with seven
-previews, acceptance and project save/reopen while Python was unavailable. Its movie, silent
-video and WAV were byte-identical to the human-approved direct take. Guided setup and native
-export passed shared-worker preflight, including through the packaged CLI; the exported job
-was not generated again. This is the tested eight-step integration scope, not fifty-step or
-endpoint/reference qualification.
-Retained transformer caches/forecasting and arbitrary Python optimizer settings are not
-implicitly selected by these controls.
+The learned upscaler is separate from spatial interpolation.
+
+**FastH3 Preview v1 · experimental** has explicit **FastH3 DENSE** and **FastH3 VSA**
+Swift T2VA presets in **Studio Settings → Model setup**. Link the corresponding existing
+pinned affine-Q8 pages and shared text/video/audio components. The worker checks every page
+header, the release revision and trained variant. It does not convert or copy the transformer.
+Both presets require four Euler evaluations (five schedule points), staged unloading, no extra
+LoRAs, references, continuation or latent/motion controls. VSA retains its trained compression
+gates and 90% sparse video-tile attention; it is not silently replaced by dense attention.
+FastH3 is excluded from Automatic. Both variants passed actual generation, seven decoded previews,
+acceptance and save/reopen with Python unavailable on 2026-10-05. Sampled frames were coherent;
+full motion/audio and broader seed approval remain separate. VSA uses the trained signed linear
+compression gate and a BF16-compatible padding mask. See [STATUS](../STATUS.md) for source-bound
+results and memory scopes; earlier Python compact-Metal timings are not Swift measurements.
+
+**VDN · experimental** offers explicit eight- and fifty-evaluation Swift T2VA presets,
+also excluded from Automatic. Eight-step setup links the pruned original H3 Q8 pages,
+`stage-dmd-step-250`, both strength-1 adapters and the original-width SiLU timestep grid.
+Fifty-step setup links `stage-b-step-2000` and its standard strength-1 adapter without Turbo
+or the eight-step input grid. Euler and the released schedule are fixed. Unsupported references,
+extra LoRAs, continuation, memory/backend overrides and latent/motion controls fail before generation.
+The original-Q8 eight-step boxing take was human-approved on 2026-10-04. Its packaged
+StudioStore route passed generation, seven previews, acceptance and save/reopen without Python;
+all three media files matched the approved direct take. On 2026-10-05, VDN50 also passed its actual
+Studio lifecycle, and VDN8's exported CLI and saved Swift-Comfy jobs reproduced the approved
+Studio media byte for byte. See STATUS for variant/host evidence; endpoint/reference mixtures
+and broader production quality remain unqualified.
+
+**Native execution policy:** Swift uses exact model evaluations, staged unloading and streamed
+weights. The native feature set excludes Python EasyCache, hierarchical BlockCache and trajectory
+prediction/replay. These approximation controls remain available in their maintained composable
+Python graphs. Native recipes reject them before loading weights. Python-only exact hot-path
+experiments such as transient Q8 expansion or compiled AdaLN are also not native settings;
+no measured Swift benefit is claimed for those experiments. Native `inference_optimization`
+remains `off`, and retained page cache remains `0`. A future port requires explicit opt-in and
+its own quality, speed and peak-memory qualification. Existing activation reuse and bounded
+metadata caches remain part of the exact Swift implementation.
 Timed audio-only Ref2VA is distinct from A2V; H3 generates a new soundtrack in either case.
 **Full latent refinement · experimental** uses accepted complete-latent artifacts, not a movie
 as a latent substitute. It rejects saved-tail continuation, Fun and Motion Fidelity mixtures.
@@ -839,7 +860,7 @@ configure the native MLX engines.
    or LTX 2.3/2.5 text/image. Swift LTX 2.5 also offers spatial DFR and one- or two-round
    temporal DFR presets, MSR images, Ingredients sheets, Union, Motion Track and CrossView
    controls when its worker is enabled. H3 also offers native Fun ControlNet and
-   **MiniMax H3 · VDN 8-step · Swift** presets.
+   **VDN 8-step**, **VDN 50-step**, **FastH3 DENSE** and **FastH3 VSA** Swift presets.
    Compatible installed adapters can be reused or acquired through pinned native catalog entries.
 2. Choose **Set Up… → Use Existing Models**, select model folders (including an existing ComfyUI
    `models` folder), then scan. Inspection reads bounded headers and manifests, never model tensors.
@@ -860,7 +881,9 @@ configure the native MLX engines.
    choices. The VDN8 preset instead requires compatible original AdaLN-pruned Q8 pages, the
    released `stage-dmd-step-250` folder and `h3_silu_temb_grid.safetensors`, plus the ordinary
    Qwen/processor/tokenizer and VAE components. Keep the stage folder intact; both named adapters
-   remain at strength 1. These three VDN-specific fields are import-only; they have no pinned
+   remain at strength 1. The VDN50 preset uses `stage-b-step-2000` with only its standard adapter and no timestep
+   grid. FastH3 dense/VSA presets instead link the corresponding pinned affine-Q8 student
+   pages. All specialized transformer/stage/grid fields are import-only; they have no pinned
    catalog download. No backbone weights are copied or converted.
 3. Use **Automatic** to select a lower-memory policy on Macs with 64 GB or less, **Lower Memory** to
    request supported memory-saving settings, or **Custom** to retain the preset policy for later
@@ -876,11 +899,11 @@ configure the native MLX engines.
    for a Swift image/reference preset, attach media and prepare a clip for worker preflight.
    Existing recipes and model files are preserved. Automatic selection can use the new compatible
    components; a specific recipe can be pinned under **Advanced generation**. **Set Up Models…**
-   is also available from missing-model actions. VDN8 is always explicit: use the setup result
-   for the selected T2V clip or pin its recipe under **Advanced generation**. It runs eight
-   Euler evaluations; unsupported execution controls are hidden. **Reset incompatible VDN
-   overrides** repairs inherited sampler/backend/cache settings while preserving prompt and
-   media. Remove incompatible attachments and continuity settings explicitly before preparing.
+   is also available from missing-model actions. VDN and FastH3 are always explicit: use the
+   setup result for a T2V clip or pin its recipe under **Advanced generation**. Released Euler
+   evaluations are fixed at 8 or 50 for VDN and 4 for FastH3; unsupported controls are hidden.
+   **Reset incompatible model overrides** repairs inherited sampler/backend/cache settings
+   while preserving prompt and media. Remove incompatible attachments and continuity settings explicitly before preparing.
 
 **Download or prepare a model** shows compatible catalog items with source terms, download size and
 required space before an explicit download. Prefer the
@@ -1031,6 +1054,11 @@ prompt/settings review remain available. Clip/movie headless export uses the sam
 
 ### Acceleration settings
 
+The residency and projection-backend controls in this subsection describe the explicitly selected
+legacy Python renderer. Swift H3 uses staged checkpoint streaming and rejects resident execution,
+nonzero retained page budgets and Python optimizer switches before loading weights. Swift preserves
+its supported normal/lower-memory video-decoder policy. See [current native controls](#current-swift-controls-and-qualification).
+
 App-level H3 acceleration preferences are separate from creative sampling settings. Automatic
 projections use the existing hardware-qualified backend and numerical fallback checks; **MLX**
 explicitly uses the standard backend. Automatic memory selection uses the lower-memory policy on
@@ -1053,6 +1081,9 @@ Low memory selects the supported lower-memory policy. Dimensions, duration and a
 remain explicit clip choices. Hardware-specific speed recommendations require matched measurements.
 
 ### Matched H3 execution measurements
+
+These historical measurements used the legacy Python renderer. They do not measure the current
+Swift worker or establish Swift performance.
 
 On an M3 Ultra with 256 GiB unified memory (2026-09-10), a saved 512×512, 124-frame,
 24 FPS H3 T2V recipe used 19 Euler evaluations, seed 42, Q8 paged FL2VA transformer,
@@ -1094,7 +1125,10 @@ renderer RSS, while **Instrumented stages** and **MLX generation** describe diff
 scopes. Do not add those peaks or treat them as total system RAM. LTX **Pre-decode pipeline** time
 includes encoding, model loading, sampling and latent upscaling; H3 reports transformer sampling.
 
-For H3, **Advanced generation → H3 page cache** offers Recipe default, Off, or 4/8/12/16 GB.
+The following retained-page settings describe legacy Python generation and composable ComfyUI
+graphs. Swift jobs require Off; a saved nonzero budget fails preflight without fallback.
+
+For legacy H3, **Advanced generation → H3 page cache** offers Recipe default, Off, or 4/8/12/16 GB.
 The recipe setting is `config.paging_cache_gb` (0–16 decimal GB; default 0). This is extra retained
 transformer weight memory, not a limit on total generation memory or a promise of fit.
 Start with Off versus 4 GB using identical prompt, seed, dimensions, schedule and storage. Compare
@@ -1106,7 +1140,7 @@ supported direct transformer and cannot be combined with full block residency. A
 the remaining budget is bypassed.
 
 ComfyUI exposes the same setting through **H3 Paging Settings (Experimental)** between Generation
-Config and the composable H3 Sampler. Headless movie/clip jobs carry the selected value. H3
+Config and the composable H3 Sampler. Explicit legacy headless movie/clip jobs carry the selected value. H3
 `result.json` includes paging counters, retained peak/budget bytes, and loading/setup/compute timing.
 Cache counters cover the configured run; other pager counters identify their executor-lifetime
 scope. File-load calls are not measurements of physical disk reads. The cache avoids some reloads

@@ -1,5 +1,48 @@
 # WeeTodd Studio implementation status
 
+Swift feature and host-route qualification, 2026-10-05:
+
+- FastH3 Preview v1 Dense and trained VSA now run through explicit Swift Studio T2VA presets.
+  Both reuse the pinned installed affine-Q8 pages in place, execute four Euler evaluations,
+  and reject unsupported references, LoRAs and continuation before weighted work.
+  Actual new Studio generations passed seven decoded previews, take acceptance and save/reopen
+  with Python unavailable. Sampled frames 0/62/123 were coherent. These presets remain experimental
+  and excluded from Automatic; full motion, semantic audio and broader seed acceptance remain open.
+- VDN50 now has guided Studio setup and explicit selection. Its real 124-frame Studio take passed
+  seven previews, acceptance and save/reopen with the fifty-evaluation schedule and only its
+  standard strength-1 adapter. VDN8 retains its original-width input grid and two required adapters.
+- MSR V2 and VDN8 each completed an actual exported Studio job through the CLI and an actual saved
+  ComfyUI API prompt through the recipe-backed Swift node. Every video, audio and muxed movie file
+  matched the previously reviewed Studio output byte for byte. Full decoding and read-only
+  StudioStore reopening passed. VDN8 also delivered 27 observed live ComfyUI progress updates.
+- Scene-v2 completed a real two-shot/five-anchor Studio generation, acceptance and save/reopen.
+  The scene leader's strict boundary policy now reaches the worker. Movie upscale completed a
+  real Studio learned 2×/three-evaluation refinement, progress, previews, acceptance and save/reopen.
+  Both retained their complete frozen workloads and reproduced all three baseline media files
+  byte for byte, including source PCM. The scene published 96 frames at 384 × 256/24 fps;
+  upscale published 49 frames at 768 × 512/24 fps.
+- Native execution retains exact evaluations, streamed weights, activation reuse and staged
+  unloading. Python EasyCache, hierarchical BlockCache, trajectory prediction/replay and Python-only
+  optimizer switches are explicitly outside the Swift feature set. Native recipes reject those
+  settings before weights; maintained composable Python graphs keep their existing contracts.
+
+| New H3 Studio take | Evaluations | Worker seconds | Peak MLX allocation | Peak Swift process footprint |
+| --- | --- | --- | --- | --- |
+| FastH3 Dense | 4 | 209.049 | 4.391 GB | 5.782 GB |
+| FastH3 trained VSA | 4 | 278.324 | 4.391 GB | 5.048 GB |
+| VDN50 | 50 | 2505.032 | 4.958 GB | 5.983 GB |
+
+These are functional runs at 672 × 384, 124 frames/24 fps, not matched performance benchmarks.
+Memory uses decimal GB and excludes FFmpeg and host processes. All four weighted stages released
+in order. VSA's first functional take had visible corruption; it was rejected for quality.
+The corrected worker preserves the trained signed, unbounded linear compression gate and a
+BF16-compatible attention mask. Focused regressions reproduced both failures before the fixes.
+Final H3 feature checks executed 33 tests with two optional skips and zero failures.
+Previously completed Dense/VDN proofs are retained: subsequent fixes changed only VSA mathematics.
+The original 31-item ledger remains 29/31; matched performance and broad audiovisual acceptance
+are not completed by this separate feature/route qualification. Clean-machine acquisition of all
+components remains separate. See [current Swift controls](studio/README.md#current-swift-controls-and-qualification).
+
 Xcode 27 source-build compatibility follow-up, 2026-10-05: app/worker packaging and validation
 explicitly retain SwiftPM's `native` build system after Swift 6.4 changed the default to
 SwiftBuild. A tiny Metal compile/link preflight now precedes the existing SwiftUI macro probe

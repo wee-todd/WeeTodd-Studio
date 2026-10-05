@@ -61,6 +61,59 @@ final class H3CheckpointLayoutTests: XCTestCase {
     return tensors
   }
 
+  private func fastFixture(vsa: Bool) -> [String: H3TensorInfo] {
+    var result: [String: H3TensorInfo] = [:]
+    for (name, tensor) in fixture() {
+      let key = String(name.dropFirst(prefix.count))
+      if key == "rope.inv_freq" || key.hasSuffix(".weight_scale") || key.hasSuffix(".comfy_quant") { continue }
+      if key.hasSuffix(".bias"), tensor.dtype == "F32" {
+        result[key] = .init(dtype: "BF16", shape: tensor.shape)
+      } else if tensor.dtype == "I8" || (key.hasPrefix("token_refiner.blocks.") &&
+        ["attn.qkv_proj.weight", "attn.out_proj.weight", "mlp.fc1.weight", "mlp.fc2.weight"].contains(where: key.hasSuffix)) {
+        let base = String(key.dropLast(".weight".count))
+        result[key] = .init(dtype: "U32", shape: [tensor.shape[0], tensor.shape[1] / 4])
+        for suffix in [".scales", ".biases"] {
+          result[base + suffix] = .init(dtype: "BF16", shape: [tensor.shape[0], tensor.shape[1] / 64])
+        }
+      } else { result[key] = tensor }
+    }
+    if vsa {
+      for index in 0..<50 {
+        result["blocks.\(index).attn.gate_compress.weight"] = .init(dtype: "BF16", shape: [7168, 5376])
+      }
+    }
+    return result
+  }
+
+  func testFastH3LayoutsRequireExplicitVariantAndCompleteAffineMetadata() throws {
+    for variant in [H3FastVariant.denseV1, .vsaV1] {
+      var tensors = fastFixture(vsa: variant == .vsaV1)
+      XCTAssertThrowsError(try H3CheckpointLayout(tensors: tensors))
+      let layout = try H3CheckpointLayout(tensors: tensors, pagedAffine: true,
+        computedRotary: true, fastVariant: variant)
+      XCTAssertEqual(layout.fastVariant, variant)
+      XCTAssertNil(layout.curveRank)
+      tensors.removeValue(forKey: "token_refiner.blocks.1.mlp.fc2.scales")
+      XCTAssertThrowsError(try H3CheckpointLayout(tensors: tensors, pagedAffine: true,
+        computedRotary: true, fastVariant: variant))
+    }
+    var tensors = fastFixture(vsa: true)
+    tensors.removeValue(forKey: "blocks.49.attn.gate_compress.weight")
+    XCTAssertThrowsError(try H3CheckpointLayout(tensors: tensors, pagedAffine: true,
+      computedRotary: true, fastVariant: .vsaV1))
+  }
+
+  func testInstalledFastH3HeaderAdmissionWhenProvided() throws {
+    guard let root = ProcessInfo.processInfo.environment["WEETODD_FASTH3_ROOT"] else {
+      throw XCTSkip("Set WEETODD_FASTH3_ROOT for installed FastH3 metadata admission.")
+    }
+    for (name, variant) in [("dense", H3FastVariant.denseV1), ("vsa-datafree", .vsaV1)] {
+      let layout = try H3CheckpointLayout(url: URL(fileURLWithPath: root)
+        .appendingPathComponent("weetodd-fasth3-\(name)-q8-paged"))
+      XCTAssertEqual(layout.fastVariant, variant)
+    }
+  }
+
   func testAcceptsDirectComfyInt8H3WithoutWeightConversion() throws {
     let result = try H3CheckpointLayout(tensors: fixture())
     XCTAssertEqual(result.prefix, prefix)

@@ -39,7 +39,7 @@ final class NativeLTXSceneLifecycleTests: XCTestCase {
     let fps = try XCTUnwrap(config["frame_rate"] as? Double)
     try require(count >= 2 && project.clips.count == count && segments.count == count,
       "Keep every frozen scene member; do not shorten the scene for qualification.")
-    try require(scene["decode_mode"] as? String == decodeMode
+    try require((scene["decode_mode"] as? String ?? "single") == decodeMode
       && project.clips.first?.continuity?.sceneDecodeMode == decodeMode,
       "Preserve the actual scene decode mode.")
     for (index, clip) in project.clips.enumerated() {
