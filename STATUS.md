@@ -1,6 +1,6 @@
 # WeeTodd Studio implementation status
 
-Current Swift feature scope 2026-10-03: native H3/LTX defaults and the previously qualified
+Current Swift feature scope 2026-10-04: native H3/LTX defaults and the previously qualified
 Studio/CLI/saved-Comfy route/lifecycle evidence remain distinct from new creative contracts.
 The original 31-item migration ledger has 29 completed checks; matched performance and broad
 quality remain open. Its fixed denominator does not absorb the separate 22-item remaining-feature
@@ -55,7 +55,27 @@ benchmark. The default convolutional VAE remains unchanged. Studio, headless and
 Swift nodes preserve native DiffVAE selection and settings; the legacy typed composable Comfy generator
 still uses its maintained Python model pipeline. MSR V2 remains structurally
 unimplemented (audio/speaker/reference-audio conditioning); it is not interchangeable with V1.
-The optional VDN checkpoint family is not implemented by native Swift H3.
+Native VDN now has original Swift hybrid-attention algebra, complete 800-tensor branch admission,
+all 208 original/363 Turbo adapter targets, original-width timestep-grid interpolation for pruned
+H3 and explicit T2VA worker/recipe routing. Released eight/fifty-evaluation Euler schedules remain
+separate; additional controls reject before weighted work. Installed numerical witnesses cover
+blocks 0/49 and selected named PEFT projections. One 672 × 384, 124-frame Singularity eight-step
+functional worker take completed in 528.85 seconds at 4.73/6.13 GB MLX/process peaks, with staged
+release and decoded previews. The original Q8-paged H3 checkpoint, using its original-width SiLU
+grid and both released adapters, also completed eight evaluations through the Swift headless route:
+480.59 worker seconds, 4.73 GB MLX and 6.04 GB process peaks, 124 frames at 24 fps and
+165,600 stereo samples at 32 kHz. Seven decoded previews and all four weighted-stage releases
+were observed; full media decoding passed. Actual sampling cancellation returned exit 130,
+with no published take or staging/preview residue. The fifty-evaluation variant passed installed
+headless preflight but was not generated. Twenty-two focused VDN tests passed, including installed
+branch, adapter and pruned-modulation witnesses. Concurrent test/build activity makes these takes
+unsuitable for isolated speed comparisons. Full audiovisual quality, matched performance,
+endpoint/reference variants and Studio selection remain open; no VDN default promotion or
+full-checkpoint parity claim.
+Final core validation passed 2,526 Python tests (five optional skips), 207 shared Swift tests
+(ten optional skips) and 743 MLX Swift tests (119 optional skips), plus compilation, lint,
+catalog and portable-workflow checks. The separate 22-test installed VDN selection had no skips.
+This does not change the historical 29/31 migration ledger.
 Owner-approved access allowed the official 2.5 Ingredients payload and installed Swift header
 preflight to pass. The first 121-frame native take omitted the second character. A prompt-only
 follow-up retained both characters; the same prompt also retained both with Studio's unchanged

@@ -26,7 +26,7 @@ public enum H3FinalLayer {
   static func evaluate(checkpointURL: URL, input: MLXArray,
     timeEmbeddings: MLXArray, timestepIndices: MLXArray,
     videoIndices: MLXArray, audioIndices: MLXArray,
-    maximumRows: Int = 40_000, observe: (String, MLXArray) throws -> Void) throws -> Output {
+    maximumRows: Int = 40_000, lora: (any H3LoRAApplying)? = nil, loraInput: MLXArray? = nil, observe: (String, MLXArray) throws -> Void) throws -> Output {
     guard input.ndim == 3, input.shape[0] == 1,
       [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(input.shape[1]), input.shape[2] == 5376,
       input.dtype == .bfloat16, timeEmbeddings.ndim == 2,
@@ -78,10 +78,12 @@ public enum H3FinalLayer {
       dtype: layout.curveRank == nil ? "BF16" : "F32")
     let modBias = try read("adaln_proj.linear.bias",
       shape: [10752], dtype: layout.curveRank == nil ? "BF16" : "F32")
-    let modulation = layout.curveRank == nil
-      ? addMM(modBias,
-          silu(timeEmbeddings.asType(.float32)).asType(.bfloat16), modWeight.T)
-      : addMM(modBias, timeEmbeddings.asType(.float32), modWeight.T)
+    let activated = layout.curveRank == nil
+      ? silu(timeEmbeddings.asType(.float32)).asType(.bfloat16)
+      : timeEmbeddings.asType(.float32)
+    let baseModulation = addMM(modBias, activated, modWeight.T)
+    let modulation = try lora?.apply(base: baseModulation, input: loraInput ?? activated,
+      target: "diffusion_model.final_layer.adaln_proj.linear", reorderQKV: false) ?? baseModulation
     eval(modulation)
     try observe("modulation", modulation)
     let shift = take(modulation[0..<timeEmbeddings.shape[0], 0..<5376],

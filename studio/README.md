@@ -58,7 +58,10 @@ Explicit spatial-v2 refinement has separate bounds: longest edge 1920, shortest 
 pixels 1920 × 1088, at most 64,000 complete packed rows and a 32 GiB estimated stage budget.
 A learned 1920 × 1088, 73-frame target completed and sampled stills were coherent; full motion/audio,
 user approval, clean performance and maximum-duration/max-canvas combinations remain unqualified.
-The learned upscaler is separate from spatial interpolation. Native VDN and FastH3 remain unavailable through this Swift route.
+The learned upscaler is separate from spatial interpolation. FastH3 remains unavailable through this Swift route. VDN has a separate experimental Swift T2VA
+worker route, including released named adapters and explicit timestep-grid support for pruned
+weights. It is not selectable in Studio; endpoint/reference combinations and production quality
+remain unqualified.
 Retained transformer caches/forecasting and arbitrary Python optimizer settings are not
 implicitly selected by these controls.
 Timed audio-only Ref2VA is distinct from A2V; H3 generates a new soundtrack in either case.

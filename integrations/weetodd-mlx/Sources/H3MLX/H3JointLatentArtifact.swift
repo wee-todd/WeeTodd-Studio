@@ -43,7 +43,7 @@ public enum H3JointLatentArtifact {
   /// partitions. Reuse the existing native component inventory implementation.
   public static func componentIdentity(base: H3T2VARequest, task: String,
     vision: URL? = nil) throws -> String {
-    guard ["t2va", "fl2va", "ref2va"].contains(task),
+    guard base.vdn == nil, ["t2va", "fl2va", "ref2va"].contains(task),
       (task == "t2va") == (vision == nil) else {
       throw H3CheckpointError.invalid("H3 full latent component binding requires the exact task and vision components.")
     }

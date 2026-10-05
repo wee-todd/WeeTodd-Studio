@@ -238,6 +238,14 @@ import UniformTypeIdentifiers
     let canvasAdmission = jointRefinement?.targetGeometry.canvasAdmission ?? H3CanvasAdmission.ordinary
     let baseRecipeData = jointRefinement?.ordinaryRecipe ?? motionRecipe?.ordinaryRecipe ?? recipeData
     var recipe = try JSONSerialization.jsonObject(with: baseRecipeData) as! [String: Any]
+    let hasVDN = recipe["vdn"] != nil
+    if hasVDN {
+      // Validate the untouched source before wrappers can strip a control.
+      _ = try H3VDNStudioRecipe.compile(data: recipeData)
+      guard motionRecipe == nil, jointRefinement == nil else {
+        throw invalid("VDN cannot combine motion repair or initialized refinement.")
+      }
+    }
     let selectedTask = (recipe["components"] as? [String: Any])?["task"] as? String ?? "t2va"
     let conditioningTask = (recipe["conditioning"] as? [String: Any])?["task"] as? String ?? "t2v"
     let refContinuation: H3Ref2VAContinuationRecipe.Prepared?
@@ -461,8 +469,9 @@ import UniformTypeIdentifiers
       stillRequest = nil
       textRequest = nil
     } else {
-      textRequest = try H3StudioRecipe.compile(
-        data: JSONSerialization.data(withJSONObject: recipe), canvasAdmission: canvasAdmission)
+      let textData = try JSONSerialization.data(withJSONObject: recipe)
+      textRequest = hasVDN ? try H3VDNStudioRecipe.compile(data: textData)
+        : try H3StudioRecipe.compile(data: textData, canvasAdmission: canvasAdmission)
       stillRequest = nil
       endpointRequest = nil
     }
@@ -851,6 +860,14 @@ import UniformTypeIdentifiers
       "preflightSeconds": preflightSeconds,
       "seconds": Date().timeIntervalSince(started)]
     var completeMetadata = metadata
+    if let vdn = textRequest?.vdn {
+      completeMetadata["vdn"] = ["variant": vdn.variant.rawValue,
+        "stage": vdn.stage.path, "attention": "hybrid_v2",
+        "schedulePoints": vdn.schedulePoints,
+        "adalnInputGrid": vdn.adalnInputGrid?.path as Any? ?? NSNull(),
+        "adapterStack": vdn.variant == .eightStep ? ["default", "turbo"] : ["default"],
+        "fullCheckpointParityQualified": false]
+    }
     if let plan = actualMotionPlan, let source = motionSource {
       completeMetadata["motionFidelity"] = ["version": 1,
         "sourcePath": source.identity.path, "sourceSHA256": source.identity.sha256,

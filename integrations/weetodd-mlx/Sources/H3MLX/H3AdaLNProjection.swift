@@ -11,6 +11,14 @@ public enum H3AdaLNProjection {
     timeEmbeddings: MLXArray,
     projectionMode: H3ProjectionMode = .weightDecoded,
     rowWindow: Int = 16384) throws -> MLXArray {
+    try evaluate(checkpointURL: checkpointURL, blockIndex: blockIndex,
+      timeEmbeddings: timeEmbeddings, projectionMode: projectionMode,
+      rowWindow: rowWindow, lora: nil)
+  }
+
+  static func evaluate(checkpointURL: URL, blockIndex: Int,
+    timeEmbeddings: MLXArray, projectionMode: H3ProjectionMode = .weightDecoded,
+    rowWindow: Int = 16384, lora: (any H3LoRAApplying)?, loraInput: MLXArray? = nil) throws -> MLXArray {
     guard (0..<50).contains(blockIndex), timeEmbeddings.ndim == 2,
       (1...128).contains(timeEmbeddings.shape[0]),
       [64, 2688].contains(timeEmbeddings.shape[1]),
@@ -32,8 +40,10 @@ public enum H3AdaLNProjection {
         layout.prefix + "blocks.\(blockIndex).adaln_proj.linear.bias") {
         MLXArray($0, [96768], type: Float.self)
       }
-      let result = addMM(bias, timeEmbeddings.asType(.float32), weight.T)
-        .asType(.bfloat16)
+      let base = addMM(bias, timeEmbeddings.asType(.float32), weight.T)
+      let applied = try lora?.apply(base:base,input:loraInput ?? timeEmbeddings,
+        target:"diffusion_model.blocks.\(blockIndex).adaln_proj.linear",reorderQKV:false) ?? base
+      let result = applied.asType(.bfloat16)
       eval(result)
       try file.checkUnchanged(at: tensorURL)
     try H3CheckpointSource.checkUnchanged(checkpointURL)
@@ -57,13 +67,17 @@ public enum H3AdaLNProjection {
       let activated = silu(timeEmbeddings[start..<stop, 0..<2688]
         .asType(.float32)).asType(.bfloat16)
       eval(activated)
-      if let rotated {
-        parts.append(try rotated.project(activated))
-      } else {
-        parts.append(try H3ComfyDecodedProjection.projectStreaming(
+      let base: MLXArray
+      if let rotated { base = try rotated.project(activated) }
+      else {
+        base = try H3ComfyDecodedProjection.projectStreaming(
           checkpointURL: checkpointURL, name: name, rows: 96768,
-          columns: 2688, input: activated, rowWindow: rowWindow))
+          columns: 2688, input: activated, rowWindow: rowWindow)
       }
+      let value = try lora?.apply(base: base, input: activated,
+        target: "diffusion_model.blocks.\(blockIndex).adaln_proj.linear", reorderQKV: false) ?? base
+      eval(value)
+      parts.append(value)
       try Task.checkCancellation()
     }
     let result = parts.count == 1 ? parts[0] : concatenated(parts, axis: 0)

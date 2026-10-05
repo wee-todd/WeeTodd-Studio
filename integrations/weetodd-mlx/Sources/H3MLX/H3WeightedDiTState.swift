@@ -60,7 +60,9 @@ final class H3WeightedDiTState {
   private var text: MLXArray?
   private var timeEmbeddings: MLXArray?
   private var modulations: [MLXArray]?
+  private var modulationLoRAInputs: MLXArray?
   private var funControl: H3FunControlState?
+  private let vdn:H3VDNRuntime?
 
   var isResident: Bool {
     text != nil && timeEmbeddings != nil && modulations != nil
@@ -71,7 +73,7 @@ final class H3WeightedDiTState {
   var residentActivationBytes: Int {
     (text?.nbytes ?? 0) + (timeEmbeddings?.nbytes ?? 0)
       + (modulations?.reduce(0) { $0 + $1.nbytes } ?? 0)
-      + (funControl?.residentActivationBytes ?? 0)
+      + (funControl?.residentActivationBytes ?? 0) + (modulationLoRAInputs?.nbytes ?? 0)
   }
 
   init(checkpointURL: URL, layout: Layout,
@@ -82,6 +84,7 @@ final class H3WeightedDiTState {
     additionalLoRAs: [H3LoRAAdapter] = [],
     loRAAdapters: [H3LoRAAdapter]? = nil,
     funControl: H3FunControlCondition? = nil,
+    vdn:H3VDNSelection? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     let textRows = layout.textRows
     guard (1...50).contains(blockCount),
@@ -114,10 +117,22 @@ final class H3WeightedDiTState {
         strength: turboLoRAStrength), at: 0)
     }
     let effective = loRAAdapters ?? adapters
+    if let vdn {
+      guard blockCount == 50,funControl == nil,effective.isEmpty,
+        case .audiovisual(let packed)=layout,
+        (try H3CheckpointLayout(url:checkpointURL).curveRank == nil ? vdn.adalnInputGrid == nil :
+          (vdn.variant == .fiftyStep || vdn.adalnInputGrid != nil)) else {
+        throw H3CheckpointError.invalid("VDN denoising requires the complete T2VA backbone and correct original-width adapter coordinates without other adapters or controls.")
+      }
+      self.vdn=try H3VDNRuntime(selection:vdn,packed:packed)
+    } else { self.vdn=nil }
     self.lora = try effective.isEmpty ? nil : H3LoRAStack(adapters: effective)
+    let application: (any H3LoRAApplying)?
+    if let vdn = self.vdn { application = vdn.lora } else { application = self.lora }
     self.text = nil
     self.timeEmbeddings = nil
     self.modulations = nil
+    self.modulationLoRAInputs = nil
     try Task.checkCancellation()
     defer {
       Stream.gpu.synchronize()
@@ -126,21 +141,25 @@ final class H3WeightedDiTState {
     let projected = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
       kind: .condition, input: textEmbeddings)
     let refined = try H3TokenRefiner.evaluate(checkpointURL: checkpointURL,
-      input: projected, lora: lora)
+      input: projected, lora: application)
     let time = try H3TimeEmbedding.evaluate(checkpointURL: checkpointURL,
       timesteps: MLXArray(timestepTable))
+    let loraTime = try vdn?.adalnInputGrid.map {
+      try H3VDNInputGrid(url:$0).evaluate(timesteps:timestepTable)
+    }
     var tables: [MLXArray] = []
     tables.reserveCapacity(blockCount)
     for index in 0..<blockCount {
       tables.append(try H3AdaLNProjection.evaluate(
         checkpointURL: checkpointURL, blockIndex: index,
-        timeEmbeddings: time, projectionMode: projectionMode))
+        timeEmbeddings: time, projectionMode: projectionMode,lora:application,loraInput:loraTime))
       if index + 1 < blockCount { progress(index + 1, blockCount) }
       try Task.checkCancellation()
     }
     text = refined
     timeEmbeddings = time
     modulations = tables
+    modulationLoRAInputs = loraTime
     if let funControl {
       self.funControl = try H3FunControlState(condition: funControl,
         timeEmbeddings: time, base: H3CheckpointLayout(url: checkpointURL))
@@ -171,6 +190,8 @@ final class H3WeightedDiTState {
     }
     lora?.evaluation = completedEvaluations
     defer { lora?.evaluation = nil }
+    let application: (any H3LoRAApplying)?
+    if let vdn { application = vdn.lora } else { application = lora }
     let video = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
       kind: .video, input: videoLatents).asType(.bfloat16)
     let audio = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
@@ -196,13 +217,13 @@ final class H3WeightedDiTState {
           index: index, input: input, modulation: modulations[index],
           modulationIndices: packed.modulationIndices,
           positions: packed.positions, projectionMode: projectionMode,
-          lora: lora, rotaryAngles: rotaryAngles, maximumRows: layout.maximumPackedRows, observe: { _, _ in })
+          lora: application, rotaryAngles: rotaryAngles, maximumRows: layout.maximumPackedRows,vdn:vdn,observe: { _, _ in })
       }, controlBlock: controlBlock, progress: progress)
     let result = try H3FinalLayer.evaluate(checkpointURL: checkpointURL,
       input: value, timeEmbeddings: timeEmbeddings,
       timestepIndices: packed.timestepIndices,
       videoIndices: packed.videoIndices,
-      audioIndices: packed.audioIndices, maximumRows: layout.maximumPackedRows, observe: { _, _ in })
+      audioIndices: packed.audioIndices, maximumRows: layout.maximumPackedRows,lora:application,loraInput:modulationLoRAInputs,observe: { _, _ in })
     completedEvaluations += 1
     return result
   }
@@ -211,6 +232,7 @@ final class H3WeightedDiTState {
     text = nil
     timeEmbeddings = nil
     modulations = nil
+    modulationLoRAInputs = nil
     funControl?.unload()
     funControl = nil
     Stream.gpu.synchronize()

@@ -82,7 +82,12 @@ mode passed the same declared tiny numerical limits; it is not BF16/RGB byte par
 benchmark. The default convolutional VAE remains unchanged. Studio, headless and saved-recipe
 Swift nodes preserve native DiffVAE selection and settings; the legacy typed composable Comfy generator
 still uses its maintained Python model pipeline. MSR V2's audio/speaker/reference-audio
-architecture is not implemented; native VDN remains unavailable. Owner-approved access allowed the
+architecture is not implemented. Native VDN now has an explicit experimental Swift T2VA worker
+route with released hybrid attention and mandatory original/Turbo adapters. Eight-step pruned
+H3 requires the original-width SiLU timestep input grid; unpruned H3 uses its own encoder.
+Endpoint/reference combinations, Studio model selection, broad audiovisual quality and matched
+performance remain unqualified. The existing typed VDN ComfyUI graphs retain their maintained
+Python engine. Owner-approved access allowed the
 new official 2.5 Ingredients adapter to pass its pinned payload hash and installed Swift header preflight.
 The first 121-frame native take omitted the second character. A clearer two-shot prompt included
 both identities with the unchanged default and experimental CFG++ samplers; framing and audiovisual

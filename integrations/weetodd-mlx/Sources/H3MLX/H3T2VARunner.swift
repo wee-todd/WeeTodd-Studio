@@ -22,6 +22,7 @@ public struct H3T2VARequest: Sendable {
   public let additionalLoRAs: [H3LoRAAdapter]
   public let loRAAdapters: [H3LoRAAdapter]
   public let funControl: H3FunControlGuide?
+  public let vdn:H3VDNSelection?
 
   public init(prompt: String, width: Int, height: Int,
     durationSeconds: Double, seed: UInt64, requestedSteps: Int,
@@ -31,6 +32,7 @@ public struct H3T2VARequest: Sendable {
     additionalLoRAs: [H3LoRAAdapter] = [],
     loRAAdapters: [H3LoRAAdapter]? = nil,
     funControl: H3FunControlGuide? = nil,
+    vdn:H3VDNSelection? = nil,
     videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil,
     samplingMethod: H3SamplingMethod = .euler,
     canvasAdmission: H3CanvasAdmission = .ordinary) throws {
@@ -90,6 +92,13 @@ public struct H3T2VARequest: Sendable {
     }
     for adapter in effective { try adapter.validate(requestedSteps: requestedSteps, samplingMethod: samplingMethod) }
     self.loRAAdapters = effective
+    if let vdn {
+      guard requestedSteps == vdn.schedulePoints,samplingMethod == .euler,
+        effective.isEmpty,turboLoRA == nil,additionalLoRAs.isEmpty,funControl == nil,canvasAdmission == .ordinary else {
+        throw H3CheckpointError.invalid("VDN requires its released Euler schedule, mandatory adapter stack and ordinary T2VA canvas, without other controls.")
+      }
+    }
+    self.vdn=vdn
   }
 }
 
@@ -131,6 +140,15 @@ public enum H3T2VARunner {
     }
     _ = try H3QwenCheckpointLayout.inspect(root: request.qwenPages)
     let transformer = try H3CheckpointLayout(url: request.transformer)
+    if let vdn=request.vdn {
+      guard refinement == nil,
+        transformer.curveRank == nil ? vdn.adalnInputGrid == nil :
+          (vdn.variant == .fiftyStep || vdn.adalnInputGrid != nil) else {
+        throw H3CheckpointError.invalid("VDN cannot combine refinement; pruned eight-step H3 requires the explicit original-width AdaLN input grid, while an unpruned base uses its own timestep encoder.")
+      }
+      _ = try H3VDNLayout(packed:layout)
+      try vdn.preflight()
+    }
     if let control = request.funControl {
       try control.validate(geometry: request.geometry)
       _ = try H3FunControlLayout(url: control.checkpoint, base: transformer)
@@ -200,7 +218,7 @@ public enum H3T2VARunner {
         turboLoRAURL: request.turboLoRA,
         turboLoRAStrength: request.turboLoRAStrength,
         additionalLoRAs: request.additionalLoRAs, loRAAdapters: request.loRAAdapters,
-        funControl: controlCondition) { completed, total in
+        funControl: controlCondition,vdn:request.vdn) { completed, total in
         progress("transformer_prepare", completed, total)
       }
       defer { state.unload() }

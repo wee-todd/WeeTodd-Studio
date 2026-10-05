@@ -16,7 +16,7 @@ public enum H3MotionFidelityRunner {
   public static func preflight(base: H3T2VARequest,
     source: H3MotionFidelityMedia.Source, settings: H3MotionFidelitySettings) throws -> H3T2VARunner.Admission {
     try settings.validate(); try source.identity.verify()
-    guard base.requestedSteps >= 16, base.funControl == nil,
+    guard base.requestedSteps >= 16, base.funControl == nil, base.vdn == nil,
       base.geometry.width == source.width, base.geometry.height == source.height,
       base.loRAAdapters.allSatisfy({ $0.startAfterEvaluations == 0 && $0.profile != .turbo }) else {
       throw H3CheckpointError.invalid("Motion Fidelity requires a plain full-schedule T2VA repair recipe and immediate ordinary adapters.")

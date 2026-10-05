@@ -516,3 +516,28 @@ single corrected recipe does not establish broad identity quality or speed parit
 Dependencies retain their licenses: [MLX Swift](https://github.com/ml-explore/mlx-swift/tree/901941965d82e4a216d4d117231d847d194c563d)
 and its bundled MLX runtime are MIT licensed. Include their notices when packaging the worker.
 Checkpoint and adapter licenses remain separate from WeeTodd source licensing.
+
+## Experimental native H3 VDN
+
+The shared H3 denoiser can explicitly select the released eight-step or fifty-step VDN T2VA
+stage. The worker admits the complete branch, reads one block at a time and applies the original
+named PEFT adapters in place. Eight-step uses both original and Turbo adapters, including all
+51 timestep/output modulation targets; fifty-step uses the original adapter only. No backbone
+weights are duplicated or converted. Euler schedule counts are nine/fifty-one points respectively.
+
+The headless-v2 `vdn` object retains the existing released stage/path/schedule fields and
+`inference_backend=verified`. Its top-level LoRA descriptors must name the exact full-strength,
+immediately active released stack with `qkv_layout=contiguous_qkv`. A pruned eight-step H3 base
+requires the Turbo descriptor's explicit `adaln_input_grid`: the released 1025 × 2688 BF16 SiLU
+grid. Swift interpolates in FP32 at the actual schedule timesteps, then applies the adapters in
+original coordinates; it never substitutes rank-64 base coordinates. The unpruned base uses its
+own timestep encoder and rejects an unused grid. The original fifty-step adapter has no
+modulation targets and needs no grid.
+
+`WeeToddH3MLXWorker preflight|render --request ENVELOPE --output DIRECTORY` executes this
+experimental route directly without Python. The existing headless CLI can hand the immutable
+recipe to that same worker through `--swift-worker`; Python is orchestration only on that route.
+Current admission rejects timed endpoints, references, continuation, initialized refinement,
+Fun control and additional adapters. Native VDN is not selectable in Studio and has no default
+promotion. Numerical core/adapter checks and a small functional render are not full-checkpoint
+parity, broad audiovisual acceptance or a measured speedup over another backend.

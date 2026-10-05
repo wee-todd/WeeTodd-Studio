@@ -130,6 +130,7 @@ public enum H3Continuation {
   /// generation controls. It is intentionally labeled as such; a future
   /// cross-runtime format must use full content hashes for model identity.
   public static func fingerprint(_ request: H3T2VARequest) throws -> String {
+    guard request.vdn == nil else { throw H3CheckpointError.invalid("VDN continuation is not qualified.") }
     var records: [String] = ["h3-swift-continuation-v2", "24", "32000",
       String(request.geometry.width), String(request.geometry.height),
       String(request.requestedSteps)]

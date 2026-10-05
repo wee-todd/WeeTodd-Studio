@@ -35,7 +35,7 @@ let package = Package(
       .product(name: "MLX", package: "mlx-swift"),
       .product(name: "MLXRandom", package: "mlx-swift"),
       .product(name: "MLXNN", package: "mlx-swift")]),
-    .testTarget(name: "H3MLXTests", dependencies: ["H3MLX"]),
+    .testTarget(name: "H3MLXTests", dependencies: ["H3MLX"], resources: [.copy("Fixtures")]),
     .target(name: "InferenceTestSupport", path: "Tests/Support"),
     .testTarget(name: "LTX25MLXTests", dependencies: ["LTX25MLX", "InferenceTestSupport"], resources: [.copy("Fixtures")]),
   ], swiftLanguageModes: [.v6])

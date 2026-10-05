@@ -14,7 +14,7 @@ public struct H3FL2VARequest: Sendable {
   public init(base: H3T2VARequest, vision: URL,
     images: [H3StillReference], anchors: [H3PackedLayout.Anchor],
     referenceNoise: H3ReferenceNoiseControls? = nil) throws {
-    guard base.funControl == nil, vision.isFileURL, vision.path.hasPrefix("/"),
+    guard base.funControl == nil, base.vdn == nil, vision.isFileURL, vision.path.hasPrefix("/"),
       (1...8).contains(images.count), images.count == anchors.count,
       anchors.enumerated().allSatisfy({ index, anchor in
         let frame: Int

@@ -85,7 +85,7 @@ public enum H3TransformerBlock {
     projectionMode: H3ProjectionMode = .weightDecoded,
     lora: (any H3LoRAApplying)? = nil,
     rotaryAngles: H3RotaryAngles? = nil, maximumRows: Int = 40_000,
-    rowWindow: Int = 16384,
+    rowWindow: Int = 16384, vdn: H3VDNRuntime? = nil,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard (0..<50).contains(index), input.ndim == 3,
       input.shape[0] == 1, [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(input.shape[1]),
@@ -186,6 +186,13 @@ public enum H3TransformerBlock {
       modulationIndices: modulationIndices, angles: angles,
       read: { try read(prefix + $0, shape: $1) },
       project: { try project($0, $1, rows: $2, columns: $3, qkv: $4) },
+      hybridAttention: vdn.map { runtime in
+        { first, qkv, query, key, value in
+          try runtime.attention(block: index, input: first, qkv: qkv,
+            query: query, key: key, value: value,
+            project: { try project($0, "attn.out_proj", rows: 5376, columns: 7168) })
+        }
+      },
       observe: { name,value in
         if maximumRows == 64_000, UInt64(Memory.activeMemory) > H3CanvasAdmission.maximumStageBytes {
           throw H3CheckpointError.invalid("H3 spatial block exceeded its 32 GiB active-memory budget.")
@@ -208,6 +215,7 @@ public enum H3TransformerBlock {
     feedWidth: Int = 14336, rotaryWidth: Int = 96,
     read: (String, [Int]) throws -> MLXArray,
     project: (MLXArray, String, Int, Int, Bool) throws -> MLXArray,
+    hybridAttention: ((MLXArray, MLXArray, MLXArray, MLXArray, MLXArray) throws -> MLXArray)? = nil,
     observe: (String, MLXArray) throws -> Void = { _, _ in }) throws -> MLXArray {
     let count = input.shape[1]
     let mod = modulation.reshaped([modulation.shape[0] * 3, 6 * hiddenWidth])
@@ -241,12 +249,17 @@ public enum H3TransformerBlock {
     let value = qkv[.ellipsis, 2, 0..<headWidth].transposed(0, 2, 1, 3)
     try observe("query", query)
     try observe("key", key)
-    let attended = MLXFast.scaledDotProductAttention(queries: query,
-      keys: key, values: value, scale: 1 / Float(headWidth).squareRoot(),
-      mask: nil).transposed(0, 2, 1, 3).reshaped([1, count, (heads * headWidth)])
-    try observe("attended", attended)
-    let attention = try project(attended, "attn.out_proj",
-      hiddenWidth, (heads * headWidth), false)
+    let attention: MLXArray
+    if let hybridAttention {
+      attention = try hybridAttention(first, qkv, query, key, value)
+    } else {
+      let attended = MLXFast.scaledDotProductAttention(queries: query,
+        keys: key, values: value, scale: 1 / Float(headWidth).squareRoot(),
+        mask: nil).transposed(0, 2, 1, 3).reshaped([1, count, (heads * headWidth)])
+      try observe("attended", attended)
+      attention = try project(attended, "attn.out_proj",
+        hiddenWidth, (heads * headWidth), false)
+    }
     try observe("attention", attention)
     let residual = input + tables[2] * attention
     eval(residual)

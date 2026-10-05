@@ -18,8 +18,8 @@ public enum H3ContinuationRunner {
   public static func preflight(_ request: H3T2VARequest,
     contextFrames: Int) throws -> Admission {
     try Task.checkCancellation()
-    guard request.funControl == nil else {
-      throw H3CheckpointError.invalid("H3 continuation cannot combine a Fun control guide.")
+    guard request.funControl == nil, request.vdn == nil else {
+      throw H3CheckpointError.invalid("H3 continuation cannot combine Fun control or experimental VDN.")
     }
     let tokenizer = try H3QwenTokenizer(url: request.tokenizer)
     let qwen = try H3QwenRequest.text(request.prompt, tokenizer: tokenizer)
