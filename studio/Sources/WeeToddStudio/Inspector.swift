@@ -202,12 +202,19 @@ struct ClipInspector: View {
                 }
               })) {
                 Text("Automatic").tag("auto")
-                ForEach(store.profiles.filter { $0.engine == clip.engine.rawValue }) {
+                ForEach(store.profiles.filter { $0.engine == clip.engine.rawValue &&
+                  ($0.generation?.vdn != true || ["t2v","t2va"].contains(clip.inferredTask)) }) {
                   Text($0.name).tag($0.id)
                 }
               }
             }
             if clip.engine == .h3 {
+              if store.profiles.first(where: { $0.id==clip.profileID })?.generation?.vdn == true {
+                Text("VDN page cache: Off").font(.caption2).foregroundStyle(.secondary)
+                if clip.h3PagingCacheGB != nil && clip.h3PagingCacheGB != 0 {
+                  Button("Clear unsupported page cache") { store.editClip { $0.h3PagingCacheGB=nil } }
+                }
+              } else {
               Picker("H3 page cache", selection: binding(\.h3PagingCacheGB)) {
                 Text("Recipe default").tag(Optional<Double>.none)
                 Text("Off").tag(Optional(0.0))
@@ -217,6 +224,7 @@ struct ClipInspector: View {
               }
               Text("Experimental: retains extra weight pages between denoising steps. This is a cache budget, not a total RAM cap. Off is the default.")
                 .font(.caption2).foregroundStyle(.secondary)
+              }
             }
             Text(
               "Generation stays on the model grid. Finishing applies the movie canvas and frame rate to each clip."

@@ -255,7 +255,13 @@ import StudioCore
       return
     }
     let recipePath = resultPath
-    store.editClip { $0.profileID = recipePath }
+    store.editClip {
+      $0.profileID = recipePath
+      if preset.id=="swift-h3-vdn8" {
+        if $0.generationSelection==nil { $0.generationSelection=GenerationSelection(task:"t2v") }
+        $0.generationSelection?.steps=8;$0.generationSelection?.h3SamplingMethod = .euler
+      }
+    }
     error = ""
     store.notice =
       "Recipe selected for \(clip.name). Prepare the clip to validate its media and settings."

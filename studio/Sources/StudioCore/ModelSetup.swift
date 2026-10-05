@@ -5,6 +5,8 @@ public struct ModelSetupComponent: Codable, Identifiable, Equatable {
   public var label: String
   public var kind: String
   public var accepts: [String]?
+  /// Explicit installed-component reuse; no pinned catalog acquisition is offered.
+  public var importOnly: Bool? = nil
   public var id: String { key }
 }
 

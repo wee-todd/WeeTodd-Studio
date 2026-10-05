@@ -240,6 +240,7 @@ struct ModelSetupView: View {
           state.resultPath = ""
         }
         .help("Link an existing local model file or folder without copying it.")
+        if component.importOnly != true {
         Button("Download…") {
           guard
             let download = compatibleDownloads.first(where: {
@@ -256,6 +257,7 @@ struct ModelSetupView: View {
           }
         )
         .help("Review a compatible download. Some packages include several components.")
+        }
       }
       if !choices.isEmpty {
         Picker(
@@ -277,7 +279,9 @@ struct ModelSetupView: View {
           Text(selected).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
         }
       } else {
-        Text("Import an existing component or download a compatible package.").font(.caption)
+        Text(component.importOnly == true
+          ? "Import an installed component. This field has no catalog download."
+          : "Import an existing component or download a compatible package.").font(.caption)
           .foregroundStyle(
             .secondary)
       }

@@ -69,18 +69,42 @@ were observed; full media decoding passed. Actual sampling cancellation returned
 with no published take or staging/preview residue. The fifty-evaluation variant passed installed
 headless preflight but was not generated. Twenty-two focused VDN tests passed, including installed
 branch, adapter and pruned-modulation witnesses. Concurrent test/build activity makes these takes
-unsuitable for isolated speed comparisons. Full audiovisual quality, matched performance,
-endpoint/reference variants and Studio selection remain open; no VDN default promotion or
-full-checkpoint parity claim.
-Final core validation passed 2,526 Python tests (five optional skips), 207 shared Swift tests
-(ten optional skips) and 743 MLX Swift tests (119 optional skips), plus compilation, lint,
-catalog and portable-workflow checks. The separate 22-test installed VDN selection had no skips.
-This does not change the historical 29/31 migration ledger.
+unsuitable for isolated speed comparisons. The original-Q8 eight-step boxing take received
+human audiovisual approval on 2026-10-04. Studio now offers an explicit experimental VDN8
+T2VA setup with linked pruned Q8 pages, released stage and original-width grid; the fixed
+eight Euler evaluations and required strength-1 adapters survive preparation. Automatic
+selection excludes VDN. Fifty-step Studio selection, endpoint/reference variants, broader
+audiovisual quality and matched performance remain open; no default promotion or full-checkpoint
+parity claim.
+Packaged Studio VDN8 qualification 2026-10-04: guided setup/header/full-worker preflight passed
+with installed weights linked in place. The three VDN-specific setup fields are explicitly
+import-only; fresh acquisition is not qualified. The actual StudioStore generation completed 124 frames
+and synchronized audio, delivered seven decoded previews, accepted the take and saved/reopened
+its project with Python unavailable. Movie, silent video and WAV bytes exactly matched the
+human-approved direct-worker take. Worker time was 541.67 seconds, with 4.73 GB MLX and
+6.08 GB Swift-worker process peaks, excluding FFmpeg. This is an integration observation,
+not an isolated speed comparison. The export retained the fixed recipe and passed actual
+packaged CLI preflight; no additional exported CLI or ComfyUI generation was rerun.
+The packaged UI showed the explicit preset, fixed 8/Euler controls, T2V-only selection,
+page cache Off and inherited-override repair. References and fifty-step Studio admission remain gated.
+Validation for this Studio delivery passed 2,951 combined Python tests (five optional skips),
+207 shared Swift tests (ten optional skips) and 743 MLX Swift tests (119 optional skips), plus
+compilation, lint, catalog and portable-workflow checks. The first Studio run caught four
+catalog/acquisition assertions; the correction explicitly marks only the three VDN fields
+import-only and retains every ordinary pinned-download check. Its final Studio profile passed
+425 Python and 970 Swift tests (46 optional Swift skips), with no failures. Final guided setup
+and packaged CLI preflight passed without Python inference. The final isolated package retains
+the exact H3 binary from the qualified Studio render and its unchanged MLX Metal library;
+no second generation was needed for the UI/catalog-only correction. The earlier separate
+22-test installed VDN numerical selection had no skips. This does not change the historical
+29/31 migration ledger.
 Owner-approved access allowed the official 2.5 Ingredients payload and installed Swift header
 preflight to pass. The first 121-frame native take omitted the second character. A prompt-only
 follow-up retained both characters; the same prompt also retained both with Studio's unchanged
 eight-forward default in 220.86 observer seconds at a 5.22 GB Swift-process peak, excluding FFmpeg.
-Framing, lighting and human audiovisual acceptance remain open. The current authored
+The official 2.5 default two-character take received human audiovisual approval on 2026-10-04.
+Other compositions, checkpoints and CFG++ sample quality remain separate; no general
+framing/lighting or Dev-base parity claim. The current authored
 2.5 workflow uses supported 2.3 Ingredients 1.3/distilled 8 CFG++; its retained native collage failure
 is unapproved and has no proven engine cause. Prefix/one-projection witnesses are not full sampler parity.
 
@@ -130,7 +154,8 @@ board, the showcased prompt headings and adapter strength 1.3. Accepted-project 
 staged unloading and no-inference resume passed, but all 121 reviewed frames still animated
 the board layout instead of composing the requested scene. Its 551.95-second worker time
 and 5.572 GB physical peak were observed with another GPU application active and are not
-an isolated performance comparison. Ingredients remains experimental and not quality-approved.
+an isolated performance comparison. That retained 2.3-adapter Ingredients take remains
+experimental and not quality-approved.
 The authored sampler now applies the checkpoint's learned marker to the first generated
 latent frame, excluding the guide tail and audio. Three focused CPU tests verify row selection,
 legacy defaults and trailing-slot arithmetic. This corrects a primary-code discrepancy;

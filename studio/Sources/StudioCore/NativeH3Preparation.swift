@@ -140,6 +140,10 @@ public enum NativeH3Preparation {
     return number.doubleValue.isFinite && (0...1).contains(number.doubleValue)
   }
   private static func supported(_ recipe: [String: Any]) -> Bool {
+    if recipe["vdn"] != nil {
+      guard let packet=try? NativeH3VDNProfile.packet(recipe) else { return false }
+      return supported(packet.ordinary)
+    }
     guard Set(recipe.keys).isSubset(of: rootKeys),
       (recipe["negative_prompt"] as? String ?? "").isEmpty,
       (recipe["block_residency"] as? String ?? "checkpoint_default") == "checkpoint_default",
@@ -195,12 +199,13 @@ public enum NativeH3Preparation {
     let modelTask = (recipe["components"] as? [String: Any])?["task"] as? String
     let task = (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
       : modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"
-    return ["samplingMethod": config["sampling_method"] as? String ?? "euler",
+    let vdn=recipe["vdn"] != nil
+    return ["samplingMethod": config["sampling_method"] as? String ?? "euler", "vdn":vdn,
       "supportedTasks": task == "ref2va" ? ["ref2va", "a2v", "extension"] : [task], "controls": [
       "evaluations": max(0, (config["steps"] as? Int ?? 20) - 1),
-      "stepsEditable": true, "refinementStepsEditable": false,
+      "stepsEditable": !vdn, "refinementStepsEditable": false,
       "cfgEditable": false, "shiftEditable": false,
-      "stepsExplanation": "H3 uses one fewer model evaluation than sigma grid points.",
+      "stepsExplanation": vdn ? "VDN requires eight Euler evaluations and both released adapters at strength 1." : "H3 uses one fewer model evaluation than sigma grid points.",
       "cfgExplanation": "Guidance is distilled into H3.",
       "shiftExplanation": "Swift H3 does not expose a Shift override."],
       "presets": [["id": "custom", "name": "Custom", "description": "Use the admitted profile settings."]]]
@@ -216,7 +221,7 @@ public enum NativeH3Preparation {
       try Task.checkCancellation()
       guard let recipe = try? profile(url.path), supported(recipe) else { return nil }
       return ["id": try canonical(url.path),
-        "name": url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " "),
+        "name": recipe["vdn"] != nil ? "MiniMax H3 · VDN 8-step · Swift" : url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " "),
         "engine": "h3", "task": (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
           : (recipe["components"] as? [String: Any])?["task"] as? String == "ref2va"
           ? "ref2va" : (recipe["components"] as? [String: Any])?["task"] as? String == "fl2va"
@@ -283,13 +288,14 @@ public enum NativeH3Preparation {
       : ["i2v", "fflf"].contains(task) ? "fflf" : "t2v"
     guard let chosen = profiles.first(where: {
       $0["task"] as? String == catalogTask &&
-        (clip.profileID == "auto" || $0["id"] as? String == clip.profileID)
+        (clip.profileID == "auto" ? ($0["generation"] as? [String:Any])?["vdn"] as? Bool != true : $0["id"] as? String == clip.profileID)
     }),
       let path = chosen["id"] as? String else {
       throw unsupported("no compatible \(catalogTask) profile is installed")
     }
     let recipe = try profile(path)
     guard supported(recipe) else { throw unsupported("the selected profile changed or contains unported settings") }
+    if recipe["vdn"] != nil { try NativeH3VDNProfile.validate(clip:clip,project:project,motion:motion,recipe:recipe) }
     return (project, clip, runtime, path, recipe,motion)
   }
   private static func frameRequest(_ request:[String:Any],imagePath:String?=nil) throws
@@ -477,7 +483,8 @@ public enum NativeH3Preparation {
     }
     var components = recipe["components"] as! [String: Any]
     let profileLoRAs=components["loras"] as? [[Any]] ?? []
-    let profileStack=recipe.removeValue(forKey:"loras")
+    let vdn=recipe["vdn"] != nil
+    let profileStack=vdn ? nil : recipe.removeValue(forKey:"loras")
 
     if let tokenizer = components["tokenizer"] as? String {
       let tokenFile = URL(fileURLWithPath: tokenizer).appendingPathComponent("tokenizer.json")
@@ -715,6 +722,7 @@ public enum NativeH3Preparation {
       sources += [source,URL(fileURLWithPath:source).deletingLastPathComponent().appendingPathComponent("joint-latents.f32").path]
     }
     if let adapters=(content["loras"] as? [String:Any])?["adapters"] as? [[String:Any]] { sources += adapters.compactMap { $0["path"] as? String } }
+    sources += NativeH3VDNProfile.sources(content)
 
     if let context=(content["continuation"] as? [String:Any])?["source_context"] as? String {
       sources += [context,URL(fileURLWithPath:context).deletingLastPathComponent().appendingPathComponent("latents.f32").path]

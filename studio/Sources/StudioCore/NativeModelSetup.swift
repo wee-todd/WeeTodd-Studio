@@ -79,8 +79,8 @@ public enum NativeModelSetup {
   }
 
   public static func catalog() -> [ModelSetupPreset] {
-    func component(_ key: String, _ label: String, _ accepts: [String]) -> ModelSetupComponent {
-      ModelSetupComponent(key: key, label: label, kind: accepts[0], accepts: accepts)
+    func component(_ key: String, _ label: String, _ accepts: [String], importOnly: Bool? = nil) -> ModelSetupComponent {
+      ModelSetupComponent(key: key, label: label, kind: accepts[0], accepts: accepts, importOnly: importOnly)
     }
     let h3 = [
       component("checkpoint", "H3 task manifest", ["directory"]),
@@ -165,7 +165,13 @@ public enum NativeModelSetup {
       engine: "h3", task: "control",
       description: "Experimental generation using one prepared Canny, depth, HED, MLSD or pose movie. Choose the original full-width five- or ten-block Fun branch and a compatible full-width H3 transformer. Turbo LoRAs cannot be combined with this control route.",
       components: h3 + [component("fun_controlnet", "H3 Fun Union full-width control branch", ["file"])])
-    return ordinary + [h3Fun] + dfr + references + [union] + controls + [crossviewIngredients] + guided + automaticDuration
+    let vdn=ModelSetupPreset(id:"swift-h3-vdn8",name:"MiniMax H3 · VDN 8-step · Swift",engine:"h3",task:"t2v",
+      description:"Experimental eight-evaluation text-to-video. Reuse the original pruned H3 pages, installed released VDN stage and SiLU input grid. Both required adapters run at strength 1. References, continuity and extra LoRAs are unavailable. Worker preflight validates the full stack before saving.",
+      components:h3.filter { $0.key != "transformer" } + [
+        component("vdn_transformer","Original pruned H3 Q8 pages",["directory"],importOnly:true),
+        component("vdn_stage","VDN stage-dmd-step-250 folder",["directory"],importOnly:true),
+        component("vdn_input_grid","Original-width H3 SiLU timestep grid",["file"],importOnly:true)])
+    return ordinary + [h3Fun,vdn] + dfr + references + [union] + controls + [crossviewIngredients] + guided + automaticDuration
   }
 
   public static func recipe(preset: ModelSetupPreset, selected: [String: String],
@@ -282,6 +288,29 @@ public enum NativeModelSetup {
     let controlFamilies = ["swift-ltx25-motion-track": "motion_track",
       "swift-ltx25-crossview": "crossview_warp", "swift-ltx25-crossview-ingredients": "crossview_ingredients"]
     if let family = controlFamilies[preset.id] { conditioning["control_family"] = family }
+    if preset.id=="swift-h3-vdn8" {
+      let stage=URL(fileURLWithPath:components.removeValue(forKey:"vdn_stage") as! String)
+      guard stage.lastPathComponent=="stage-dmd-step-250" else {
+        throw StudioError.invalid("Choose the released stage-dmd-step-250 VDN folder for eight-step generation.")
+      }
+      let grid=components.removeValue(forKey:"vdn_input_grid") as! String
+      components["transformer"]=components.removeValue(forKey:"vdn_transformer")
+      let paths=[stage.appendingPathComponent("adapters/default/adapter_model.safetensors").path,
+        stage.appendingPathComponent("adapters/turbo/adapter_model.safetensors").path]
+      config["steps"]=9;config["width"]=672;config["height"]=384;config["duration_seconds"]=5.0
+      let fields:[String:Any]=["repository":stage.deletingLastPathComponent().path,"checkpoint":stage.path,
+        "model_spec":stage.appendingPathComponent("model_spec.json").path,
+        "linear_branch":stage.appendingPathComponent("linear_branch/model.safetensors").path,
+        "default_adapter":paths[0],"turbo_adapter":paths[1],"schedule_points":9,
+        "stage":"stage-dmd-step-250","inference_backend":"verified"]
+      let adapters:[[String:Any]]=paths.enumerated().map { index,path in
+        ["path":path,"strength":1.0,"profile":index==0 ? "standard":"turbo","qkv_layout":"contiguous_qkv",
+         "start_after_evaluations":0,"adaln_input_grid":index==1 ? grid:NSNull()]
+      }
+      return ["format":"weetodd-headless-v2","engine":"h3","candidate":preset.id,
+        "components":components,"config":config,"vdn":fields,"loras":["version":1,"adapters":adapters],
+        "prompt":"A continuous scene with synchronized sound.","conditioning":conditioning]
+    }
     return ["format": "weetodd-headless-v2", "engine": preset.engine,
       "candidate": preset.id, "components": components, "config": config,
       "prompt": "A continuous scene with synchronized sound.", "conditioning": conditioning]
@@ -379,6 +408,30 @@ private enum NativeModelInspector {
   static func matches(_ url: URL, key: String, engine: String, task: String) throws -> Bool {
     let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     if engine == "h3" {
+      if key=="vdn_transformer" {
+        guard directory,let manifest=try? document(url.appendingPathComponent("paged_manifest.json")),
+          manifest["format"] as? String == "weetodd-h3-paged-v1",manifest["num_blocks"] as? Int == 50,
+          let fixed=manifest["fixed"] as? [String:Any],let file=fixed["file"] as? String,
+          file=="pages/fixed.safetensors",let tensors=try? header(url.appendingPathComponent(file)) else { return false }
+        return (tensors["adaln_t_table"] as? [String:Any])?["shape"] as? [Int] == [1001,64]
+      }
+      if key=="vdn_input_grid" {
+        guard !directory,let tensors=try? header(url) else { return false }
+        return Set(tensors.keys.filter { $0 != "__metadata__" }) == ["silu_t_emb_grid"]
+          && (tensors["silu_t_emb_grid"] as? [String:Any])?["shape"] as? [Int] == [1025,2688]
+          && (tensors["silu_t_emb_grid"] as? [String:Any])?["dtype"] as? String == "BF16"
+      }
+      if key=="vdn_stage" {
+        guard directory,url.lastPathComponent=="stage-dmd-step-250",
+          let spec=try? document(url.appendingPathComponent("model_spec.json")),spec["format_version"] as? Int == 2,
+          let tensors=try? header(url.appendingPathComponent("linear_branch/model.safetensors")),
+          tensors.keys.filter({ $0 != "__metadata__" }).count==800 else { return false }
+        for name in ["default","turbo"] {
+          guard (try? document(url.appendingPathComponent("adapters/\(name)/adapter_config.json")))?["type"] as? String == "lora",
+            FileManager.default.fileExists(atPath:url.appendingPathComponent("adapters/\(name)/adapter_model.safetensors").path) else { return false }
+        }
+        return true
+      }
       if key == "fun_controlnet" {
         guard !directory else { return false }
         let tensors = try header(url)

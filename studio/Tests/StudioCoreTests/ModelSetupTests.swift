@@ -104,7 +104,7 @@ final class ModelSetupTests: XCTestCase {
   func testNativeSetupCatalogAndRecipeWithoutPython() throws {
     let presets = NativeModelSetup.catalog()
     XCTAssertEqual(Set(presets.map(\.id)), Set(["swift-h3-text", "swift-h3-image",
-      "swift-h3-reference", "swift-h3-fun-control", "swift-ltx25-text", "swift-ltx25-image",
+      "swift-h3-reference", "swift-h3-fun-control", "swift-h3-vdn8", "swift-ltx25-text", "swift-ltx25-image",
       "swift-ltx25-dfr-spatial", "swift-ltx25-dfr-temporal-1", "swift-ltx25-dfr-temporal-2",
       "swift-ltx25-msr", "swift-ltx25-ingredients", "swift-ltx25-union",
       "swift-ltx25-motion-track", "swift-ltx25-crossview", "swift-ltx25-crossview-ingredients",

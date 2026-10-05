@@ -261,6 +261,12 @@ final class NativeModelDownloadsTests: XCTestCase {
     XCTAssertEqual(diffusion.files.first?.sha256,"847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3")
     for preset in NativeModelSetup.catalog() {
       for component in preset.components {
+        if component.importOnly == true {
+          XCTAssertEqual(preset.id,"swift-h3-vdn8")
+          XCTAssertTrue(["vdn_transformer","vdn_stage","vdn_input_grid"].contains(component.key))
+          XCTAssertFalse(catalog.contains { $0.descriptor.supports(engine:preset.engine,task:preset.task,component:component.key) })
+          continue
+        }
         XCTAssertTrue(catalog.contains { $0.descriptor.supports(engine:preset.engine, task:preset.task, component:component.key) },
           "Missing Python-free download for \(preset.id): \(component.key)")
       }

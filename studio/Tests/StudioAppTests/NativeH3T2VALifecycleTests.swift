@@ -95,7 +95,7 @@ final class NativeH3T2VALifecycleTests: XCTestCase {
     guard store.error == nil else { throw StudioError.invalid(store.error!) }
     let prepared = URL(fileURLWithPath: try XCTUnwrap(store.preparedRecipe))
     let preparedRecipe = try JSONSerialization.jsonObject(with: Data(contentsOf: prepared)) as! [String: Any]
-    for key in ["config", "components", "conditioning"] {
+    for key in ["config", "components", "conditioning"] + (profile["vdn"] == nil ? []:["vdn","loras"]) {
       guard NSDictionary(dictionary: try XCTUnwrap(preparedRecipe[key] as? [String: Any]))
         .isEqual(to: try XCTUnwrap(profile[key] as? [String: Any])) else {
         throw StudioError.invalid("T2VA preparation changed the frozen \(key); stop before generation.")
@@ -148,6 +148,12 @@ final class NativeH3T2VALifecycleTests: XCTestCase {
     let takeDirectory = URL(fileURLWithPath: version.path).deletingLastPathComponent()
     let receiptURL = takeDirectory.appendingPathComponent("result.json")
     let receipt = try JSONSerialization.jsonObject(with: Data(contentsOf: receiptURL)) as! [String: Any]
+    if profile["vdn"] != nil {
+      guard let vdn=receipt["vdn"] as? [String:Any],vdn["variant"] as? String == "8_step",
+        vdn["adapterStack"] as? [String] == ["default","turbo"],vdn["schedulePoints"] as? Int == 9 else {
+        throw StudioError.invalid("The Studio VDN take lost its selected stage or mandatory adapter stack.")
+      }
+    }
     guard receipt["status"] as? String == "complete", receipt["task"] as? String == "t2va",
       receipt["nativeRuntime"] as? String == "swift-mlx", receipt["frames"] as? Int == modelFrames,
       (receipt["referenceImages"] as? [[String: Any]])?.isEmpty == true,
@@ -170,7 +176,7 @@ final class NativeH3T2VALifecycleTests: XCTestCase {
       "requestedDuration": original.duration, "modelFrames": modelFrames,
       "modelDuration": Double(modelFrames) / 24, "seed": original.seed,
       "renderAndAcceptanceSeconds": Date().timeIntervalSince(started), "otherClipsUnchanged": true,
-      "scope": "Actual new ordinary T2VA Studio lifecycle only; no inferred Comfy acceptance or visual quality approval."]
+      "scope": profile["vdn"] == nil ? "Actual new ordinary T2VA Studio lifecycle only; no inferred Comfy acceptance or visual quality approval." : "Actual new eight-step VDN T2VA Studio lifecycle; exact recipe and adapters retained; no inference from this to other tasks or fifty-step support."]
     try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys])
       .write(to: root.appendingPathComponent("studio-qualification.json"))
   }

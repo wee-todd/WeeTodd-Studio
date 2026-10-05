@@ -85,14 +85,17 @@ still uses its maintained Python model pipeline. MSR V2's audio/speaker/referenc
 architecture is not implemented. Native VDN now has an explicit experimental Swift T2VA worker
 route with released hybrid attention and mandatory original/Turbo adapters. Eight-step pruned
 H3 requires the original-width SiLU timestep input grid; unpruned H3 uses its own encoder.
-Endpoint/reference combinations, Studio model selection, broad audiovisual quality and matched
-performance remain unqualified. The existing typed VDN ComfyUI graphs retain their maintained
-Python engine. Owner-approved access allowed the
+Studio offers an explicitly selected experimental eight-step T2VA preset with guided in-place
+setup and fixed Euler/adapter settings. The reviewed original-Q8 boxing take was human-approved
+on 2026-10-04. Endpoint/reference combinations, the fifty-step Studio route, broader audiovisual
+quality and matched performance remain unqualified. The existing typed VDN ComfyUI graphs
+retain their maintained Python engine. Owner-approved access allowed the
 new official 2.5 Ingredients adapter to pass its pinned payload hash and installed Swift header preflight.
 The first 121-frame native take omitted the second character. A clearer two-shot prompt included
-both identities with the unchanged default and experimental CFG++ samplers; framing and audiovisual
-acceptance remain open. The supported 2.3 adapter remains available, and the current
-authored 2.5 example also uses it.
+both identities with the unchanged default and experimental CFG++ samplers. The official
+2.5 default two-character take was human-approved on 2026-10-04; other compositions,
+checkpoints and sampler variants require their own quality review. The supported 2.3 adapter
+remains available, and the current authored 2.5 example also uses it.
 The retained 2.3 collage failure has no proven engine cause. See the [current Studio controls](studio/README.md#current-swift-controls-and-qualification)
 and [implementation status](STATUS.md) for the qualified scope and remaining restrictions.
 
@@ -1758,8 +1761,9 @@ Swift-worker header preflight. At 768 × 448, 121 frames and 24 fps, a clearer t
 both character roles with the existing deterministic default and experimental CFG++ sampler.
 The default took 220.86 observer seconds and peaked at 5.22 GB in the Swift process, excluding FFmpeg.
 The sixteen-prediction CFG++ take took 431.07 observer seconds and peaked at 5.22 GB.
-These are qualification observations, not a matched engine-speed benchmark. Framing, lighting and
-human audiovisual acceptance remain open; the tests do not establish Dev-base recipe parity.
+These are qualification observations, not a matched engine-speed benchmark. The official 2.5
+default two-character take received human audiovisual approval on 2026-10-04. This resolves that
+sample review, not general framing/lighting accuracy or Dev-base recipe parity.
 An explicitly selected `config.single_stage_sampler: "euler_ancestral_cfg_pp"` compiles to
 version 11: eight updates, sixteen serial predictions, Float32 sampler state and BF16 model
 inputs. It requires reference strength 1 and retains a separate native seeded-noise policy.
@@ -2330,7 +2334,15 @@ video/audio decode, and mux; shared text encoding is excluded. Peaks are MLX all
 
 ## VDN-H3 experimental integration
 
-Use the [saved UI workflow](workflows/balance/t2v/h3_vdn_8_step_experimental.json) or its
+Studio provides **MiniMax H3 · VDN 8-step · Swift** under **Settings → Model
+setup**. It links compatible pruned Q8 pages, the released stage and original-width timestep grid
+in place, validates them with the Swift worker and requires explicit recipe selection. Its
+eight Euler evaluations and two strength-1 adapters are fixed; references, extra LoRAs and
+continuity are rejected. Fifty-step native admission remains worker-only. See
+[guided setup](studio/README.md#guided-model-setup).
+
+The maintained composable ComfyUI route below uses its separate Python engine. Use the
+[saved UI workflow](workflows/balance/t2v/h3_vdn_8_step_experimental.json) or its
 [matching API prompt](examples/h3_vdn_8_step_api.json). The graph preserves the standard
 component loader, preview override, preflight, text encoder, and joint sampler. **Direct Publish
 Latents** performs staged VAE decoding and synchronized publication without a persistent

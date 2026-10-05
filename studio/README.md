@@ -60,8 +60,18 @@ A learned 1920 × 1088, 73-frame target completed and sampled stills were cohere
 user approval, clean performance and maximum-duration/max-canvas combinations remain unqualified.
 The learned upscaler is separate from spatial interpolation. FastH3 remains unavailable through this Swift route. VDN has a separate experimental Swift T2VA
 worker route, including released named adapters and explicit timestep-grid support for pruned
-weights. It is not selectable in Studio; endpoint/reference combinations and production quality
-remain unqualified.
+weights. Studio exposes the eight-step T2VA variant through explicit guided setup and recipe
+selection; it is excluded from Automatic. Eight Euler evaluations, both strength-1 adapters and
+staged MLX unloading are fixed. Unsupported references, extra LoRAs, continuation, memory/backend
+overrides and latent/motion controls reject before generation. The original-Q8 boxing take was
+human-approved on 2026-10-04; endpoint/reference combinations, fifty-step Studio selection and
+broader production quality remain unqualified.
+The packaged VDN8 StudioStore route passed a new 672 × 384, 124-frame generation with seven
+previews, acceptance and project save/reopen while Python was unavailable. Its movie, silent
+video and WAV were byte-identical to the human-approved direct take. Guided setup and native
+export passed shared-worker preflight, including through the packaged CLI; the exported job
+was not generated again. This is the tested eight-step integration scope, not fifty-step or
+endpoint/reference qualification.
 Retained transformer caches/forecasting and arbitrary Python optimizer settings are not
 implicitly selected by these controls.
 Timed audio-only Ref2VA is distinct from A2V; H3 generates a new soundtrack in either case.
@@ -810,7 +820,8 @@ configure the native MLX engines.
    count once a native worker or the optional renderer is configured. Choose H3 text/image/reference
    or LTX 2.3/2.5 text/image. Swift LTX 2.5 also offers spatial DFR and one- or two-round
    temporal DFR presets, MSR images, Ingredients sheets, Union, Motion Track and CrossView
-   controls when its worker is enabled. H3 also offers a native Fun ControlNet guide preset.
+   controls when its worker is enabled. H3 also offers native Fun ControlNet and
+   **MiniMax H3 · VDN 8-step · Swift** presets.
    Compatible installed adapters can be reused or acquired through pinned native catalog entries.
 2. Choose **Set Up… → Use Existing Models**, select model folders (including an existing ComfyUI
    `models` folder), then scan. Inspection reads bounded headers and manifests, never model tensors.
@@ -827,7 +838,12 @@ configure the native MLX engines.
    a Qwen vision tower: choose installed vision-capable pages or a compatible raw
    Qwen checkpoint for that field. Text encoding itself requires the supported paged pack.
    Native H3 transformer/audio fields require compatible direct/folded-weight files;
-   older Python paged transformers and unfurled audio bundles are excluded from native choices.
+   older Python paged transformers and unfurled audio bundles are excluded from ordinary native
+   choices. The VDN8 preset instead requires compatible original AdaLN-pruned Q8 pages, the
+   released `stage-dmd-step-250` folder and `h3_silu_temb_grid.safetensors`, plus the ordinary
+   Qwen/processor/tokenizer and VAE components. Keep the stage folder intact; both named adapters
+   remain at strength 1. These three VDN-specific fields are import-only; they have no pinned
+   catalog download. No backbone weights are copied or converted.
 3. Use **Automatic** to select a lower-memory policy on Macs with 64 GB or less, **Lower Memory** to
    request supported memory-saving settings, or **Custom** to retain the preset policy for later
    advanced adjustment. Memory information is advisory and does not promise fit, allocate RAM, or
@@ -842,7 +858,11 @@ configure the native MLX engines.
    for a Swift image/reference preset, attach media and prepare a clip for worker preflight.
    Existing recipes and model files are preserved. Automatic selection can use the new compatible
    components; a specific recipe can be pinned under **Advanced generation**. **Set Up Models…**
-   is also available from missing-model actions.
+   is also available from missing-model actions. VDN8 is always explicit: use the setup result
+   for the selected T2V clip or pin its recipe under **Advanced generation**. It runs eight
+   Euler evaluations; unsupported execution controls are hidden. **Reset incompatible VDN
+   overrides** repairs inherited sampler/backend/cache settings while preserving prompt and
+   media. Remove incompatible attachments and continuity settings explicitly before preparing.
 
 **Download or prepare a model** shows compatible catalog items with source terms, download size and
 required space before an explicit download. Prefer the
@@ -1115,9 +1135,10 @@ Legacy 2.3 setup and existing saved recipes retain their prior settings. The pin
 2.5 download requires Hugging Face approval. After owner-approved access, its actual payload hash,
 all 480 projection pairs and installed Swift-worker header preflight passed. The first 121-frame
 take omitted the second character. A clearer two-shot prompt retained both characters with the
-unchanged eight-forward default and experimental sixteen-forward CFG++ sampler. Framing, lighting
-and human audiovisual acceptance remain open. These tests do not establish Dev-base recipe parity. The current authored
-2.5 example uses the supported 2.3 Ingredients adapter at 1.3 with distilled eight-step CFG++;
+unchanged eight-forward default and experimental sixteen-forward CFG++ sampler. The official
+2.5 default two-character take was human-approved on 2026-10-04. This approval applies to that
+sample; broader framing/lighting, CFG++ quality and Dev-base recipe parity remain unqualified.
+The current authored 2.5 example uses the supported 2.3 Ingredients adapter at 1.3 with distilled eight-step CFG++;
 the retained 2.3 collage failure still has no proven engine cause.
 The current MSR V1 contract has 480 video pairs and five visual-slot tensors. The actual MSR V2
 header has 1,152 pairs, extra audio/video-to-audio targets and five audio-slot tensors; V2's

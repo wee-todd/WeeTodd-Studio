@@ -538,6 +538,9 @@ modulation targets and needs no grid.
 experimental route directly without Python. The existing headless CLI can hand the immutable
 recipe to that same worker through `--swift-worker`; Python is orchestration only on that route.
 Current admission rejects timed endpoints, references, continuation, initialized refinement,
-Fun control and additional adapters. Native VDN is not selectable in Studio and has no default
-promotion. Numerical core/adapter checks and a small functional render are not full-checkpoint
-parity, broad audiovisual acceptance or a measured speedup over another backend.
+Fun control and additional adapters. Studio offers explicit experimental eight-step T2VA
+guided setup and recipe selection, with the released adapter stack and Euler schedule fixed;
+Automatic selection excludes it. The fifty-step variant remains worker-only. The original-Q8
+eight-step boxing take received human audiovisual approval on 2026-10-04. Numerical checks and
+that sample do not establish full-checkpoint parity, broad quality or a measured speedup over
+another backend.
