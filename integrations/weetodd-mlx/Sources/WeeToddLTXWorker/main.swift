@@ -108,7 +108,7 @@ private final class MovieWorkerEvents:@unchecked Sendable {
     if let direct=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any],
       ((direct["version"] as? Int == 5 && direct["task"] as? String == "union_control") ||
         ((direct["version"] as? Int == 6 || direct["version"] as? Int == 11) && direct["task"] as? String == "ingredients") ||
-        (direct["version"] as? Int == 7 && direct["task"] as? String == "msr") ||
+        ((direct["version"] as? Int == 7 || direct["version"] as? Int == 16) && direct["task"] as? String == "msr") ||
         ((direct["version"] as? Int == 8 || direct["version"] as? Int == 9) && direct["task"] as? String == "dfr") ||
         (direct["version"] as? Int == 10 && direct["task"] as? String == "ic_control") ||
         direct["version"] as? Int == 12 || direct["version"] as? Int == 13 || direct["version"] as? Int == 14 || direct["version"] as? Int == 15) {
@@ -209,6 +209,18 @@ private final class MovieWorkerEvents:@unchecked Sendable {
       preparedPublicationAudio=try await interval.extract(ffmpeg:URL(fileURLWithPath:ffmpeg),directory:publicationDirectory)
       try NativeMediaSource(path:reference.path,sha256:reference.sourceSHA256).verify()
     } else { preparedPublicationAudio=nil }
+    let voiceDirectory=output.appendingPathExtension("msr-voices-"+UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at:voiceDirectory) }
+    var preparedMSRAudio:[MLXSourceAudioInterval.Prepared]=[]
+    for reference in request.msr?.audioReferences ?? [] {
+      try NativeMediaSource(path:reference.path,sha256:reference.sourceSHA256).verify()
+      let interval=try MLXSourceAudioInterval(source:URL(fileURLWithPath:reference.path),
+        sourceStartSeconds:reference.sourceStartSeconds,sourceDurationSeconds:reference.sourceDurationSeconds,
+        durationSeconds:reference.effectiveDurationSeconds)
+      preparedMSRAudio.append(try await interval.extract(ffmpeg:URL(fileURLWithPath:ffmpeg),
+        directory:voiceDirectory.appendingPathComponent("slot-\(reference.imageSlot)")))
+      try NativeMediaSource(path:reference.path,sha256:reference.sourceSHA256).verify()
+    }
     let previewFrames=try request.dfr.map {
       try MLXDFRTemporalPlan.outputFrames(inputFrames:request.frames,rounds:$0.temporalRounds)
     } ?? request.frames
@@ -218,7 +230,7 @@ private final class MovieWorkerEvents:@unchecked Sendable {
     var lastPreview=Date.distantPast,revision=0
     var result:[String:Any]=[:]
     defer { try? FileManager.default.removeItem(at:preview) }
-    _ = try pipeline.run(ffmpeg:URL(fileURLWithPath:ffmpeg),preparedAudio:preparedAudio,preparedPublicationAudio:preparedPublicationAudio,
+    _ = try pipeline.run(ffmpeg:URL(fileURLWithPath:ffmpeg),preparedAudio:preparedAudio,preparedPublicationAudio:preparedPublicationAudio,preparedMSRAudio:preparedMSRAudio,
       preparedTextLease:preparedTextLease,textPreparationBinding:textBinding,textPreparationSeconds:textPreparationSeconds,decodedPreview:{ index,bytes in
       guard MLXStudioPreview.shouldEmit(index:index,total:previewFrames,
         secondsSinceLast:Date().timeIntervalSince(lastPreview)) else { return }

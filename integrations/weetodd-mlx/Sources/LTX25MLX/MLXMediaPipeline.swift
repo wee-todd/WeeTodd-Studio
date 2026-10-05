@@ -105,6 +105,7 @@ public final class MLXMediaPipeline {
         try MLXReferenceVideoLayout(geometry:geometry,strength:$0.referenceStrength)
       }
       let msr=try MLXMSRReferencePlan.resolve(request,target:geometry)
+      let msrAudio=try MLXMSRAudioLayout.resolve(request,target:geometry)
       let dfr=try request.dfr.map { _ in try MLXDFRLayout(geometry:geometry,
         slotFrames:MLXDFRCanvas(frames:recipe.high.frames).slotFrames,
         reference:index == 1 ? recipe.low : nil,
@@ -114,11 +115,11 @@ public final class MLXMediaPipeline {
       guard layout == nil || guide == nil else { throw LTXError.invalid("LTX extension cannot combine with endpoint references.") }
       let block=try MLXAVBlock(configuration:AVBlockConfiguration(
         videoTokens:singleStage?.videoTokens ?? ordinary?.videoTokens ?? dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ic?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
-        audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
+        audioTokens:msrAudio?.audioTokens ?? guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
         maximumActivationBytes:blockBudget)
       if singleStage?.requiresPerTokenVideo == true || ordinary?.anchors.isEmpty == false || layout != nil || union != nil || ic != nil || ingredients != nil || msr != nil || (dfr?.referenceTokens ?? 0) > 0 ||
         (dfr != nil && !request.referenceImages.isEmpty) { try block.admitPerTokenVideo() }
-      if guide != nil { try block.admitPerTokenAV() }
+      if guide != nil || msrAudio != nil { try block.admitPerTokenAV() }
       _ = try MLXDenoiser.admitRotary(configuration:block.configuration,maximumActivationBytes:blockBudget)
     }
     if let dfr=request.dfr,dfr.temporalRounds>0 {
@@ -234,6 +235,7 @@ public final class MLXMediaPipeline {
         throw LTXError.invalid("MSR reference layout is missing.")
       }
       msrSampler=try MLXSingleStageMSR(layout:layout,
+        audioLayout:MLXMSRAudioLayout.resolve(request,target:request.recipe().high),
         transformerRoot:URL(fileURLWithPath:request.transformerRoot),
         adapter:LoRAAdapter(path:msr.adapterPath,strength:msr.adapterStrength),
         maximumActivationBytes:transformerActivationBytes)
@@ -289,6 +291,12 @@ public final class MLXMediaPipeline {
         try MLXReferenceImage.inspect(URL(fileURLWithPath:reference.path))
       }
       _ = try MLXVideoEncoder(checkpoint:URL(fileURLWithPath:request.videoCheckpoint))
+      for voice in msr.audioReferences {
+        try NativeMediaSource(path:voice.path,sha256:voice.sourceSHA256).verify()
+        _ = try MLXSourceAudioInterval(source:URL(fileURLWithPath:voice.path),sourceStartSeconds:voice.sourceStartSeconds,
+          sourceDurationSeconds:voice.sourceDurationSeconds,durationSeconds:voice.effectiveDurationSeconds)
+      }
+      if !msr.audioReferences.isEmpty { _ = try MLXAudioEncoder(checkpoint:URL(fileURLWithPath:request.audioCheckpoint),maximumMelFrames:501) }
     }
     if let source=request.audioReference {
       _ = try MLXSourceAudioInterval(source:URL(fileURLWithPath:source.path),
@@ -309,6 +317,7 @@ public final class MLXMediaPipeline {
   }
   public func run(ffmpeg:URL,preparedAudio:MLXSourceAudioInterval.Prepared?=nil,
     preparedPublicationAudio:MLXSourceAudioInterval.Prepared?=nil,
+    preparedMSRAudio:[MLXSourceAudioInterval.Prepared]=[],
     extensionGuideLease:ExtensionGuideLease?=nil,
     preparedTextLease:MLXPreparedTextLease?=nil,textPreparationBinding:MLXTextPreparationBinding?=nil,
     textPreparationSeconds:Double=0,
@@ -357,6 +366,11 @@ public final class MLXMediaPipeline {
         preparedPublicationAudio!.publicationSamples == Int((Double(g.frames)/g.fps*48000).rounded(.toNearestOrEven))) else {
       throw LTXError.invalid("CrossView requires its exact publication-only source waveform before weighted execution.")
     }
+    let voices=request.msr?.audioReferences ?? []
+    guard preparedMSRAudio.count == voices.count,zip(preparedMSRAudio,voices).allSatisfy({
+      $0.0.sourceStartSeconds == $0.1.sourceStartSeconds && $0.0.durationSeconds == $0.1.effectiveDurationSeconds &&
+      $0.0.conditioningSamples == Int(($0.1.effectiveDurationSeconds*16000).rounded(.toNearestOrEven))
+    }) else { throw LTXError.invalid("MSR requires its exact prepared voice intervals before weighted execution.") }
     let publicationSource=preparedAudio ?? preparedPublicationAudio
     guard (extensionGuideLease?.guides != nil) == (extensionContextFrames != nil),
       extensionGuideLease == nil || preparedAudio == nil else {
@@ -390,6 +404,28 @@ public final class MLXMediaPipeline {
       try report("reference_preparation_complete")
     }
     let latents=try autoreleasepool {
+      let msrAudioTokens:[MLXArray]=try autoreleasepool {
+        guard let msr=request.msr,!voices.isEmpty,let layout=try MLXMSRAudioLayout.resolve(request,target:g) else { return [] }
+        let start=Date(),slots=try MLXMSRSlotEmbedding.load(URL(fileURLWithPath:msr.adapterPath),audio:true)
+        var tokens:[MLXArray]=[]
+        for (index,source) in preparedMSRAudio.enumerated() {
+          let token=try autoreleasepool {
+            try report("msr_audio_encode",index,voices.count)
+            let mel=try MLXAudioMel.encode(wav:source.conditioning)
+            let encoder=try MLXAudioEncoder(checkpoint:URL(fileURLWithPath:request.audioCheckpoint),maximumMelFrames:501)
+            let raw=try encoder.encode(mel:mel) { try report("msr_audio_encode:\(index+1)",$0,$1) }
+            guard raw.shape[0]>=layout.lengths[index] else { throw LTXError.invalid("MSR audio encoder returned too few voice tokens.") }
+            let fitted=try raw[0..<layout.lengths[index]].asType(.float32)+MLXMSRSlotEmbedding.embedding(slotID:voices[index].imageSlot,state:slots)
+            eval(fitted);return fitted
+          }
+          Stream.gpu.synchronize();Memory.clearCache()
+          try report("msr_audio_encoder_weights_released",index+1,voices.count)
+          try NativeMediaSource(path:voices[index].path,sha256:voices[index].sourceSHA256).verify()
+          tokens.append(token)
+        }
+        timings["msr_audio_encode"]=Date().timeIntervalSince(start)
+        return tokens
+      }
       let frozenAudio:MLXArray?=try autoreleasepool {
         guard let source=preparedAudio else { return nil }
         let start=Date()
@@ -575,7 +611,7 @@ public final class MLXMediaPipeline {
       } else if let msrSampler {
         let started=Date()
         sampled=try msrSampler.evaluate(videoContext:contexts.video,audioContext:contexts.audio,
-          references:preparedGuides.2,seed:request.seed,progress:report)
+          references:preparedGuides.2,audioReferences:msrAudioTokens,seed:request.seed,progress:report)
         timings["sampling"]=Date().timeIntervalSince(started)
       } else if let ingredientsSampler {
         guard let guide=preparedGuides.1 else {
@@ -811,6 +847,16 @@ public final class MLXMediaPipeline {
       metadata["reference_conditioning"]="ordered VAE latent groups with learned slot embeddings, negative reference times and grouped attention"
       metadata["msr_adapter_scope"]="single_full_resolution_stage"
       metadata["msr_reference_sha256"]=msr.references.map(\.sourceSHA256)
+      if !msr.audioReferences.isEmpty {
+        metadata["recipe"]="ltx25-msr-v2-audio-single-stage-v1"
+        metadata["msr_audio_reference_sha256"]=msr.audioReferences.map(\.sourceSHA256)
+        metadata["msr_audio_image_slots"]=msr.audioReferences.map(\.imageSlot)
+        metadata["msr_audio_effective_seconds"]=msr.audioReferences.map(\.effectiveDurationSeconds)
+        metadata["msr_audio_requested_seconds"]=msr.audioReferences.map(\.sourceDurationSeconds)
+        metadata["msr_audio_tokens"]=try MLXMSRAudioLayout.resolve(request,target:g)?.lengths ?? []
+        metadata["audio_conditioning"]="clean negative-time speaker prefixes; generated target audio only"
+        for voice in msr.audioReferences { try NativeMediaSource(path:voice.path,sha256:voice.sourceSHA256).verify() }
+      }
     } else if let dfr=request.dfr {
       metadata["reference_conditioning"]="stage-one generated keyframe slots; stage-two clean half-resolution reference plus upscaled seeded slots"
       metadata["dfr_adapter_scope"]="stage_two_only"

@@ -5,7 +5,7 @@ Studio/CLI/saved-Comfy route/lifecycle evidence remain distinct from new creativ
 The original 31-item migration ledger has 29 completed checks; matched performance and broad
 quality remain open. Its fixed denominator does not absorb the separate 22-item remaining-feature
 inventory or turn CPU/header admission into completed generation. Full migration is not complete.
-A final-app isolated clean-registry reuse check passed in 8.177 seconds: 23 catalog contracts,
+A final-app isolated clean-registry reuse check passed in 8.177 seconds: the then-current 23 catalog contracts,
 eight setup/header cases, completed Dev-directory adoption, Turbo import and Diffusion VAE
 component adoption. Python/runtime were intentionally unavailable; no network, inference,
 conversion rerun or weight copies occurred. This qualifies installed-component reuse and header
@@ -53,8 +53,9 @@ retained 1344×768, 89-frame decoder-only take with exact source PCM. The experi
 mode passed the same declared tiny numerical limits; it is not BF16/RGB byte parity or a whole-job
 benchmark. The default convolutional VAE remains unchanged. Studio, headless and saved-recipe
 Swift nodes preserve native DiffVAE selection and settings; the legacy typed composable Comfy generator
-still uses its maintained Python model pipeline. MSR V2 remains structurally
-unimplemented (audio/speaker/reference-audio conditioning); it is not interchangeable with V1.
+still uses its maintained Python model pipeline. Swift MSR V2 supports sparse image-linked
+voice prefixes with its full adapter.
+V1 remains a separate compatible visual-only contract.
 Native VDN now has original Swift hybrid-attention algebra, complete 800-tensor branch admission,
 all 208 original/363 Turbo adapter targets, original-width timestep-grid interpolation for pruned
 H3 and explicit T2VA worker/recipe routing. Released eight/fifty-evaluation Euler schedules remain
@@ -424,10 +425,28 @@ Generated scene quality and Dev-base recipe parity remain separate qualification
 New 2.5 Ingredients setup now selects the trained 768 × 448 canvas from bounded metadata;
 legacy 2.3 setup and saved recipes keep their prior settings. A focused regression reproduced
 the generic 512-pixel setup height, then passed for both 2.5 tags and both legacy version tags.
-The inspected MSR V2 header contains 1,152 rank-128 pairs and audio attention/feed-forward,
-video-to-audio targets plus five audio-slot tensors. Current V1 supports 480 video
-pairs and five visual-slot tensors without V2 sparse-speaker/absolute audio-slot/
-reference-audio conditioning, so V2 is structurally excluded rather than rejected by name.
+The earlier MSR V2 exclusion was resolved on 2026-10-05 by full Swift adapter admission,
+sparse voice slots, absolute negative audio windows and clean reference-prefix sampling.
+V1 retains its 480-pair visual-only behavior.
+
+Swift LTX 2.5 MSR V2 2026-10-05 (experimental): released 1,152 rank-128 projection pairs
+and ten learned visual/audio-slot tensors are validated before weighted work. Studio binds up
+to two explicit audio intervals to stable image-attachment identities; worker request version 16
+preserves sparse slot numbering and caps each interval at five seconds. The existing joint
+sampler keeps reference audio clean and strips it before target decoding. Staged release,
+progress, decoded previews, cancellation, recipe export and saved-take reopening share the
+existing Swift runtime. V1, ordinary LoRAs and A2V keep their prior contracts.
+
+A real packaged-worker two-image/two-voice five-second 768 × 448 test with Python unavailable
+completed render plus acceptance in 159.01 seconds: sampling 130.12 seconds, voice encoding
+2.41 seconds. Two previews and acceptance/save/reopen passed. MLX peak was 3.30 GB and
+Swift process-footprint peak 5.50 GB, excluding FFmpeg. CPU speech recognition recovered
+"Are you ready? Yes, let us begin." without an expected-text hint. Cancellation during
+weighted voice encoding exited 130 without output or temporary media; a separately exported
+Studio native job passed actual packaged CLI preflight. No second exported-job generation
+was run. Voice likeness, naturalness, lip synchronization, other reference counts and larger
+canvases remain unqualified. These figures are functional evidence, not an idle matched
+benchmark. Legacy typed Python MSR nodes retain V1; V2 uses recipe-backed Swift execution.
 
 Swift H3 folded audio acquisition 2026-10-02: native Model Setup now offers
 a separately pinned 32 kHz stereo audio VAE package with the source license,

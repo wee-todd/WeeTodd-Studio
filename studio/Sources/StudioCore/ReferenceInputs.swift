@@ -57,7 +57,8 @@ extension Clip {
       let driver = ReferenceAction(id: "audioDriver", label: "Audio · drive video",
         detail: "Uses this audio as the timed driver. LTX preserves the supplied audio; this is not a voice/style reference.", role: .audioDriver)
       return engine == .h3 ? [driver, ReferenceAction(id: "audioReference", label: "Audio · reference sound / voice",
-        detail: "H3 Ref2VA also needs a visual reference. Swift H3 uses up to 15 seconds of this audio at 32 kHz as a sound or voice reference; generated audio is still new.", role: .reference)] : [driver]
+        detail: "H3 Ref2VA also needs a visual reference. Swift H3 uses up to 15 seconds of this audio at 32 kHz as a sound or voice reference; generated audio is still new.", role: .reference)] : engine == .ltx25 ? [driver,ReferenceAction(id:"msrVoice",label:"Voice identity · MSR V2",
+        detail:"Requires the MSR V2 adapter and a binding to image 1 or 2. Uses up to five seconds as a voice reference; the generated soundtrack is new.",role:.reference)] : [driver]
     default: return []
     }
   }
@@ -84,6 +85,7 @@ extension Clip {
     var attachment = Attachment(assetID: asset.id, role: action.role)
     attachment.controlType = action.controlType
     attachment.description = asset.name
+    if action.id == "msrVoice" { attachment.audioSourceStart=0;attachment.audioSourceDuration=min(5,asset.duration) }
     if action.role == .audioDriver { attachments.removeAll { $0.role == .audioDriver } }
     attachments.append(attachment)
     // Selecting a purpose selects its task in one undoable change. Other inputs stay visible.

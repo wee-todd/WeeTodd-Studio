@@ -901,7 +901,7 @@ retry with a fresh directory. The actual installed Dev conversion completed in 1
 Studio adoption tests passed. That does not establish full clean-library acquisition/reuse of
 every native package or bit identity to the original BF16 model: affine Q8 is quantized.
 A final-app clean-registry check completed in 8.177 seconds with Python/runtime unavailable:
-it validated all 23 catalog contracts and eight setup/header cases, adopted the completed Dev
+it validated the then-current 23 catalog contracts and eight setup/header cases, adopted the completed Dev
 directory and imported Turbo. The eighth case adopted Diffusion VAE into a complete LTX profile
 while preserving its four other component paths. Weights remained in place; there was no network,
 inference or conversion rerun. This proves isolated reuse/setup, not a fresh download/install of
@@ -1140,9 +1140,23 @@ unchanged eight-forward default and experimental sixteen-forward CFG++ sampler. 
 sample; broader framing/lighting, CFG++ quality and Dev-base recipe parity remain unqualified.
 The current authored 2.5 example uses the supported 2.3 Ingredients adapter at 1.3 with distilled eight-step CFG++;
 the retained 2.3 collage failure still has no proven engine cause.
-The current MSR V1 contract has 480 video pairs and five visual-slot tensors. The actual MSR V2
-header has 1,152 pairs, extra audio/video-to-audio targets and five audio-slot tensors; V2's
-sparse-speaker/reference-audio contracts are not implemented and its files are explicitly rejected.
+MSR V1 retains its 480 video pairs and five visual-slot tensors. Swift MSR V2 admits the
+complete 1,152-pair adapter and its ten visual/audio-slot tensors. Select its installed adapter
+in the MSR setup preset. Attach one to five images as **Appearance · MSR image**. Add an
+audio asset using **Voice identity · MSR V2**, then choose the corresponding image in the
+voice attachment's inspector. Only image 1 and image 2 can have voice references, with one
+voice per image. Bindings follow attachment identity, including after reordering or reopening.
+Choose a source start and duration; the encoder uses at most five seconds from that interval.
+These references provide voice identity, not a fixed dialogue soundtrack: describe new
+dialogue in the scene prompt. An A2V audio driver remains a separate control.
+
+A five-second 768 × 448 V2 two-character/two-voice installed-app run passed generation, two
+decoded previews, acceptance, save/reopen and stage releases with Python unavailable.
+Render plus acceptance took 159.01 seconds; MLX/process peaks were 3.30/5.50 GB, excluding
+FFmpeg. Exported native-job preflight and cancellation during voice encoding also passed.
+Speech recognition recovered the requested dialogue without supplying it as a recognition
+prompt. Voice likeness, naturalness and lip synchronization remain separate review checks.
+The following earlier measurements concern V1 and Ingredients, not V2.
 Installed-app five-second 512 × 256 jobs passed generation, two decoded previews, acceptance
 and reopening with Python unavailable. Their render-plus-acceptance times were 83.49 seconds
 for two-image MSR and 99.38 seconds for Ingredients; worker process peaks were 4.03/4.00 GB,

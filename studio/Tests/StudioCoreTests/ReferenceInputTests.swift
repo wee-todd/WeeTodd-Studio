@@ -10,12 +10,21 @@ final class ReferenceInputTests: XCTestCase {
         ["movieAppearance", "movieMotion", "preprocessedControl"])
       let audio = MediaAsset(name: "Audio", kind: .audio)
       XCTAssertEqual(clip.referenceActions(for: audio).map(\.id),
-        engine == .h3 ? ["audioDriver", "audioReference"] : ["audioDriver"])
+        engine == .h3 ? ["audioDriver", "audioReference"] : engine == .ltx25 ? ["audioDriver","msrVoice"] : ["audioDriver"])
       XCTAssertFalse(clip.canAssignMedia(audio, role: .first))
       XCTAssertFalse(clip.canAssignMedia(movie, role: .audioDriver))
     }
   }
 
+  func testMSRVoiceAttachmentRequiresExplicitPairingAndKeepsA2VSeparate() throws {
+    var clip=Clip(engine:.ltx25),audio=MediaAsset(name:"Voice",kind:.audio);audio.duration=8
+    let action=try XCTUnwrap(clip.referenceActions(for:audio).first { $0.id == "msrVoice" })
+    try clip.attachReference(audio,action:action)
+    XCTAssertEqual(clip.inferredTask,"ref2va");XCTAssertEqual(clip.attachments[0].role,.reference)
+    XCTAssertEqual(clip.attachments[0].audioSourceDuration,5)
+    XCTAssertNil(clip.attachments[0].msrAudioReferenceID)
+    XCTAssertFalse(clip.attachments.contains { $0.role == .audioDriver })
+  }
   func testIngredientsIsAtomicAndInfersTheCorrectModelTask() throws {
     for engine in [Engine.ltx23, .ltx25] {
       var clip = Clip(name: "Shot", engine: engine)

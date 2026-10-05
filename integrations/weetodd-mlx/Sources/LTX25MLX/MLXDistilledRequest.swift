@@ -115,8 +115,8 @@ public struct MLXDistilledRequest:Codable,Sendable {
     }
     guidedSampling=version < 12 ? nil : try c.decodeIfPresent(MLXGuidedSampling.self,forKey:.guidedSampling)
     automaticDuration=version < 13 ? nil : try c.decodeIfPresent(MLXAutomaticDurationPolicy.self,forKey:.automaticDuration)
-    generatedKeyframes=version < 14 ? nil : try c.decode(Int.self,forKey:.generatedKeyframes)
-    singleStageSampling=version < 15 ? nil : try c.decode(MLXSingleStageSampling.self,forKey:.singleStageSampling)
+    generatedKeyframes=version < 14 ? nil : try c.decodeIfPresent(Int.self,forKey:.generatedKeyframes)
+    singleStageSampling=version < 15 ? nil : try c.decodeIfPresent(MLXSingleStageSampling.self,forKey:.singleStageSampling)
     noisePolicy=version < 3 ? .native : try c.decode(MLXNoisePolicy.self,forKey:.noisePolicy)
     let dfrCanvas=try (version == 8 || version == 9) ? MLXDFRCanvas(frames:frames) : nil
     let roles=referenceImages.map(\.role)
@@ -153,9 +153,12 @@ public struct MLXDistilledRequest:Codable,Sendable {
         noisePolicy == .releasedMLX && (version == 6 ||
           (ingredientsSampling == .ancestralCFGPP && ingredientsSheet?.referenceStrength == 1 &&
             msr == nil && dfr == nil && icControl == nil))) ||
-      (version == 7 && task == "msr" && roles.isEmpty && audioReference == nil &&
+      ((version == 7 || version == 16) && task == "msr" && roles.isEmpty && audioReference == nil &&
         unionControlGuide == nil && ingredientsSheet == nil && msr != nil &&
-        stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX) ||
+        stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX &&
+        dfr == nil && icControl == nil && guidedSampling == nil && automaticDuration == nil &&
+        generatedKeyframes == nil && singleStageSampling == nil &&
+        (version == 16 ? !(msr?.audioReferences.isEmpty ?? true) : msr?.audioReferences.isEmpty == true)) ||
       ((version == 8 || version == 9) && task == "dfr" &&
         (roles.isEmpty || roles == ["first"] || roles == ["first","last"]) && audioReference == nil &&
         unionControlGuide == nil && ingredientsSheet == nil && msr == nil && dfr != nil &&
@@ -214,7 +217,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     }
     guard singleStageSampling?.method != .cfgpp || audioReference == nil else { throw LTXError.invalid("Single-stage CFG++ cannot freeze source audio.") }
     var requiredPaths=[gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,outputDirectory]
-    if !spatialUpscalerCheckpoint.isEmpty || ![6,7,11,15].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
+    if !spatialUpscalerCheckpoint.isEmpty || ![6,7,11,15,16].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
     for path in requiredPaths {
       guard path.hasPrefix("/"), path.utf8.count <= 4096, !path.utf8.contains(0) else {
         throw LTXError.invalid("Model and output paths must be explicit absolute local paths.")
@@ -363,21 +366,64 @@ public struct MLXMSRRequest:Codable,Sendable {
   public let adapterPath:String
   public let adapterStrength:Float
   public let references:[MLXMSRReference]
+  public let audioReferences:[MLXMSRAudioReference]
   enum CodingKeys:String,CodingKey,CaseIterable {
-    case adapterPath="adapter_path",adapterStrength="adapter_strength",references
+    case adapterPath="adapter_path",adapterStrength="adapter_strength",references,audioReferences="audio_references"
   }
   public init(from decoder:Decoder) throws {
+    let all=try decoder.container(keyedBy:MSRAnyKey.self)
     let c=try decoder.container(keyedBy:CodingKeys.self)
-    guard Set(c.allKeys.map(\.stringValue)) == Set(CodingKeys.allCases.map(\.rawValue)) else {
+    guard Set(all.allKeys.map(\.stringValue)).subtracting(["audio_references"]) == Set(CodingKeys.allCases.map(\.rawValue)).subtracting(["audio_references"]) else {
       throw LTXError.invalid("MSR requires exact adapter and reference fields.")
     }
     adapterPath=try c.decode(String.self,forKey:.adapterPath)
     adapterStrength=try c.decode(Float.self,forKey:.adapterStrength)
     references=try c.decode([MLXMSRReference].self,forKey:.references)
+    audioReferences=(try c.decodeIfPresent([MLXMSRAudioReference].self,forKey:.audioReferences) ?? []).sorted { $0.imageSlot < $1.imageSlot }
     guard adapterPath.hasPrefix("/"),adapterPath.utf8.count <= 4096,!adapterPath.utf8.contains(0),
       adapterStrength.isFinite,adapterStrength > 0,adapterStrength <= 3,
-      (1...5).contains(references.count),references.filter({ $0.role == "background" }).count <= 1 else {
+      (1...5).contains(references.count),references.filter({ $0.role == "background" }).count <= 1,
+      audioReferences.count<=2,Set(audioReferences.map(\.imageSlot)).count == audioReferences.count,
+      audioReferences.allSatisfy({ $0.imageSlot<=references.count && references[$0.imageSlot-1].role != "background" }),
+      audioReferences.isEmpty || references.map(\.role) == (references.filter { $0.role != "background" } + references.filter { $0.role == "background" }).map(\.role) else {
       throw LTXError.invalid("MSR adapter or one-to-five reference count is invalid.")
+    }
+  }
+}
+
+private struct MSRAnyKey:CodingKey {
+  let stringValue:String
+  var intValue:Int? { nil }
+  init(stringValue:String) { self.stringValue=stringValue }
+  init?(intValue:Int) { return nil }
+}
+
+/// A bounded voice identity reference, explicitly paired to visual image 1 or 2.
+/// The reference is conditioning only; the model generates the output soundtrack.
+public struct MLXMSRAudioReference:Codable,Sendable {
+  public let path:String,sourceSHA256:String,imageSlot:Int
+  public let sourceStartSeconds:Double,sourceDurationSeconds:Double
+  public var effectiveDurationSeconds:Double { min(sourceDurationSeconds,5) }
+  enum CodingKeys:String,CodingKey,CaseIterable {
+    case path,sourceSHA256="source_sha256",imageSlot="image_slot"
+    case sourceStartSeconds="source_start_seconds",sourceDurationSeconds="source_duration_seconds"
+  }
+  public init(from decoder:Decoder) throws {
+    let all=try decoder.container(keyedBy:MSRAnyKey.self)
+    guard Set(all.allKeys.map(\.stringValue)) == Set(CodingKeys.allCases.map(\.rawValue)) else {
+      throw LTXError.invalid("MSR voice reference contains missing or unsupported fields.")
+    }
+    let c=try decoder.container(keyedBy:CodingKeys.self)
+    path=try c.decode(String.self,forKey:.path);sourceSHA256=try c.decode(String.self,forKey:.sourceSHA256)
+    imageSlot=try c.decode(Int.self,forKey:.imageSlot)
+    sourceStartSeconds=try c.decode(Double.self,forKey:.sourceStartSeconds)
+    sourceDurationSeconds=try c.decode(Double.self,forKey:.sourceDurationSeconds)
+    guard path.hasPrefix("/"),path.utf8.count<=4096,!path.utf8.contains(0),
+      sourceSHA256.utf8.count == 64,sourceSHA256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+      (1...2).contains(imageSlot),sourceStartSeconds.isFinite,sourceStartSeconds>=0,
+      sourceDurationSeconds.isFinite,sourceDurationSeconds>0,sourceDurationSeconds<=86400,
+      (sourceStartSeconds+sourceDurationSeconds).isFinite else {
+      throw LTXError.invalid("MSR voice path, digest, image slot or source interval is invalid.")
     }
   }
 }

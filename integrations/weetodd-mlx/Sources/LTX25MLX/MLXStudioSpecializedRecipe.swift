@@ -73,11 +73,13 @@ enum MLXStudioSpecializedRecipe {
     var ids=Set<String>()
     for input in inputs {
       guard let id=input["id"] as? String,!id.isEmpty,ids.insert(id).inserted,
-        input["kind"] as? String == "image" else { throw invalid("requires unique still-image references") }
+        (input["kind"] as? String == "image" || task == "ref2va" && input["kind"] as? String == "audio") else { throw invalid("requires unique image or MSR voice references") }
     }
+    let imageInputs=inputs.filter { $0["kind"] as? String == "image" }
+    let audioInputs=inputs.filter { $0["kind"] as? String == "audio" }
     if task == "ref2va" {
       let msrStrength=components["msr_lora_strength"] ?? 1
-      guard (1...5).contains(inputs.count),components["msr_lora_path"] as? String == adapter,
+      guard (1...5).contains(imageInputs.count),audioInputs.count<=2,components["msr_lora_path"] as? String == adapter,
         let number=msrStrength as? NSNumber,CFGetTypeID(number) != CFBooleanGetTypeID(),
         number.doubleValue == strength.doubleValue else {
         throw invalid("MSR adapter path and strength must match the single IC adapter")
@@ -94,7 +96,7 @@ enum MLXStudioSpecializedRecipe {
     root["conditioning"]=["version":1,"task":"t2v","audio_policy":"generated","inputs":[]]
     var request=try MLXStudioRecipe.compileFields(data:JSONSerialization.data(withJSONObject:root),
       outputDirectory:outputDirectory,requiresSpatialUpscaler:false)
-    request["version"]=task == "ref2va" ? 7 : ingredientsCFGPP ? 11 : 6
+    request["version"]=task == "ref2va" ? (audioInputs.isEmpty ? 7 : 16) : ingredientsCFGPP ? 11 : 6
     request["task"]=task == "ref2va" ? "msr" : "ingredients"
     request["audio_reference"]=NSNull();request["union_control_guide"]=NSNull()
     request["ingredients_sheet"]=NSNull()
@@ -103,8 +105,8 @@ enum MLXStudioSpecializedRecipe {
       request["ingredients_sampling"]=MLXIngredientsSampling.ancestralCFGPP.rawValue
     }
     if task == "ref2va" {
-      let ordered=inputs.filter { $0["reference_role"] as? String != "background" }
-        + inputs.filter { $0["reference_role"] as? String == "background" }
+      let ordered=imageInputs.filter { $0["reference_role"] as? String != "background" }
+        + imageInputs.filter { $0["reference_role"] as? String == "background" }
       let references=try ordered.map { input -> [String:Any] in
         guard Set(input.keys).isSubset(of:["id","kind","role","path","sha256","strength",
           "description","reference_role","reference_priority","reference_frames","reference_size_policy","attention_strength"]),
@@ -117,7 +119,28 @@ enum MLXStudioSpecializedRecipe {
           "size_policy":input["reference_size_policy"] ?? "sol_auto","strength":input["strength"] ?? 1,
           "attention_strength":input["attention_strength"] ?? 1]
       }
-      request["msr"]=["adapter_path":adapter,"adapter_strength":strength,"references":references]
+      let voices=try audioInputs.map { input -> [String:Any] in
+        guard Set(input.keys).isSubset(of:["id","kind","role","path","sha256","strength","image_slot","source_start_seconds","source_duration_seconds"]),
+          input["role"] as? String == "reference",let path=input["path"] as? String,let digest=input["sha256"] as? String,
+          let weight=input["strength"] as? NSNumber,CFGetTypeID(weight) != CFBooleanGetTypeID(),weight.doubleValue == 1,
+          let slot=input["image_slot"] as? NSNumber,CFGetTypeID(slot) != CFBooleanGetTypeID(),
+          let start=input["source_start_seconds"] as? NSNumber,CFGetTypeID(start) != CFBooleanGetTypeID(),
+          let duration=input["source_duration_seconds"] as? NSNumber,CFGetTypeID(duration) != CFBooleanGetTypeID() else {
+          throw invalid("voice references require an image slot, fixed strength and explicit source interval")
+        }
+        return ["path":path,"source_sha256":digest,"image_slot":slot,
+          "source_start_seconds":start,"source_duration_seconds":duration]
+      }
+      request["msr"]=["adapter_path":adapter,"adapter_strength":strength,"references":references,"audio_references":voices]
+      if !voices.isEmpty {
+        for key in ["dfr","ic_control","guided_sampling","automatic_duration","generated_keyframes","single_stage_sampling"] {
+          guard request[key] == nil || request[key] is NSNull else {
+            throw invalid("MSR V2 cannot combine voice references with \(key)")
+          }
+          request[key]=NSNull()
+        }
+        request["ingredients_sampling"]=MLXIngredientsSampling.deterministic.rawValue
+      }
       let guide=ordered.enumerated().map { index,input in
         "Image \(index+1) provides the \(input["reference_role"] as! String): \((input["description"] as! String).trimmingCharacters(in:.whitespacesAndNewlines))"
       }.joined(separator:"\n")

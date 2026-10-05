@@ -26,6 +26,9 @@ final class NativeH3PreparationTests: XCTestCase {
     let inputs=(recipe["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
     XCTAssertEqual(inputs.compactMap {$0["kind"] as? String},["audio","audio"])
     XCTAssertEqual(inputs.compactMap {$0["frame_index"] as? Int},[119,0])
+    project.clips[0].attachments[0].msrAudioReferenceID=UUID()
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    project.clips[0].attachments[0].msrAudioReferenceID=nil
     project.clips[0].attachments[1].h3ReferencePlacement=nil
     XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
   }

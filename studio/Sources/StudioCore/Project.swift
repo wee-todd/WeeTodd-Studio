@@ -91,6 +91,8 @@ public struct Attachment: Codable, Identifiable, Equatable {
   /// Canonical interval in the original audio, shared by adjacent music-video shots.
   public var audioSourceStart: Double?
   public var audioSourceDuration: Double?
+  /// Stable visual attachment identity for an MSR V2 voice; never an array index.
+  public var msrAudioReferenceID: UUID?
   public init(assetID: UUID, role: MediaRole, time: Double = 0) {
     self.assetID = assetID
     self.role = role

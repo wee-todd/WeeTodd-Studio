@@ -151,6 +151,36 @@ final class LTXAdapterCompatibilityTests: XCTestCase {
       XCTAssertThrowsError(try LTXAdapterCompatibility.ingredientsPlan(file:SafeTensorFile(url:url),strength:1))
     }
   }
+  func testCompleteMSRV2AcceptsAudioAndVideoToAudioTargetsButRejectsMissingMetadata() throws {
+    var metadata=["reference_slot_embedding_type":"fourier_mlp","reference_token_order":"prepend",
+      "reference_slot_time_offsets":"pic1_based_negative_time","reference_slot_embedding_num_frequencies":"16",
+      "reference_slot_embedding_hidden_dim":"256","reference_slot_embedding_dim":"128",
+      "reference_slot_embedding_enabled":"True","reference_audio_slot_embedding_enabled":"True",
+      "reference_audio_slot_embedding_type":"fourier_mlp","reference_audio_slot_embedding_num_frequencies":"16",
+      "reference_audio_slot_embedding_hidden_dim":"256","reference_audio_slot_embedding_dim":"128",
+      "reference_audio_conditioning":"id_lora_clean_negative_rope","reference_audio_token_order":"pic1_to_picN_then_target",
+      "reference_audio_rope_layout":"absolute_image_slot_windows","reference_audio_sparse_slots":"True",
+      "reference_audio_overflow_mode":"truncate","reference_audio_slot_duration_seconds":"5.0",
+      "reference_audio_end_margin_seconds":"0.04","trainable_cross_modal_direction":"video_to_audio"]
+    var tensors:[(String,[Int],String)]=[]
+    for prefix in ["reference_slot_embedding.","reference_audio_slot_embedding."] {
+      for (name,shape) in [("frequencies",[16]),("net.0.weight",[256,33]),("net.0.bias",[256]),("net.2.weight",[128,256]),("net.2.bias",[128])] {
+        tensors.append(("diffusion_model."+prefix+name,shape,"BF16"))
+      }
+    }
+    for (name,shape) in LTXAdapterCompatibility.blockTargetShapes where !name.contains("to_gate_logits") && !name.contains("audio_to_video_attn") {
+      tensors += [("diffusion_model."+name+".lora_A.weight",[128,Int(shape[1])],"BF16"),
+        ("diffusion_model."+name+".lora_B.weight",[Int(shape[0]),128],"BF16")]
+    }
+    try withTensorFile(metadata:metadata,tensors:tensors) { url in
+      XCTAssertEqual(try LTXAdapterCompatibility.msrPlan(file:SafeTensorFile(url:url),strength:1).pairs.count,1152)
+    }
+    metadata.removeValue(forKey:"reference_audio_sparse_slots")
+    try withTensorFile(metadata:metadata,tensors:tensors) { url in
+      XCTAssertThrowsError(try LTXAdapterCompatibility.msrPlan(file:SafeTensorFile(url:url),strength:1))
+    }
+  }
+
   func testMSRRejectsIncompleteSlotAndLoRASignatures() throws {
     let tensors: [(String, [Int], String)] = [
       ("diffusion_model.reference_slot_embedding.frequencies", [16], "BF16"),

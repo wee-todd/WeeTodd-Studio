@@ -7,22 +7,26 @@ import AdapterRuntime
 /// Reference LoRA factors stream per block; no duplicate Python/Swift sampler.
 final class MLXSingleStageMSR {
   let layout:MLXMSRLayout
+  let audioLayout:MLXMSRAudioLayout?
   let configuration:AVBlockConfiguration
   private let weights:MLXDenoiserWeights
   private let maximumActivationBytes:Int
   private let gate=NSLock()
 
-  init(layout:MLXMSRLayout,transformerRoot:URL,adapter:LoRAAdapter,
+  init(layout:MLXMSRLayout,audioLayout:MLXMSRAudioLayout?=nil,transformerRoot:URL,adapter:LoRAAdapter,
     maximumActivationBytes:Int) throws {
     try adapter.validate()
     guard adapter.enabled,adapter.strength>0 else {
       throw LTXError.invalid("MSR needs one enabled task adapter.")
     }
     let config=try AVBlockConfiguration(videoTokens:layout.videoTokens,
-      audioTokens:layout.target.audioFrames,textTokens:1024)
+      audioTokens:audioLayout?.audioTokens ?? layout.target.audioFrames,textTokens:1024)
     let block=try MLXAVBlock(configuration:config,maximumActivationBytes:maximumActivationBytes,
       videoAttentionGroups:layout.groupRows)
-    try block.admitPerTokenVideo()
+    if audioLayout != nil { try block.admitPerTokenAV() } else { try block.admitPerTokenVideo() }
+    if audioLayout != nil {
+      _ = try MLXMSRSlotEmbedding.load(URL(fileURLWithPath:adapter.path),audio:true)
+    }
     _ = try MLXDenoiser.admitRotary(configuration:config,maximumActivationBytes:maximumActivationBytes)
     let checked=try MLXDenoiserWeights(root:transformerRoot,configuration:config,
       adapters:[adapter],msrAdapterPath:adapter.path,
@@ -30,11 +34,11 @@ final class MLXSingleStageMSR {
     guard checked.sourceCheckpoint == "ltx-2.5-22b-distilled-transformer-bf16.safetensors" else {
       throw LTXError.invalid("MSR requires the released distilled LTX 2.5 transformer.")
     }
-    self.layout=layout;configuration=config;weights=checked
+    self.layout=layout;self.audioLayout=audioLayout;configuration=config;weights=checked
     self.maximumActivationBytes=maximumActivationBytes
   }
 
-  func evaluate(videoContext:MLXArray,audioContext:MLXArray,references:[MLXArray],seed:UInt64,
+  func evaluate(videoContext:MLXArray,audioContext:MLXArray,references:[MLXArray],audioReferences:[MLXArray]=[],seed:UInt64,
     progress:(String,Int,Int) throws -> Void) throws -> [String:MLXArray] {
     guard gate.try() else { throw LTXError.invalid("MSR sampler is already active.") }
     defer { Stream.gpu.synchronize();Memory.clearCache();gate.unlock() }
@@ -46,6 +50,8 @@ final class MLXSingleStageMSR {
     }
     let videoNoise=MLXNoisePolicy.seeded(seed,tokens:layout.target.videoTokens).asType(.float32)
     let audioNoise=MLXNoisePolicy.seeded(seed &+ 1,tokens:layout.target.audioFrames).asType(.float32)
+    guard (audioLayout != nil) == !audioReferences.isEmpty else { throw LTXError.invalid("MSR speaker references differ from admission.") }
+    let audioPrepared=try audioLayout?.prepare(generated:audioNoise,references:audioReferences)
     let prepared=try layout.prepare(generated:videoNoise,references:references)
     let runner=try MLXSamplingRunner(configuration:configuration,
       maximumActivationBytes:maximumActivationBytes,videoAttentionGroups:layout.groupRows)
@@ -53,17 +59,17 @@ final class MLXSingleStageMSR {
       0.909375,0.725,0.421875,0],eta:0)
     let inputs:[String:MLXArray]=[
       "video_text":videoContext,"audio_text":audioContext,
-      "video_latent":prepared.latent,"audio_latent":audioNoise,
+      "video_latent":prepared.latent,"audio_latent":audioPrepared?.latent ?? audioNoise,
       "video_positions":MLXArray(layout.positions,[layout.videoTokens,3]),
-      "audio_positions":MLXArray(layout.target.audioPositions,[layout.target.audioFrames,1]),
+      "audio_positions":MLXArray(audioLayout?.positions ?? layout.target.audioPositions,[configuration.audioTokens,1]),
       "video_attention_templates":prepared.attentionTemplates]
     let sampled=try runner.evaluate(inputs,schedule:schedule,
-      videoConditioning:prepared.condition,bfloat16State:["video","audio"],
+      videoConditioning:prepared.condition,audioConditioning:audioPrepared?.condition,bfloat16State:["video","audio"],
       fixedWeights:weights.readFixed,blockWeights:weights.readBlock,
       fixedAdapters:weights.fixedAdapters,blockAdapters:weights.blockAdapters,
       stageProgress:{ _,event in try progress("msr:"+event.stage,event.completedBlocks,48) },
       progress:{ event in try progress("sampling",event.completedSteps,event.totalSteps) })
     return ["video":sampled["video"]![0..<layout.target.videoTokens],
-      "audio":sampled["audio"]!]
+      "audio":try audioLayout?.target(sampled["audio"]!) ?? sampled["audio"]!]
   }
 }

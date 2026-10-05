@@ -1,5 +1,6 @@
 """The headless host must hand an immutable recipe to the Swift video worker."""
 
+import hashlib
 import json
 import os
 import signal
@@ -371,3 +372,39 @@ def test_movie_wrapper_rejects_missing_ffmpeg_before_worker_launch(
         run_swift_video_worker(worker=fake_worker(tmp_path), engine="ltx25", recipe=recipe,
                               output=tmp_path / "take", mode="preflight")
     assert not (tmp_path / "take").exists()
+
+
+def test_installed_worker_preflights_direct_msr_v2(tmp_path):
+    worker = os.environ.get("WEETODD_MSR_V2_WORKER")
+    direct = os.environ.get("WEETODD_MSR_V2_DIRECT_REQUEST")
+    if not worker or not direct:
+        pytest.skip("Opt-in installed MSR V2 worker and encoded request")
+    request = json.loads(Path(direct).read_text())
+    assert request["version"] == 16 and request["task"] == "msr"
+    output = tmp_path / "output"
+    request["output_directory"] = str(output)
+    recipe = tmp_path / "request.json"
+    recipe.write_text(json.dumps(request, sort_keys=True))
+    envelope = tmp_path / "envelope.json"
+    envelope.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobID": "ef8b025d-0055-42aa-96cc-9e297536dbe1",
+                "engine": "ltx25",
+                "recipePath": str(recipe),
+                "recipeSHA256": hashlib.sha256(recipe.read_bytes()).hexdigest(),
+                "outputDirectory": str(output),
+                "ffmpegPath": "/opt/homebrew/bin/ffmpeg",
+            }
+        )
+    )
+    result = subprocess.run(
+        [worker, "preflight", "--request", str(envelope), "--output", str(output)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    final = json.loads(result.stdout.strip().splitlines()[-1])
+    assert final["status"] == "success" and final["result"]["task"] == "msr"

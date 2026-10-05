@@ -580,7 +580,7 @@
     "descriptor": {
       "id": "ltx25-msr-v1",
       "name": "LTX 2.5 Licon MSR v1 \u00b7 Learned-slot adapter",
-      "description": "Complete rank-128 Licon v1 adapter with learned Fourier reference slots. Requires the dedicated MSR profile. V2 adds audio and cross-modal adapters with speaker-slot conditioning outside the current visual-reference contract.",
+      "description": "Complete rank-128 Licon v1 adapter with learned Fourier reference slots. Requires the dedicated MSR profile; visual references only. Choose V2 for paired voice identities.",
       "downloadBytes": 1308886513,
       "requiredDiskBytes": 1577321969,
       "sourceURL": "https://huggingface.co/LiconStudio/LTX-2.5-Multiple-Subject-Reference/tree/aa19b48f845995525d8ace60cdc89b842e951ce6",
@@ -603,6 +603,60 @@
         "target": "LTX-2.5-Licon-MSR-V1.safetensors",
         "size": 1308840536,
         "sha256": "d45cedd720e5819ccbe200a4b0ae01f7ae0e0d2966d700a24ebd4c7739515d4f"
+      },
+      {
+        "repo": "LiconStudio/LTX-2.5-Multiple-Subject-Reference",
+        "revision": "aa19b48f845995525d8ace60cdc89b842e951ce6",
+        "filename": "README.md",
+        "target": "SOURCE_README.md",
+        "size": 4220,
+        "sha256": "a677c071f7f327f0af86a227e28f39991baf499fed3824a2b7e871168c4449c7"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "LICENSE",
+        "size": 30399,
+        "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451",
+        "target": "LTX_BASE_LICENSE"
+      },
+      {
+        "repo": "Vayden/LTX-2.5-MLX-Q8-Paged",
+        "revision": "445f3d7e46fd850884750c32b49eb5e629c3b686",
+        "filename": "GEMMA_APACHE_LICENSE",
+        "size": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "target": "APACHE_LICENSE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "ltx25-msr-v2",
+      "name": "LTX 2.5 Licon MSR v2 \u00b7 Images and voices",
+      "description": "Complete rank-128 V2 adapter with visual and audio Fourier slots. Shared Swift MSR sampling supports 1\u20135 images and up to two voice references paired to image 1 or 2; each voice uses at most five seconds. Generates a new soundtrack.",
+      "downloadBytes": 2215140305,
+      "requiredDiskBytes": 2658168366,
+      "sourceURL": "https://huggingface.co/LiconStudio/LTX-2.5-Multiple-Subject-Reference/tree/aa19b48f845995525d8ace60cdc89b842e951ce6",
+      "licenseURL": "https://huggingface.co/LiconStudio/LTX-2.5-Multiple-Subject-Reference/blob/aa19b48f845995525d8ace60cdc89b842e951ce6/README.md",
+      "licenseNotice": "Source model terms and required attribution are retained. Review the source license and any Hugging Face access requirements before downloading.",
+      "outputKind": "directory",
+      "engines": [
+        "ltx25"
+      ],
+      "components": [
+        "msr_lora_path"
+      ]
+    },
+    "kind": "ltx25-adapter",
+    "files": [
+      {
+        "repo": "LiconStudio/LTX-2.5-Multiple-Subject-Reference",
+        "revision": "aa19b48f845995525d8ace60cdc89b842e951ce6",
+        "filename": "LTX-2.5-Licon-MSR-V2.safetensors",
+        "target": "LTX-2.5-Licon-MSR-V2.safetensors",
+        "size": 2215094328,
+        "sha256": "7cf982168d4f77f44b02943fb458f937f90c89335dcf7cf71b2f425e78bab713"
       },
       {
         "repo": "LiconStudio/LTX-2.5-Multiple-Subject-Reference",

@@ -132,6 +132,15 @@ final class StudioRecipeTests: XCTestCase {
     wrong=input;wrong["format"]="mp4";recipe["conditioning"]=["version":1,"task":"control","inputs":[wrong]]
     XCTAssertThrowsError(try compile(recipe))
   }
+  func testEncodedInstalledMSRV2RequestForWorkerPreflight() throws {
+    let environment=ProcessInfo.processInfo.environment
+    guard let recipe=environment["WEETODD_MSR_DIRECT_RECIPE"],let output=environment["WEETODD_MSR_DIRECT_OUTPUT"] else { throw XCTSkip("Opt-in installed request encoding") }
+    let request=try MLXStudioRecipe.compile(data:Data(contentsOf:URL(fileURLWithPath:recipe)),outputDirectory:output)
+    XCTAssertEqual(request.version,16)
+    let encoded=try JSONEncoder().encode(request)
+    XCTAssertEqual(try JSONDecoder().decode(MLXDistilledRequest.self,from:encoded).version,16)
+    try encoded.write(to:URL(fileURLWithPath:output+".json"))
+  }
   func testMSRStudioRecipeKeepsOrderedReferencesAndTheirControls() throws {
     var recipe=fixture()
     var components=recipe["components"] as! [String:Any]
@@ -156,6 +165,22 @@ final class StudioRecipeTests: XCTestCase {
     XCTAssertEqual(request.msr?.references.first?.attentionStrength,0.7)
     XCTAssertEqual(request.spatialUpscalerCheckpoint,"")
     XCTAssertTrue(request.prompt.hasPrefix("Image 1 provides the subject: Description hero\nImage 2 provides the background: Description room"))
+    var voice:[String:Any]=["id":"voice","kind":"audio","role":"reference","path":"/voice.wav",
+      "sha256":String(repeating:"b",count:64),"strength":1,"image_slot":1,"source_start_seconds":0.2,"source_duration_seconds":4]
+    recipe["conditioning"]=["version":1,"task":"ref2va","audio_policy":"generated",
+      "inputs":[reference("room","background"),voice,reference("hero","subject")]]
+    let v2=try compile(recipe)
+    XCTAssertEqual(v2.version,16);XCTAssertEqual(v2.msr?.audioReferences.first?.imageSlot,1)
+    XCTAssertEqual(v2.msr?.audioReferences.first?.sourceStartSeconds,0.2)
+    for override in [["generated_keyframes":1], ["pipeline_mode":"guided","stage1_steps":8,"stage1_sampler":"euler_guided"], ["duration_mode":"automatic","auto_duration_min_seconds":1,"auto_duration_max_seconds":5]] as [[String:Any]] {
+      var changed=recipe,varConfig=config
+      for (key,value) in override { varConfig[key]=value }
+      changed["config"]=varConfig
+      XCTAssertThrowsError(try compile(changed),"MSR V2 must reject unsupported overrides")
+    }
+    voice["image_slot"]=2
+    recipe["conditioning"]=["version":1,"task":"ref2va","audio_policy":"generated","inputs":[reference("room","background"),voice,reference("hero","subject")]]
+    XCTAssertThrowsError(try compile(recipe))
     var invalid=components;invalid["ic_loras"]=[["/different.safetensors",0.8]]
     recipe["components"]=invalid;XCTAssertThrowsError(try compile(recipe))
   }

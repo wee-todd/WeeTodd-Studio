@@ -288,6 +288,16 @@ final class NativeModelSetupControlTests: XCTestCase {
     let direct=try NativeModelSetup.recipe(preset:preset,selected:selected,memoryMode:.automatic)
     XCTAssertEqual((direct["components"] as! [String:Any])["tokenizer"] as? String,canonical.path)
   }
+  func testInstalledMSRV2HeaderAdmitsBothStreamsAndRejectsIncompleteVoiceMetadata() throws {
+    guard let path=ProcessInfo.processInfo.environment["WEETODD_MSR_V2_HEADER"] else { throw XCTSkip("Pinned MSR V2 bounded header") }
+    let root=try directory();defer { try? FileManager.default.removeItem(at:root) }
+    var value=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:path))) as! [String:Any]
+    let complete=try write(root,name:"renamed-v2",header:value)
+    XCTAssertEqual(try NativeModelSetup.scan(presetID:"swift-ltx25-msr",roots:[complete.path]).candidates["msr_lora_path"],[complete.path])
+    var metadata=value["__metadata__"] as! [String:String];metadata.removeValue(forKey:"reference_audio_rope_layout");value["__metadata__"]=metadata
+    let partial=try write(root,name:"partial",header:value)
+    XCTAssertTrue(try NativeModelSetup.scan(presetID:"swift-ltx25-msr",roots:[partial.path]).candidates["msr_lora_path"]!.isEmpty)
+  }
   func testRealBoundedRemoteHeadersMatchInstalledDiscoveryWhenRequested() throws {
     guard let source = ProcessInfo.processInfo.environment["WEETODD_NATIVE_HEADER_FIXTURES"] else {
       throw XCTSkip("Opt-in real bounded HTTP header qualification")
@@ -321,7 +331,7 @@ final class NativeModelSetupControlTests: XCTestCase {
       let header = try JSONSerialization.jsonObject(with:Data(contentsOf:v2Path)) as! [String:Any]
       let file = try write(root,name:"LTX-2.5-Licon-MSR-V2",header:header)
       XCTAssertEqual(header.keys.filter { $0.hasSuffix(".lora_A.weight") }.count,1152)
-      XCTAssertTrue(try NativeModelSetup.scan(presetID:"swift-ltx25-msr",roots:[file.path]).candidates["msr_lora_path"]!.isEmpty)
+      XCTAssertEqual(try NativeModelSetup.scan(presetID:"swift-ltx25-msr",roots:[file.path]).candidates["msr_lora_path"],[file.path])
     }
   }
 }

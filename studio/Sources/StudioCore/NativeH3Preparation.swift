@@ -504,6 +504,9 @@ public enum NativeH3Preparation {
       try NativeH3FunControlMetadata.validate(control: controlPath, transformer: canonical(transformer))
       components["fun_controlnet"] = controlPath
     }
+    guard clip.attachments.filter(\.isEnabled).allSatisfy({ $0.msrAudioReferenceID == nil }) else {
+      throw unsupported("MSR V2 voice-to-image binding belongs to LTX MSR, not H3")
+    }
     var referenceInputs: [[String: Any]] = []
     let endpointAttachments = clip.attachments.filter {
       $0.isEnabled && Set<MediaRole>([.first, .last, .keyframe]).contains($0.role)

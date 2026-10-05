@@ -14,7 +14,7 @@ weights in place. Compatible pinned preconverted downloads now run in Swift with
 streamed checksums, resume and cancellation. Native setup includes DFR, MSR and
 Ingredients, Union, Motion Track and CrossView profiles. The merged native catalog has 23 pinned packages, including the duration head, raw Dev transformer, distilled refinement adapter and one-step Diffusion VAE;
 checkpoint/task admission and complete clean-machine installation remain separately qualified.
-Native setup can convert the admitted raw LTX 2.5 Dev transformer to unmerged Q8 pages in a new directory. Other source conversions and unsupported adapters retain their explicit setup paths. A final-app isolated clean-registry check passed eight setup/header cases against all 23 catalog contracts,
+Native setup can convert the admitted raw LTX 2.5 Dev transformer to unmerged Q8 pages in a new directory. Other source conversions and unsupported adapters retain their explicit setup paths. A final-app isolated clean-registry check passed eight setup/header cases against the then-current 23 catalog contracts,
 including Diffusion VAE adoption, without Python, network, conversion reruns or weight copies.
 Complete clean-machine acquisition of all weights remains pending.
 
@@ -81,8 +81,9 @@ retained 1344×768, 89-frame decoder-only take with exact source PCM. The experi
 mode passed the same declared tiny numerical limits; it is not BF16/RGB byte parity or a whole-job
 benchmark. The default convolutional VAE remains unchanged. Studio, headless and saved-recipe
 Swift nodes preserve native DiffVAE selection and settings; the legacy typed composable Comfy generator
-still uses its maintained Python model pipeline. MSR V2's audio/speaker/reference-audio
-architecture is not implemented. Native VDN now has an explicit experimental Swift T2VA worker
+still uses its maintained Python model pipeline. Swift MSR V2 supports one to five images
+and up to two image-linked voice references. Clean audio prefixes generate a new soundtrack
+rather than copying reference audio. Native VDN has an experimental Swift T2VA worker
 route with released hybrid attention and mandatory original/Turbo adapters. Eight-step pruned
 H3 requires the original-width SiLU timestep input grid; unpruned H3 uses its own encoder.
 Studio offers an explicitly selected experimental eight-step T2VA preset with guided in-place
@@ -1713,12 +1714,21 @@ a task-specific pipeline. Guarded Ingredients admission also accepts compatible 
 rank-128 full-resolution sheet adapters after complete tensor/header checks; the pinned official
 2.5 package was retrieved after access approval on October 4. Its pinned SHA-256 and all 480
 rank-128 projection pairs passed installed Swift-worker header preflight. Scene quality requires
-separate visual qualification. Licon MSR V2 is
-structurally different: its actual header has 1,152 rank-128 pairs across 48 blocks, additional
-audio attention/feed-forward and video-to-audio targets, and five audio-slot embedding tensors.
-The current V1 route supports 480 video pairs and five visual-slot tensors, without V2's
-sparse-speaker, absolute audio-slot or reference-audio conditioning. V2 is explicitly excluded
-until those contracts are implemented; its version label alone is not the reason.
+separate visual qualification. Swift Licon MSR V2 validates all 1,152 rank-128 pairs, five visual
+and five audio-slot tensors, and the released sparse audio-window metadata. V1 remains
+compatible with its 480 video pairs and visual-only slots. In Studio, select the V2 adapter,
+attach one to five MSR images, then add **Voice identity · MSR V2** audio references and bind
+them to image 1 or 2. Choose an explicit source interval; at most five seconds per voice are
+encoded. References stay clean during sampling and are removed before target audio decoding.
+The shared Swift worker and exported native jobs preserve these bindings. The maintained
+legacy typed MSR ComfyUI nodes retain their V1 contract; V2 uses the recipe-backed Swift route.
+
+A five-second 768 × 448 two-image/two-voice installed-app test completed in 159.01 seconds,
+including acceptance, with two decoded previews, save/reopen and Python unavailable. Peak
+MLX allocation was 3.30 GB and peak Swift process footprint was 5.50 GB, excluding FFmpeg.
+Independent speech recognition recovered the requested two-line dialogue. Voice likeness,
+naturalness and lip synchronization still require review; this is functional qualification,
+not a matched performance comparison or production-quality claim.
 
 **LTX 2.5 Media Conditioning** provides one composable typed stack. Image keyframes execute through
 the current Generate node. Audio-driven input freezes the encoded audio during both visual stages

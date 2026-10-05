@@ -862,7 +862,15 @@ public enum NativeLTXPreparation {
     if context.task == "a2v", keyframes == nil,attachments.filter({ $0.role == .first }).count > 1 {
       throw StudioError.invalid("Audio to video accepts at most one opening-frame image.")
     }
-    if specialized == "msr",!(1...5).contains(attachments.count) {
+    let msrImages=attachments.filter { item in
+      item.role == .reference && context.assets.last(where:{$0.id == item.assetID})?.kind == .image
+    }
+    let msrOrdered=msrImages.filter { ($0.referenceRole ?? "subject") != "background" } + msrImages.filter { $0.referenceRole == "background" }
+    var voiceSlots=Set<Int>()
+    guard specialized == "msr" || !attachments.contains(where:{$0.msrAudioReferenceID != nil}) else {
+      throw unsupported("MSR voice bindings require an MSR V2 profile")
+    }
+    if specialized == "msr",!(1...5).contains(msrImages.count) {
       throw StudioError.invalid("MSR needs one to five described still images.")
     }
     if ["ingredients","union","motion_track"].contains(specialized ?? ""),attachments.filter({ $0.role != .lora }).count != 1 {
@@ -889,6 +897,21 @@ public enum NativeLTXPreparation {
         }
         try NativeLTXLoRAMetadata.validate(path: path, model: asset.loraModel!.rawValue)
         loras.append([path, attachment.strength]); continue
+      }
+      if specialized == "msr",attachment.role == .reference,asset.kind == .audio {
+        guard let bound=attachment.msrAudioReferenceID,let index=msrOrdered.firstIndex(where:{$0.id == bound}),index<2,
+          msrOrdered[index].referenceRole != "background",voiceSlots.insert(index+1).inserted,
+          attachment.strength == 1,attachment.time == 0,
+          attachment.referenceRole == nil,attachment.referencePriority == nil,attachment.referenceFrames == nil,
+          attachment.referenceSizePolicy == nil,attachment.attentionStrength == nil,
+          let start=attachment.audioSourceStart,start.isFinite,(0...86400).contains(start),
+          let duration=attachment.audioSourceDuration,duration.isFinite,(0.033...86400).contains(duration),
+          asset.duration>0,start+duration<=asset.duration+0.01 else {
+          throw StudioError.invalid("MSR V2 voices need a unique binding to character image 1 or 2, strength 1 and a valid explicit source interval.")
+        }
+        inputs.append(["id":attachment.id.uuidString,"kind":"audio","role":"reference","path":path,
+          "sha256":try sourceSHA256(path,maxBytes:4*1024*1024*1024),"strength":1,"image_slot":index+1,
+          "source_start_seconds":start,"source_duration_seconds":duration]);continue
       }
       if attachment.role == .audioDriver {
         let preparedTimelineMix = clip.audioDriverSelection != nil

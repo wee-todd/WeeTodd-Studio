@@ -288,6 +288,7 @@ struct ClipInspector: View {
 struct AttachmentRow: View {
   @EnvironmentObject var store: StudioStore
   var attachment: Attachment
+  private var isMSRVoice:Bool { store.selectedClip?.engine == .ltx25 && attachment.role == .reference && store.allAssets.first(where:{$0.id == attachment.assetID})?.kind == .audio }
   private var isDrawThings: Bool { store.selectedClip?.engine == .drawThings }
   private var guideTypes: [(String, String)] {
     let kind = store.allAssets.first { $0.id == attachment.assetID }?.kind
@@ -337,6 +338,7 @@ struct AttachmentRow: View {
               let asset = store.allAssets.first(where: { $0.id == attachment.assetID }),
               clip.canAssignMedia(asset, role: v) else { return }
             clip.attachments[index].role = v
+            if v != .reference { clip.attachments[index].msrAudioReferenceID=nil }
             if let action = clip.referenceActions(for: asset).first(where: { $0.role == v && $0.preparation == nil }) {
               clip.attachments[index].controlType = action.controlType
             }
@@ -366,6 +368,7 @@ struct AttachmentRow: View {
         Button("Use clip length") { edit { $0.audioSourceStart = $0.audioSourceStart ?? 0; $0.audioSourceDuration = store.selectedClip?.duration } }
           .font(.caption)
       }
+      if isMSRVoice { msrVoiceControls }
       if attachment.role == .keyframe {
         HStack {
           Text("Time (s)")
@@ -412,7 +415,7 @@ struct AttachmentRow: View {
             Button("Reset to 1") { edit { $0.strength = 1 } }
           }
         }.font(.caption2)
-      } else if !isDrawThings && (store.selectedClip?.engine == .h3 && attachment.role != .control || attachment.role == .audioDriver) {
+      } else if !isDrawThings && (store.selectedClip?.engine == .h3 && attachment.role != .control || attachment.role == .audioDriver || isMSRVoice) {
         HStack {
           Text("Strength · fixed at 1")
           if attachment.strength != 1 { Button("Reset to 1") { edit { $0.strength = 1 } } }
@@ -431,7 +434,7 @@ struct AttachmentRow: View {
           "Describe this reference",
           text: Binding(get: { attachment.description }, set: { v in edit { $0.description = v } })
         ).font(.caption).textFieldStyle(.roundedBorder)
-        if store.selectedClip?.engine == .ltx25 && attachment.role == .reference {
+        if store.selectedClip?.engine == .ltx25 && attachment.role == .reference && !isMSRVoice {
           msrControls
         }
         if store.selectedClip?.engine == .h3,store.runtime.usesNativeH3,attachment.role == .reference {
@@ -448,6 +451,28 @@ struct AttachmentRow: View {
     Binding(
       get: { attachment[keyPath: key] ?? "" },
       set: { v in edit { $0[keyPath: key] = v.isEmpty ? nil : v } })
+  }
+  private var msrVoiceControls:some View {
+    let images=(store.selectedClip?.attachments ?? []).filter { item in
+      item.role == .reference && store.allAssets.first(where:{$0.id == item.assetID})?.kind == .image && item.referenceRole != "background"
+    }
+    return VStack(alignment:.leading,spacing:6) {
+      Picker("Character image",selection:Binding(get:{ attachment.msrAudioReferenceID?.uuidString ?? "" },set:{ value in edit { $0.msrAudioReferenceID=UUID(uuidString:value) } })) {
+        Text("Choose character image").tag("")
+        ForEach(Array(images.prefix(2).enumerated()),id:\.element.id) { index,item in
+          Text("Image \(index+1) · \(store.allAssets.first(where:{$0.id == item.assetID})?.name ?? "Missing image")").tag(item.id.uuidString)
+        }
+      }
+      HStack {
+        Text("Voice start (s)")
+        TextField("Start",value:Binding(get:{ attachment.audioSourceStart ?? 0 },set:{ value in edit { $0.audioSourceStart=value } }),format:.number)
+      }
+      HStack {
+        Text("Voice duration (s)")
+        TextField("Duration",value:Binding(get:{ attachment.audioSourceDuration ?? 0 },set:{ value in edit { $0.audioSourceDuration=value } }),format:.number)
+      }
+      Text("MSR V2 uses the first five seconds of this interval as voice identity. It generates new dialogue and audio. One voice per character image; at most two voices.").foregroundStyle(.secondary)
+    }.font(.caption2)
   }
   private var msrControls: some View {
     VStack(alignment: .leading, spacing: 6) {

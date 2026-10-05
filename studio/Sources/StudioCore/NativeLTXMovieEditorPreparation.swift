@@ -36,7 +36,7 @@ public enum NativeLTXMovieEditorPreparation {
         used.insert(URL(fileURLWithPath:asset.path).standardizedFileURL.resolvingSymlinksInPath().path).inserted,
         attachment.isEnabled,attachment.time==0,attachment.attentionStrength==nil,
         attachment.referenceRole==nil,attachment.referencePriority==nil,attachment.referenceFrames==nil,
-        attachment.referenceSizePolicy==nil else {
+        attachment.referenceSizePolicy==nil,attachment.msrAudioReferenceID==nil else {
         throw StudioError.invalid("Movie attachments require distinct local media and cannot ignore reference timing, attention or disabled controls.")
       }
       switch attachment.role {

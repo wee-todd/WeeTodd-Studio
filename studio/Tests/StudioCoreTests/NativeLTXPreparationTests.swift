@@ -525,6 +525,21 @@ final class NativeLTXPreparationTests: XCTestCase {
     XCTAssertEqual(inputs[0]["reference_frames"] as? String,"25")
     XCTAssertEqual(inputs[0]["attention_strength"] as? Double,0.7)
     XCTAssertEqual(inputs[0]["description"] as? String,attachment.description)
+    let voiceFile=root.appendingPathComponent("voice.wav");try Data([4,5,6]).write(to:voiceFile)
+    var voiceAsset=MediaAsset(name:"Voice",kind:.audio,path:voiceFile.path);voiceAsset.duration=8
+    project.assets.append(voiceAsset)
+    var voice=Attachment(assetID:voiceAsset.id,role:.reference)
+    voice.msrAudioReferenceID=attachment.id;voice.audioSourceStart=0.2;voice.audioSourceDuration=4
+    project.clips[0].attachments=[voice,attachment]
+    let v2=try NativeLTXPreparation.compose(request:request(project,runtime))
+    let v2Inputs=((v2["recipe"] as! [String:Any])["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+    let audio=try XCTUnwrap(v2Inputs.first { $0["kind"] as? String == "audio" })
+    XCTAssertEqual(audio["image_slot"] as? Int,1)
+    XCTAssertEqual(audio["source_start_seconds"] as? Double,0.2)
+    XCTAssertEqual(audio["source_duration_seconds"] as? Double,4)
+    project.clips[0].attachments[0].msrAudioReferenceID=UUID()
+    XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
+    project.clips[0].attachments=[attachment]
     project.clips[0].attachments[0].attentionStrength=2
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))
   }

@@ -126,19 +126,48 @@ public enum LTXAdapterCompatibility {
         return tensor.shape == shape && ["BF16","F16","F32"].contains(tensor.dtype)
       }
     }) else { throw LTXError.invalid("MSR learned-slot tensors are incomplete or incompatible.") }
-    let auxiliaries=Set(slotShapes.keys.map { prefix+$0 })
+    let audioEnabled=file.metadata["reference_audio_slot_embedding_enabled"]?.lowercased() == "true"
+    var auxiliaries=Set(slotShapes.keys.map { prefix+$0 })
+    if audioEnabled {
+      try validateMSRAudioMetadata(file.metadata)
+      guard let audioPrefix=["diffusion_model.reference_audio_slot_embedding.","reference_audio_slot_embedding."].first(where:{ p in
+        slotShapes.allSatisfy { name,shape in
+          file.tensors[p+name].map { $0.shape == shape && ["BF16","F16","F32"].contains($0.dtype) } ?? false
+        }
+      }) else { throw LTXError.invalid("MSR V2 audio-slot tensors are incomplete.") }
+      auxiliaries.formUnion(slotShapes.keys.map { audioPrefix+$0 })
+    }
     let plan=try LoRAPlan(file:file,strength:strength,targetShapes:targetShapes,
       normalize:normalize,auxiliaryTensors:auxiliaries)
     let expected=Set((0..<48).flatMap { block in
       ["attn1.to_k","attn1.to_out","attn1.to_q","attn1.to_v",
        "attn2.to_k","attn2.to_out","attn2.to_q","attn2.to_v",
        "ff.proj_in","ff.proj_out"].map { "transformer_blocks.\(block).\($0)" }
+      + (audioEnabled ? ["audio_attn1.to_k","audio_attn1.to_out","audio_attn1.to_q","audio_attn1.to_v",
+        "audio_attn2.to_k","audio_attn2.to_out","audio_attn2.to_q","audio_attn2.to_v",
+        "audio_ff.proj_in","audio_ff.proj_out","video_to_audio_attn.to_k","video_to_audio_attn.to_out",
+        "video_to_audio_attn.to_q","video_to_audio_attn.to_v"].map { "transformer_blocks.\(block).\($0)" } : [])
     })
-    guard plan.pairs.count == 480,Set(plan.pairs.map(\.target)) == expected,
+    guard plan.pairs.count == (audioEnabled ? 1152 : 480),Set(plan.pairs.map(\.target)) == expected,
       plan.pairs.allSatisfy({ $0.rank == 128 }) else {
       throw LTXError.invalid("MSR needs the complete 48-block rank-128 task adapter.")
     }
     return plan
+  }
+
+  public static func validateMSRAudioMetadata(_ metadata:[String:String]) throws {
+    let expected=["reference_audio_conditioning":"id_lora_clean_negative_rope",
+      "reference_audio_token_order":"pic1_to_picN_then_target",
+      "reference_audio_rope_layout":"absolute_image_slot_windows","reference_audio_overflow_mode":"truncate",
+      "reference_audio_slot_embedding_type":"fourier_mlp","reference_audio_slot_embedding_num_frequencies":"16",
+      "reference_audio_slot_embedding_hidden_dim":"256","reference_audio_slot_embedding_dim":"128",
+      "trainable_cross_modal_direction":"video_to_audio"]
+    guard expected.allSatisfy({ metadata[$0.key] == $0.value }),
+      ["reference_slot_embedding_enabled","reference_audio_slot_embedding_enabled","reference_audio_sparse_slots"].allSatisfy({ metadata[$0]?.lowercased() == "true" }),
+      Double(metadata["reference_audio_slot_duration_seconds"] ?? "") == 5,
+      Double(metadata["reference_audio_end_margin_seconds"] ?? "") == 0.04 else {
+      throw LTXError.invalid("MSR V2 requires its released sparse audio-slot metadata and 5-second windows.")
+    }
   }
 
   /// Pixel-Spatial x2 is a stage-two DFR task adapter, not an ordinary LoRA.

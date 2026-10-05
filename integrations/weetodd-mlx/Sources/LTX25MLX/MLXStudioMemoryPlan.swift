@@ -34,6 +34,7 @@ public struct MLXStudioMemoryPlan:Sendable {
         try MLXReferenceVideoLayout(geometry:geometry,strength:$0.referenceStrength)
       }
       let msr=try MLXMSRReferencePlan.resolve(request,target:geometry)
+      let msrAudio=try MLXMSRAudioLayout.resolve(request,target:geometry)
       let dfr=try request.dfr.map { _ in try MLXDFRLayout(geometry:geometry,
         slotFrames:MLXDFRCanvas(frames:recipe.high.frames).slotFrames,
         reference:index == 1 ? recipe.low : nil,
@@ -45,9 +46,9 @@ public struct MLXStudioMemoryPlan:Sendable {
       }
       transformer=max(transformer,try MLXAVBlock.estimatedActivationBytes(configuration:
         AVBlockConfiguration(videoTokens:singleStage?.videoTokens ?? ordinary?.videoTokens ?? dfr?.videoTokens ?? guide?.videoTokens ?? layout?.videoTokens ?? union?.videoTokens ?? ic?.videoTokens ?? ingredients?.videoTokens ?? msr?.layout.videoTokens ?? geometry.videoTokens,
-          audioTokens:guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
+          audioTokens:msrAudio?.audioTokens ?? guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
         perTokenVideo:singleStage?.requiresPerTokenVideo == true || ordinary?.anchors.isEmpty == false || layout != nil || guide != nil || union != nil || ic != nil || ingredients != nil || msr != nil ||
-          (dfr?.referenceTokens ?? 0)>0 || (dfr != nil && !request.referenceImages.isEmpty),perTokenAudio:guide != nil) + (index == 0 && request.guidedSampling != nil ?
+          (dfr?.referenceTokens ?? 0)>0 || (dfr != nil && !request.referenceImages.isEmpty),perTokenAudio:guide != nil || msrAudio != nil) + (index == 0 && request.guidedSampling != nil ?
           MLXGuidedSampling.reserveBytes(videoTokens:ordinary?.videoTokens ?? layout?.videoTokens ?? geometry.videoTokens,
             audioTokens:geometry.audioFrames) : 0))
     }

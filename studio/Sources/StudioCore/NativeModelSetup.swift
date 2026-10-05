@@ -134,7 +134,7 @@ public enum NativeModelSetup {
         description: "Reuse installed DFR components in place. Swift worker preflight checks the full adapter stack before creating this profile.",
         components: ltx + [detail] + (rounds == 0 ? [] : [temporal]))
     }
-    let references=[("msr","ref2va","MSR images","msr_lora_path","MSR learned-slot adapter"),
+    let references=[("msr","ref2va","MSR images / V2 voices","msr_lora_path","MSR learned-slot adapter"),
       ("ingredients","control","Ingredients sheet","ingredients_lora_path","Ingredients adapter")].map {
       family,task,label,key,adapter in
       ModelSetupPreset(id:"swift-ltx25-"+family,name:"LTX 2.5 · "+label+" · Swift",engine:"ltx25",task:task,
@@ -368,9 +368,9 @@ private enum NativeModelInspector {
     return nil
   }
 
-  private static func completeControlAdapter(_ tensors: [String: Any], rank: Int) -> Bool {
-    let keys = tensors.keys.filter { $0 != "__metadata__" }
-    guard keys.count == 960 else { return false }
+  private static func completeControlAdapter(_ tensors: [String: Any], rank: Int, audio:Bool=false, auxiliary:Set<String>=[]) -> Bool {
+    let keys = tensors.keys.filter { $0 != "__metadata__" && !auxiliary.contains($0) }
+    guard keys.count == (audio ? 2304 : 960) else { return false }
     var targets = Set<String>()
     for name in keys where name.hasSuffix(".lora_A.weight") {
       let partner = name.replacingOccurrences(of: ".lora_A.weight", with: ".lora_B.weight")
@@ -386,7 +386,7 @@ private enum NativeModelInspector {
       if let prefix = prefixes.first(where: stem.hasPrefix) { stem.removeFirst(prefix.count) }
       stem += "."
       for (old, new) in [(".to_out.0.", ".to_out."), (".ff.net.0.proj.", ".ff.proj_in."),
-        (".ff.net.2.", ".ff.proj_out.")] { stem = stem.replacingOccurrences(of: old, with: new) }
+        (".ff.net.2.", ".ff.proj_out."), (".audio_ff.net.0.proj.",".audio_ff.proj_in."), (".audio_ff.net.2.",".audio_ff.proj_out.")] { stem = stem.replacingOccurrences(of: old, with: new) }
       stem.removeLast()
       let parts = stem.split(separator: ".")
       guard parts.count >= 4, parts[0] == "transformer_blocks", let block = Int(parts[1]),
@@ -399,10 +399,15 @@ private enum NativeModelInspector {
       if attention.contains(tail) { shape = [4096, 4096] }
       else if tail == "ff.proj_in" { shape = [16384, 4096] }
       else if tail == "ff.proj_out" { shape = [4096, 16384] }
+      else if audio, ["audio_attn1","audio_attn2"].flatMap({ family in ["to_k","to_out","to_q","to_v"].map { family+"."+$0 } }).contains(tail) { shape=[2048,2048] }
+      else if audio,tail == "audio_ff.proj_in" { shape=[8192,2048] }
+      else if audio,tail == "audio_ff.proj_out" { shape=[2048,8192] }
+      else if audio,["video_to_audio_attn.to_q","video_to_audio_attn.to_out"].contains(tail) { shape=[2048,2048] }
+      else if audio,["video_to_audio_attn.to_k","video_to_audio_attn.to_v"].contains(tail) { shape=[2048,4096] }
       else { return false }
       guard a[1] == shape[1], b[0] == shape[0], targets.insert(stem).inserted else { return false }
     }
-    return targets.count == 480
+    return targets.count == (audio ? 1152 : 480)
   }
 
   static func matches(_ url: URL, key: String, engine: String, task: String) throws -> Bool {
@@ -607,7 +612,8 @@ private enum NativeModelInspector {
     case "msr_lora_path","ingredients_lora_path":
       let keys=tensors.keys.filter { $0.hasSuffix(".lora_A.weight") || $0.hasSuffix(".lora_B.weight") }
       let a=keys.filter { $0.hasSuffix(".lora_A.weight") }
-      guard keys.count == 960,a.count == 480,a.allSatisfy({ name in
+      let audio=key == "msr_lora_path" && metadata["reference_audio_slot_embedding_enabled"] == "True"
+      guard keys.count == (audio ? 2304 : 960),a.count == (audio ? 1152 : 480),a.allSatisfy({ name in
         let partner=name.replacingOccurrences(of:".lora_A.weight",with:".lora_B.weight")
         guard let down=(tensors[name] as? [String:Any])?["shape"] as? [Int],down.count == 2,
           let up=(tensors[partner] as? [String:Any])?["shape"] as? [Int],up.count == 2 else { return false }
@@ -628,9 +634,27 @@ private enum NativeModelInspector {
         metadata["reference_slot_embedding_hidden_dim"] == "256",
         metadata["reference_slot_embedding_dim"] == "128" else { return false }
       let shapes:[String:[Int]]=["frequencies":[16],"net.0.weight":[256,33],"net.0.bias":[256],"net.2.weight":[128,256],"net.2.bias":[128]]
-      return ["diffusion_model.reference_slot_embedding.","reference_slot_embedding."].contains { prefix in
-        shapes.allSatisfy { name,shape in (tensors[prefix+name] as? [String:Any])?["shape"] as? [Int] == shape }
+      let families=audio ? ["reference_slot_embedding.","reference_audio_slot_embedding."] : ["reference_slot_embedding."]
+      var auxiliary=Set<String>()
+      for family in families {
+        guard let prefix=["diffusion_model."+family,family].first(where:{ tensors[$0+"frequencies"] != nil }),
+          shapes.allSatisfy({ name,shape in
+            guard let tensor=tensors[prefix+name] as? [String:Any] else { return false }
+            return tensor["shape"] as? [Int] == shape && ["BF16","F16","F32"].contains(tensor["dtype"] as? String ?? "")
+          }) else { return false }
+        auxiliary.formUnion(shapes.keys.map { prefix+$0 })
       }
+      if audio {
+        let expected=["reference_audio_slot_embedding_type":"fourier_mlp","reference_audio_slot_embedding_num_frequencies":"16",
+          "reference_audio_slot_embedding_hidden_dim":"256","reference_audio_slot_embedding_dim":"128",
+          "reference_audio_conditioning":"id_lora_clean_negative_rope","reference_audio_token_order":"pic1_to_picN_then_target",
+          "reference_audio_rope_layout":"absolute_image_slot_windows","reference_audio_sparse_slots":"True",
+          "reference_audio_overflow_mode":"truncate","reference_audio_slot_embedding_enabled":"True","trainable_cross_modal_direction":"video_to_audio","video_parameters_frozen":"True"]
+        guard expected.allSatisfy({metadata[$0.key] == $0.value}),
+          Double(metadata["reference_audio_slot_duration_seconds"] ?? "") == 5,
+          Double(metadata["reference_audio_end_margin_seconds"] ?? "") == 0.04 else { return false }
+      }
+      return completeControlAdapter(tensors,rank:128,audio:audio,auxiliary:auxiliary)
     case "dfr_detailing_lora_path":
       guard metadata["model_version"] == "2.5",
         metadata["reference_downscale_factor"] == "2",

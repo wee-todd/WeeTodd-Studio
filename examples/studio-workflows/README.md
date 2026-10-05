@@ -117,7 +117,7 @@ engines. The recipe-backed Swift node is a separate host: unchanged recipes go t
 preflight, and movie requests require an available FFmpeg bound in the job envelope; an explicit node
 path may be supplied. Contract validation, empty media selectors
 and correct sockets do not establish installed weights, completed inference or creative quality.
-A final-app isolated setup/reuse check passed all 23 catalog contracts and eight setup/header
+A final-app isolated setup/reuse check passed the then-current 23 catalog contracts and eight setup/header
 cases without Python, network, inference, conversion reruns or weight copies. It does not certify
 fresh acquisition of every checkpoint. A real native Movie exported job matched its retained
 direct take in all three media files, then resumed with zero new generations and reopened through
@@ -125,8 +125,12 @@ StudioStore.load without invoking a worker. The learned H3 latent upscaler/full
 2 MP path now has a bounded functional result under explicit spatial-v2 admission; ordinary
 1 MP/40,000-row limits remain separate. Native LTX Diffusion VAE passed scoped CPU/numerical and actual retained 89-frame decoder
 qualification; the default Conv decoder is unchanged. Legacy typed composable Comfy generation
-uses its Python pipeline; saved-recipe Swift execution can carry native DiffVAE controls. MSR V2
-architectural conditioning remains unsupported. The official 2.5 Ingredients payload passed its
+uses its Python pipeline; saved-recipe Swift execution can carry native DiffVAE controls.
+Recipe-backed Swift MSR V2 now preserves up to two image-linked voice references with sparse
+clean audio prefixes. A packaged two-character/two-voice Studio run passed with Python
+unavailable, including previews and save/reopen; exported native-job CLI preflight passed.
+No second exported V2 generation or saved V2 ComfyUI graph was run. Voice likeness,
+naturalness and lip synchronization remain unreviewed. The official 2.5 Ingredients payload passed its
 pinned hash and installed Swift header preflight after access approval. Its first 121-frame native
 take omitted the second character. A clearer two-shot prompt retained both characters with the
 unchanged default and experimental CFG++ samplers; human audiovisual acceptance remains open.

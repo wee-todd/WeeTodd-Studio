@@ -160,6 +160,21 @@ final class MLXDistilledRequestTests:XCTestCase {
       "temporal_upscaler_path":"/temporal.safetensors","temporal_rounds":2]
     value["fps"]=48;XCTAssertThrowsError(try decode(value))
   }
+  func testMSRVoicesRequireDedicatedRequestVersionAndRoundTrip() throws {
+    var value=base();value["version"]=16;value["task"]="msr"
+    value["noise_policy"]="mlx_threefry_bf16_v1";value["spatial_upscaler_checkpoint"]=""
+    value["reference_images"]=[];value["ingredients_sampling"]="deterministic_bf16_v1"
+    for key in ["audio_reference","union_control_guide","ingredients_sheet","dfr","ic_control","guided_sampling","automatic_duration","generated_keyframes","single_stage_sampling"] { value[key]=NSNull() }
+    let image:[String:Any]=["path":"/subject.png","source_sha256":String(repeating:"a",count:64),"role":"subject","priority":"auto","size_policy":"quality","reference_frames":"25","strength":1,"attention_strength":1]
+    value["msr"]=["adapter_path":"/msrv2.safetensors","adapter_strength":1,"references":[image],
+      "audio_references":[["path":"/voice.wav","source_sha256":String(repeating:"b",count:64),"image_slot":1,"source_start_seconds":0,"source_duration_seconds":5]]]
+    let request=try decode(value)
+    XCTAssertEqual(request.msr?.audioReferences.count,1)
+    XCTAssertEqual(try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONEncoder().encode(request)).version,16)
+    value["version"]=7
+    for key in ["dfr","ic_control","ingredients_sampling","guided_sampling","automatic_duration","generated_keyframes","single_stage_sampling"] { value.removeValue(forKey:key) }
+    XCTAssertThrowsError(try decode(value))
+  }
   func testMSRRequestKeepsOrderedOneToFiveReferencesAndRejectsOtherTasks() throws {
     var value=base();value["version"]=7;value["task"]="msr"
     value["noise_policy"]="mlx_threefry_bf16_v1"

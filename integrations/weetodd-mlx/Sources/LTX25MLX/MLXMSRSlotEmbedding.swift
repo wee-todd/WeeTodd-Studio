@@ -11,10 +11,12 @@ enum MLXMSRSlotEmbedding {
     "frequencies":[16],"net.0.weight":[256,33],"net.0.bias":[256],
     "net.2.weight":[128,256],"net.2.bias":[128]]
 
-  static func load(_ url:URL) throws -> [String:MLXArray] {
+  static func load(_ url:URL,audio:Bool=false) throws -> [String:MLXArray] {
     let file=try SafeTensorFile(url:url,maximumHeaderBytes:4*1024*1024)
     _ = try LTXAdapterCompatibility.msrPlan(file:file,strength:1)
-    let prefixes=["diffusion_model.reference_slot_embedding.","reference_slot_embedding."]
+    if audio { try LTXAdapterCompatibility.validateMSRAudioMetadata(file.metadata) }
+    let name=audio ? "reference_audio_slot_embedding." : "reference_slot_embedding."
+    let prefixes=["diffusion_model."+name,name]
     guard let prefix=prefixes.first(where: { file.tensors[$0+"frequencies"] != nil }) else {
       throw LTXError.invalid("MSR learned-slot tensor prefix is missing.")
     }

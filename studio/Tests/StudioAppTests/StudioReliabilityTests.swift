@@ -527,6 +527,21 @@ final class StudioReliabilityTests: XCTestCase {
     let preparedConfig = preparedValue["config"] as! [String: Any]
     XCTAssertEqual(preparedConfig["seed"] as? Int, clip.seed)
     XCTAssertEqual(try XCTUnwrap(preparedConfig["duration_seconds"] as? Double), clip.duration, accuracy: 0.000001)
+    if config["msrV2"] == "true" {
+      let actualInputs=(preparedValue["conditioning"] as! [String:Any])["inputs"] as! [[String:Any]]
+      let voiceInputs=actualInputs.filter { $0["kind"] as? String == "audio" }
+      guard store.error == nil,voiceInputs.count == 2,
+        voiceInputs.compactMap({$0["image_slot"] as? Int}).sorted() == [1,2],
+        preparedConfig["width"] as? Int == 768,preparedConfig["height"] as? Int == 448,
+        try NativeHeadlessJob.fileHash(URL(fileURLWithPath:config["worker"]!)) == config["workerSHA256"] else {
+        throw StudioError.invalid("MSR V2 preparation changed the frozen voice bindings, geometry or worker; stop before generation.")
+      }
+      if ProcessInfo.processInfo.environment["WEETODD_NATIVE_LTX_PREPARE_ONLY"] == "1" {
+        try JSONSerialization.data(withJSONObject:["recipe":prepared,"recipeSHA256":try NativeHeadlessJob.fileHash(URL(fileURLWithPath:prepared)),"inferenceExecuted":false],options:[.prettyPrinted,.sortedKeys])
+          .write(to:root.appendingPathComponent("preparation-qualification.json"))
+        return
+      }
+    }
     var previewRevisions=Set<Int>()
     let previewObserver=store.bridge.$livePreview.sink { event in
       if let revision=event?.previewRevision, let path=event?.previewPath {

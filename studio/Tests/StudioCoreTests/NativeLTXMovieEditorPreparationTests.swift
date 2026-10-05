@@ -35,7 +35,7 @@ final class NativeLTXMovieEditorPreparationTests:XCTestCase {
     let described=try NativeLTXMovieEditorPreparation.describe(request:request(original,runtime))
     XCTAssertEqual((described["generation"] as? [String:Any])?["supportedTasks"] as? [String],["video_upscale"])
     XCTAssertEqual(try encoder.encode(original),snapshot)
-    for name in ["negative","projection","memory","continuity","slot","lora"] {
+    for name in ["negative","projection","memory","continuity","slot","lora","voice-binding"] {
       var project=original
       switch name {
       case "negative":project.clips[0].negativePrompt="blur"
@@ -43,6 +43,7 @@ final class NativeLTXMovieEditorPreparationTests:XCTestCase {
       case "memory":project.clips[0].generationSelection?.memoryPolicy="retain"
       case "continuity":project.clips[0].continuity=ClipContinuity(mode:"frame")
       case "slot":project.clips[0].generationSelection?.ltx25Keyframes=LTX25KeyframeSettings(generatedCount:1,experimentalEnabled:true)
+      case "voice-binding":project.clips[0].attachments[0].msrAudioReferenceID=UUID()
       default:project.clips[0].attachments.append(Attachment(assetID:project.assets[0].id,role:.lora))
       }
       XCTAssertThrowsError(try NativeLTXMovieEditorPreparation.describe(request:request(project,runtime)),name)
