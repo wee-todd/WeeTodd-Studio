@@ -28,8 +28,8 @@ feature in the current app.
 | LTX one-step Diffusion VAE | Explicit experimental complete-component decoder selection; Conv remains the default, with strict workspace and checkpoint admission | CPU/header/release checks, tiny numerical comparisons and actual retained 1344 × 768/89-frame decode; no whole-job or Conv pixel-parity claim |
 | H3 reference preparation | Optional 50–400% image pixel budget; movie match-output/native-H3 budget; full/half/quarter/automatic density; explicit frame or Last placement and replacement soundtrack | CPU tests; new policies are not a general likeness/motion-quality approval |
 | H3 LoRA composition | Up to eight distinct ordered adapters, signed strengths −10 to 10, explicit QKV layout/profile and deferred standard-adapter start | Header/CPU arithmetic checks; historical real stacks qualify only those adapters |
-| H3 full latent refinement | Save complete AV latents; initialize at the same canvas or enlarge both axes by at most 2×; exact source duration/task/component identity | Full saving/initialized/interpolation packets completed; corrected learned 1920 × 1088, 73-frame target completed with exact source PCM and coherent sampled stills; full audiovisual/user quality approval separate |
-| H3 Motion Fidelity | Experimental independent T2VA movie repair; 24 fps matching canvas/trim, at least 15 base evaluations, immediate standard adapters, bounded expansion | CPU producer/acceptance/lifecycle tests plus actual native repair with exact selected source PCM; sampled frames coherent, full audiovisual/user approval separate |
+| H3 full latent refinement | Save complete AV latents; initialize at the same canvas or enlarge both axes by at most 2×; exact source duration/task/component identity | Full saving/initialized/interpolation packets completed; retained initialized and corrected learned 1920 × 1088/73-frame takes human-approved October 5; older interpolation failure and broader settings remain separate |
+| H3 Motion Fidelity | Experimental independent T2VA movie repair; 24 fps matching canvas/trim, at least 15 base evaluations, immediate standard adapters, bounded expansion | CPU producer/acceptance/lifecycle tests and actual native repair with exact selected source PCM; retained repair human-approved October 5; broader fidelity improvement remains unqualified |
 
 For **Dev guidance**, **Automatic duration**, **Timed images and generated keyframes** and
 **Full-resolution single-stage sampling**, enable the corresponding experimental execution
@@ -56,8 +56,8 @@ Qwen tokens, packed rows, RGB bytes and activation limits can reject otherwise v
 Ordinary Swift H3 retains a 32-pixel grid, at most 1376×768 total pixels and 40,000 packed rows.
 Explicit spatial-v2 refinement has separate bounds: longest edge 1920, shortest 1088, total
 pixels 1920 × 1088, at most 64,000 complete packed rows and a 32 GiB estimated stage budget.
-A learned 1920 × 1088, 73-frame target completed and sampled stills were coherent; full motion/audio,
-user approval, clean performance and maximum-duration/max-canvas combinations remain unqualified.
+A learned 1920 × 1088, 73-frame target completed and received human motion/audio approval
+on October 5. Clean performance and maximum-duration/max-canvas combinations remain unqualified.
 The learned upscaler is separate from spatial interpolation.
 
 **FastH3 Preview v1 · experimental** has explicit **FastH3 DENSE** and **FastH3 VSA**
@@ -90,6 +90,11 @@ and broader production quality remain unqualified.
 The retained two-character/two-voice MSR V2, Scene V2 and learned LTX movie-upscale clips also
 received human audiovisual approval on 2026-10-05. These approvals apply to the exact checked
 fixtures and their byte-identical host outputs; they do not establish every configuration.
+
+The user also approved the retained H3 initialized-refinement, Motion Fidelity, learned
+1920 × 1088 spatial-refinement and nineteen-evaluation Canny Fun boxing clips on October 5.
+All ten linked follow-up review fixtures are approved. The older interpolation failure,
+other settings and performance remain separate; these approvals do not promote new defaults.
 
 **Native execution policy:** Swift uses exact model evaluations, staged unloading and streamed
 weights. The native feature set excludes Python EasyCache, hierarchical BlockCache and trajectory
@@ -1989,7 +1994,8 @@ that worker. The newer bounded-read worker additionally completed corrected exte
 1376 × 768 Beowulf and A2V recipes, and a full 124-frame Fun boxing guide. A2V's blind CPU
 transcription matches the selected source excerpt's recognized words; that does not approve
 voice likeness or lip sync. Fun visibly follows the broad guard/punch/bag motion, while bag
-typography and auditory review remain open. These individual results do not replace matched
+typography was unstable. The user subsequently approved the retained nineteen-evaluation
+Fun boxing clip's audiovisual quality on October 5. These individual results do not replace matched
 performance measurements or qualify every setting through every host.
 These checks leave broad identity, seam and audio quality
 and matched useful-size performance open.

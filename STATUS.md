@@ -1,8 +1,10 @@
 # WeeTodd Studio implementation status
 
-Retained audiovisual review, 2026-10-05: the user approved the exact linked FastH3 Dense,
-corrected VSA, VDN50, two-character/two-voice MSR V2, Scene V2 and LTX learned movie-upscale
-clips. This closes motion/audio review for those six fixtures without another generation.
+Retained audiovisual review, 2026-10-05: the user approved all ten linked review fixtures:
+FastH3 Dense, corrected VSA, VDN50, two-character/two-voice MSR V2, Scene V2, LTX learned
+movie upscale, H3 initialized refinement, Motion Fidelity, learned 1920 × 1088 spatial
+refinement and the nineteen-evaluation Canny Fun boxing clip. This closes motion/audio
+review for this ten-fixture packet without another generation.
 It does not qualify additional seeds, resolutions, conditioning mixtures or performance.
 FastH3 and VDN remain explicit experimental selections outside Automatic.
 
@@ -125,8 +127,9 @@ integrated creative packets completed all eight functional executions; sampled i
 had severe ghosting and Fun 08 was soft. Corrected learned spatial-v2 also completed 1920 × 1088,
 73 frames/three standard suffix evaluations/no LoRA with source PCM exact and staged release.
 Its worker time was 1037.097 seconds and MLX/physical peaks were 14.391/15.283 GB excluding FFmpeg.
-Sampled frames 0/36/72 were coherent without ghost/checkerboard; no full motion/audio/user approval or
-clean performance claim is made. Legacy Q8 FL reuse and
+Sampled frames 0/36/72 were coherent without ghost/checkerboard. The user subsequently approved
+this retained learned take's motion/audio on October 5; clean performance remains unqualified.
+The older interpolation failure is a separate fixture. Legacy Q8 FL reuse and
 `res_multistep` have separate real execution evidence; neither qualifies every paged source,
 continuation, reference mixture or new refinement. Saved-tail formats/imports retain their own
 source and model identities. Existing composable ComfyUI engines remain separate from the

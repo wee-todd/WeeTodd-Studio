@@ -109,8 +109,10 @@ single-stage and movie-upscale headers pass. Representative ordinary balanced CF
 with five anchors/source PCM and learned 2× movie refinement completed functional inference;
 CPU-only guide compositions are not thereby rendered. Eight H3 integrated creative packets also
 completed, and learned spatial-v2 completed a 1920 × 1088/73-frame target with exact source PCM and
-coherent sampled stills. This does not establish broad quality, clean performance, full AV review or
-every new host lifecycle. See [current controls and restrictions](../../studio/README.md#current-swift-controls-and-qualification).
+coherent sampled stills. On October 5, the user approved the retained scene-v2, movie-upscale,
+initialized H3 refinement, Motion Fidelity, learned spatial-v2 and nineteen-evaluation Canny Fun
+clips. Other settings, clean performance and every new host lifecycle remain separate.
+See [current controls and restrictions](../../studio/README.md#current-swift-controls-and-qualification).
 
 Shipped ComfyUI UI/API definitions remain portable templates for their documented composable
 engines. The recipe-backed Swift node is a separate host: unchanged recipes go through native

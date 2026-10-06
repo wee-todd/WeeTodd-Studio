@@ -431,8 +431,11 @@ eight integrated creative packets completed native execution. Their static sampl
 severe ghosting in the older interpolation sample and a soft Fun midpoint; execution is not quality
 approval. The learned H3 latent upscaler is separate from interpolation. Its corrected 1920×1088,
 73-frame take completed under explicit spatial-v2 admission with exact source PCM and coherent
-sampled first/middle/last frames. This does not qualify full motion/audio, unrestricted 2 MP/15-second
-generation or clean performance. Ordinary H3 retains its existing 1 MP/40,000-row admission. Density reduction is a
+sampled first/middle/last frames. On October 5, the user approved this retained learned take,
+initialized refinement, Motion Fidelity and the nineteen-evaluation Canny Fun boxing clip
+for audiovisual quality. These approvals do not qualify the older interpolation failure,
+unrestricted 2 MP/15-second generation or clean performance.
+Ordinary H3 retains its existing 1 MP/40,000-row admission. Density reduction is a
 fidelity/compute trade, not a guarantee of preserved motion or likeness.
 
 The native migration's historical route/lifecycle acceptance does not certify every new feature.
