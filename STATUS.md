@@ -1,5 +1,16 @@
 # WeeTodd Studio implementation status
 
+Matched performance follow-up, 2026-10-05: seven planned Swift/Python pairs completed with
+frozen creative inputs and checkpoint identities, complete media decoding, and separate physical
+and MLX peaks. LTX timing differences straddle zero across opposite orders; the H3 T2VA gap
+shrinks from 28.3% to 5.5% with different desktop load. Ref2VA is 8.2% slower with 39.7% lower
+physical footprint but 11.0% higher MLX allocation. FastH3 Dense is 7.3% faster; original VSA
+is 52.2% slower. The exact-output correction reduced sampling to 175.6 s and its MLX peak
+to 3.11 GB, but total time was 248.0 s with larger initialization costs. Full speed parity
+remains open; every decoded video pixel and audio sample matches the original.
+See the [complete measurement conditions](studio/README.md#matched-swiftpython-measurements-october-5-2026).
+These comparisons do not close uncontended performance or broad audiovisual acceptance.
+
 Swift feature and host-route qualification, 2026-10-05:
 
 - FastH3 Preview v1 Dense and trained VSA now run through explicit Swift Studio T2VA presets.

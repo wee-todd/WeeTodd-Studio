@@ -7,6 +7,13 @@ import XCTest
 @testable import H3MLX
 
 final class H3VideoDecodeMemoryModeTests: XCTestCase {
+  func testResidentModesDeferBlockOutputAndKeepDirectEagerBehavior() {
+    for mode: H3VideoDecodeMemoryMode in [.normal, .lowMemoryBF16] {
+      XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: mode)["materializesBlockOutput"] as? Bool, false)
+    }
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: nil)["materializesBlockOutput"] as? Bool, true)
+  }
+
   func testSelectedModesRequireResidentSessionBeforeCheckpointAccess() throws {
     try Device.withDefaultDevice(.cpu) {
       let latent = MLXArray.zeros([1, 7, 2, 2, 24], dtype: .float32)
@@ -32,6 +39,8 @@ final class H3VideoDecodeMemoryModeTests: XCTestCase {
     let output: String
     let maximumMLXBytes: Int
     let maximumPhysicalBytes: UInt64
+    /// An explicit decoder-only comparison; nil follows the production delegate.
+    let spatialBatchSize: Int?
   }
 
   private func sha(_ data: Data) -> String {
@@ -73,6 +82,7 @@ final class H3VideoDecodeMemoryModeTests: XCTestCase {
     guard let mode = H3VideoDecodeMemoryMode(rawValue: fixture.mode),
       fixture.maximumMLXBytes == 6 * 1024 * 1024 * 1024,
       fixture.maximumPhysicalBytes == 8 * 1024 * 1024 * 1024,
+      fixture.spatialBatchSize == nil || [1, 4].contains(fixture.spatialBatchSize!),
       try signature(fixture.checkpoint) == fixture.checkpointStat,
       !FileManager.default.fileExists(atPath: fixture.output) else {
       throw H3CheckpointError.invalid("Changed or previously executed decoder fixture.")
@@ -119,6 +129,7 @@ final class H3VideoDecodeMemoryModeTests: XCTestCase {
       // Same overload used by the public decodeChunks delegate, with close statistics only.
       try H3VideoVAEDecoder.decodeChunks(checkpointURL: checkpointURL,
         latent: latent, retainWeights: true, memoryMode: mode,
+        spatialBatchSize: fixture.spatialBatchSize ?? 4,
         onSessionClosed: { closed = $0 }) { chunk in
         guard chunk.dtype == .float32 else {
           throw H3CheckpointError.invalid("Production decoder output precision changed.")
@@ -149,6 +160,7 @@ final class H3VideoDecodeMemoryModeTests: XCTestCase {
     let released = closed?.closed == true && closed?.remainingResidentBytes == 0
     let report: [String: Any] = ["status": failure == nil && exact && released ? "passed" : "failed",
       "memoryMode": mode.rawValue, "videoDecode": H3VideoDecodeMemoryMode.diagnostics(for: mode),
+      "explicitSpatialBatchSize": fixture.spatialBatchSize as Any? ?? NSNull(),
       "secondsInclusiveHostValidation": elapsed, "frames": frames,
       "chunkShapes": shapes, "float32ChunkSHA256": floats, "rgb8ChunkSHA256": rgb,
       "rawLatentSHA256": fixture.rawSHA256, "exactFrozenPixels": exact,

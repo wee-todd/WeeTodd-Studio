@@ -54,6 +54,22 @@ struct H3FastTiles: Sendable {
 /// attention. Per-head video gathers are bounded to eight query tiles; no global
 /// token×token mask or dense weight conversion is constructed.
 enum H3FastAttention {
+  /// Copy complete contiguous 64-row tiles. Expanding routes into individual
+  /// row indices makes the gather repeat its indexing work for every row.
+  static func gatherTiles(blocks: MLXArray, routes: MLXArray) throws -> MLXArray {
+    guard blocks.ndim == 4, routes.ndim == 4, routes.shape[0] == 1,
+      blocks.shape[0] == routes.shape[1], blocks.shape[1] > 0,
+      blocks.shape[2] == 64, blocks.shape[3] > 0,
+      routes.shape[2] > 0, routes.shape[3] > 0 else {
+      throw H3CheckpointError.invalid("Invalid FastH3 tile gather geometry.")
+    }
+    let heads = blocks.shape[0], count = blocks.shape[1], width = blocks.shape[3]
+    let offsets = MLXArray((0..<heads).map { Int32($0 * count) }, [1, heads, 1, 1])
+    let indices = (routes.asType(.int32) + offsets).reshaped([-1])
+    return take(blocks.reshaped([heads * count, 64, width]), indices, axis: 0)
+      .reshaped([heads * routes.shape[2], 1, routes.shape[3] * 64, width])
+  }
+
   static func selectedTileCount(videoTiles:Int,sparsity:Double) -> Int {
     max(1,Int(ceil(Double(1-sparsity)*Double(videoTiles))))
   }
@@ -72,12 +88,18 @@ enum H3FastAttention {
     let mask = MLXArray(valid,[1,1,count*64,1])
     let indices = MLXArray(tiles.indices)
     func packed(_ input:MLXArray) -> MLXArray { take(input,indices,axis:2)*mask.asType(input.dtype) }
-    let tq = packed(query),tk = packed(key),tv = packed(value)
     let sizes = MLXArray(tiles.sizes.map(Float.init),[1,1,count,1])
     func pooled(_ input:MLXArray) -> MLXArray {
       input.asType(.float32).reshaped([1,heads,count,64,width]).sum(axis:3)/sizes
     }
-    let pq = pooled(tq),pk = pooled(tk),pv = pooled(tv)
+    // Keep the packed BF16 tensors available for every consumer group, and
+    // release each full Float32 pooling temporary before starting the next.
+    let tq = packed(query);eval(tq)
+    let pq = pooled(tq);eval(pq)
+    let tk = packed(key);eval(tk)
+    let pk = pooled(tk);eval(pk)
+    let tv = packed(value);eval(tv)
+    let pv = pooled(tv);eval(pv)
     let scores = matmul(pq,pk.swappedAxes(-1,-2))*scale
     let compression = matmul(softmax(scores,axis:-1),pv)
     let rowTiles = MLXArray(tiles.rowSlots.map { $0/64 })
@@ -89,31 +111,42 @@ enum H3FastAttention {
     } else {
       let prefix = tiles.prefixTiles,video = count-prefix
       let keep = selectedTileCount(videoTiles:video,sparsity:sparsity)
-      let tiledKeys = tk.reshaped([heads*count*64,width])
-      let tiledValues = tv.reshaped([heads*count*64,width])
-      let headOffsets = MLXArray((0..<heads).map { Int32($0*count*64) },[1,heads,1,1,1])
-      let localRows = MLXArray((0..<64).map(Int32.init),[1,1,1,1,64])
-      let tiledValidity = MLXArray(valid)
-      var groups:[MLXArray] = []
-      for start in stride(from:0,to:video,by:8) {
-        try Task.checkCancellation()
-        let end = min(start+8,video),group = end-start
-        let selected = argSort(-scores[.ellipsis,(prefix+start)..<(prefix+end),prefix..<count],axis:-1)[.ellipsis,0..<keep]+Int32(prefix)
-        let allPrefix = broadcast(MLXArray((0..<prefix).map(Int32.init),[1,1,1,prefix]),to:[1,heads,group,prefix])
-        let selectedTiles = concatenated([allPrefix,selected],axis:-1)
-        let selectedRows = selectedTiles.expandedDimensions(axis:-1)*Int32(64)+localRows
-        let gathered = (selectedRows+headOffsets).reshaped([-1])
-        let keyRows = (prefix+keep)*64
-        let keys = take(tiledKeys,gathered,axis:0).reshaped([heads*group,1,keyRows,width])
-        let values = take(tiledValues,gathered,axis:0).reshaped([heads*group,1,keyRows,width])
-        let validKeys = take(tiledValidity,selectedRows.reshaped([-1]),axis:0).reshaped([heads*group,1,1,keyRows])
-        let attentionMask = which(validKeys .> 0,MLXArray(Float(0)),MLXArray(-Float.infinity)).asType(query.dtype)
-        let queries = tq[.ellipsis,((prefix+start)*64)..<((prefix+end)*64),0..<width].reshaped([heads*group,1,64,width])
-        let attended = MLXFast.scaledDotProductAttention(queries:queries,keys:keys,values:values,scale:scale,mask:attentionMask)
-          .reshaped([1,heads,group*64,width])
-        eval(attended);groups.append(attended)
+      let tiledKeys = tk.reshaped([heads,count,64,width])
+      let tiledValues = tv.reshaped([heads,count,64,width])
+      let tiledValidity = MLXArray(valid,[count,64])
+      // Keep the existing sorted route order, but sort each score row once
+      // for the whole block instead of launching a sort per query group.
+      let selected = argSort(-scores[.ellipsis,prefix..<count,prefix..<count],axis:-1)[.ellipsis,0..<keep]+Int32(prefix)
+      let allPrefix = broadcast(MLXArray((0..<prefix).map(Int32.init),[1,1,1,prefix]),to:[1,heads,video,prefix])
+      let routes = concatenated([allPrefix,selected],axis:-1)
+      eval(routes)
+      var headGroups:[MLXArray] = []
+      let videoScatter = MLXArray(tiles.rowSlots.dropFirst(tiles.prefixRows).map { $0-Int32(prefix*64) })
+      // Bound each gathered K/V and masked SDPA call to four independent
+      // heads, matching the maintained low-memory grouped consumer policy.
+      for headStart in stride(from:0,to:heads,by:4) {
+        let headEnd = min(headStart+4,heads),headCount = headEnd-headStart
+        let headKeys = tiledKeys[headStart..<headEnd,0..<count,0..<64,0..<width]
+        let headValues = tiledValues[headStart..<headEnd,0..<count,0..<64,0..<width]
+        var groups:[MLXArray] = []
+        for start in stride(from:0,to:video,by:8) {
+          try Task.checkCancellation()
+          let end = min(start+8,video),group = end-start
+          let selectedTiles = routes[0..<1,headStart..<headEnd,start..<end,0..<(prefix+keep)]
+          let keyRows = (prefix+keep)*64
+          let keys = try gatherTiles(blocks:headKeys,routes:selectedTiles)
+          let values = try gatherTiles(blocks:headValues,routes:selectedTiles)
+          let validKeys = take(tiledValidity,selectedTiles.reshaped([-1]),axis:0).reshaped([headCount*group,1,1,keyRows])
+          let attentionMask = which(validKeys .> 0,MLXArray(Float(0)),MLXArray(-Float.infinity)).asType(query.dtype)
+          let queries = tq[0..<1,headStart..<headEnd,((prefix+start)*64)..<((prefix+end)*64),0..<width].reshaped([headCount*group,1,64,width])
+          let attended = MLXFast.scaledDotProductAttention(queries:queries,keys:keys,values:values,scale:scale,mask:attentionMask)
+            .reshaped([1,headCount,group*64,width])
+          eval(attended);groups.append(attended)
+        }
+        let headOutput = take(concatenated(groups,axis:2),videoScatter,axis:2)
+        eval(headOutput);headGroups.append(headOutput)
       }
-      let videoOutput = take(concatenated(groups,axis:2),MLXArray(tiles.rowSlots.dropFirst(tiles.prefixRows).map { $0-Int32(prefix*64) }),axis:2)
+      let videoOutput = concatenated(headGroups,axis:1)
       let prefixOutput = MLXFast.scaledDotProductAttention(queries:query[.ellipsis,0..<tiles.prefixRows,0..<width],keys:key,values:value,scale:scale,mask:nil)
       output = concatenated([prefixOutput,videoOutput],axis:2)
     }

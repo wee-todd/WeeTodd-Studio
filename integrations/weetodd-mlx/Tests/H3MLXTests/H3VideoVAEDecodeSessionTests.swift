@@ -109,26 +109,35 @@ final class H3VideoVAEDecodeSessionTests: XCTestCase {
     let checkpoint = try installed()
     let latent = tileLatent()
     enum Stop: Error { case requested }
-    var retained: H3VideoVAEDecodeSession?
-    XCTAssertThrowsError(try H3VideoVAEDecodeSession.withSession(checkpointURL: checkpoint) { session in
-      retained = session
-      return try H3VideoVAETileDecoder.decode(checkpointURL: checkpoint, latent: latent,
-        session: session, observe: { name, _ in
-          if name == "vit0" { throw Stop.requested }
-        })
-    }) { XCTAssertTrue($0 is Stop) }
-    XCTAssertTrue(try XCTUnwrap(retained).isClosed)
-    XCTAssertEqual(retained?.residentBytes, 0)
-    XCTAssertEqual(retained?.projectionLoads, 4)
-    XCTAssertThrowsError(try H3VideoVAEDecodeSession.withSession(checkpointURL: checkpoint) { session in
-      retained = session
-      return try H3VideoVAETileDecoder.decode(checkpointURL: checkpoint, latent: latent,
-        session: session, observe: { name, _ in
-          if name == "vit0" { throw CancellationError() }
-        })
-    }) { XCTAssertTrue($0 is CancellationError) }
-    XCTAssertTrue(try XCTUnwrap(retained).isClosed)
-    XCTAssertEqual(retained?.residentBytes, 0)
+    // Deferred modes can still have an unevaluated block output at this
+    // boundary. Error and cancellation must release its graph and weights.
+    for memoryMode: H3VideoDecodeMemoryMode? in [nil, .normal, .lowMemoryBF16] {
+      var retained: H3VideoVAEDecodeSession?
+      let previousCacheLimit = Memory.cacheLimit
+      XCTAssertThrowsError(try H3VideoVAEDecodeSession.withSession(
+        checkpointURL: checkpoint, memoryMode: memoryMode) { session in
+        retained = session
+        return try H3VideoVAETileDecoder.decode(checkpointURL: checkpoint, latent: latent,
+          session: session, observe: { name, _ in
+            if name == "vit0" { throw Stop.requested }
+          })
+      }) { XCTAssertTrue($0 is Stop) }
+      XCTAssertTrue(try XCTUnwrap(retained).isClosed)
+      XCTAssertEqual(retained?.residentBytes, 0)
+      XCTAssertEqual(retained?.projectionLoads, 4)
+      XCTAssertEqual(Memory.cacheLimit, previousCacheLimit)
+      XCTAssertThrowsError(try H3VideoVAEDecodeSession.withSession(
+        checkpointURL: checkpoint, memoryMode: memoryMode) { session in
+        retained = session
+        return try H3VideoVAETileDecoder.decode(checkpointURL: checkpoint, latent: latent,
+          session: session, observe: { name, _ in
+            if name == "vit0" { throw CancellationError() }
+          })
+      }) { XCTAssertTrue($0 is CancellationError) }
+      XCTAssertTrue(try XCTUnwrap(retained).isClosed)
+      XCTAssertEqual(retained?.residentBytes, 0)
+      XCTAssertEqual(Memory.cacheLimit, previousCacheLimit)
+    }
   }
 
   /// Decode-only qualification: same immutable saved sampler output, no text

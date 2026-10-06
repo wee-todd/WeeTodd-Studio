@@ -138,7 +138,10 @@ public enum H3VideoVAEBlock {
     try observe("feed", feed)
     let secondScale = try read("scale2", shape: [2048])
     let output = residual + feed * secondScale
-    eval(output)
+    // Resident stages can leave this graph for the next residual boundary or
+    // the tile's final normalization. Direct eager callers keep their barrier.
+    if let session { session.materializeBlockOutput(output) }
+    else { eval(output) }
     try observe("output", output)
     if let session { try session.checkUnchanged() }
     else { try file?.checkUnchanged(at: checkpointURL) }

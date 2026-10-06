@@ -788,6 +788,11 @@ a specified mode retain eager decoding. A separate 22-frame, 768 × 768 control-
 witness retained exact latent bytes while reducing peak MLX allocation by 5.134 GB;
 that is an encoder-stage result, not a full-generation memory figure.
 
+The [October 5 matched Swift/Python measurements](studio/README.md#matched-swiftpython-measurements-october-5-2026)
+retain both run orders, renderer physical and MLX allocation peaks, reference-budget controls,
+and desktop-load caveats. They show lower Swift physical footprint across these seven pairs;
+they do not establish universal Swift speed parity or broader audiovisual acceptance.
+
 Ripple also has an opt-in **Use Swift MLX for Ripple (experimental)** route in its Runtime
 Settings. It freezes edited images, streams the source guide, runs the pinned author LoRA
 through the single-stage Swift sampler, shows decoding previews, and verifies the published

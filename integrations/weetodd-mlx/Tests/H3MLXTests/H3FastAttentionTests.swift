@@ -1,8 +1,114 @@
 import XCTest
 import MLX
+import MLXRandom
+import CryptoKit
 @testable import H3MLX
 
 final class H3FastAttentionTests: XCTestCase {
+  func testSparseHeadBatchRemainderMatchesIndependentHeads() throws {
+    let tiles = try H3FastTiles(prefixSegments: [3, 5], videoGrid: [3, 5, 6])
+    let shape = [1, 5, tiles.rows, 4]
+    let data = (0..<(5 * tiles.rows * 4)).map { Float($0 % 37 - 18) / 37 }
+    for dtype: DType in [.float32, .bfloat16] {
+      let q = MLXArray(data, shape).asType(dtype)
+      let k = (q * 0.7).asType(dtype), v = (q * 0.4).asType(dtype)
+      let gate = (q * 8).asType(dtype)
+      let result = try H3FastAttention.evaluate(query: q, key: k, value: v,
+        gate: gate, tiles: tiles, minimumSparseRows: 1)
+      var expected: [MLXArray] = []
+      for head in 0..<5 {
+        func slice(_ value: MLXArray) -> MLXArray {
+          value[0..<1,head..<(head+1),0..<tiles.rows,0..<4]
+        }
+        expected.append(try H3FastAttention.evaluate(query: slice(q), key: slice(k),
+          value: slice(v), gate: slice(gate), tiles: tiles, minimumSparseRows: 1))
+      }
+      XCTAssertEqual(result.dtype, dtype)
+      let error = abs(result.asType(.float32) - concatenated(expected,axis:1).asType(.float32)).max().item(Float.self)
+      XCTAssertLessThanOrEqual(error, dtype == .float32 ? 3e-6 : 0.012)
+    }
+  }
+  func testTileGatherPreservesHeadGroupOrderRepeatedTilesAndEveryPaddedRow() throws {
+    try Device.withDefaultDevice(.cpu) {
+      let heads = 3, count = 5, width = 4
+      let values = (0..<(heads * count * 64 * width)).map(Float.init)
+      let routes: [Int32] = [0,3,4, 1,0,1, 3,2,0, 4,1,4, 2,4,0, 1,3,2]
+      var expected: [Float] = []
+      for head in 0..<heads {
+        for group in 0..<2 {
+          for slot in 0..<3 {
+            let tile = Int(routes[(head * 2 + group) * 3 + slot])
+            let start = (head * count + tile) * 64 * width
+            expected += values[start..<(start + 64 * width)]
+          }
+        }
+      }
+      for dtype: DType in [.float32, .bfloat16] {
+        let blocks = MLXArray(values, [heads, count, 64, width]).asType(dtype)
+        let result = try H3FastAttention.gatherTiles(blocks: blocks,
+          routes: MLXArray(routes, [1, heads, 2, 3]))
+        XCTAssertEqual(result.shape, [heads * 2, 1, 3 * 64, width])
+        XCTAssertEqual(result.dtype, dtype)
+        XCTAssertEqual(result.asArray(Float.self), MLXArray(expected).asType(dtype).asArray(Float.self))
+        XCTAssertThrowsError(try H3FastAttention.gatherTiles(blocks: blocks,
+          routes: MLXArray([Int32(0)], [1, 1, 1, 1])))
+      }
+    }
+  }
+  /// Attention-only probe at the measured 672x384/124-frame workload. It
+  /// loads no model weights and freezes every output bit before optimization.
+  func testRepresentativeAttentionFrozenParityAndTiming() throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let outputPath = environment["WEETODD_H3_VSA_PROBE_OUTPUT"] else {
+      throw XCTSkip("Opt-in bounded VSA attention parity/performance probe.")
+    }
+    guard !FileManager.default.fileExists(atPath: outputPath) else {
+      throw H3CheckpointError.invalid("VSA probe output already exists.")
+    }
+    let memoryBudget = environment["WEETODD_H3_VSA_PROBE_MAX_MLX_BYTES"].flatMap(Int.init)
+    guard memoryBudget == nil || memoryBudget == 5 * 1024 * 1024 * 1024 / 2 else {
+      throw H3CheckpointError.invalid("VSA probe requires its fixed 2.5 GiB allocation bound.")
+    }
+    let tiles = try H3FastTiles(prefixSegments: [171, 414], videoGrid: [37, 12, 21])
+    let shape = [1, 56, tiles.rows, 128]
+    let inputs = (0..<4).map {
+      MLXRandom.normal(shape, key: MLXRandom.key(UInt64(801 + $0))).asType(.bfloat16)
+    }
+    eval(inputs)
+    let previousLimit = Memory.cacheLimit
+    Memory.cacheLimit = 128 * 1024 * 1024
+    defer { Stream.gpu.synchronize(); Memory.clearCache(); Memory.cacheLimit = previousLimit }
+    Memory.peakMemory = Memory.activeMemory
+    var seconds: [Double] = []
+    var output: MLXArray?
+    for _ in 0..<4 {
+      let start = CFAbsoluteTimeGetCurrent()
+      output = try H3FastAttention.evaluate(query: inputs[0], key: inputs[1],
+        value: inputs[2], gate: inputs[3], tiles: tiles)
+      Stream.gpu.synchronize()
+      seconds.append(CFAbsoluteTimeGetCurrent() - start)
+    }
+    if let memoryBudget { XCTAssertLessThanOrEqual(Memory.peakMemory, memoryBudget) }
+    let result = try XCTUnwrap(output)
+    XCTAssertEqual(result.shape, shape)
+    XCTAssertEqual(result.dtype, .bfloat16)
+    var digest = SHA256()
+    for head in 0..<shape[1] {
+      let values = result[0, head, 0..<tiles.rows, 0..<128].asArray(Float.self)
+      values.withUnsafeBytes { digest.update(data: Data($0)) }
+    }
+    let hash = digest.finalize().map { String(format: "%02x", $0) }.joined()
+    if let expected = environment["WEETODD_H3_VSA_PROBE_EXPECTED_SHA256"] {
+      XCTAssertEqual(hash, expected, "Every output must retain its frozen Float32 value.")
+    }
+    let report: [String: Any] = ["shape": shape, "inputSeeds": [801, 802, 803, 804],
+      "dtype": "bfloat16", "prefixSegments": [171, 414], "videoGrid": [37, 12, 21],
+      "outputFloat32SHA256": hash, "secondsIncludingFirstCompilation": seconds,
+      "warmSeconds": Array(seconds.dropFirst()), "peakMLXBytes": Memory.peakMemory,
+      "scope": "attention only; no weights, sampler, VAE, hash time or whole-render speed claim"]
+    try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+      .write(to: URL(fileURLWithPath: outputPath))
+  }
   func testTrainedCompressionGateIsUnboundedSignedLinearProjection() {
     Device.withDefaultDevice(.cpu) {
       let input=MLXArray([Float(1),2,3,4],[1,2,2])

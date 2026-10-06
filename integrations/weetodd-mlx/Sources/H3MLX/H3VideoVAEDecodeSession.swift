@@ -100,6 +100,10 @@ final class H3VideoVAEDecodeSession {
     if H3VideoDecodeMemoryMode.materializesFirstResidual(for: memoryMode) { eval(value) }
   }
 
+  func materializeBlockOutput(_ value: MLXArray) {
+    if H3VideoDecodeMemoryMode.materializesBlockOutput(for: memoryMode) { eval(value) }
+  }
+
   func close() {
     guard !isClosed else { return }
     Stream.gpu.synchronize()

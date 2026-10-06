@@ -13,11 +13,16 @@ public enum H3VideoDecodeMemoryMode: String, Sendable {
     mode != .normal
   }
 
+  static func materializesBlockOutput(for mode: Self?) -> Bool {
+    mode == nil
+  }
+
   public static func diagnostics(for mode: Self?) -> [String: Any] {
     ["memoryMode": mode?.rawValue ?? "direct_eager",
       "materializationPolicy": mode == .normal ? "defer_projections_and_residual"
         : mode == .lowMemoryBF16 ? "defer_projections" : "eager",
       "packedWeightsResidentWithinVideoStage": true,
+      "materializesBlockOutput": materializesBlockOutput(for: mode),
       "allocationCacheLimitBytes": 128 * 1024 * 1024,
       "spatialBatch": 4,
       "scope": "video-only residency; released before audio; no whole-generation speed guarantee"]

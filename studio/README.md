@@ -891,7 +891,9 @@ configure the native MLX engines.
    enforce a hard limit. Clip size/duration and other resident applications still matter.
    Swift H3 preserves this saved policy during video decoding: normal mode defers projection
    and first-residual evaluations; lower-memory mode keeps the residual boundary. Both release
-   packed video weights before audio decoding. The worker reports the actual policy and cache
+   packed video weights before audio decoding. Resident modes also defer block-output evaluation
+   to the next residual boundary or the tile's final normalization; direct eager APIs retain
+   their evaluation barriers. Spatial tile batch remains four. The worker reports the actual policy and cache
    limit; the allocation cache limit is not a bound on total process memory.
 4. **Create Recipe** runs the shared component/configuration preflight and writes a new recipe.
    Image/reference presets still need media attached to a clip before full render preflight can pass.
@@ -1110,6 +1112,55 @@ Try **Paged · larger workspace** first for this recipe before full residency. N
 also selects a larger decode batch; decode did not improve in these runs.
 Process RSS and the largest instrumented MLX stage are distinct counters, not additive RAM totals.
 This is evidence for this recipe on this Mac, not qualification for a 36 GB Mac or every task.
+
+### Matched Swift/Python measurements, October 5, 2026
+
+Seven fresh-process pairs used frozen prompts, seeds, dimensions, schedules and component files
+on an M3 Ultra with 256 GB unified memory. Both MLX cores were 0.32.2. Times include launch,
+text/vision preparation, sampling, decoding and publication. Media verification is outside timing.
+All movies passed complete video/audio decoding and frame-count/rate checks.
+
+| Case | Python seconds | Swift seconds | Swift time change | Physical peak GB, Python / Swift | MLX peak GB, Python / Swift |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| LTX-FFLF | 182.7 | 177.6 | -2.8% | 12.51 / 8.84 | 12.43 / 5.89 |
+| H3-T2VA | 306.0 | 392.6 | +28.3% | 46.33 / 5.08 | 42.67 / 4.45 |
+| H3-Ref2VA-1MP | 1032.5 | 1117.0 | +8.2% | 24.87 / 15.00 | 12.14 / 13.48 |
+| FastH3-Dense | 222.5 | 206.4 | -7.3% | 14.48 / 5.25 | 5.37 / 4.61 |
+| FastH3-VSA | 153.8 | 234.1 | +52.2% | 14.48 / 5.45 | 6.06 / 4.61 |
+| H3-T2VA-Repeat | 313.8 | 331.1 | +5.5% | 46.25 / 5.10 | 42.67 / 4.45 |
+| LTX-FFLF-Repeat | 183.1 | 189.7 | +3.6% | 12.83 / 8.84 | 12.43 / 5.89 |
+
+Memory uses decimal GB. Physical peak is the renderer's lifetime footprint, excluding FFmpeg
+and the host; MLX peak is the observed allocation high-water before existing stage resets.
+The counters are separate. Ref2VA has lower physical footprint but higher MLX allocation.
+
+LTX used 1344 × 768, 89 frames/24 fps, seed 43 and eight plus three evaluations. It is a
+3.708-second FFLF clip, not a five-second clip. Both orders remain visible: the time differences
+straddle zero. H3 T2VA used 768 × 448/124 frames, seed 20260929 and four evaluations with
+pruned BF16 weights. Its native streaming and Python residency policies differ. FastH3 used
+672 × 384/124 frames, seed 20260922 and four evaluations of each trained affine-Q8 variant.
+These small H3 canvases are diagnostic workloads outside the recommended production short edge.
+Ref2VA used 1376 × 768/124 frames, seed 20261002, Singularity INT8 and strength-1 LightX Turbo.
+Both runtimes retained the complete 448 × 1344 reference through an explicit native 100% budget;
+prepared RGB bytes and all 200 block input shapes were checked.
+
+The desktop remained interactive. WebKit GPU-process CPU markers were asymmetric in both
+T2VA orders and the LTX repeat; a brief Studio voice job overlapped Ref2VA. These markers do
+not measure per-app GPU occupancy. No best-order result establishes uncontended parity.
+Ref2VA and FastH3 use the qualified decoder-output deferral; both T2VA orders and LTX retain
+the original workers. No checkpoint, precision, sampling count or creative input was reduced.
+The original VSA slowdown remains visible above; the following correction is measured separately.
+
+
+The exact-output VSA attention correction uses tile-block gathers, one route sort per block,
+four-head sparse consumers and sequential packed/pool materialization. Its complete frozen take
+retained every decoded pixel and audio sample. Sampling improved from 182.0 to 175.6 seconds,
+and sampling MLX peak fell from 3.92 to 3.11 GB. Whole MLX peak remained 4.61 GB;
+physical peak changed from 5.45 to 5.25 GB. Total time worsened from 234.1 to 248.0 seconds,
+with Qwen initialization 5.5 to 18.2 seconds and transformer preparation 1.7 to 9.1 seconds.
+No busy GPU-app marker was observed in this final run. These initialization costs are measured,
+not causally attributed; no whole-generation gain or speed-parity claim is made. Python's retained
+VSA total is 153.8 seconds, so the full speed gap remains open.
 
 ## Progress, measurements, and H3 page retention
 
