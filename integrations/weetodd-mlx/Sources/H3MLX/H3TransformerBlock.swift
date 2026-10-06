@@ -121,7 +121,9 @@ public enum H3TransformerBlock {
     let prefix = layout.prefix + "blocks.\(index)."
     let previousCacheLimit = Memory.cacheLimit
     Memory.cacheLimit = 128 * 1024 * 1024
+    let nativePage = layout.fastVariant == nil ? nil : H3NativePage(file: file, url: tensorURL)
     defer {
+      nativePage?.clear()
       Stream.gpu.synchronize()
       Memory.clearCache()
       Memory.cacheLimit = previousCacheLimit
@@ -131,6 +133,7 @@ public enum H3TransformerBlock {
         descriptor.shape == shape.map(UInt64.init) else {
         throw H3CheckpointError.invalid("Missing H3 block tensor: \(name)")
       }
+      if let nativePage { return try nativePage.read(name) }
       let value = try H3TensorPayload.withTensorBytes(file: file, name: name,
         maximumBufferedBytes: 4 * 1024 * 1024) { bytes in
         dtype == "F32"
@@ -145,7 +148,8 @@ public enum H3TransformerBlock {
       let base: MLXArray
       let name = prefix + suffix + ".weight"
       if file.tensors[name]?.dtype == "U32" {
-        let weight = try H3QwenQ8Projection(file: file, name: name)
+        let reader: ((String) throws -> MLXArray)? = nativePage.map { page in { try page.read($0) } }
+        let weight = try H3QwenQ8Projection(file: file, name: name, tensor: reader)
         guard weight.rows == rows, weight.columns == columns else {
           throw H3CheckpointError.invalid("Paged H3 affine projection changed after admission.")
         }

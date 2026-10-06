@@ -1,9 +1,129 @@
 import Foundation
 import MLX
+import MLXRandom
+import CryptoKit
+import TensorIO
 import XCTest
 @testable import H3MLX
 
 final class H3TransformerBlockTests: XCTestCase {
+  func testInstalledAffineProjectionLoadingComparison() throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let outputPath = environment["WEETODD_H3_AFFINE_LOAD_OUTPUT"],
+      let checkpointPath = environment["WEETODD_H3_TEST_CHECKPOINT"] else {
+      throw XCTSkip("Opt-in installed affine weight-loading comparison.")
+    }
+    guard !FileManager.default.fileExists(atPath: outputPath) else {
+      throw H3CheckpointError.invalid("Affine loading probe output already exists.")
+    }
+    let checkpoint = URL(fileURLWithPath: checkpointPath)
+    let layout = try H3CheckpointLayout(url: checkpoint)
+    let url = try H3CheckpointSource.fileURL(checkpoint, block: 0)
+    let file = try SafeTensorFile(url: url)
+    let stem = layout.prefix + "blocks.0.mlp.fc1"
+    let input = MLXRandom.normal([1,9909,5376], key: MLXRandom.key(901)).asType(.bfloat16)
+    eval(input)
+    let previous = Memory.cacheLimit
+    Memory.cacheLimit = 128 * 1024 * 1024
+    defer { Stream.gpu.synchronize(); Memory.clearCache(); Memory.cacheLimit = previous }
+    var reports: [[String: Any]] = []
+    var expected: String?
+    for mapped in [true, false] {
+      var times: [Double] = []
+      var output: MLXArray?
+      Memory.clearCache(); Memory.peakMemory = Memory.activeMemory
+      for _ in 0..<4 {
+        let start = CFAbsoluteTimeGetCurrent()
+        let weight: H3QwenQ8Projection
+        if mapped { weight = try H3QwenQ8Projection(file: file, name: stem + ".weight") }
+        else {
+          let arrays = try loadArrays(url: url)
+          weight = try H3QwenQ8Projection(packed: XCTUnwrap(arrays[stem + ".weight"]),
+            scales: XCTUnwrap(arrays[stem + ".scales"]), biases: XCTUnwrap(arrays[stem + ".biases"]), columns: 5376)
+        }
+        output = try weight.project(input); eval(output!); Stream.gpu.synchronize()
+        times.append(CFAbsoluteTimeGetCurrent() - start)
+      }
+      let peak = Memory.peakMemory
+      let result = try XCTUnwrap(output)
+      var digest = SHA256()
+      for start in stride(from: 0, to: 9909, by: 256) {
+        result[0, start..<min(start+256,9909), 0..<28672].asArray(Float.self)
+          .withUnsafeBytes { digest.update(data: Data($0)) }
+      }
+      let hash = digest.finalize().map { String(format: "%02x", $0) }.joined()
+      if let expected { XCTAssertEqual(hash, expected) } else { expected = hash }
+      reports.append(["loader": mapped ? "scoped-mapping-copy" : "mlx-file-backed",
+        "seconds": times, "peakMLXBytes": peak, "outputFloat32SHA256": hash])
+      try file.checkUnchanged(at: url)
+    }
+    try JSONSerialization.data(withJSONObject: reports, options: [.prettyPrinted,.sortedKeys])
+      .write(to: URL(fileURLWithPath: outputPath))
+  }
+  /// One complete trained block, including weight reads and all projections.
+  /// Boundary timings deliberately synchronize and are diagnostic only; the
+  /// four ordinary calls below use the uninstrumented production execution.
+  func testInstalledFastVSABlockFrozenParityAndTiming() throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let outputPath = environment["WEETODD_H3_VSA_BLOCK_OUTPUT"],
+      let checkpointPath = environment["WEETODD_H3_TEST_CHECKPOINT"] else {
+      throw XCTSkip("Opt-in installed trained VSA complete-block probe.")
+    }
+    guard !FileManager.default.fileExists(atPath: outputPath) else {
+      throw H3CheckpointError.invalid("VSA block probe output already exists.")
+    }
+    let checkpoint = URL(fileURLWithPath: checkpointPath)
+    XCTAssertEqual(try H3CheckpointLayout(url: checkpoint).fastVariant, .vsaV1)
+    let tiles = try H3FastTiles(prefixSegments: [171, 414], videoGrid: [37, 12, 21])
+    let input = MLXRandom.normal([1, tiles.rows, 5376], key: MLXRandom.key(901)).asType(.bfloat16)
+    let modulation = (MLXRandom.normal([1, 96768], key: MLXRandom.key(902)) * 0.05).asType(.bfloat16)
+    let indices = MLXArray((0..<tiles.rows).map { Int32($0 < 171 ? 0 : ($0 < 585 ? 1 : 2)) })
+    let positions = MLXArray((0..<tiles.rows).flatMap { row -> [Float] in
+      if row < 585 { return [Float(row), 0, 0] }
+      let video = row - 585
+      return [Float(video / 252), Float((video / 21) % 12), Float(video % 21)]
+    }, [tiles.rows, 3])
+    eval([input, modulation, indices, positions])
+    let angles = try H3TransformerBlock.prepareRotaryAngles(checkpointURL: checkpoint, positions: positions)
+    let previousLimit = Memory.cacheLimit
+    defer { Stream.gpu.synchronize(); Memory.clearCache(); Memory.cacheLimit = previousLimit }
+    Memory.peakMemory = Memory.activeMemory
+    var seconds: [Double] = []
+    var output: MLXArray?
+    for _ in 0..<4 {
+      let start = CFAbsoluteTimeGetCurrent()
+      output = try H3TransformerBlock.evaluate(checkpointURL: checkpoint, index: 0,
+        input: input, modulation: modulation, modulationIndices: indices,
+        positions: positions, rotaryAngles: angles, fastTiles: tiles, observe: { _, _ in })
+      Stream.gpu.synchronize()
+      seconds.append(CFAbsoluteTimeGetCurrent() - start)
+    }
+    let peak = Memory.peakMemory
+    if let maximum = environment["WEETODD_H3_VSA_BLOCK_MAX_WARM_SECONDS"].flatMap(Double.init) {
+      XCTAssertLessThanOrEqual(seconds.dropFirst().sorted()[1], maximum)
+    }
+    let values = try XCTUnwrap(output).asArray(Float.self)
+    let hash = values.withUnsafeBytes { SHA256.hash(data: Data($0)).map { String(format: "%02x", $0) }.joined() }
+    if let expected = environment["WEETODD_H3_VSA_BLOCK_EXPECTED_SHA256"] { XCTAssertEqual(hash, expected) }
+    if let budget = environment["WEETODD_H3_VSA_BLOCK_MAX_MLX_BYTES"].flatMap(Int.init) { XCTAssertLessThanOrEqual(peak, budget) }
+    var stages: [[String: Any]] = []
+    var start = CFAbsoluteTimeGetCurrent()
+    let diagnostic = try H3TransformerBlock.evaluate(checkpointURL: checkpoint, index: 0,
+      input: input, modulation: modulation, modulationIndices: indices,
+      positions: positions, rotaryAngles: angles, fastTiles: tiles, observe: { name, value in
+        eval(value); Stream.gpu.synchronize()
+        let end = CFAbsoluteTimeGetCurrent()
+        stages.append(["boundary": name, "secondsSincePriorBoundary": end - start])
+        start = end
+      })
+    XCTAssertEqual(diagnostic.asArray(Float.self), values)
+    let report: [String: Any] = ["scope": "one installed trained block; no whole-render speed claim",
+      "inputShape": input.shape, "inputSeeds": [901, 902], "outputFloat32SHA256": hash,
+      "secondsIncludingFirstCompilation": seconds, "warmSeconds": Array(seconds.dropFirst()),
+      "peakMLXBytes": peak, "instrumentedBoundaryTimings": stages]
+    try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+      .write(to: URL(fileURLWithPath: outputPath))
+  }
   func testInstalledRotaryFrequencyKeepsFloat32PhaseUntilTrig() throws {
     guard let path = ProcessInfo.processInfo.environment["WEETODD_H3_TEST_CHECKPOINT"] else {
       throw XCTSkip("Set an installed H3 checkpoint for rotary phase parity.")

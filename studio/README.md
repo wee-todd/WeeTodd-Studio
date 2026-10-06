@@ -23,7 +23,7 @@ feature in the current app.
 | LTX automatic duration | Explicit opt-in for ordinary T2V/I2V/FFLF; duration head resolves the `8k+1` grid before sampling, with 0.25–30-second bounds | Pinned head and CPU tests; actual 57-frame combined take completed |
 | LTX ordinary keyframes | Up to eight distinct timed images and 0–8 generated slots; arbitrary integer frames are allowed; first-frame input replaces the main opening plane | CPU/header tests and the combined take; ordinary slots are stage-one-only |
 | LTX full-resolution single stage | Eight updates; Euler/ancestral use eight forwards and CFG++ full/balanced/speed use 15/12/10 forwards; no spatial upscaler or second stage | CPU math/header checks and one functional balanced 12-forward take with first/last images and generated slots; other schedules and guide compositions have CPU/header qualification only |
-| LTX scene anchors | Experimental scene v2: at most 32 global first/interior/last anchors and 256 MiB encoded references; two to six shots, at most 30 seconds | CPU routing/budget checks plus actual two-window/five-anchor/source-PCM take; new scene-v2 Studio lifecycle and broad quality remain separate from earlier v1 evidence |
+| LTX scene anchors | Experimental scene v2: at most 32 global first/interior/last anchors and 256 MiB encoded references; two to six shots, at most 30 seconds | CPU routing/budget checks and actual two-window/five-anchor/source-PCM Studio take, previews, acceptance and save/reopen; retained clip human-approved October 5; broader configurations remain unqualified |
 | LTX movie upscale | Experimental learned 2× only, learned 2× + refine, or Pixel-Spatial 2× + refine; exact source frame count/rate with explicit source/sidecar/silent audio | CPU source/movie/acceptance tests plus actual learned 2×/three-evaluation refinement/source interval with exact sidecar PCM; actual StudioCore export/native CLI acceptance, zero-generation resume and Store.load reopen passed |
 | LTX one-step Diffusion VAE | Explicit experimental complete-component decoder selection; Conv remains the default, with strict workspace and checkpoint admission | CPU/header/release checks, tiny numerical comparisons and actual retained 1344 × 768/89-frame decode; no whole-job or Conv pixel-parity claim |
 | H3 reference preparation | Optional 50–400% image pixel budget; movie match-output/native-H3 budget; full/half/quarter/automatic density; explicit frame or Last placement and replacement soundtrack | CPU tests; new policies are not a general likeness/motion-quality approval |
@@ -68,8 +68,9 @@ Both presets require four Euler evaluations (five schedule points), staged unloa
 LoRAs, references, continuation or latent/motion controls. VSA retains its trained compression
 gates and 90% sparse video-tile attention; it is not silently replaced by dense attention.
 FastH3 is excluded from Automatic. Both variants passed actual generation, seven decoded previews,
-acceptance and save/reopen with Python unavailable on 2026-10-05. Sampled frames were coherent;
-full motion/audio and broader seed approval remain separate. VSA uses the trained signed linear
+acceptance and save/reopen with Python unavailable on 2026-10-05. Sampled frames were coherent.
+The retained Dense and VSA clips received human motion/audio approval on 2026-10-05;
+broader seed approval remains separate. VSA uses the trained signed linear
 compression gate and a BF16-compatible padding mask. See [STATUS](../STATUS.md) for source-bound
 results and memory scopes; earlier Python compact-Metal timings are not Swift measurements.
 
@@ -82,9 +83,13 @@ extra LoRAs, continuation, memory/backend overrides and latent/motion controls f
 The original-Q8 eight-step boxing take was human-approved on 2026-10-04. Its packaged
 StudioStore route passed generation, seven previews, acceptance and save/reopen without Python;
 all three media files matched the approved direct take. On 2026-10-05, VDN50 also passed its actual
-Studio lifecycle, and VDN8's exported CLI and saved Swift-Comfy jobs reproduced the approved
+Studio lifecycle and received human motion/audio approval for that retained clip. VDN8's exported CLI and saved Swift-Comfy jobs reproduced the approved
 Studio media byte for byte. See STATUS for variant/host evidence; endpoint/reference mixtures
 and broader production quality remain unqualified.
+
+The retained two-character/two-voice MSR V2, Scene V2 and learned LTX movie-upscale clips also
+received human audiovisual approval on 2026-10-05. These approvals apply to the exact checked
+fixtures and their byte-identical host outputs; they do not establish every configuration.
 
 **Native execution policy:** Swift uses exact model evaluations, staged unloading and streamed
 weights. The native feature set excludes Python EasyCache, hierarchical BlockCache and trajectory
@@ -1162,6 +1167,28 @@ No busy GPU-app marker was observed in this final run. These initialization cost
 not causally attributed; no whole-generation gain or speed-parity claim is made. Python's retained
 VSA total is 153.8 seconds, so the full speed gap remains open.
 
+The subsequent file-loading change applies only to pinned owned FastH3 Q8 pages. Lazy MLX
+file handles materialize one consumed factor at a time; unused AdaLN factors remain lazy.
+Norms, projections, attention, schedule and stage releases retain their prior contracts.
+The installed complete-block test retained its exact output and 2.93 GB allocation within
+the fixed 0.78-second warm-median limit. New full Dense/VSA outputs also retained every
+decoded pixel and audio sample of the original Swift takes.
+
+Dense complete time changed from 206.4 to 178.6 seconds (13.4% lower); sampling changed
+134.5 to 118.9 seconds. VSA changed from the prior optimized 248.0 to 237.1 seconds
+(4.4% lower), with sampling 175.6 to 162.4 seconds. Its original 234.1-second total remains
+slightly faster than the current result. A fresh frozen Python VSA comparator took 150.2 seconds:
+Swift remains 57.9% slower. Whole MLX peak remains 4.61 GB. Native lifetime physical peaks
+were 5.33 GB Dense and 5.84 GB VSA, higher than their retained comparisons; fresh Python
+VSA used 14.48 GB physical and 6.06 GB MLX. No memory reduction follows from the loading change.
+
+These serial runs kept the same workload and MLX core. Text initialization varied from
+19.39 seconds for VSA to 5.72 seconds for Dense. CPU markers and a brief Python WebKit
+GPU-process marker remain recorded; they do not establish GPU occupancy or idle-machine parity.
+The complete-time change cannot be attributed solely to loading. A separate larger-query-batch
+probe preserved output but missed its complete-block speed target and increased allocation;
+it was reverted before full generation. Production attention batching remains unchanged.
+
 ## Progress, measurements, and H3 page retention
 
 Native renders now send live stage/evaluation updates to the status bar. Sampling shows its own
@@ -1259,7 +1286,8 @@ decoded previews, acceptance, save/reopen and stage releases with Python unavail
 Render plus acceptance took 159.01 seconds; MLX/process peaks were 3.30/5.50 GB, excluding
 FFmpeg. Exported native-job preflight and cancellation during voice encoding also passed.
 Speech recognition recovered the requested dialogue without supplying it as a recognition
-prompt. Voice likeness, naturalness and lip synchronization remain separate review checks.
+prompt. The user approved this retained clip's audiovisual quality on October 5;
+other voices and compositions remain unqualified.
 The following earlier measurements concern V1 and Ingredients, not V2.
 Installed-app five-second 512 × 256 jobs passed generation, two decoded previews, acceptance
 and reopening with Python unavailable. Their render-plus-acceptance times were 83.49 seconds

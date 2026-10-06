@@ -1,5 +1,23 @@
 # WeeTodd Studio implementation status
 
+Retained audiovisual review, 2026-10-05: the user approved the exact linked FastH3 Dense,
+corrected VSA, VDN50, two-character/two-voice MSR V2, Scene V2 and LTX learned movie-upscale
+clips. This closes motion/audio review for those six fixtures without another generation.
+It does not qualify additional seeds, resolutions, conditioning mixtures or performance.
+FastH3 and VDN remain explicit experimental selections outside Automatic.
+
+FastH3 loading follow-up, 2026-10-05: pinned owned Q8 pages now materialize each consumed
+factor through lazy MLX file handles. The complete installed-block oracle remained exact
+within its fixed speed/allocation bounds. New frozen Dense and VSA runs retained every
+decoded video pixel and audio sample. Dense total changed from 206.4 to 178.6 seconds;
+VSA sampling changed from the prior optimized 175.6 to 162.4 seconds and total from 248.0
+to 237.1 seconds. VSA still exceeds its original 234.1-second Swift result and a fresh
+150.2-second Python comparator. Whole MLX peak stayed 4.61 GB; observed lifetime physical
+peaks increased to 5.33 GB Dense and 5.84 GB VSA. No memory or universal speed win is claimed.
+Initialization varied, and desktop load/OS caches were uncontrolled. A larger attention-batch
+candidate missed its complete-block speed target and increased allocation; it was reverted
+without generating a movie. Other H3 source formats and attention batching remain unchanged.
+
 Matched performance follow-up, 2026-10-05: seven planned Swift/Python pairs completed with
 frozen creative inputs and checkpoint identities, complete media decoding, and separate physical
 and MLX peaks. LTX timing differences straddle zero across opposite orders; the H3 T2VA gap
@@ -18,7 +36,8 @@ Swift feature and host-route qualification, 2026-10-05:
   and reject unsupported references, LoRAs and continuation before weighted work.
   Actual new Studio generations passed seven decoded previews, take acceptance and save/reopen
   with Python unavailable. Sampled frames 0/62/123 were coherent. These presets remain experimental
-  and excluded from Automatic; full motion, semantic audio and broader seed acceptance remain open.
+  and excluded from Automatic. The retained Dense/VSA clips received human motion/audio approval
+  on October 5; broader seed acceptance remains open.
 - VDN50 now has guided Studio setup and explicit selection. Its real 124-frame Studio take passed
   seven previews, acceptance and save/reopen with the fifty-evaluation schedule and only its
   standard strength-1 adapter. VDN8 retains its original-width input grid and two required adapters.

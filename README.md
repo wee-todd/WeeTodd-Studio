@@ -1754,9 +1754,9 @@ legacy typed MSR ComfyUI nodes retain their V1 contract; V2 uses the recipe-back
 A five-second 768 × 448 two-image/two-voice installed-app test completed in 159.01 seconds,
 including acceptance, with two decoded previews, save/reopen and Python unavailable. Peak
 MLX allocation was 3.30 GB and peak Swift process footprint was 5.50 GB, excluding FFmpeg.
-Independent speech recognition recovered the requested two-line dialogue. Voice likeness,
-naturalness and lip synchronization still require review; this is functional qualification,
-not a matched performance comparison or production-quality claim.
+Independent speech recognition recovered the requested two-line dialogue. The user approved
+this retained clip's audiovisual quality on October 5. Other voices and compositions remain
+unqualified; this is not a matched performance comparison or general production-quality claim.
 
 **LTX 2.5 Media Conditioning** provides one composable typed stack. Image keyframes execute through
 the current Generate node. Audio-driven input freezes the encoded audio during both visual stages

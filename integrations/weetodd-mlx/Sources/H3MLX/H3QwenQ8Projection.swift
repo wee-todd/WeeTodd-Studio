@@ -33,12 +33,18 @@ public struct H3QwenQ8Projection {
   }
 
   public init(file: SafeTensorFile, name: String) throws {
+    try self.init(file: file, name: name, tensor: nil)
+  }
+
+  init(file: SafeTensorFile, name: String,
+    tensor: ((String) throws -> MLXArray)?) throws {
     let layout = try MLXAffineQ8(file: file, weight: name, groupSize: 64)
     let stem = String(name.dropLast(".weight".count))
     func read(_ key: String) throws -> MLXArray {
       guard let descriptor = file.tensors[key], descriptor.byteCount <= 512 * 1024 * 1024 else {
         throw H3CheckpointError.invalid("Missing or oversized H3 Qwen projection: \(key)")
       }
+      if let tensor { return try tensor(key) }
       return try file.withTensorBytes(named: key) { bytes in
         let shape = descriptor.shape.map(Int.init)
         switch descriptor.dtype {

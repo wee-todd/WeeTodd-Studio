@@ -130,8 +130,9 @@ Recipe-backed Swift MSR V2 now preserves up to two image-linked voice references
 clean audio prefixes. A packaged two-character/two-voice Studio run passed with Python
 unavailable, including previews and save/reopen. Its exported Studio job and saved ComfyUI API
 prompt also completed through the recipe-backed Swift route. Video, audio and muxed movie files
-matched the retained Studio output byte for byte. Voice likeness, naturalness and lip
-synchronization remain unreviewed. The official 2.5 Ingredients payload passed its
+matched the retained Studio output byte for byte. The user approved the retained clip's
+audiovisual quality on 2026-10-05; other voices and compositions remain unqualified.
+The official 2.5 Ingredients payload passed its
 pinned hash and installed Swift header preflight after access approval. Its first 121-frame native
 take omitted the second character. A clearer two-shot prompt retained both characters with the
 unchanged default and experimental CFG++ samplers. The default two-character take received
