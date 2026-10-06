@@ -1,5 +1,24 @@
 # WeeTodd Studio implementation status
 
+Swift H3 indexed attention and LTX confirmation, 2026-10-06: BF16/D=128 trained VSA now
+reads selected padded tiles directly in Metal, with unchanged routing, compression and dense
+prefix attention. The frozen attention and installed-block outputs remain exact. One fresh
+Swift pair retained every video pixel/audio sample and ordered stage release; sampling fell
+156.974 → 118.577 seconds. Total time fell 228.504 → 170.406 seconds, partly from unchanged
+text/preparation stages warming; do not attribute the entire change to attention. Whole MLX
+peak remained 4.611 GB, and worker physical peak was effectively unchanged at 5.254 → 5.262 GB.
+The contemporary grouped-SDPA Python control took 142.594 seconds: Swift remains 19.5% slower,
+with lower whole MLX/physical peaks than Python's 6.064/14.475 GB. The speed gap remains open.
+Current LTX FFLF took 178.540 seconds in Swift versus 180.775 in Python at 1344 × 768,
+89 frames, seed 43 and the same first/last images. Its fixed +5% time and lower-memory
+confirmation passed; native pixels/audio match the retained accepted take. Swift/Python
+peaks were 5.911/12.425 GB MLX and 8.822/12.636 GB physical. This qualifies that fixed
+recipe, not every task or hardware. All five full executions passed media verification with
+no swap growth; desktop activity and OS caches were uncontrolled. Native jobs had Python
+unavailable. Focused tests cover partial tiles, route/feature layouts and cancellation;
+no model settings or Automatic selections changed. See
+[current measurement scopes](studio/README.md#swift-h3-indexed-attention).
+
 Swift H3 activation ownership, 2026-10-06: consumer-owned timestep gathers and separate
 attention/feed scopes preserve arithmetic and evaluation barriers. Three fresh Swift
 control/candidate pairs passed exact decoded video/audio equality and ordered stage release

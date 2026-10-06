@@ -1,5 +1,13 @@
 # WeeTodd Swift MLX inference
 
+Trained H3 VSA BF16/D=128 now reads routed padded tiles through indexed Metal attention,
+preserving the native accumulator order, tile routing, learned compression and dense prefix.
+Other admitted shapes retain bounded grouped attention. The generated Steel primitives retain
+their MIT notice in `H3SteelAttentionSource.swift`; the existing worker notices include MLX's
+license. Unsupported feature strides fail admission, and small route views become contiguous.
+See the [current speed/memory qualification](../../studio/README.md#swift-h3-indexed-attention)
+for frozen component hashes, full-media parity, the remaining H3 speed gap and LTX confirmation.
+
 Swift owns this native MLX component; its execution does not invoke Python. Studio can select
 its LTX 2.5 worker for distilled T2V, first-image I2V, first/last-frame, one-driver A2V,
 after-extension, per-clip motion continuation and continuous scenes with optional
@@ -539,9 +547,10 @@ modulation targets and needs no grid.
 experimental route directly without Python. The existing headless CLI can hand the immutable
 recipe to that same worker through `--swift-worker`; Python is orchestration only on that route.
 Current admission rejects timed endpoints, references, continuation, initialized refinement,
-Fun control and additional adapters. Studio offers explicit experimental eight-step T2VA
-guided setup and recipe selection, with the released adapter stack and Euler schedule fixed;
-Automatic selection excludes it. The fifty-step variant remains worker-only. The original-Q8
-eight-step boxing take received human audiovisual approval on 2026-10-04. Numerical checks and
-that sample do not establish full-checkpoint parity, broad quality or a measured speedup over
+Fun control and additional adapters. Studio offers explicit experimental eight- and fifty-step
+T2VA guided setup and recipe selection, with each released adapter stack and Euler schedule
+fixed; Automatic selection excludes both. The original-Q8 eight-step boxing take received human
+audiovisual approval on 2026-10-04, and the retained fifty-step take passed human review on
+2026-10-05. Numerical checks and those samples do not establish full-checkpoint parity, broad
+quality or a measured speedup over
 another backend.

@@ -18,3 +18,8 @@ https://github.com/dgrauet/ltx-2-mlx
 Lightricks/LTX-2 was consulted as a technical reference. Its source and model
 weights are not vendored here.
 https://github.com/Lightricks/LTX-2
+
+H3SteelAttentionSource.swift embeds MIT-licensed MLX Steel primitives and an
+indexed attention adaptation from Apple Inc. The complete MIT notice is retained
+in that file and in the packaged native worker notices.
+https://github.com/ml-explore/mlx-swift/tree/901941965d82e4a216d4d117231d847d194c563d

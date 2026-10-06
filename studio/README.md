@@ -1231,6 +1231,55 @@ Python comparison or LTX performance qualification was run. The VSA speed gap re
 Larger-query batches, fused K/V gathers and a larger cache missed the bounded speed target
 and were reverted before these movies. No model settings or experimental defaults were promoted.
 
+### Swift H3 indexed attention
+
+The 2026-10-06 follow-up replaces repeated BF16/D=128 VSA K/V gathers with one indexed
+Metal consumer. It reads the same padded tiles, preserves route and accumulation order,
+retains Float32 pooling and signed compression, and keeps ordinary dense prefix attention.
+Other shapes retain the bounded grouped consumer. This is not the full compact preordered
+Python implementation. Existing model selections, settings and experimental status remain.
+
+The fixed attention and installed-block output hashes remain exact. In the same debug probe,
+complete-block warm median fell 0.859 → 0.600 seconds; the final release probe passed its
+0.70-second target at 0.581 seconds. Block MLX peak rose slightly, 2.508 → 2.540 GB, inside
+the existing 2.6 GiB bound. These are component measurements, not complete-clip timings.
+Tests reject unsupported feature strides and safely handle sliced/broadcast route storage.
+The embedded MLX Steel source retains its MIT notice; inference uses Swift and Metal.
+
+A fresh control/candidate pair used the same five-second Beowulf boxing recipe, seed 20260922,
+672 × 384 canvas, four evaluations, checkpoints and MLX library. All 124 decoded frames
+and every audio sample matched. Sampling fell 156.974 → 118.577 seconds (24.5%).
+Whole time fell 228.504 → 170.406 seconds (25.4%), but unchanged text initialization
+also fell 18.000 → 5.705 seconds and preparation fell 8.805 → 2.059 seconds.
+Do not assign the full total-time difference to the indexed consumer.
+
+| Current execution | Total seconds | Whole MLX peak, GB | Worker physical peak, GB |
+| --- | ---: | ---: | ---: |
+| Swift VSA control | 228.504 | 4.611 | 5.254 |
+| Swift VSA indexed | 170.406 | 4.611 | 5.262 |
+| Python VSA grouped SDPA | 142.594 | 6.064 | 14.475 |
+| Swift LTX FFLF | 178.540 | 5.911 | 8.822 |
+| Python LTX FFLF | 180.775 | 12.425 | 12.636 |
+
+Swift VSA remains 19.5% slower than the fresh Python control. The Python comparator uses
+grouped SDPA, not its compact/indexed preset. Native VSA sampling allocation rose slightly,
+2.716 → 2.724 GB; decoder peaks kept whole allocation unchanged. Earlier activation ownership
+memory savings remain; this consumer change primarily improves speed.
+
+LTX used the unchanged 1344 × 768, 89-frame, seed-43 first/last-frame recipe with eight
+stage-one and three stage-two evaluations. Its native movie matches the retained accepted
+take pixel-for-pixel and sample-for-sample. Swift was 1.24% faster in this pair and passed
+the predeclared limit of at most 5% slower with lower MLX and physical peaks. Two retained
+opposite-order pairs also fall inside that band. This confirms the fixed recipe; it is not
+an all-task or all-hardware performance guarantee. No LTX code or recipe setting changed.
+
+All five full executions passed complete media decoding with no swap growth. Both native H3
+jobs retained previews, progress and ordered text/transformer/video/audio release. Native jobs
+ran with Python unavailable; Python runs were explicit comparison jobs. GB is decimal;
+physical footprint excludes FFmpeg and differs from MLX allocation. Desktop/system activity
+and OS/file/Metal caches were uncontrolled. No machine-exclusive GPU claim follows.
+H3 VSA's remaining speed gap is open; the LTX fixed-recipe confirmation passed.
+
 ## Progress, measurements, and H3 page retention
 
 Native renders now send live stage/evaluation updates to the status bar. Sampling shows its own

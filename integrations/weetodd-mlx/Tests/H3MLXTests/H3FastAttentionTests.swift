@@ -5,6 +5,105 @@ import CryptoKit
 @testable import H3MLX
 
 final class H3FastAttentionTests: XCTestCase {
+  func testProductionBF16D128ConsumerAcceptsSortedRoutesAndRetainsSignedCompression() throws {
+    let tiles = try H3FastTiles(prefixSegments: [3,65], videoGrid: [3,5,6])
+    let shape = [1,3,tiles.rows,128]
+    let q = MLXArray.zeros(shape,dtype:.bfloat16)
+    let v = broadcast(MLXArray([Float(2),4,-2],[1,3,1,1]).asType(.bfloat16),to:shape)
+    let gate = MLXArray.full(shape,values:MLXArray(Float(-0.75)),dtype:.bfloat16)
+    let result = try H3FastAttention.evaluate(query:q,key:q,value:v,gate:gate,tiles:tiles,
+      sparsity:0,minimumSparseRows:1)
+    let expected = broadcast(MLXArray([Float(0.5),1,-0.5],[1,3,1,1]),to:shape)
+    XCTAssertEqual(result.shape,shape)
+    XCTAssertEqual(result.dtype,.bfloat16)
+    XCTAssertEqual(result.asType(.float32).asArray(Float.self),expected.asArray(Float.self))
+  }
+
+  func testIndexedAttentionCancellationRejectsWorkBeforeMetalExecution() async throws {
+    let cancelled = Task { () throws -> Void in
+      withUnsafeCurrentTask { $0?.cancel() }
+      let tiles = try H3FastTiles(prefixSegments:[1],videoGrid:[1,1,1])
+      _ = try H3IndexedAttention.evaluate(
+        query:MLXArray.zeros([1,1,64,128],dtype:.bfloat16),
+        key:MLXArray.zeros([1,1,128,128],dtype:.bfloat16),
+        value:MLXArray.zeros([1,1,128,128],dtype:.bfloat16),
+        routes:MLXArray([Int32(0),1],[1,1,1,2]),tiles:tiles)
+    }
+    do { _ = try await cancelled.value; XCTFail("Cancelled attention executed.") }
+    catch is CancellationError { }
+  }
+
+  func testIndexedAttentionNormalizesRouteViewsAndRejectsSteppedFeatures() throws {
+    let tiles = try H3FastTiles(prefixSegments:[3],videoGrid:[3,5,6])
+    let count = tiles.sizes.count, video = count - tiles.prefixTiles, heads = 3
+    let q = MLXRandom.normal([1,heads,video*64,128],key:MLXRandom.key(920)).asType(.bfloat16)
+    let k = MLXRandom.normal([1,heads,count*64,128],key:MLXRandom.key(921)).asType(.bfloat16)
+    let v = MLXRandom.normal([1,heads,count*64,128],key:MLXRandom.key(922)).asType(.bfloat16)
+    let rows = (0..<(heads*video)).flatMap { group in [Int32(group%count),Int32((group+1)%count)] }
+    let dense = MLXArray(rows,[1,heads,video,2])
+    let sliced = MLXArray(rows.flatMap { [$0,Int32(count-1)] },[1,heads,video,4])[.ellipsis,.stride(by:2)]
+    let expected = try H3IndexedAttention.evaluate(query:q,key:k,value:v,routes:dense,tiles:tiles)
+    let actual = try H3IndexedAttention.evaluate(query:q,key:k,value:v,routes:sliced,tiles:tiles)
+    XCTAssertEqual(abs(actual.asType(.float32)-expected.asType(.float32)).max().item(Float.self),0)
+    let broadcastRoutes = broadcast(MLXArray([Int32(0),Int32(count-1)],[1,1,1,2]),
+      to:[1,heads,video,2])
+    let repeated = MLXArray((0..<(heads*video)).flatMap { _ in [Int32(0),Int32(count-1)] },
+      [1,heads,video,2])
+    let broadcastResult = try H3IndexedAttention.evaluate(query:q,key:k,value:v,
+      routes:broadcastRoutes,tiles:tiles)
+    let repeatedResult = try H3IndexedAttention.evaluate(query:q,key:k,value:v,routes:repeated,tiles:tiles)
+    XCTAssertEqual(abs(broadcastResult.asType(.float32)-repeatedResult.asType(.float32)).max().item(Float.self),0)
+    let stepped = MLXRandom.normal([1,heads,video*64,256],key:MLXRandom.key(923))
+      .asType(.bfloat16)[.ellipsis,.stride(by:2)]
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:stepped,key:k,value:v,routes:dense,tiles:tiles))
+    let steppedKeys = MLXRandom.normal([1,heads,count*64,256],key:MLXRandom.key(924))
+      .asType(.bfloat16)[.ellipsis,.stride(by:2)]
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:q,key:steppedKeys,value:v,routes:dense,tiles:tiles))
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:q,key:k,value:steppedKeys,routes:dense,tiles:tiles))
+  }
+
+  func testIndexedBF16AttentionMasksEveryPartialTileAndPreservesPerHeadRepeatedRoutes() throws {
+    let tiles = try H3FastTiles(prefixSegments: [3, 65], videoGrid: [3, 5, 6])
+    let count = tiles.sizes.count, video = count - tiles.prefixTiles, heads = 3
+    let q = MLXRandom.normal([1, heads, video * 64, 128], key: MLXRandom.key(910)).asType(.bfloat16)
+    let k = MLXRandom.normal([1, heads, count * 64, 128], key: MLXRandom.key(911)).asType(.bfloat16)
+    let v = MLXRandom.normal([1, heads, count * 64, 128], key: MLXRandom.key(912)).asType(.bfloat16)
+    let selections = (0..<(heads * video)).flatMap { group in
+      [Int32(group % count), Int32((group + 2) % count), Int32(group % count)]
+    }
+    let routes = MLXArray(selections, [1, heads, video, 3])
+    let result = try H3IndexedAttention.evaluate(query: q, key: k, value: v, routes: routes, tiles: tiles)
+    XCTAssertEqual(result.shape, q.shape)
+    XCTAssertEqual(result.dtype, .bfloat16)
+    for head in 0..<heads {
+      for tile in 0..<video {
+        let size = tiles.sizes[tiles.prefixTiles + tile]
+        let selected = selections[((head * video + tile) * 3)..<((head * video + tile + 1) * 3)]
+        // Independent native SDPA oracle: concatenate actual rows only.
+        // Random nonzero padding makes an omitted mask fail this comparison.
+        func actualRows(_ input: MLXArray) -> MLXArray {
+          concatenated(selected.map { index in
+            let start = Int(index) * 64
+            return input[0..<1,head..<(head+1),start..<(start+tiles.sizes[Int(index)]),0..<128]
+          },axis:2)
+        }
+        let query = q[0..<1,head..<(head+1),(tile*64)..<(tile*64+size),0..<128]
+        let expected = MLXFast.scaledDotProductAttention(queries: query, keys: actualRows(k),
+          values: actualRows(v), scale: 1 / Float(128).squareRoot(), mask: nil)
+        let actual = result[0..<1,head..<(head+1),(tile*64)..<(tile*64+size),0..<128]
+        XCTAssertLessThanOrEqual(abs(actual.asType(.float32)-expected.asType(.float32)).max().item(Float.self),0.008)
+      }
+    }
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:q,key:k,value:v,
+      routes:MLXArray.full(routes.shape,values:MLXArray(Int32(count))),tiles:tiles))
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:q,key:k,value:v,
+      routes:MLXArray.full(routes.shape,values:MLXArray(Int32(-1))),tiles:tiles))
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:q.asType(.float32),key:k,
+      value:v,routes:routes,tiles:tiles))
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:q,key:k,value:v,
+      routes:routes[0..<1,0..<1,0..<video,0..<3],tiles:tiles))
+  }
+
   func testSparseHeadBatchRemainderMatchesIndependentHeads() throws {
     let tiles = try H3FastTiles(prefixSegments: [3, 5], videoGrid: [3, 5, 6])
     let shape = [1, 5, tiles.rows, 4]
