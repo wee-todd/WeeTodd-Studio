@@ -84,6 +84,9 @@ Use the [model setup guide](studio/README.md#guided-model-setup) and
 [clip generation controls](studio/README.md#clip-generation-controls) for the supported combinations.
 No ComfyUI installation is needed.
 
+For measured Swift H3 memory improvements and remaining speed limits, see the
+[native performance results](studio/README.md#swift-h3-activation-ownership).
+
 Native clips expose **Model**, **Task**, sampling controls, render size and seed directly in the
 inspector, without a required template step. Execution presets and custom recipes remain under
 **Advanced generation**.

@@ -99,6 +99,8 @@ final class H3TransformerBlockTests: XCTestCase {
       seconds.append(CFAbsoluteTimeGetCurrent() - start)
     }
     let peak = Memory.peakMemory
+    XCTAssertLessThanOrEqual(peak, 2_791_728_742,
+      "Consumer-owned modulation must retain the fixed 2.6 GiB complete-block bound.")
     if let maximum = environment["WEETODD_H3_VSA_BLOCK_MAX_WARM_SECONDS"].flatMap(Double.init) {
       XCTAssertLessThanOrEqual(seconds.dropFirst().sorted()[1], maximum)
     }
@@ -113,7 +115,8 @@ final class H3TransformerBlockTests: XCTestCase {
       positions: positions, rotaryAngles: angles, fastTiles: tiles, observe: { name, value in
         eval(value); Stream.gpu.synchronize()
         let end = CFAbsoluteTimeGetCurrent()
-        stages.append(["boundary": name, "secondsSincePriorBoundary": end - start])
+        stages.append(["boundary": name, "secondsSincePriorBoundary": end - start,
+          "activeMLXBytes": Memory.activeMemory, "peakMLXBytes": Memory.peakMemory])
         start = end
       })
     XCTAssertEqual(diagnostic.asArray(Float.self), values)

@@ -1194,6 +1194,43 @@ The complete-time change cannot be attributed solely to loading. A separate larg
 probe preserved output but missed its complete-block speed target and increased allocation;
 it was reverted before full generation. Production attention batching remains unchanged.
 
+### Swift H3 activation ownership
+
+On October 5–6, 2026, the shared Swift H3 block was changed to gather timestep modulation
+only for its consumer and release attention/feed intermediates in separate scopes.
+Arithmetic, precision, projection barriers, VSA batches and the 128 MiB cache remain unchanged.
+The fixed installed complete-block oracle retained its exact Float32 output while allocation
+fell from 2.927 to 2.508 GB. Its 2.6 GiB regression bound failed before the change and passed afterward.
+
+Three fresh-process, serial control/candidate pairs used identical recipes, checkpoints,
+seeds, references, four Euler evaluations and the same MLX Metal library. All six jobs ran
+with Python unavailable to inference. Every decoded video pixel and audio sample matched;
+all text, transformer, video and audio stages released in order. Ref2VA used the full
+1376 × 768 canvas, five seconds, one Beowulf image and strength-1 LightX2V four-step Turbo LoRA.
+T2VA and VSA used their retained 672 × 384 recipes. All published 124 frames at 24 fps.
+
+| Fresh Swift pair | Total seconds, control → candidate | Sampling MLX peak, GB | Whole-job MLX peak, GB | Worker physical peak, GB |
+| --- | ---: | ---: | ---: | ---: |
+| FastH3 VSA | 216.731 → 210.200 | 3.111 → 2.716 | 4.611 → 4.611 | 5.254 → 5.254 |
+| H3 T2VA | 340.108 → 337.196 | 4.095 → 2.972 | 4.670 → 4.670 | 5.320 → 5.319 |
+| H3 Ref2VA, 1MP | 1003.068 → 999.702 | 13.482 → 9.093 | 13.482 → 9.093 | 14.508 → 9.656 |
+
+Ref2VA whole-job MLX allocation fell 32.6%, and worker physical peak fell 33.4%.
+VSA and T2VA sampling allocation fell 12.7% and 27.4%, but decoding kept their whole-job
+peaks unchanged. This is principally a memory improvement. Full-time differences were
+3.0%, 0.9% and 0.3%; the latter two do not establish a meaningful speed improvement.
+
+GB is decimal. Physical footprint and MLX allocation are distinct counters; worker physical
+peak excludes FFmpeg. Sampled process-tree measurements including FFmpeg are retained separately.
+Phase receipts report cumulative MLX peak through that phase; earlier stages were below
+each sampling peak. Timing covers launch through exit and excludes post-run media verification.
+Desktop activity and OS caches were uncontrolled, with no swap growth. Background markers
+include system monitoring, desktop applications and a brief control-run WebKit GPU marker.
+These single ordered pairs do not establish uncontended speed parity. No new contemporary
+Python comparison or LTX performance qualification was run. The VSA speed gap remains open.
+Larger-query batches, fused K/V gathers and a larger cache missed the bounded speed target
+and were reverted before these movies. No model settings or experimental defaults were promoted.
+
 ## Progress, measurements, and H3 page retention
 
 Native renders now send live stage/evaluation updates to the status bar. Sampling shows its own

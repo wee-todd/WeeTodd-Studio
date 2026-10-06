@@ -1,5 +1,20 @@
 # WeeTodd Studio implementation status
 
+Swift H3 activation ownership, 2026-10-06: consumer-owned timestep gathers and separate
+attention/feed scopes preserve arithmetic and evaluation barriers. Three fresh Swift
+control/candidate pairs passed exact decoded video/audio equality and ordered stage release
+with Python unavailable to inference. At 1376 × 768, five seconds and four Turbo evaluations,
+Ref2VA whole MLX peak fell 13.482 → 9.093 GB (32.6%) and worker physical peak fell
+14.508 → 9.656 GB (33.4%). Time was effectively unchanged, 1003.068 → 999.702 seconds.
+VSA/T2VA sampling allocation fell 12.7%/27.4%; decoder peaks left whole allocation unchanged.
+Their total times were 216.731 → 210.200 and 340.108 → 337.196 seconds. These are single
+ordered pairs under desktop activity and uncontrolled OS caches. No swap growth occurred.
+The fixed installed block retained its frozen output and passed a new 2.6 GiB allocation bound
+that failed before the fix. Rejected batching/gather/cache experiments were reverted before
+full renders. This qualifies the measured H3 memory reduction, not full speed parity or
+other canvases. LTX source and qualification are unchanged; the VSA speed gap remains open.
+See [measurement scopes and limitations](studio/README.md#swift-h3-activation-ownership).
+
 Retained audiovisual review, 2026-10-05: the user approved all ten linked review fixtures:
 FastH3 Dense, corrected VSA, VDN50, two-character/two-voice MSR V2, Scene V2, LTX learned
 movie upscale, H3 initialized refinement, Motion Fidelity, learned 1920 × 1088 spatial
