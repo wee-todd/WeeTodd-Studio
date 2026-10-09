@@ -35,8 +35,12 @@ establish a compiler-flag inference speedup.
 
 The retained checklist closes native DFR editor controls, representative guided/image/generated-slot
 composition, remaining representative schedule/decoder execution and the acquisition/memory-policy
-audit within their stated scopes. The older Ingredients composition failure and H3 FP16 human
-visual review remain open. The acquisition audit includes an actual pinned HTTPS transfer with
+audit within their stated scopes. The user approved the retained complete H3 FP16 VSA clip on October 8.
+The fixed seven-item checklist still has six closed items (85.7% by item count); owner review of
+the restored older-adapter Ingredients composition is the only open item. The new ancestral
+sample passes agent sampled composition review and technical checks; owner motion/dialogue
+acceptance is pending. This count does not estimate remaining effort.
+The acquisition audit includes an actual pinned HTTPS transfer with
 checksum verification and 24-package setup coverage; it does not claim first installation of every
 large package. Lower-RAM simulation admits the same 512 × 256/49-frame LTX recipe on
 16/24/32/64 GiB policies and rejects oversized jobs. Physical smaller-Mac speed and peak memory
@@ -82,7 +86,89 @@ Studio Swift 1,004 with 50 skips. All suites reported zero failures. Installed-c
 other optional qualification tests retain their explicit opt-in skips; the six actual Swift
 generation checks above are separate evidence. The separate final app opens the isolated
 project, retains its controls and take statistics, and plays the accepted take to its endpoint.
-These checks do not close the older Ingredients composition failure or H3 FP16 human review.
+These checks do not close the older Ingredients composition failure. The user’s subsequent October 8
+visual approval closes the retained complete FP16 VSA review separately.
+
+## October 9 Ingredients schedule correction
+
+The Dev Ingredients adaptive schedule formerly counted 10,752 combined target/reference tokens
+instead of 5,376 generated tokens for the frozen 768 × 448/121-frame case. Sampling, preflight
+and execution metadata now consistently use the generated grid. Transformer admission still
+counts all reference rows. An independent 31-sigma fixture reproduces the original mismatch and
+passes after correction; explicit overrides and fixed schedules are unchanged. Thirty focused
+Swift tests report zero failures and one installed-weight opt-in skip. The unchanged-input run
+executed all 90 audiovisual forwards with the expected 31 sigmas, publishing 121 frames and
+finite stereo audio. Two decoded previews, monotonic progress and ordered stage release passed
+without Python inference. Observed launch-to-exit time was 2489.976 seconds, active MLX peak
+4152005564 bytes and worker physical peak 5586257336 bytes, excluding FFmpeg. The user was working
+in the background, so this is not an isolated performance comparison. All nine sampled frames
+show one woman instead of Beowulf and Hrothgar: scene quality failed. This Dev mix remains
+unqualified and developer-only; the accepted official 2.5 default is unchanged.
+
+Bounded diagnostics recovered the entire positive prompt from its retained token IDs and compared
+actual trained positive video/audio contexts with an independent reference. Positive relative L2
+errors were below 0.000003. Negative audio missed the predeclared absolute-error limit in four
+learned-register elements, so blanket text-encoder parity is not claimed. All sixteen static-guide
+latent planes match a separate Swift still encode within Float32 roundoff. The same still latent
+also matches the retained independent trained Python encoder, with relative L2 0.000003908.
+The complete first-block witness agrees with independent Float32 factorized-LoRA mathematics
+(video/audio maximum absolute errors 0.000002623/0.000007153). A subsequent all-48-block complete
+positive denoiser witness uses actual Dev Q8 weights and the legacy adapter with small synthetic
+latent/text inputs. Against independently aligned Float32 base/factorized-LoRA mathematics,
+video/audio maximum absolute errors are 0.000127196/0.000003636 and relative L2 errors
+0.000062066/0.000001149, both within the existing generic component limits. This covers full-stack
+norm/attention/modulation arithmetic at one timestep; it excludes learned text encoding, guide
+VAE, CFG/STG perturbations and the sampling trajectory. It is not composition approval.
+
+Later version-17 corrections preserve raw Float32 sigmas before timestep embedding and
+clean-prediction conversion, and match the publisher's Euler Float32/BF16 rounding boundaries.
+These corrections are limited to the explicit Dev Ingredients path; previously qualified ordinary
+guided defaults remain intact. No new Dev render followed those precision corrections. The earlier
+woman/omitted-character failure is retained, and optional Dev compatibility quality stays unresolved.
+
+## October 9 explicit ancestral Ingredients control
+
+The historical positive-only ancestral Ingredients feature is now available in the shared Swift
+renderer and Studio's existing **Full-resolution single-stage sampling** override. Explicit
+`config.single_stage_sampler: "euler_ancestral"` compiles to version 18, with eight conditional
+predictions, eta 1, noise scale 1, split-key seed-plus-10000 noise, BF16 state with Float32 stepping,
+and no refinement/upscaler. Its canonical recipe uses eight stage-one updates and zero stage-two
+updates. The existing version-11 CFG++ option retains sixteen predictions with fixed empty
+unconditional text; the inherited deterministic/version-6 recipe and approved official 2.5
+setup default are unchanged. Projects/export retain explicit policy. Negative prompts, partial
+CFG++ schedules and timed/generated slots reject before media preparation. Five focused Studio
+regressions pass. Final core, Studio and workflow validation passes: 3,488 Python tests passed
+with six skips; Swift inference ran 208 tests with ten skips, MLX 1,024 with 177 skips, and Studio
+1,009 with 50 skips. All suites report zero failures. Installed-model opt-in checks retain their
+explicit skips; the complete generated diner clip is separate runtime evidence.
+
+A complete 768 × 448/121-frame/24-fps job with the supported older adapter executed exactly eight
+conditional and zero unconditional forwards. It published finite, nonzero stereo audio and a
+live decoded preview, removed that preview on completion, and released text, transformer,
+video VAE and audio VAE in order without Python inference. Launch-to-exit was 235.5778 observed
+seconds; peak active MLX was 4116960076 bytes and worker physical peak 5471257992 bytes, excluding
+FFmpeg. User background work was active, so this is not an isolated performance comparison.
+Nine sampled frames retain two distinct aliens throughout the diner scene with changing
+mug/espresso actions and no animated reference board. Agent sampled composition review passes;
+owner motion/dialogue review is pending. This restores a missing supported distilled sampling
+feature, separately from the optional Dev experiment. The fixed checklist remains 6/7 by item
+count pending owner acceptance; no Torch/ComfyUI pixel parity or all-composition quality is claimed.
+
+Typed Studio preparation produces the same ancestral recipe contents as the completed worker
+job. Native export/reopen, one actual frozen-worker preflight, retained receipt adoption and
+zero-call resume pass with media hashes unchanged. Adoption reuses the existing generation;
+it is not a second headless render. The actual shared ComfyUI Swift-worker bridge also passes
+preflight for the frozen recipe; no new graph render is claimed. Final test execution exposed a
+subprocess fixture startup race: its 150 ms timeout could end before the shell wrote its PID.
+The test now checks that timeout separately from a bounded PID/reaping witness. Production
+worker deadlines, sampler code and H3 performance policy are unchanged.
+
+The separate final release passes nine actual packaged-worker model preflights, including both
+Singularity profiles. Actual cancellation after the first text-encoding event exits 130 with no
+sampling, take or preview. The isolated app shows ancestral 8 and CFG++ 16, zero refinement,
+save/reopen persistence and reset. The retained take plays to its five-second endpoint with
+its original statistics. An export made through the app menu passes the bundled CLI preflight
+with Python unavailable. No complete inference was repeated for these packaging checks.
 
 ## Current H3 integration and performance
 
@@ -236,7 +322,8 @@ six live preview revisions, preview cleanup and ordered stage release passed. Co
 and muxed audio match the retained FP32 clip exactly. Published RGB24 measures 39.289 dB PSNR
 with maximum channel difference 62; these encoded-video metrics differ from the raw saved-latent
 comparison above. Four sampled frames and the largest-error frame show no gross defect in agent
-review. Human visual acceptance is pending. This is a functional qualification, not an isolated
+review. The user approved this complete retained clip visually on October 8. This is a representative
+functional and visual qualification, not an isolated
 speed comparison or all-task quality approval. FP32 remains the default.
 
 The retained signed v10 worker completed all four frozen FP32 recipes. T2VA and Dense passed the fixed strongest-Python
@@ -415,8 +502,9 @@ The corrected worker preserves the trained signed, unbounded linear compression 
 BF16-compatible attention mask. Focused regressions reproduced both failures before the fixes.
 Final H3 feature checks executed 33 tests with two optional skips and zero failures.
 Previously completed Dense/VDN proofs are retained: subsequent fixes changed only VSA mathematics.
-The original 31-item ledger remains 29/31; matched performance and broad audiovisual acceptance
-are not completed by this separate feature/route qualification. Clean-machine acquisition of all
+At this historical checkpoint the original 31-item ledger remained 29/31; matched performance and
+broad audiovisual acceptance were not completed by this separate feature/route qualification.
+Clean-machine acquisition of all
 components remains separate. See [current Swift controls](studio/README.md#current-swift-controls-and-qualification).
 
 Xcode 27 source-build compatibility follow-up, 2026-10-05: app/worker packaging and validation
@@ -439,8 +527,9 @@ and launch check does not establish new model quality, speed, memory or clean-Ma
 
 Current Swift feature scope 2026-10-04: native H3/LTX defaults and the previously qualified
 Studio/CLI/saved-Comfy route/lifecycle evidence remain distinct from new creative contracts.
-The original 31-item migration ledger has 29 completed checks; matched performance and broad
-quality remain open. Its fixed denominator does not absorb the separate 22-item remaining-feature
+At that October 4 checkpoint the original 31-item migration ledger had 29 completed checks;
+matched performance and broad quality remained open. Its fixed denominator does not absorb the
+separate 22-item remaining-feature
 inventory or turn CPU/header admission into completed generation. Full migration is not complete.
 A final-app isolated clean-registry reuse check passed in 8.177 seconds: the then-current 23 catalog contracts,
 eight setup/header cases, completed Dev-directory adoption, Turbo import and Diffusion VAE
@@ -2625,7 +2714,7 @@ contracts; it does not establish that every workflow has local models and select
 | Engine | Implemented | Qualification limits |
 | --- | --- | --- |
 | H3 | T2V, endpoint/timed frames, multimodal Ref2VA, audio-driven Ref2VA, external extension, generic LoRAs, FastH3 and VDN variants | Native Ref2VA A2V and extension have real renders. Extension visual quality needs further qualification. Accelerator/task combinations are gated. A2V generates a new soundtrack. |
-| H3 Fun ControlNet | Loader, preprocessing boundary, native Swift control execution, nodes and headless transport | One direct 384×256/73-frame Canny native render completed with audio, previews and stage release. Four evaluations without Turbo qualify execution only; corrected packaged Studio/CLI/ComfyUI lifecycle checks are recorded at the top. Visual/control quality remains open. Checkpoint terms remain separate. |
+| H3 Fun ControlNet | Loader, preprocessing boundary, native Swift control execution, nodes and headless transport | One direct 384×256/73-frame Canny native render completed with audio, previews and stage release. Four evaluations without Turbo qualify execution only; corrected packaged Studio/CLI/ComfyUI lifecycle checks are recorded at the top. The retained nineteen-evaluation Canny clip was human-approved October 5; the older probe and broader control branches remain unqualified. Checkpoint terms remain separate. |
 | LTX 2.3 | T2V, keyframes, A2V, Ingredients, Union/Motion controls, generic LoRAs, Dev/distilled video extension | Conditioned renders and longer distilled extension have evidence. Generic LoRAs support resident and streamed paths; specialized control combinations remain separately gated. |
 | LTX 2.5 | T2V, keyframes, A2V, Ingredients/MSR, IC controls, external extension, refinement/upscaling, LoRAs | Full-length MSR, short extension and direct-worker temporal DFR have route evidence. Temporal DFR is not a production default. Every adapter/precision/task combination is not qualified. |
 

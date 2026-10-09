@@ -103,6 +103,11 @@ public enum NativeLTXPreparation {
       let path=adapters[0][0] as? String,path.hasPrefix("/"),
       let strength=adapters[0][1] as? Double,strength.isFinite,strength>0,strength<=3 else { return nil }
     let task=(recipe["conditioning"] as? [String:Any])?["task"] as? String
+    // The dedicated Ingredients selector distinguishes its zero-refinement recipe
+    // from generic IC/Union single-stage controls before broad task inference.
+    if task == "control",config["ic_lora_single_stage"] as? Bool == true,
+      ["euler_ancestral","euler_ancestral_cfg_pp"].contains(config["single_stage_sampler"] as? String ?? ""),
+      (components["msr_lora_path"] as? String ?? "").isEmpty { return "ingredients" }
     if task == "control",(config["ic_lora_single_stage"] as? Bool != true || config["stage2_steps"] as? Int == 0),
       strength<=2,(components["msr_lora_path"] as? String ?? "").isEmpty { return "union" }
     guard config["ic_lora_single_stage"] as? Bool == true else { return nil }
@@ -144,7 +149,9 @@ public enum NativeLTXPreparation {
     let components = recipe["components"] as? [String: Any] ?? [:]
     let task = (recipe["conditioning"] as? [String: Any])?["task"] as? String ?? "t2v"
     let specialized=specialization(recipe)
-    let authoredIngredients=specialized == "ingredients" && config["single_stage_sampler"] as? String == "euler_ancestral_cfg_pp"
+    let ingredients=specialized == "ingredients"
+    let ingredientsSampler=ingredients ? LTX25SingleStageMethod(rawValue:config["single_stage_sampler"] as? String ?? "") : nil
+    let authoredIngredients=ingredientsSampler == .cfgpp
     let guided = guidedProfile(recipe)
     let durationMode = config["duration_mode"] as? String ?? "manual"
     let headPath = components["duration_head_path"] as? String ?? ""
@@ -183,8 +190,9 @@ public enum NativeLTXPreparation {
       "dfrTemporalAvailable": dfrValid && temporal.hasPrefix("/"),
       "dfrTemporalRounds": dfrValid ? rounds : 0,
       "dfrDetailingStrength": dfrValid ? strength : 0.5,
-      "singleStageAvailable":(ordinary || singleStageValid || guideFamily) && !dfrEnabled,
-      "singleStageEnabled":singleStageValid,
+      "singleStageAvailable":(ordinary || singleStageValid || guideFamily || ingredients) && !dfrEnabled,
+      "singleStageMethods":ingredients ? [LTX25SingleStageMethod.ancestral.rawValue,LTX25SingleStageMethod.cfgpp.rawValue] : LTX25SingleStageMethod.allCases.map(\.rawValue),
+      "singleStageEnabled":singleStageValid || ingredientsSampler != nil,
       "ordinaryKeyframesAvailable":(ordinary || guided || singleStageValid) && !dfrEnabled,
       "supportedTasks": singleStageValid ? (guideFamily ? ["control"] : singleStageMethod == .cfgpp ? ["t2v","i2v","fflf"]:["t2v","i2v","fflf","a2v"]) : durationMode == "automatic" ? automaticAvailable ? ["t2v","i2v","fflf"] : [] : guided ? ["t2v", "i2v", "fflf", "a2v"] : specialized != nil ? [specialized == "msr" ? "ref2va" : "control"] : dfrValid ? ["t2v", "i2v", "fflf"] : ordinary && !dfrEnabled
       ? ["t2v", "i2v", "fflf", "a2v", "extension"] : [],
@@ -620,8 +628,8 @@ public enum NativeLTXPreparation {
     let assets = try JSONDecoder().decode([MediaAsset].self, from: data(request["globalAssets"] ?? []))
     let selectedRecipe = try recipe(profile)
     let selectedConfig=selectedRecipe["config"] as! [String:Any]
-    if singleStage == nil,selectedConfig["ic_lora_single_stage"] as? Bool == true,
-      selectedConfig["stage2_steps"] as? Int == 0 {
+    if singleStage == nil,specialization(selectedRecipe) != "ingredients",
+      selectedConfig["ic_lora_single_stage"] as? Bool == true,selectedConfig["stage2_steps"] as? Int == 0 {
       guard let method=LTX25SingleStageMethod(rawValue:selectedConfig["stage1_sampler"] as? String ?? ""),
         let schedule=LTX25NegativeSchedule(rawValue:selectedConfig["cfg_pp_schedule"] as? String ?? "full"),
         method == .cfgpp || schedule == .full,
@@ -642,10 +650,18 @@ public enum NativeLTXPreparation {
     }
     if singleStage != nil {
       let family=specialization(selectedRecipe)
+      let ingredients=task == "control" && family == "ingredients"
+      if ingredients {
+        guard [.ancestral,.cfgpp].contains(singleStage!.method),singleStage?.negativeSchedule == .full,
+          clip.negativePrompt.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+          keyframes == nil,clip.attachments.allSatisfy({ [.control,.lora].contains($0.role) }) else {
+          throw unsupported("Ingredients supports eight-step ancestral or full sixteen-evaluation CFG++ with its fixed empty unconditional context and one described sheet; negative prompts, timed images and generated keyframes are unsupported")
+        }
+      }
       let control=task == "control" && ["union","motion_track","crossview_warp","crossview_ingredients"].contains(family ?? "")
-      guard (family == nil || control), !guidedProfile(selectedRecipe),
+      guard (family == nil || control || ingredients), !guidedProfile(selectedRecipe),
         (selectedConfig["dfr_enabled"] as? Bool ?? false) == false,
-        (control || ["t2v","i2v","fflf","a2v"].contains(task)),singleStage?.method != .cfgpp || task != "a2v" else {
+        (control || ingredients || ["t2v","i2v","fflf","a2v"].contains(task)),singleStage?.method != .cfgpp || task != "a2v" else {
         throw unsupported("single-stage sampling requires an ordinary distilled or IC/Union control profile; CFG++ cannot freeze an A2V driver")
       }
     }
@@ -671,7 +687,11 @@ public enum NativeLTXPreparation {
     if guided != nil { warnings = ["Swift Dev guided sampling is experimental. Visual quality and performance are not qualified."] }
     if automatic != nil { warnings.append("Automatic duration is experimental; the accepted take uses the predicted video interval. Audio-driven and continuous scenes require manual duration.") }
     if keyframes != nil { warnings.append("Ordinary timed images and generated keyframes are experimental. Generated slots apply to stage one only; quality is not qualified.") }
-    if singleStage != nil { warnings = ["Full-resolution single-stage sampling is experimental until real-model qualification. The selected negative schedule controls actual transformer evaluations."] }
+    if let singleStage {
+      warnings = specialization(selectedRecipe) == "ingredients"
+        ? ["Ingredients single-stage sampling uses \(singleStage.method == .cfgpp ? 16:8) full-resolution transformer evaluations and no refinement stage. CFG++ uses a fixed empty unconditional context. This explicit override is experimental until real-model qualification."]
+        : ["Full-resolution single-stage sampling is experimental until real-model qualification. The selected negative schedule controls actual transformer evaluations."]
+    }
     if guided == nil,singleStage == nil, let inherited = (selectedRecipe["config"] as? [String: Any])?["negative_prompt"] as? String,
       !inherited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       warnings.append("The selected profile's negative prompt is not evaluated by distilled Swift sampling and is omitted.")
@@ -830,7 +850,7 @@ public enum NativeLTXPreparation {
       if dfr.temporalRounds == 0 { config["dfr_temporal_upsampler_path"] = "" }
     }
     let keyframes=clip.generationSelection?.ltx25Keyframes
-    let dimensionGrid=singleStage == nil ? 64:32
+    let dimensionGrid=singleStage == nil || specialized == "ingredients" ? 64:32
     let automatic = clip.generationSelection?.ltx25AutomaticDuration
     guard let fps = config["frame_rate"] as? Double, fps.isFinite, (1...120).contains(fps),
       clip.duration.isFinite, clip.duration > 0, automatic != nil || clip.duration <= 20,
@@ -881,8 +901,13 @@ public enum NativeLTXPreparation {
       config = try guidedConfig(config, selection: selection, negativePrompt: clip.negativePrompt)
     } else if singleStage == nil { config["negative_prompt"] = "" }
     if let singleStage {
-      config["ic_lora_single_stage"]=true;config["stage1_steps"]=8;config["stage2_steps"]=0
-      config["stage1_sampler"]=singleStage.method.rawValue;config["stage2_sampler"]="euler"
+      config["ic_lora_single_stage"]=true;config["stage1_steps"]=8
+      // CFG++ retains its historical specialized recipe signature. The explicit
+      // ancestral route has a canonical zero-refinement input; defaults stay intact.
+      config["stage2_steps"]=specialized == "ingredients" && singleStage.method == .cfgpp ? 3:0
+      if specialized == "ingredients" { config["single_stage_sampler"]=singleStage.method.rawValue }
+      config["stage1_sampler"]=specialized == "ingredients" ? "euler_ancestral":singleStage.method.rawValue
+      config["stage2_sampler"]="euler"
       config["stage1_eta"]=singleStage.method == .euler ? 0:1;config["stage1_s_noise"]=1
       config["ancestral_seed_offset"]=10000;config["cfg_pp_batched"]=false
       config["cfg_pp_schedule"]=singleStage.negativeSchedule.rawValue
@@ -919,7 +944,7 @@ public enum NativeLTXPreparation {
     }
     let allowed: Set<MediaRole> = ["t2v", "extension"].contains(context.task) ? [] : context.task == "i2v" ? (keyframes == nil ? [.first] : [.first,.last,.keyframe])
       : context.task == "a2v" ? (keyframes == nil ? [.audioDriver,.first] : [.audioDriver,.first,.last,.keyframe]) : context.task == "ref2va" ? [.reference]
-      : context.task == "control" ? (singleStage == nil ? [.control] : [.control,.first,.last,.keyframe]) : [.first, .last, .keyframe]
+      : context.task == "control" ? (singleStage == nil || specialized == "ingredients" ? [.control] : [.control,.first,.last,.keyframe]) : [.first, .last, .keyframe]
     guard roles.isSubset(of: allowed) else { throw unsupported("attached media conflict with \(context.task); no inputs were discarded") }
     if context.task == "i2v", !roles.contains(.first),keyframes == nil || roles.isDisjoint(with:[.last,.keyframe]) { throw StudioError.invalid("Image to video requires an image attachment.") }
     if context.task == "fflf", keyframes == nil,clip.generationSelection != nil, !roles.isSuperset(of: [.first, .last]) {
@@ -1082,7 +1107,7 @@ public enum NativeLTXPreparation {
     if inputs.filter({ $0["reference_role"] as? String == "background" }).count>1 {
       throw StudioError.invalid("MSR accepts at most one background image.")
     }
-    if keyframes != nil || singleStage != nil {
+    if (keyframes != nil || singleStage != nil),specialized != "ingredients" {
       let generatedCount=keyframes?.generatedCount ?? 0
       let images=inputs.filter { $0["role"] as? String == "keyframe" }
       let indices=images.map { $0["frame_index"] as? String == "last" ? frames-1 : $0["frame_index"] as! Int }

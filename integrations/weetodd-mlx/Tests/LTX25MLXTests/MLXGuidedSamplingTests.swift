@@ -22,6 +22,102 @@ final class MLXGuidedSamplingTests: XCTestCase {
     let legacy=try decode();XCTAssertFalse(legacy.singleStage);XCTAssertTrue(legacy.stgAudio)
     fields["stg_audio"]=1;XCTAssertThrowsError(try decode())
   }
+  func testSingleStageIngredientsPreservesDistinctRawScheduleHeadsBeforeProjection() throws {
+    try Device.withDefaultDevice(.gpu) {
+      let source=MLXDenoiserTests(),f=try source.fixture()
+      let layout=DenoiserLayout.inputShapes(f.configuration)
+      let inputs=f.inputs.mapValues { MLXArray($0) }.map { key,value in
+        (key,value.reshaped(layout[key]!))
+      }
+      let sigmas:[Double]=[0.99641359,0.9958,0]
+      XCTAssertEqual(DenoiserMath.bfloat16(Float(sigmas[0])),DenoiserMath.bfloat16(Float(sigmas[1])))
+      let schedule=try SamplingSchedule(sigmas:sigmas,eta:0)
+      for singleStage in [true,false] {
+        let sampling=try MLXGuidedSampling(mode:.guided,steps:2,stg:0,videoRescale:0,
+          audioRescale:0,modality:1,stgBlocks:[],sigmas:sigmas,
+          distilledAdapterPath:singleStage ? "" : "/models/refinement.safetensors",singleStage:singleStage)
+        let runner=try MLXGuidedSamplingRunner(configuration:f.configuration,sampling:sampling,
+          maximumActivationBytes:1024*1024*1024)
+        let prepared=try runner.prepare(Dictionary(uniqueKeysWithValues:inputs),schedule:schedule,
+          videoDenoiseMask:[1,1,1,0,0],frozenAudio:false,
+          fixedWeights:source.weight,fixedAdapters:{ _ in [] },progress:{ _ in })
+        XCTAssertEqual(prepared.rawGlobalTimesteps,singleStage)
+        XCTAssertEqual(prepared.modulations.count,singleStage ? 2 : 1)
+        if singleStage {
+          for sigma in sigmas.dropLast() {
+            XCTAssertNotNil(prepared.modulations[Float(sigma).bitPattern])
+          }
+          if let a=prepared.embeddings[Float(sigmas[0]).bitPattern]?["audio"],
+            let b=prepared.embeddings[Float(sigmas[1]).bitPattern]?["audio"] {
+            XCTAssertGreaterThan((a-b).abs().max().item(Float.self),0.00001)
+          }
+        } else {
+          XCTAssertNotNil(prepared.modulations[DenoiserMath.bfloat16(Float(sigmas[0])).bitPattern])
+        }
+      }
+    }
+  }
+  func testSingleStageEulerMatchesPinnedPublisherFloat32IntermediatesAtEveryUpdate() throws {
+    let url=try XCTUnwrap(Bundle.module.url(forResource:"publisher-dev-ingredients-precision",
+      withExtension:"json",subdirectory:"Fixtures"))
+    let fixture=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:url)) as? [String:Any])
+    let sigmas=try XCTUnwrap(fixture["sigmas"] as? [Double])
+    let initial=try XCTUnwrap(fixture["initial"] as? [String:[[NSNumber]]])
+    let steps=try XCTUnwrap(fixture["steps"] as? [[String:Any]])
+    func array(_ rows:[[NSNumber]]) -> MLXArray {
+      MLXArray(rows.flatMap { $0.map(\.floatValue) },[rows.count,rows[0].count])
+    }
+    try Device.withDefaultDevice(.cpu) {
+      let sampling=try MLXGuidedSampling(mode:.guided,steps:30,stg:0,videoRescale:0,
+        audioRescale:0,modality:1,stgBlocks:[],sigmas:sigmas,distilledAdapterPath:"",singleStage:true)
+      var calls=0,events=0
+      let result=try MLXGuidedTrajectory.evaluate(initial.mapValues(array),sampling:sampling,
+        schedule:SamplingSchedule(sigmas:sigmas,eta:0),frozenAudio:false,
+        noise:{ _,_,_,_ in XCTFail("Euler cannot draw noise"); return MLXArray(Float(0)) },
+        predict:{ state,sigma in
+          if calls>0 {
+            let expected=try XCTUnwrap(steps[calls-1]["expectedPublisherState"] as? [String:[[NSNumber]]])
+            for name in ["video","audio"] {
+              XCTAssertEqual(state[name]!.asArray(Float.self),array(expected[name]!).asArray(Float.self),
+                "publisher update \(calls) \(name)")
+            }
+          }
+          XCTAssertEqual(sigma,Float(sigmas[calls]))
+          let prediction=try XCTUnwrap(steps[calls]["prediction"] as? [String:[[NSNumber]]])
+          calls+=1; return prediction.mapValues(array)
+        },progress:{ _ in events+=1 })
+      let expected=try XCTUnwrap(steps.last?["expectedPublisherState"] as? [String:[[NSNumber]]])
+      for name in ["video","audio"] {
+        XCTAssertEqual(result[name]!.asArray(Float.self),array(expected[name]!).asArray(Float.self))
+      }
+      XCTAssertEqual(calls,30);XCTAssertEqual(events,30)
+    }
+  }
+  func testSingleStagePredictionUsesRawAudioSigmaAndRetainsFrozenAndTokenPolicies() throws {
+    let url=try XCTUnwrap(Bundle.module.url(forResource:"publisher-dev-ingredients-precision",
+      withExtension:"json",subdirectory:"Fixtures"))
+    let fixture=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:url)) as? [String:Any])
+    let cases=try XCTUnwrap(fixture["denoisedCases"] as? [[String:Any]])
+    func array(_ rows:[[NSNumber]]) -> MLXArray {
+      MLXArray(rows.flatMap { $0.map(\.floatValue) },[rows.count,rows[0].count])
+    }
+    try Device.withDefaultDevice(.cpu) {
+      for item in cases {
+        let sample=array(try XCTUnwrap(item["sample"] as? [[NSNumber]]))
+        let velocity=array(try XCTUnwrap(item["velocity"] as? [[NSNumber]]))
+        let sigma=try XCTUnwrap(item["sigma"] as? NSNumber).floatValue
+        let mask=(item["mask"] as? [NSNumber]).map { MLXArray($0.map(\.floatValue),[$0.count,1]) }
+        let frozen=try XCTUnwrap(item["frozenAudio"] as? Bool)
+        for raw in [true,false] {
+          let output=MLXGuidedPrediction.clean(modelInput:sample,velocity:velocity,sigma:sigma,
+            rawSigma:raw,denoiseMask:mask,frozen:frozen)
+          let expected=array(try XCTUnwrap(item[raw ? "expectedPublisherX0" : "legacyRoundedSigmaX0"] as? [[NSNumber]]))
+          XCTAssertEqual(output.asType(.float32).asArray(Float.self),expected.asArray(Float.self),
+            "\(item["name"]!) raw=\(raw)")
+        }
+      }
+    }
+  }
   private func policy(_ mode: MLXGuidedSampling.Mode = .guided, sigmas: [Double]? = nil) throws -> MLXGuidedSampling {
     try MLXGuidedSampling(mode: mode, steps: sigmas.map { $0.count-1 } ?? 3,
       stg: 0, videoRescale: 0, audioRescale: 0, modality: 1, stgBlocks: [],

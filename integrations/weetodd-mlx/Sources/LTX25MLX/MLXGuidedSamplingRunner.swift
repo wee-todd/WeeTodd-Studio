@@ -2,6 +2,16 @@ import Foundation
 import MLX
 import LTX25Engine
 
+/// One guided prediction boundary; frozen/token masks preserve their own times.
+enum MLXGuidedPrediction {
+  static func clean(modelInput:MLXArray,velocity:MLXArray,sigma:Float,rawSigma:Bool,
+    denoiseMask:MLXArray?=nil,frozen:Bool=false) -> MLXArray {
+    let time:MLXArray = frozen ? MLXArray(Float(0)) :
+      (denoiseMask.map { $0*sigma } ?? MLXArray(rawSigma ? sigma : DenoiserMath.bfloat16(sigma)))
+    return (modelInput-time*velocity).asType(.bfloat16)
+  }
+}
+
 /// Model-independent AV trajectory; prediction owns and releases every weighted
 /// pass before returning. CPU fixtures exercise this same production integrator.
 enum MLXGuidedTrajectory {
@@ -38,9 +48,20 @@ enum MLXGuidedTrajectory {
         for name in names {
           let prediction=try checked(clean[name]!,name:name)
           let x=state[name]!.asType(.bfloat16), x0=prediction.asType(.bfloat16)
-          // Preserve the released Euler arithmetic at sigma_next=0 too: a
-          // BF16 subtract/update is not bit-identical to returning x0 directly.
-          let next=x+(Float(nextSigma-sigma))*((x-x0)/Float(sigma))
+          let next:MLXArray
+          if sampling.singleStage {
+            // Publisher Dev IC-LoRA Euler: calculate velocity in Float32,
+            // round it to the sample dtype, then update in Float32 before the
+            // BF16 state boundary. Subtract already-Float32 sigma points.
+            let velocity=((x.asType(.float32)-x0.asType(.float32))/Float(sigma))
+              .asType(.bfloat16).asType(.float32)
+            next=(x.asType(.float32)+(Float(nextSigma)-Float(sigma))*velocity)
+              .asType(.bfloat16)
+          } else {
+            // Preserve the previously qualified MLX Euler recipe, including
+            // its BF16 arithmetic at sigma_next=0. HQ has a separate trajectory.
+            next=x+(Float(nextSigma-sigma))*((x-x0)/Float(sigma))
+          }
           state[name]=try checked(next.asType(.float32),name:name)
         }
         try progress(.init(completedSteps:index+1,totalSteps:schedule.steps.count,
@@ -107,6 +128,22 @@ final class MLXGuidedSamplingRunner {
     denoiser=try MLXDenoiser(configuration:configuration,maximumActivationBytes:maximumActivationBytes-reserve,
       keyframeMarkerRows:keyframeMarkerRows,leadingKeyframeMarkerRows:leadingKeyframeMarkerRows)
   }
+  /// The production schedule cache, shared by guided evaluations and boundary tests.
+  func prepare(_ inputs:[String:MLXArray],schedule:SamplingSchedule,
+    videoDenoiseMask:[Float]?,frozenAudio:Bool,fixedWeights:MLXDenoiser.FixedProvider,
+    fixedAdapters:MLXDenoiser.FixedAdapters,
+    progress:(MLXDenoiser.Progress) throws -> Void) throws -> MLXDenoiser.Preparation {
+    var predictionSigmas=schedule.sigmas.dropLast().map(Float.init)
+    if sampling.mode == .guidedHQ {
+      var full=schedule.sigmas; full[full.count-1]=0.0011
+      predictionSigmas += zip(full,full.dropFirst()).map { Float(sqrt($0*$1)) }
+      predictionSigmas.append(0.0011)
+    }
+    return try denoiser.prepare(inputs,sigmas:predictionSigmas,
+      videoDenoiseMask:videoDenoiseMask,frozenAudio:frozenAudio,
+      rawGlobalTimesteps:sampling.singleStage,
+      weights:fixedWeights,adapters:fixedAdapters,progress:progress)
+  }
   func evaluate(_ inputs: [String:MLXArray], schedule: SamplingSchedule,
     negativeContexts: [String:MLXArray], videoConditioning: MLXVideoDenoiseCondition?, frozenAudio: Bool,
     fixedWeights: MLXDenoiser.FixedProvider, blockWeights: MLXDenoiser.BlockProvider,
@@ -123,16 +160,10 @@ final class MLXGuidedSamplingRunner {
     guard videoConditioning == nil || videoConditioning!.clean.shape == denoiser.inputShapes["video_latent"] else {
       throw LTXError.invalid("Dev reference conditioning differs from admitted video tokens.")
     }
-    var predictionSigmas=schedule.sigmas.dropLast().map(Float.init)
-    if sampling.mode == .guidedHQ {
-      var full=schedule.sigmas; full[full.count-1]=0.0011
-      predictionSigmas += zip(full,full.dropFirst()).map { Float(sqrt($0*$1)) }
-      predictionSigmas.append(0.0011)
-    }
     let tokenTimes=videoConditioning.map { !$0.mask.allSatisfy { $0 == 1 } } ?? false
-    let preparation=try denoiser.prepare(inputs,sigmas:predictionSigmas,
+    let preparation=try prepare(inputs,schedule:schedule,
       videoDenoiseMask:tokenTimes ? videoConditioning?.mask : nil,frozenAudio:frozenAudio,
-      weights:fixedWeights,adapters:fixedAdapters) { try stageProgress(0,$0) }
+      fixedWeights:fixedWeights,fixedAdapters:fixedAdapters) { try stageProgress(0,$0) }
     let mask=videoConditioning.map { MLXArray($0.mask,[$0.mask.count,1]) }
     var invocation=0
     func predict(_ state:[String:MLXArray],_ sigma:Float) throws -> [String:MLXArray] {
@@ -150,10 +181,10 @@ final class MLXGuidedSamplingRunner {
           progress:{ try stageProgress(invocation,$0) },perturbation:perturbation)
         var clean:[String:MLXArray]=[:]
         for name in ["video","audio"] {
-          let time:MLXArray=name == "audio" && frozenAudio ? MLXArray(Float(0)) :
-            (name == "video" && tokenTimes ? mask!*sigma : MLXArray(DenoiserMath.bfloat16(sigma)))
-          let value=modelInputs[name+"_latent"]!-time*velocity[name]!
-          clean[name]=value.asType(.bfloat16)
+          clean[name]=MLXGuidedPrediction.clean(modelInput:modelInputs[name+"_latent"]!,
+            velocity:velocity[name]!,sigma:sigma,rawSigma:sampling.singleStage,
+            denoiseMask:name == "video" && tokenTimes ? mask : nil,
+            frozen:name == "audio" && frozenAudio)
         }
         eval(Array(clean.values)); return clean
       }

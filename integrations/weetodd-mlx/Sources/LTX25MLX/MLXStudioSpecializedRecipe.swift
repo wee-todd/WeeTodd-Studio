@@ -50,14 +50,34 @@ enum MLXStudioSpecializedRecipe {
         throw invalid("Dev Ingredients requires zero refinement updates and no CFG++ sampler")
       }
     }
-    let ingredientsCFGPP:Bool
+    let ingredientsSampling:MLXIngredientsSampling?
     if let sampler=config["single_stage_sampler"] {
-      guard task == "control",single,sampler as? String == "euler_ancestral_cfg_pp" else {
-        throw invalid("single_stage_sampler requires Ingredients and euler_ancestral_cfg_pp")
+      guard task == "control",single,let sampler=sampler as? String,
+        ["euler_ancestral","euler_ancestral_cfg_pp"].contains(sampler) else {
+        throw invalid("single_stage_sampler requires Ingredients and an explicit ancestral sampler")
       }
-      ingredientsCFGPP=true
+      ingredientsSampling=sampler == "euler_ancestral" ? .ancestral : .ancestralCFGPP
+      if ingredientsSampling == .ancestral {
+        guard config["duration_mode"] == nil || config["duration_mode"] as? String == "manual" else {
+          throw invalid("plain ancestral Ingredients requires manual duration")
+        }
+        if let declared=config["generated_keyframes"] {
+          guard let count=declared as? NSNumber,CFGetTypeID(count) != CFBooleanGetTypeID(),
+            count.doubleValue.isFinite,count.doubleValue == 0 else {
+            throw invalid("plain ancestral Ingredients does not support generated keyframes")
+          }
+        }
+        guard let refinement=config["stage2_steps"] as? NSNumber,
+          CFGetTypeID(refinement) != CFBooleanGetTypeID(),refinement.doubleValue == 0,
+          config["stage1_sampler"] as? String == "euler_ancestral" else {
+          throw invalid("plain ancestral Ingredients requires euler_ancestral and zero refinement updates")
+        }
+        // The ordinary parser validates the remaining fixed distilled controls.
+        // Discard its private refinement placeholder in the v18 request below.
+        config["stage2_steps"]=3
+      }
       config.removeValue(forKey:"single_stage_sampler")
-    } else { ingredientsCFGPP=false }
+    } else { ingredientsSampling=nil }
     if task == "control",!single {
       guard inputs.count == 1,(components["msr_lora_path"] as? String ?? "").isEmpty,
         strength.doubleValue <= 2 else { throw invalid("Union Control needs one guide and its stage-one adapter") }
@@ -109,7 +129,7 @@ enum MLXStudioSpecializedRecipe {
     root["conditioning"]=["version":1,"task":"t2v","audio_policy":"generated","inputs":[]]
     var request=try MLXStudioRecipe.compileFields(data:JSONSerialization.data(withJSONObject:root),
       outputDirectory:outputDirectory,requiresSpatialUpscaler:false,singleStageGuided:ingredientsGuided)
-    request["version"]=task == "ref2va" ? (audioInputs.isEmpty ? 7 : 16) : ingredientsGuided ? 17 : ingredientsCFGPP ? 11 : 6
+    request["version"]=task == "ref2va" ? (audioInputs.isEmpty ? 7 : 16) : ingredientsGuided ? 17 : ingredientsSampling == .ancestral ? 18 : ingredientsSampling == .ancestralCFGPP ? 11 : 6
     request["task"]=task == "ref2va" ? "msr" : "ingredients"
     request["audio_reference"]=NSNull();request["union_control_guide"]=NSNull()
     request["ingredients_sheet"]=NSNull()
@@ -117,9 +137,12 @@ enum MLXStudioSpecializedRecipe {
       for key in ["msr","dfr","ic_control","automatic_duration","generated_keyframes","single_stage_sampling"] { request[key]=NSNull() }
       request["stage_two_loras"]=[]
     }
-    if ingredientsCFGPP {
+    if let ingredientsSampling {
       request["msr"]=NSNull();request["dfr"]=NSNull();request["ic_control"]=NSNull()
-      request["ingredients_sampling"]=MLXIngredientsSampling.ancestralCFGPP.rawValue
+      request["ingredients_sampling"]=ingredientsSampling.rawValue
+      if ingredientsSampling == .ancestral {
+        for key in ["guided_sampling","automatic_duration","generated_keyframes","single_stage_sampling"] { request[key]=NSNull() }
+      }
     }
     if task == "ref2va" {
       let ordered=imageInputs.filter { $0["reference_role"] as? String != "background" }

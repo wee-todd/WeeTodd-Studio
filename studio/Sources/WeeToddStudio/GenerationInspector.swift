@@ -251,7 +251,10 @@ struct GenerationInspector: View {
       }
   }
   @ViewBuilder var singleStageControls:some View {
-    let available=(store.generationDescriptions[clip.id]?["generation"] as? [String:Any])?["singleStageAvailable"] as? Bool ?? false
+    let generation=store.generationDescriptions[clip.id]?["generation"] as? [String:Any] ?? [:]
+    let available=generation["singleStageAvailable"] as? Bool ?? false
+    let ingredients=generation["referenceFamily"] as? String == "ingredients"
+    let methods=(generation["singleStageMethods"] as? [String])?.compactMap(LTX25SingleStageMethod.init(rawValue:)) ?? LTX25SingleStageMethod.allCases
     if available || clip.generationSelection?.ltx25SingleStage != nil {
       DisclosureGroup("Full-resolution single-stage sampling") {
         Toggle("Override with single-stage sampling",isOn:Binding(get:{ clip.generationSelection?.ltx25SingleStage != nil },set:{ enabled in
@@ -259,24 +262,28 @@ struct GenerationInspector: View {
         })).disabled(!available && clip.generationSelection?.ltx25SingleStage == nil)
         if clip.generationSelection?.ltx25SingleStage == nil,
           (store.generationDescriptions[clip.id]?["generation"] as? [String:Any])?["singleStageEnabled"] as? Bool == true {
-          Text("The model profile uses single-stage sampling. Enable the override to change its sampler or negative schedule. Select a two-stage profile to use 8 + 3 sampling.")
+          Text(ingredients ? "The Ingredients profile supplies its sampler. Enable the override to choose eight-step ancestral or full CFG++ sampling." : "The model profile uses single-stage sampling. Enable the override to change its sampler or negative schedule. Select a two-stage profile to use 8 + 3 sampling.")
             .font(.caption2).foregroundStyle(.secondary)
         }
         if let settings=clip.generationSelection?.ltx25SingleStage {
           Toggle("Enable experimental execution",isOn:Binding(get:{ settings.experimentalEnabled },set:{ enabled in edit { $0.ltx25SingleStage?.experimentalEnabled=enabled } }))
           Picker("Sampler",selection:Binding(get:{ settings.method },set:{ method in edit {
             $0.ltx25SingleStage?.method=method
-            if method != .cfgpp { $0.ltx25SingleStage?.negativeSchedule = .full }
+            if ingredients || method != .cfgpp { $0.ltx25SingleStage?.negativeSchedule = .full }
           } })) {
-            ForEach(LTX25SingleStageMethod.allCases) { Text($0.label).tag($0) }
+            ForEach(methods) { Text($0.label).tag($0) }
           }
           if settings.method == .cfgpp {
-            Picker("Negative passes",selection:Binding(get:{ settings.negativeSchedule },set:{ schedule in edit { $0.ltx25SingleStage?.negativeSchedule=schedule } })) {
-              ForEach(LTX25NegativeSchedule.allCases) { Text("\($0.label) — \($0.evaluationCount) evaluations").tag($0) }
+            if ingredients {
+              Text("Full unconditional passes — 16 evaluations").font(.caption2).foregroundStyle(.secondary)
+            } else {
+              Picker("Negative passes",selection:Binding(get:{ settings.negativeSchedule },set:{ schedule in edit { $0.ltx25SingleStage?.negativeSchedule=schedule } })) {
+                ForEach(LTX25NegativeSchedule.allCases) { Text("\($0.label) — \($0.evaluationCount) evaluations").tag($0) }
+              }
             }
-            Text("Uses the clip's negative prompt. CFG++ generates audio; it cannot freeze an A2V driver.").font(.caption2).foregroundStyle(.secondary)
+            Text(ingredients ? "Ingredients CFG++ uses its fixed empty unconditional context on all eight steps. Clip negative prompts are unsupported." : "Uses the clip's negative prompt. CFG++ generates audio; it cannot freeze an A2V driver.").font(.caption2).foregroundStyle(.secondary)
           }
-          Text("Eight updates at the output resolution, with no spatial upscale or second stage. Supports ordinary timed images and generated slots. Experimental; real-model quality is not qualified.").font(.caption2).foregroundStyle(.secondary)
+          Text(ingredients ? "Eight updates at the output resolution with one described Ingredients sheet and no second stage. Ancestral uses eight evaluations; CFG++ uses sixteen. Experimental; real-model quality is not qualified." : "Eight updates at the output resolution, with no spatial upscale or second stage. Supports ordinary timed images and generated slots. Experimental; real-model quality is not qualified.").font(.caption2).foregroundStyle(.secondary)
         }
       }
     }

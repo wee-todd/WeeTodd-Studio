@@ -23,6 +23,7 @@ feature in the current app.
 | LTX automatic duration | Explicit opt-in for ordinary T2V/I2V/FFLF; duration head resolves the `8k+1` grid before sampling, with 0.25–30-second bounds | Pinned head and CPU tests; actual 57-frame combined take completed |
 | LTX ordinary keyframes | Up to eight distinct timed images and 0–8 generated slots; arbitrary integer frames are allowed; first-frame input replaces the main opening plane | CPU/header tests and the combined take; ordinary slots are stage-one-only |
 | LTX full-resolution single stage | Eight updates; Euler/ancestral use eight forwards and CFG++ full/balanced/speed use 15/12/10 forwards; no spatial upscaler or second stage | CPU math/header checks; actual Euler, ancestral, CFG++ full/balanced/speed takes with first/last images and generated slots; one balanced Union composition; other guide combinations retain contract/preparation coverage |
+| LTX Ingredients sampling | Inherit the saved deterministic recipe, or explicitly select eight-forward ancestral / sixteen-forward CFG++; explicit choices require one full-strength described sheet, no refinement/upscaler, no timed/generated slots or clip negative prompt | New ancestral job completed 121 frames with stereo audio, preview and ordered release; sampled two-character composition passes agent review, owner motion/dialogue review pending; official 2.5 default unchanged |
 | LTX scene anchors | Experimental scene v2: at most 32 global first/interior/last anchors and 256 MiB encoded references; two to six shots, at most 30 seconds | CPU routing/budget checks and actual two-window/five-anchor/source-PCM Studio take, previews, acceptance and save/reopen; retained clip human-approved October 5; broader configurations remain unqualified |
 | LTX movie upscale | Experimental learned 2× only, learned 2× + refine, or Pixel-Spatial 2× + refine; exact source frame count/rate with explicit source/sidecar/silent audio | CPU source/movie/acceptance tests plus actual learned 2×/three-evaluation refinement/source interval with exact sidecar PCM; actual StudioCore export/native CLI acceptance, zero-generation resume and Store.load reopen passed |
 | LTX one-step Diffusion VAE | Explicit experimental complete-component decoder selection; Conv remains the default, with strict workspace and checkpoint admission | CPU/header/release checks, tiny numerical comparisons, retained 1344 × 768/89-frame decode and complete 768 × 448/49-frame Dev Euler/refinement job; no Conv pixel-parity or isolated performance claim |
@@ -30,7 +31,7 @@ feature in the current app.
 | H3 LoRA composition | Up to eight distinct ordered adapters, signed strengths −10 to 10, explicit QKV layout/profile and deferred standard-adapter start | Header/CPU arithmetic checks; historical real stacks qualify only those adapters |
 | H3 full latent refinement | Save complete AV latents; initialize at the same canvas or enlarge both axes by at most 2×; exact source duration/task/component identity | Full saving/initialized/interpolation packets completed; retained initialized and corrected learned 1920 × 1088/73-frame takes human-approved October 5; older interpolation failure and broader settings remain separate |
 | H3 Motion Fidelity | Experimental independent T2VA movie repair; 24 fps matching canvas/trim, at least 15 base evaluations, immediate standard adapters, bounded expansion | CPU producer/acceptance/lifecycle tests and actual native repair with exact selected source PCM; retained repair human-approved October 5; broader fidelity improvement remains unqualified |
-| H3 video decode precision | Explicit experimental FP16 for Swift lower-memory profiles; FP32 stays default | Complete 1376 × 768 saved-latent numerical/release comparison and one complete packaged 672 × 384 VSA job with exact audio, progress, previews and release; published pixels differ and human visual review is pending |
+| H3 video decode precision | Explicit experimental FP16 for Swift lower-memory profiles; FP32 stays default | Complete 1376 × 768 saved-latent numerical/release comparison and one complete packaged 672 × 384 VSA job with exact audio, progress, previews and release; published pixels differ; the user approved that complete clip visually October 8, without all-task qualification |
 | H3 Sol attention | Explicit approximate attention for independent Swift MLX Ref2VA with ordinary signed-I8 weights, or FL2VA image/keyframes with rank-64 BF16 weights; one strength-1 BF16 Turbo adapter, four Euler evaluations and Drop AdaLN; at most 40000 packed rows | Ref2VA signed-app generation and review passed; FL installed-weight execution and complete Studio generation passed at 38937 rows; exact linked FL take human-approved October 8 |
 | H3 transformer weight cache | Explicit stage-local budget: 0, 8, 16, 32, 48, 64 or 96 GiB; ordinary signed-I8 or BF16 block projections with immediate adapters | Installed I8/BF16 projection reuse and teardown passed; complete 48 GiB FL Studio run loaded 50 blocks once and served 150 hits |
 
@@ -150,15 +151,27 @@ physical peaks, excluding FFmpeg. Two decoded preview revisions, monotonic progr
 release, cancellation, accepted-take reopening and zero-inference resume passed. This is one
 bounded Union execution check; it does not qualify all IC combinations, production performance
 or audiovisual quality. The inspector's renderer summary follows the resolved schedule.
-Ingredients uses its separate version-11 authored option: sixteen forwards, not the ordinary
-15/12/10 schedules. Its latest marker-corrected sample still animated the reference board instead
-of composing the requested scene; it is not quality-approved. A developer-only version-17
+Ingredients has separate explicit sampler controls: version-18 ancestral uses eight conditional
+forwards with no refinement; the existing version-11 CFG++ uses sixteen, not the ordinary
+15/12/10 schedules. Inherited deterministic recipes and the approved official 2.5 default are
+unchanged. The new ancestral job passes media/lifecycle checks and sampled two-character diner
+composition; owner motion/dialogue review is pending. Earlier CFG++ reference-board failures
+remain failures and do not qualify that separate sampler. A developer-only version-17
 request tests the older 2.3 adapter with an unmerged 2.5 Dev base, 30 Euler updates, CFG 4,
 video-only STG at block 29/scale 1, strength 1.4 and full-length repeated RGB-sheet encoding.
 It has no refinement pass and is not selectable in Studio. This tests cross-version compatibility,
 not exact parity with the publisher's original 2.3 base recipe; the accepted official 2.5 default is unchanged.
 The 121-frame compatibility test executed all 90 serial forwards and removed the reference-board
 collage, but omitted the second character. Scene adherence failed; this mix is not quality-approved.
+Dev Ingredients now derives adaptive sigmas from the generated target grid; frozen guides still
+count toward transformer admission and attention. Its version-17 path also preserves Float32
+sigmas through timestep embedding and clean-prediction conversion, and follows the publisher's
+Float32/BF16 Euler rounding boundaries. Ordinary guided defaults, explicit sigma overrides and
+fixed eight-update recipes are unchanged. The retained schedule-corrected run produced one woman
+instead of the two requested men and remains failed. The later precision corrections have not
+been rerendered on that case; numerical witnesses do not qualify Dev scene quality. The separate
+restored eight-evaluation distilled ancestral route is selectable in Studio; this optional Dev
+compatibility experiment remains developer-only and does not replace the accepted 2.5 default.
 The four remaining ordinary sampler checks each published 49 frames at 512 × 256/24 fps,
 with two endpoints and two generated slots. Observed video/audio completion events match
 8/8/15/10 forwards for Euler/ancestral/CFG++ full/speed. Timing, finite audio, previews and
@@ -1455,7 +1468,9 @@ and FP16 **98.153 seconds**, an **11.1% decoder-only reduction**. Peak MLX was *
 essentially unchanged. Complete RGB comparison measured **65.504 dB PSNR** and a maximum 8-bit
 channel difference of **2**. This was one serial FP32-then-FP16 pair, not a warm benchmark or
 whole-generation comparison. Sampling and audio inference did not run. Numerical checks and
-release passed; human quality review remains separate. FP16 is not the byte-exact FP32 path.
+release passed; human quality review of this saved-latent pair remains separate. FP16 is not the byte-exact FP32 path.
+The later complete 672 × 384 FastH3 VSA FP16 clip received the user’s visual approval on October 8.
+That representative pass retains FP32 as the default and does not qualify every task or isolated speed.
 
 #### Retained whole-generation results
 
@@ -1524,7 +1539,7 @@ context, with four live preview revisions, in 236.723 seconds; this was a functi
 A separate v11 VSA run took 144.081 seconds against the unchanged 137.793-second limit and failed speed, with exact
 complete decoded media, seven live preview revisions and lower whole MLX/worker physical peaks (4.494/5.332 GB).
 It does not replace the v10 failure. The 1 MP Ref2VA recipe was not rerun in v11. Final-source combined validation
-and the staged commit gate remain pending.
+and the staged commit gate were pending at that checkpoint; the subsequent integrated source passed both.
 The FP16 saved-decoder result above does not change these FP32 whole-job gate outcomes.
 
 The signed v12 worker completed fresh VSA and 1 MP Ref2VA tests with exact accepted RGB24/PCM Float32
@@ -1617,14 +1632,26 @@ shared worker preflight after the described images are attached. MSR keeps image
 with one optional background last, and maps role, priority, frame count, sizing, reference
 strength and attention strength. Ingredients uses one described sheet and at least 121 frames.
 MSR and saved deterministic Ingredients recipes run eight full-resolution evaluations; there
-is no second stage or spatial upscaler. An explicit experimental Ingredients recipe can set
-`config.single_stage_sampler` to `euler_ancestral_cfg_pp`. This version-11 worker request runs
-eight updates with sixteen serial conditional/unconditional evaluations, using learned empty-text
-conditioning, Float32 sampler state and BF16 model inputs. It requires reference strength 1;
-unsupported sampler values and combinations fail before model loading. Native ancestral noise
-is reproducible within its declared runtime policy, not pixel-identical to ComfyUI noise.
-Existing recipes retain their deterministic sampling. The new option is not a qualified default;
-contract/numerical tests and real-model visual acceptance are separate checks.
+is no second stage or spatial upscaler. For Ingredients, open **Full-resolution single-stage
+sampling**, enable **Override with single-stage sampling** and **Enable experimental execution**,
+then choose **Euler ancestral** or **Euler ancestral CFG++**. Turning off the override restores
+the saved profile behavior; the approved official 2.5 default is unchanged.
+**Euler ancestral** exports `config.single_stage_sampler: "euler_ancestral"` as version 18:
+eight conditional predictions, eta 1, BF16 state with Float32 stepping, split-key ancestral
+noise seeded at seed + 10000, and zero refinement updates. **Euler ancestral CFG++** retains
+version 11, eight updates and sixteen serial conditional/unconditional predictions with learned
+empty-text conditioning and Float32 sampler state. It keeps its historical input recipe signature;
+the effective plan has no refinement. These explicit choices require a described sheet at reference
+strength 1, at least 121 frames and the existing 64-pixel canvas grid. Clip negative prompts, partial CFG++
+schedules, timed images and generated slots are unsupported and fail before media preparation.
+The selected policy survives project save/reopen and native export. Native noise is reproducible
+within its runtime policy; it does not establish Torch/ComfyUI pixel parity.
+The new ancestral job completed 768 × 448/121-frame audiovisual generation without Python,
+including one decoded preview, progress and ordered release. Nine sampled frames retain two
+distinct aliens in a diner with changing mug/espresso actions and no animated reference board;
+owner motion/dialogue review is pending. Observed launch-to-exit was 235.58 seconds, MLX peak
+3.83 GiB and worker physical peak 5.10 GiB, excluding FFmpeg. User background work was active,
+so these are functional observations, not an isolated performance comparison or a new default.
 Ordinary LoRAs, DFR and audio drivers cannot be combined with these single-adapter profiles.
 Ingredients setup admits compatible 2.5 full-resolution rank-128 sheet adapters after complete
 header/shape checks and starts them at strength 1.0; legacy 2.3 starts at 1.2.

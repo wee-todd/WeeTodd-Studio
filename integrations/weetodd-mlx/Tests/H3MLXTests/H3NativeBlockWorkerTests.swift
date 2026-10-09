@@ -74,7 +74,17 @@ final class H3NativeBlockWorkerTests: XCTestCase {
       XCTAssertThrowsError(try H3NativeBlockWorker.preflight(workerURL: file, timeout: seconds))
     }
     XCTAssertFalse(FileManager.default.fileExists(atPath: pidURL.path))
-    XCTAssertThrowsError(try H3NativeBlockWorker.preflight(workerURL: file, timeout: 0.15))
+    // A short deadline may expire before the child runs its first instruction.
+    // Verify that deadline independently from the child-written PID witness.
+    let short = try worker(directory, name: "short-deadline", body: "while :; do :; done")
+    for (candidate, seconds) in [(short, 0.15), (file, 2.0)] {
+      XCTAssertThrowsError(try H3NativeBlockWorker.preflight(workerURL: candidate, timeout: seconds)) { error in
+        guard case H3CheckpointError.invalid(let message) = error else {
+          return XCTFail("Expected capability deadline failure, got \(error)")
+        }
+        XCTAssertTrue(message.contains("timed out"))
+      }
+    }
     let pid = try XCTUnwrap(Int32(String(contentsOf: pidURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
     XCTAssertEqual(kill(pid, 0), -1); XCTAssertEqual(errno, ESRCH)
   }
@@ -85,14 +95,20 @@ final class H3NativeBlockWorkerTests: XCTestCase {
       do { try H3NativeBlockWorker.preflight(workerURL: file); return false }
       catch is CancellationError { return true }
     }
-    for _ in 0..<100 {
-      if FileManager.default.fileExists(atPath: pidURL.path) { break }
-      try await Task.sleep(nanoseconds: 10_000_000)
+    // File creation can precede the shell's PID write. Await the parsed value,
+    // with a separate bounded fixture-startup deadline, before cancelling.
+    let readinessDeadline = DispatchTime.now().uptimeNanoseconds + 2_000_000_000
+    var workerPID: Int32?
+    while workerPID == nil && DispatchTime.now().uptimeNanoseconds < readinessDeadline {
+      workerPID = (try? String(contentsOf: pidURL, encoding: .utf8)).flatMap {
+        Int32($0.trimmingCharacters(in: .whitespacesAndNewlines))
+      }
+      if workerPID == nil { try await Task.sleep(nanoseconds: 10_000_000) }
     }
     task.cancel()
     let cancelled = try await task.value
     XCTAssertTrue(cancelled)
-    let pid = try XCTUnwrap(Int32(String(contentsOf: pidURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+    let pid = try XCTUnwrap(workerPID, "Worker fixture did not publish its PID before the startup deadline.")
     XCTAssertEqual(kill(pid, 0), -1); XCTAssertEqual(errno, ESRCH)
   }
   func testOptionalInstalledWorkerCapabilitiesWithoutInference() throws {

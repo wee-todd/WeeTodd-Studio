@@ -48,16 +48,31 @@ Movie/clip export uses `weetodd-studio-native-job-v1` when all clips select nati
 or accepted movie sources. It freezes the edit and existing prepared `weetodd-headless-v2`
 recipes for WeeToddCLI, without Python or a second sampler. This format is an execution job,
 separate from planning definitions, native image v4 jobs and the legacy Python-hosted movie formats.
-Prepared Ingredients recipes retain their sampler choice across export. Existing deterministic
-recipes use eight evaluations. The explicit experimental `config.single_stage_sampler` value
-`euler_ancestral_cfg_pp` uses eight updates and sixteen serial evaluations in the shared Swift
-worker, with full-strength sheet conditioning and a versioned native noise policy. Unsupported
-choices fail admission; exporting a recipe does not establish reference likeness or scene quality.
+Prepared Ingredients recipes retain their sampler choice across project reopen and native export.
+Studio's **Full-resolution single-stage sampling** override offers explicit **Euler ancestral**:
+`config.single_stage_sampler: "euler_ancestral"`, eight conditional evaluations and zero refinement
+in a version-18 request, with BF16 state/Float32 stepping and split-key seed-plus-10000 noise.
+The existing `euler_ancestral_cfg_pp` selector retains eight updates and sixteen serial evaluations,
+its fixed empty unconditional text and historical version-11 input signature. Existing deterministic
+recipes keep eight evaluations, and the approved official 2.5 setup default is unchanged.
+Both explicit choices require one full-strength described sheet; negative prompts, timed images,
+generated slots and partial CFG++ schedules fail admission. The new ancestral job completed
+media/lifecycle checks and sampled two-character diner composition; owner motion/dialogue review
+is pending. Export does not establish universal likeness, scene quality or Torch/ComfyUI pixel parity.
 A developer-only version-17 Ingredients request separately tests an unmerged 2.5 Dev base
 with the older 2.3 adapter, repeated RGB reference encoding and serial CFG/video-only STG.
 It has no refinement pass and is not selectable in Studio; it is not the accepted 2.5 default.
-It supports cut-only finishing with embedded source audio; unsupported finishing is rejected
-explicitly. Complete prepared continuous scenes retain member timing and shared take identity;
+Dev Ingredients now derives adaptive sigmas from the generated target grid; frozen guides still
+count toward transformer admission and attention. Its version-17 path also preserves Float32
+sigmas through timestep embedding and clean-prediction conversion, and follows the publisher's
+Float32/BF16 Euler rounding boundaries. Ordinary guided defaults, explicit sigma overrides and
+fixed eight-update recipes are unchanged. The retained schedule-corrected run produced one woman
+instead of the two requested men and remains failed. The later precision corrections have not
+been rerendered on that case; numerical witnesses do not qualify Dev scene quality. The separate
+restored eight-evaluation distilled ancestral route is selectable in Studio; this optional Dev
+compatibility experiment remains developer-only and does not replace the accepted 2.5 default.
+Native movie/clip export supports cut-only finishing with embedded source audio; unsupported
+finishing is rejected explicitly. Complete prepared continuous scenes retain member timing and shared take identity;
 ordinary continuity needs an accepted source before export. Pending Ripple drafts use their dedicated
 native edit request with frozen source/guide/reference identities and retain `RippleTake` receipts
 and original trims on CLI acceptance. Silent and source-audio fixtures and installed-worker Ripple
@@ -92,7 +107,8 @@ checks do not approve the prior continuation seam
 or Fun visual quality. A later corrected 107-frame continuation has now removed the old
 gray-border contamination while retaining the robot/table; seam texture and audio still
 require separate review.
-Matched useful-size speed/memory and broad identity, seam and audio quality remain open.
+The four original H3 performance cases now have retained passes. Broader conditioning ranges,
+physical smaller-Mac measurements and unreviewed identity, seam and audio cases remain separate qualifications.
 These checks do not qualify all native tasks. See [execution, supported finishing and qualification](../../studio/README.md#headless-movie-and-clip-jobs).
 
 ## Current experimental native recipe boundary

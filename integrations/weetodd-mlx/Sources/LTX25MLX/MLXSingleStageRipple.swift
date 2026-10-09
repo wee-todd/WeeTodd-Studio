@@ -3,9 +3,20 @@ import MLX
 import LTX25Engine
 import AdapterRuntime
 
-/// The single-stage, deterministic LTX 2.5 reference schedule used by Ripple
-/// and static Ingredients sheets. Both enter as a full-length VAE guide.
+/// Shared single-stage LTX 2.5 reference sampling for Ripple and Ingredients.
+/// Both enter as a full-length VAE guide; ancestral Ingredients is explicit.
 public final class MLXSingleStageRipple {
+  static func schedule(sampling:MLXIngredientsSampling) throws -> SamplingSchedule {
+    try SamplingSchedule(sigmas:[1,0.99375,0.9875,0.98125,0.975,0.909375,0.725,0.421875,0],
+      eta:sampling == .deterministic ? 0 : 1)
+  }
+  static func ancestralNoise(seed:UInt64) -> MLXSamplingRunner.Noise {
+    var key=MLXRandom.key(seed &+ 10000)
+    return { _,_,shape in
+      let (next,draw)=MLXRandom.split(key:key);key=next
+      return MLXRandom.normal([1]+shape,key:draw).reshaped(shape)
+    }
+  }
   static func cfgppReserveBytes(geometry:AVGeometry) -> Int {
     (geometry.videoTokens*2+geometry.audioFrames)*128*4*8+1024*6144*4
   }
@@ -14,6 +25,11 @@ public final class MLXSingleStageRipple {
     sampling:MLXIngredientsSampling) -> Int {
     task == .ingredients && sampling == .ancestralCFGPP
       ? geometry.latentHeight*geometry.latentWidth : 0
+  }
+  static func guidedSchedule(geometry:AVGeometry,sampling:MLXGuidedSampling) throws -> SamplingSchedule {
+    // Shift by the canvas being generated. Frozen reference rows enlarge
+    // transformer admission, but do not enlarge the noisy target latent.
+    try sampling.schedule(videoTokens:geometry.videoTokens)
   }
   public struct Plan: Sendable {
     public let layout: MLXReferenceVideoLayout
@@ -28,8 +44,7 @@ public final class MLXSingleStageRipple {
       anchors: anchors)
     let configuration = try AVBlockConfiguration(videoTokens: layout.videoTokens,
       audioTokens: geometry.audioFrames, textTokens: 1024)
-    let schedule = try SamplingSchedule(
-      sigmas: [1, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0], eta: 0)
+    let schedule = try Self.schedule(sampling:.deterministic)
     let block = try MLXAVBlock(configuration: configuration,
       maximumActivationBytes: maximumActivationBytes)
     try block.admitPerTokenVideo()
@@ -62,7 +77,7 @@ public final class MLXSingleStageRipple {
     }
     guard ingredientsSampling == .deterministic ||
       (task == .ingredients && referenceStrength == 1) else {
-      throw LTXError.invalid("Authored CFG++ requires Ingredients with reference strength 1.")
+      throw LTXError.invalid("Authored ancestral sampling requires Ingredients with reference strength 1.")
     }
     let adapterURL = URL(fileURLWithPath: adapters[0].path)
       .resolvingSymlinksInPath().standardizedFileURL
@@ -132,7 +147,7 @@ public final class MLXSingleStageRipple {
       unconditional=["video_text":unconditionalVideoContext,"audio_text":unconditionalAudioContext]
     } else {
       guard unconditionalVideoContext == nil,unconditionalAudioContext == nil else {
-        throw LTXError.invalid("Deterministic sampling does not evaluate unconditional text contexts.")
+        throw LTXError.invalid("Positive-only reference sampling does not evaluate unconditional text contexts.")
       }
       unconditional=nil
     }
@@ -143,7 +158,7 @@ public final class MLXSingleStageRipple {
       let sampler=try MLXGuidedSamplingRunner(configuration:plan.configuration,sampling:guidedSampling,
         maximumActivationBytes:maximumActivationBytes+reserve,
         leadingKeyframeMarkerRows:geometry.latentHeight*geometry.latentWidth)
-      let sampled=try sampler.evaluate(inputs,schedule:guidedSampling.schedule(videoTokens:plan.configuration.videoTokens),
+      let sampled=try sampler.evaluate(inputs,schedule:Self.guidedSchedule(geometry:geometry,sampling:guidedSampling),
         negativeContexts:unconditional!,videoConditioning:prepared.condition,frozenAudio:false,
         fixedWeights:weights.readFixed,blockWeights:weights.readBlock,
         fixedAdapters:weights.fixedAdapters,blockAdapters:weights.blockAdapters,
@@ -154,16 +169,20 @@ public final class MLXSingleStageRipple {
     let sampler = try MLXSamplingRunner(configuration: plan.configuration,
       maximumActivationBytes: maximumActivationBytes,
       leadingKeyframeMarkerRows:Self.leadingMarkerRows(geometry:geometry,task:task,sampling:ingredientsSampling))
-    let schedule=try cfgpp ? SamplingSchedule(sigmas:plan.schedule.sigmas,eta:1) : plan.schedule
+    let schedule=try Self.schedule(sampling:ingredientsSampling)
+    let noise:MLXSamplingRunner.Noise?
+    if cfgpp {
+      noise={ index,name,shape in
+        let offset=UInt64(index*2+(name == "audio" ? 1 : 0))
+        return MLXNoisePolicy.seeded(seed &+ 10000 &+ offset,tokens:shape[0]).asType(.float32)
+      }
+    } else { noise=ingredientsSampling == .ancestral ? Self.ancestralNoise(seed:seed) : nil }
     let sampled = try sampler.evaluate(inputs, schedule: schedule,
       videoConditioning: prepared.condition, bfloat16State: cfgpp ? [] : ["video", "audio"],
       unconditionalContexts:unconditional,
       fixedWeights: weights.readFixed, blockWeights: weights.readBlock,
       fixedAdapters: weights.fixedAdapters, blockAdapters: weights.blockAdapters,
-      noise:cfgpp ? { index,name,shape in
-        let offset=UInt64(index*2+(name == "audio" ? 1 : 0))
-        return MLXNoisePolicy.seeded(seed &+ 10000 &+ offset,tokens:shape[0]).asType(.float32)
-      } : nil,
+      noise:noise,
       stageProgress: { evaluation, event in
         let branch=cfgpp && evaluation > 0 ? (evaluation%2 == 0 ? "unconditional:" : "conditional:") : ""
         try progress((task == .ripple ? "ripple:" : "ingredients:") + branch + event.stage, event.completedBlocks, 48)

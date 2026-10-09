@@ -125,7 +125,8 @@ Swift lower-memory profiles; FP32 remains the default. Its saved-latent test red
 by 11.1%, with small pixel differences and essentially unchanged peak allocation. It does not
 qualify whole-job speed or change the failed FP32 gates. A later complete packaged FastH3 VSA
 job at 672 × 384 passed requested/applied FP16, progress, live previews and staged release,
-with exact retained audio. Published video differs; visual acceptance remains separate. See
+with exact retained audio. Published video differs; the user approved that complete clip visually
+on October 8. This is a representative quality pass, not all-task qualification. See
 [current policies, limits and measurements](studio/README.md#swift-h3-performance-follow-up).
 
 Native clips expose **Model**, **Task**, sampling controls, render size and seed directly in the
@@ -494,8 +495,9 @@ Ordinary H3 retains its existing 1 MP/40,000-row admission. Density reduction is
 fidelity/compute trade, not a guarantee of preserved motion or likeness.
 
 The native migration's historical route/lifecycle acceptance does not certify every new feature.
-Matched performance, useful-size quality, Ingredients scene adherence and full clean-machine acquisition
-remain separate work. Native Diffusion VAE now has CPU/header/release checks, tiny numerical comparisons and an actual
+The four original H3 performance cases have retained passes. Broader settings, Ingredients scene
+adherence, physical smaller-Mac qualification and full clean-machine acquisition remain separate work.
+Native Diffusion VAE now has CPU/header/release checks, tiny numerical comparisons and an actual
 retained 1344×768, 89-frame decoder-only take with exact source PCM. A complete 768 × 448,
 49-frame Dev Euler/refinement job also passes the standard-layout Diffusion VAE path, previews,
 finite audio and staged release without Python. The experimental tiled Metal
@@ -644,10 +646,13 @@ components; temporal rounds preserve duration and cannot exceed 120 fps. A separ
 headless Ingredients route accepts a frozen static
 reference sheet, encodes one RGB still and repeats its normalized latent across at least 121 frames, then samples with the compatible
 rank-128 task adapter in one full-resolution stage. Saved Ingredients recipes retain their
-eight-evaluation deterministic sampler. An explicit experimental Ingredients recipe option,
-`single_stage_sampler: "euler_ancestral_cfg_pp"`, selects eight updates and sixteen serial
+eight-evaluation deterministic sampler. Studio's **Full-resolution single-stage sampling**
+control now offers explicit **Euler ancestral**: eight conditional evaluations, eta 1 and no
+refinement or upscaler. It exports `single_stage_sampler: "euler_ancestral"` as a version-18
+request with BF16 state, Float32 stepping and a split-key seed-plus-10000 noise policy.
+The existing explicit `euler_ancestral_cfg_pp` choice retains sixteen serial
 conditional/unconditional evaluations with Float32 sampler state and BF16 model inputs.
-It marks the first generated latent frame without marking the reference guide or audio.
+CFG++ marks the first generated latent frame without marking the reference guide or audio.
 It requires full-strength sheet conditioning; its native seeded noise does not claim ComfyUI
 pixel parity. Mathematical and contract tests pass; visual qualification remains separate.
 Two controlled five-second tests, including a balanced black reference board and the
@@ -744,8 +749,9 @@ completed 73 frames with stereo audio in 841.25 seconds at an 8.10 GB peak proce
 footprint; its sampled frames were stable, while speech and lip-sync quality need review.
 These differently conditioned takes are not a matched performance comparison. Swift H3 is
 selected by default in Runtime Settings; turn **Use Swift MLX for H3 (default)** off only
-to select the legacy Python backend explicitly. Corrected Ref2VA output, broad audiovisual
-quality and matched useful-size performance still require fresh qualification. A 768 × 768, five-second,
+to select the legacy Python backend explicitly. The following early H3 measurements are historical;
+use the current qualification near the top of this guide for later results. At that checkpoint,
+corrected Ref2VA output, broad audiovisual quality and matched useful-size performance still required qualification. A 768 × 768, five-second,
 one-evaluation text-only wiring run completed in 407.7 seconds,
 with 124 decoded video frames, stereo audio within 8.3 ms of video duration, 6.98 GB peak MLX
 allocation and 7.99 GB peak worker footprint (FFmpeg excluded). Its dark output is not a
@@ -755,7 +761,7 @@ without making a merged checkpoint copy. A 768 × 768, five-second, four-evaluat
 completed in 878.77 seconds with 7.84 GB peak MLX allocation and 9.18 GB peak worker footprint
 (FFmpeg excluded). The five reviewed frames show a coherent boxer and punch, but no reference
 image was supplied, so character identity and full perceptual quality remain unqualified. This
-is an integration test path, not a qualified user-facing engine. A separate two-image Ref2VA
+was an integration test path at that checkpoint; later user-facing qualifications are summarized above. A separate two-image Ref2VA
 boxing take at 768 × 448 and four evaluations completed in 881.38 seconds. It produced 124
 video frames and stereo audio with an 8.3 ms endpoint difference. Peak worker footprint was
 5.72 GB and peak MLX allocation 4.96 GB, excluding FFmpeg; the Mac used no swap. The inspected
@@ -764,8 +770,8 @@ frames show coherent motion. A separate one-image Beowulf take through the packa
 Its peak worker footprint was 5.61 GB and peak MLX allocation 4.90 GB, with no system swap;
 the inspected frames show coherent boxing. Both historical takes used vertically inverted
 still-reference pixels and do not qualify identity or likeness. Broader H3 video/audio-reference
-quality, general LoRA stacks and the remaining LTX 2.5 tasks still need native route coverage
-before the H3/LTX Python inference paths can be retired.
+quality, general LoRA stacks and the remaining LTX 2.5 tasks still needed native route coverage
+at that checkpoint. Later native route and feature qualifications are recorded in STATUS.
 A five-second 768 × 448 H3 T2VA Turbo recipe later completed in both headless and saved
 recipe-backed ComfyUI Swift routes with byte-identical video and audio, synchronized endpoints,
 decoded previews, and the same 4.82 GB peak MLX allocation. The ordered still-reference route
@@ -774,7 +780,7 @@ job completed and a separate two-image installed-app
 take delivered seven previews and passed acceptance, project save and reopen with Python
 unavailable. Those visual observations also predate the still-reference orientation fix; they
 verify route execution and lifecycle, not identity quality. H3's worker still reports
-experimental production status; reference quality and general adapter support remain open.
+experimental production status. These early takes did not establish broad reference quality or general adapter support.
 A later recipe-backed ComfyUI T2VA run used the installed FL2VA checkpoint in text-only mode
 with the four-evaluation Turbo LoRA. Its five-second, 768 × 448 robot shot completed in
 579.94 seconds at a 5.23 GB peak Swift process footprint, with coherent arm motion and stereo
@@ -1871,11 +1877,24 @@ The sixteen-prediction CFG++ take took 431.07 observer seconds and peaked at 5.2
 These are qualification observations, not a matched engine-speed benchmark. The official 2.5
 default two-character take received human audiovisual approval on 2026-10-04. This resolves that
 sample review, not general framing/lighting accuracy or Dev-base recipe parity.
-An explicitly selected `config.single_stage_sampler: "euler_ancestral_cfg_pp"` compiles to
-version 11: eight updates, sixteen serial predictions, Float32 sampler state and BF16 model
-inputs. It requires reference strength 1 and retains a separate native seeded-noise policy.
-The setup preset and saved version-6 recipes keep their original deterministic sampler.
-This option passes contract/numerical tests; it is not a quality-qualified default.
+In Studio, open **Full-resolution single-stage sampling**, enable its override and experimental
+execution, then select **Euler ancestral** or **Euler ancestral CFG++**. Ingredients accepts one
+described sheet at strength 1, at least 121 frames, and its existing 64-pixel canvas grid.
+Negative prompts, timed images, generated slots and partial CFG++ schedules are rejected.
+`config.single_stage_sampler: "euler_ancestral"` compiles to version 18: eight conditional
+predictions, eta 1, BF16 state with Float32 stepping, and no refinement/upscaler. Its canonical
+recipe uses `stage1_steps: 8`, `stage2_steps: 0` and `stage1_sampler: "euler_ancestral"`.
+The existing `euler_ancestral_cfg_pp` selector still compiles to version 11: eight updates,
+sixteen serial predictions and fixed empty unconditional text conditioning. Its historical
+input recipe signature is preserved; its effective plan has no refinement. The setup preset
+and saved version-6 recipes keep their original deterministic sampler. Export/reopen retains
+the selected policy; none of these changes alters the human-approved official 2.5 default.
+A complete 768 × 448/121-frame ancestral job published synchronized media, a decoded preview,
+progress and ordered stage release without Python inference. Nine sampled frames retain two
+distinct aliens in a diner, with changing mug/espresso actions and no animated reference board.
+Owner motion/dialogue review is pending. Its 235.58-second launch-to-exit observation and
+3.83/5.10 GiB MLX/worker physical peaks exclude FFmpeg; background work was active, so these
+are not isolated performance results or Torch/ComfyUI pixel-parity evidence.
 A controlled 121-frame render completed all sixteen predictions and lifecycle checks, but
 retained the reference-board composition instead of the requested scene; scene quality failed.
 A saved recipe-backed ComfyUI graph produced the same movie bytes as Studio. The final
@@ -1889,7 +1908,16 @@ omits distilled refinement. This is a 2.5 Dev compatibility test of the older 2.
 not the publisher's original 2.3 base recipe. It is not selectable in Studio or a new default;
 unsupported mixtures fail before weights load. The 121-frame test completed 90 serial forwards
 and removed the board collage, but omitted the second character. Scene adherence failed, so the
-older adapter/base mix remains unqualified. Existing composable nodes retain their Python sampler.
+this Dev adapter/base mix remains unqualified. Existing composable nodes retain their Python sampler.
+Dev Ingredients now derives adaptive sigmas from the generated target grid; frozen guides still
+count toward transformer admission and attention. Its version-17 path also preserves Float32
+sigmas through timestep embedding and clean-prediction conversion, and follows the publisher's
+Float32/BF16 Euler rounding boundaries. Ordinary guided defaults, explicit sigma overrides and
+fixed eight-update recipes are unchanged. The retained schedule-corrected run produced one woman
+instead of the two requested men and remains failed. The later precision corrections have not
+been rerendered on that case; numerical witnesses do not qualify Dev scene quality. The separate
+restored eight-evaluation distilled ancestral route is selectable in Studio; this optional Dev
+compatibility experiment remains developer-only and does not replace the accepted 2.5 default.
 
 Use **LTX 2.5 IC-LoRA Control Guide** for Canny edges, depth maps, pose skeletons, Motion Track, or
 another preprocessed control video. Connect the IMAGE batch from the matching preprocessor.

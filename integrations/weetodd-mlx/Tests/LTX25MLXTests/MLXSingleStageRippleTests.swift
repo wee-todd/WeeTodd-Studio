@@ -4,6 +4,37 @@ import AdapterRuntime
 @testable import LTX25MLX
 
 final class MLXSingleStageRippleTests: XCTestCase {
+  func testDevIngredientsSchedulesGeneratedCanvasAndAdmitsFrozenReferenceRows() throws {
+    let fixtureURL=try XCTUnwrap(Bundle.module.url(forResource:"ingredients-target-schedule",
+      withExtension:"json",subdirectory:"Fixtures"))
+    let fixture=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:fixtureURL)) as? [String:Any])
+    let expected=try XCTUnwrap(fixture["expected"] as? [NSNumber]).map(\.doubleValue)
+    let geometry=try AVGeometry(width:768,height:448,frames:121,fps:24)
+    let sampling=try MLXGuidedSampling(mode:.guided,steps:30,videoCFG:4,audioCFG:4,
+      stg:1,videoRescale:0,audioRescale:0,modality:1,stgBlocks:[29],
+      distilledAdapterPath:"",singleStage:true,stgAudio:false)
+    let plan=try MLXSingleStageRipple.plan(geometry:geometry,strength:1,
+      maximumActivationBytes:32*1024*1024*1024)
+    XCTAssertEqual(geometry.videoTokens,5376)
+    XCTAssertEqual(plan.configuration.videoTokens,10752)
+    XCTAssertEqual(plan.layout.videoTokens,10752)
+    let actual=try MLXSingleStageRipple.guidedSchedule(geometry:geometry,sampling:sampling)
+    XCTAssertEqual(actual.sigmas.count,expected.count)
+    for (index,pair) in zip(actual.sigmas,expected).enumerated() {
+      XCTAssertEqual(pair.0,pair.1,accuracy:1e-12,"target-grid sigma \(index)")
+    }
+    XCTAssertEqual(actual.eta,0)
+  }
+
+  func testDevIngredientsPreservesExplicitSigmaOverride() throws {
+    let geometry=try AVGeometry(width:768,height:448,frames:121,fps:24)
+    let sampling=try MLXGuidedSampling(mode:.guided,steps:2,videoCFG:4,audioCFG:4,
+      stg:1,videoRescale:0,audioRescale:0,modality:1,stgBlocks:[29],sigmas:[1,0.4,0],
+      distilledAdapterPath:"",singleStage:true,stgAudio:false)
+    XCTAssertEqual(try MLXSingleStageRipple.guidedSchedule(geometry:geometry,sampling:sampling).sigmas,
+      [1,0.4,0])
+  }
+
   func testRippleUsesEightDeterministicStepsAndAdmitsAppendedGuide() throws {
     let geometry = try AVGeometry(width: 64, height: 64, frames: 9, fps: 24)
     let plan = try MLXSingleStageRipple.plan(geometry: geometry, strength: 1,

@@ -110,8 +110,10 @@ public struct MLXDistilledRequest:Codable,Sendable {
     dfr=version < 8 ? nil : try c.decodeIfPresent(MLXDFRRequest.self,forKey:.dfr)
     icControl=version < 10 ? nil : try c.decodeIfPresent(MLXICControl.self,forKey:.icControl)
     ingredientsSampling=version < 11 ? .deterministic : try c.decode(MLXIngredientsSampling.self,forKey:.ingredientsSampling)
-    guard version == 11 || ingredientsSampling == .deterministic else {
-      throw LTXError.invalid("The authored Ingredients sampler requires its dedicated version 11 request.")
+    guard (version == 11 && ingredientsSampling == .ancestralCFGPP) ||
+      (version == 18 && ingredientsSampling == .ancestral) ||
+      (version != 11 && version != 18 && ingredientsSampling == .deterministic) else {
+      throw LTXError.invalid("The authored Ingredients sampler requires its dedicated version 11 CFG++ or version 18 ancestral request.")
     }
     guidedSampling=version < 12 ? nil : try c.decodeIfPresent(MLXGuidedSampling.self,forKey:.guidedSampling)
     automaticDuration=version < 13 ? nil : try c.decodeIfPresent(MLXAutomaticDurationPolicy.self,forKey:.automaticDuration)
@@ -153,12 +155,13 @@ public struct MLXDistilledRequest:Codable,Sendable {
         noisePolicy == .releasedMLX) ||
       (version == 5 && task == "union_control" && roles.isEmpty &&
         audioReference == nil && unionControlGuide != nil) ||
-      ((version == 6 || version == 11) && task == "ingredients" && roles.isEmpty &&
+      ((version == 6 || version == 11 || version == 18) && task == "ingredients" && roles.isEmpty &&
         audioReference == nil && unionControlGuide == nil && ingredientsSheet != nil &&
         frames >= 121 && stageOneLoras.isEmpty && stageTwoLoras.isEmpty &&
         noisePolicy == .releasedMLX && (version == 6 ||
-          (ingredientsSampling == .ancestralCFGPP && ingredientsSheet?.referenceStrength == 1 &&
-            msr == nil && dfr == nil && icControl == nil))) ||
+          (ingredientsSampling == (version == 11 ? .ancestralCFGPP : .ancestral) &&
+            ingredientsSheet?.referenceStrength == 1 && msr == nil && dfr == nil && icControl == nil &&
+            guidedSampling == nil && automaticDuration == nil && generatedKeyframes == nil && singleStageSampling == nil))) ||
       ((version == 7 || version == 16) && task == "msr" && roles.isEmpty && audioReference == nil &&
         unionControlGuide == nil && ingredientsSheet == nil && msr != nil &&
         stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX &&
@@ -187,7 +190,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
         !(stageOneLoras+stageTwoLoras).contains(where: { $0.path == guidedSampling.distilledAdapterPath }) else {
         throw LTXError.invalid("The Dev refinement adapter must appear only in its dedicated stage-two slot.")
       }
-      _ = try guidedSampling.schedule(videoTokens:guidedIngredients ? recipe().high.videoTokens*2 : recipe().low.videoTokens)
+      _ = try guidedSampling.schedule(videoTokens:guidedIngredients ? recipe().high.videoTokens : recipe().low.videoTokens)
     }
     if let automaticDuration {
       _ = try automaticDuration.maximumFrames(fps:fps)
@@ -226,7 +229,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     }
     guard singleStageSampling?.method != .cfgpp || audioReference == nil else { throw LTXError.invalid("Single-stage CFG++ cannot freeze source audio.") }
     var requiredPaths=[gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,outputDirectory]
-    if !spatialUpscalerCheckpoint.isEmpty || ![6,7,11,15,16,17].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
+    if !spatialUpscalerCheckpoint.isEmpty || ![6,7,11,15,16,17,18].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
     for path in requiredPaths {
       guard path.hasPrefix("/"), path.utf8.count <= 4096, !path.utf8.contains(0) else {
         throw LTXError.invalid("Model and output paths must be explicit absolute local paths.")
@@ -294,10 +297,11 @@ public struct MLXDistilledRequest:Codable,Sendable {
   }
 }
 
-/// Version 6 preserves the original deterministic recipe. Version 11 opts into
-/// the authored CFG++ recipe with Float32 sampler state and BF16 model inputs.
+/// Version 6 preserves deterministic sampling; version 11 retains Float32 CFG++.
+/// Version 18 explicitly selects positive-only ancestral sampling with BF16 state.
 public enum MLXIngredientsSampling:String,Codable,Sendable {
   case deterministic = "deterministic_bf16_v1"
+  case ancestral = "euler_ancestral_bf16_v1"
   case ancestralCFGPP = "euler_ancestral_cfg_pp_float32_v1"
   public var transformerEvaluations:Int { self == .ancestralCFGPP ? 16 : 8 }
 }

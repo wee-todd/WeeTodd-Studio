@@ -752,7 +752,7 @@ public final class MLXMediaPipeline {
         additionalFrames:publishedFrames,fps:g.fps,decodedSamples:admission.audioSamples).count
     }
     var metadata:[String:Any]=["status":"complete","scope":"developer Swift MLX distilled audiovisual generation",
-      "recipe":request.singleStageSampling == nil ? request.dfr.map { $0.temporalRounds > 0 ? "ltx25-dfr-spatiotemporal-distilled-v1" : "ltx25-dfr-spatial-distilled-v1" } ?? (request.msr != nil ? "ltx25-msr-single-stage-v1" : request.ingredientsSheet == nil ? DistilledTwoStageRecipe.identifier : request.ingredientsSampling == .ancestralCFGPP ? "ltx25-ingredients-ancestral-cfgpp-v1" : "ltx25-ingredients-single-stage-v1") : "ltx25-ordinary-single-stage-v1",
+      "recipe":request.singleStageSampling == nil ? request.dfr.map { $0.temporalRounds > 0 ? "ltx25-dfr-spatiotemporal-distilled-v1" : "ltx25-dfr-spatial-distilled-v1" } ?? (request.msr != nil ? "ltx25-msr-single-stage-v1" : request.ingredientsSheet == nil ? DistilledTwoStageRecipe.identifier : request.ingredientsSampling == .ancestralCFGPP ? "ltx25-ingredients-ancestral-cfgpp-v1" : request.ingredientsSampling == .ancestral ? "ltx25-ingredients-ancestral-v1" : "ltx25-ingredients-single-stage-v1") : "ltx25-ordinary-single-stage-v1",
       "noise_algorithm":request.noisePolicy.algorithm,"seed":request.seed,
       "text_token_ids":ids,"width":outputG.width,"height":outputG.height,"frames":publishedFrames,"fps":outputG.fps,
       "video_seconds":Double(publishedFrames)/outputG.fps,
@@ -809,6 +809,13 @@ public final class MLXMediaPipeline {
       metadata["stage1_model_evaluations"]=evaluations
       metadata["stage1_updates"]=guided.steps+(guided.mode == .guided ? 0 : 1)
       metadata["stage2_model_evaluations"]=guided.singleStage ? 0 : 3
+      if guided.singleStage {
+        metadata["schedule_target_video_tokens"]=g.videoTokens
+        metadata["schedule_sigmas"]=try MLXSingleStageRipple.guidedSchedule(geometry:g,sampling:guided).sigmas
+        metadata["guided_timestep_policy"]="float32_phase_bf16_features_v1"
+        metadata["guided_prediction_time_policy"]="float32_audio_sigma_and_video_token_times_v1"
+        metadata["guided_euler_policy"]="float32_intermediates_bf16_velocity_and_state_v1"
+      }
     }
     if let source=publicationSource {
       metadata["audio_samples"]=source.publicationSamples
@@ -851,6 +858,13 @@ public final class MLXMediaPipeline {
         metadata["sampler_state_precision"]="float32_sampler_bf16_model_v1"
         metadata["ancestral_noise_policy"]="mlx_threefry_bf16_step_modality_seed_plus_10000_v1"
         metadata["unconditional_prompt"]=""
+      } else if request.ingredientsSampling == .ancestral {
+        metadata["sampler_state_precision"]="bf16_state_float32_step_v1"
+        metadata["ancestral_noise_policy"]="mlx_threefry_split_key_seed_plus_10000_v1"
+        metadata["ancestral_eta"]=1
+        metadata["ancestral_s_noise"]=1
+        metadata["ancestral_seed_offset"]=10000
+        metadata["unconditional_model_evaluations"]=0
       }
     } else if let msr=request.msr {
       metadata["reference_count"]=msr.references.count
