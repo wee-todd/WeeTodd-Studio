@@ -1892,7 +1892,8 @@ the selected policy; none of these changes alters the human-approved official 2.
 A complete 768 × 448/121-frame ancestral job published synchronized media, a decoded preview,
 progress and ordered stage release without Python inference. Nine sampled frames retain two
 distinct aliens in a diner, with changing mug/espresso actions and no animated reference board.
-Owner motion/dialogue review is pending. Its 235.58-second launch-to-exit observation and
+The owner approved this clip on October 9, closing the final migration acceptance item.
+Its 235.58-second launch-to-exit observation and
 3.83/5.10 GiB MLX/worker physical peaks exclude FFmpeg; background work was active, so these
 are not isolated performance results or Torch/ComfyUI pixel-parity evidence.
 A controlled 121-frame render completed all sixteen predictions and lifecycle checks, but
@@ -1907,7 +1908,7 @@ full-length repeated RGB-sheet encoding. It reuses the shared serial guidance ru
 omits distilled refinement. This is a 2.5 Dev compatibility test of the older 2.3 adapter,
 not the publisher's original 2.3 base recipe. It is not selectable in Studio or a new default;
 unsupported mixtures fail before weights load. The 121-frame test completed 90 serial forwards
-and removed the board collage, but omitted the second character. Scene adherence failed, so the
+and removed the board collage, but omitted the second character. Scene adherence failed, so
 this Dev adapter/base mix remains unqualified. Existing composable nodes retain their Python sampler.
 Dev Ingredients now derives adaptive sigmas from the generated target grid; frozen guides still
 count toward transformer admission and attention. Its version-17 path also preserves Float32

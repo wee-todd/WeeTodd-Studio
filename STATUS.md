@@ -1,5 +1,15 @@
 # WeeTodd Studio implementation status
 
+## October 9 H3 and LTX 2.5 Swift migration acceptance
+
+The owner approved the restored ancestral Ingredients clip on October 9. The fixed migration
+checklist is now 7/7 closed (100% by acceptance-item count); this approval closes its final 1/1
+remaining item. Required H3 and LTX 2.5 paths are integrated within the documented qualification
+scopes. No additional required unported task was found in the feature audit. Other Python
+components are outside this migration. Failed optional Dev Ingredients experiments retain their
+failed or unqualified status. This closure does not claim every prompt/parameter combination,
+all-package cold installation, physical smaller-Mac performance or Torch/ComfyUI pixel parity.
+
 ## October 8 native LTX controls and guided composition
 
 Studio now persists native DFR mode/strength overrides: inherit profile, off, spatial, and one
@@ -36,10 +46,9 @@ establish a compiler-flag inference speedup.
 The retained checklist closes native DFR editor controls, representative guided/image/generated-slot
 composition, remaining representative schedule/decoder execution and the acquisition/memory-policy
 audit within their stated scopes. The user approved the retained complete H3 FP16 VSA clip on October 8.
-The fixed seven-item checklist still has six closed items (85.7% by item count); owner review of
-the restored older-adapter Ingredients composition is the only open item. The new ancestral
-sample passes agent sampled composition review and technical checks; owner motion/dialogue
-acceptance is pending. This count does not estimate remaining effort.
+The subsequent October 9 owner approval of the restored ancestral Ingredients clip closes
+the final item. The fixed checklist is now 7/7 closed (100% by acceptance-item count).
+This count does not estimate engineering effort or qualification of optional Dev experiments.
 The acquisition audit includes an actual pinned HTTPS transfer with
 checksum verification and 24-package setup coverage; it does not claim first installation of every
 large package. Lower-RAM simulation admits the same 512 × 256/49-frame LTX recipe on
@@ -86,7 +95,7 @@ Studio Swift 1,004 with 50 skips. All suites reported zero failures. Installed-c
 other optional qualification tests retain their explicit opt-in skips; the six actual Swift
 generation checks above are separate evidence. The separate final app opens the isolated
 project, retains its controls and take statistics, and plays the accepted take to its endpoint.
-These checks do not close the older Ingredients composition failure. The user’s subsequent October 8
+Those October 8 checks did not close the older Ingredients composition failure. The user’s subsequent October 8
 visual approval closes the retained complete FP16 VSA review separately.
 
 ## October 9 Ingredients schedule correction
@@ -150,9 +159,9 @@ seconds; peak active MLX was 4116960076 bytes and worker physical peak 547125799
 FFmpeg. User background work was active, so this is not an isolated performance comparison.
 Nine sampled frames retain two distinct aliens throughout the diner scene with changing
 mug/espresso actions and no animated reference board. Agent sampled composition review passes;
-owner motion/dialogue review is pending. This restores a missing supported distilled sampling
-feature, separately from the optional Dev experiment. The fixed checklist remains 6/7 by item
-count pending owner acceptance; no Torch/ComfyUI pixel parity or all-composition quality is claimed.
+the owner approved the clip on October 9. This restores a missing supported distilled sampling
+feature, separately from the optional Dev experiment. The fixed checklist is now 7/7 closed by
+acceptance-item count; no Torch/ComfyUI pixel parity or all-composition quality is claimed.
 
 Typed Studio preparation produces the same ancestral recipe contents as the completed worker
 job. Native export/reopen, one actual frozen-worker preflight, retained receipt adoption and
@@ -530,7 +539,7 @@ Studio/CLI/saved-Comfy route/lifecycle evidence remain distinct from new creativ
 At that October 4 checkpoint the original 31-item migration ledger had 29 completed checks;
 matched performance and broad quality remained open. Its fixed denominator does not absorb the
 separate 22-item remaining-feature
-inventory or turn CPU/header admission into completed generation. Full migration is not complete.
+inventory or turn CPU/header admission into completed generation. Migration was incomplete at that checkpoint.
 A final-app isolated clean-registry reuse check passed in 8.177 seconds: the then-current 23 catalog contracts,
 eight setup/header cases, completed Dev-directory adoption, Turbo import and Diffusion VAE
 component adoption. Python/runtime were intentionally unavailable; no network, inference,
@@ -1049,8 +1058,10 @@ cancel retention and atomic no-overwrite publication. Focused fixture and real p
 HTTPS tests pass. At this checkpoint, H3 acquisition and external-extension Studio routing
 were incomplete; later catalog and extension entries record their implementations. All
 mandatory components for supported native tasks now have pinned Swift-ready sources.
-Image/A2V saved motion context, lifecycle breadth, matched performance and AV quality remain
-open; clean-machine acquisition and full migration qualification have not been established.
+At that checkpoint, Image/A2V saved motion context, lifecycle breadth, matched performance and
+AV quality remained open. Full migration qualification had not been established. The October 9
+acceptance entry records current closure; all-package clean-machine acquisition remains outside
+that qualification.
 
 Swift LTX 2.5 Studio references 2026-10-02 (experimental): MSR and Ingredients
 now compile Studio's described still-image contract to the existing single-stage

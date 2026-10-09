@@ -57,8 +57,8 @@ its fixed empty unconditional text and historical version-11 input signature. Ex
 recipes keep eight evaluations, and the approved official 2.5 setup default is unchanged.
 Both explicit choices require one full-strength described sheet; negative prompts, timed images,
 generated slots and partial CFG++ schedules fail admission. The new ancestral job completed
-media/lifecycle checks and sampled two-character diner composition; owner motion/dialogue review
-is pending. Export does not establish universal likeness, scene quality or Torch/ComfyUI pixel parity.
+media/lifecycle checks and sampled two-character diner composition; the owner approved the clip
+on October 9. Export does not establish universal likeness, scene quality or Torch/ComfyUI pixel parity.
 A developer-only version-17 Ingredients request separately tests an unmerged 2.5 Dev base
 with the older 2.3 adapter, repeated RGB reference encoding and serial CFG/video-only STG.
 It has no refinement pass and is not selectable in Studio; it is not the accepted 2.5 default.
@@ -102,8 +102,8 @@ checks. The conditioning/decoder qualification worker has now passed FFLF, singl
 Ref2VA, soundtrack Ref2VA, independent A2V, external-after, movie Ref2VA and Fun through
 Studio, native CLI and saved uncached ComfyUI execution, including cancellation recovery
 and accepted-take reopening. Standalone audio Ref2VA also passed all three hosts and
-cancellation recovery; remaining range/finishing checks are still pending. These route
-checks do not approve the prior continuation seam
+cancellation recovery. At that route checkpoint, range/finishing checks remained pending.
+These dated route checks did not approve the prior continuation seam
 or Fun visual quality. A later corrected 107-frame continuation has now removed the old
 gray-border contamination while retaining the robot/table; seam texture and audio still
 require separate review.

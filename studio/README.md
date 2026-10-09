@@ -23,7 +23,7 @@ feature in the current app.
 | LTX automatic duration | Explicit opt-in for ordinary T2V/I2V/FFLF; duration head resolves the `8k+1` grid before sampling, with 0.25–30-second bounds | Pinned head and CPU tests; actual 57-frame combined take completed |
 | LTX ordinary keyframes | Up to eight distinct timed images and 0–8 generated slots; arbitrary integer frames are allowed; first-frame input replaces the main opening plane | CPU/header tests and the combined take; ordinary slots are stage-one-only |
 | LTX full-resolution single stage | Eight updates; Euler/ancestral use eight forwards and CFG++ full/balanced/speed use 15/12/10 forwards; no spatial upscaler or second stage | CPU math/header checks; actual Euler, ancestral, CFG++ full/balanced/speed takes with first/last images and generated slots; one balanced Union composition; other guide combinations retain contract/preparation coverage |
-| LTX Ingredients sampling | Inherit the saved deterministic recipe, or explicitly select eight-forward ancestral / sixteen-forward CFG++; explicit choices require one full-strength described sheet, no refinement/upscaler, no timed/generated slots or clip negative prompt | New ancestral job completed 121 frames with stereo audio, preview and ordered release; sampled two-character composition passes agent review, owner motion/dialogue review pending; official 2.5 default unchanged |
+| LTX Ingredients sampling | Inherit the saved deterministic recipe, or explicitly select eight-forward ancestral / sixteen-forward CFG++; explicit choices require one full-strength described sheet, no refinement/upscaler, no timed/generated slots or clip negative prompt | New ancestral job completed 121 frames with stereo audio, preview and ordered release; sampled two-character composition passes agent review; owner approved the clip October 9; official 2.5 default unchanged |
 | LTX scene anchors | Experimental scene v2: at most 32 global first/interior/last anchors and 256 MiB encoded references; two to six shots, at most 30 seconds | CPU routing/budget checks and actual two-window/five-anchor/source-PCM Studio take, previews, acceptance and save/reopen; retained clip human-approved October 5; broader configurations remain unqualified |
 | LTX movie upscale | Experimental learned 2× only, learned 2× + refine, or Pixel-Spatial 2× + refine; exact source frame count/rate with explicit source/sidecar/silent audio | CPU source/movie/acceptance tests plus actual learned 2×/three-evaluation refinement/source interval with exact sidecar PCM; actual StudioCore export/native CLI acceptance, zero-generation resume and Store.load reopen passed |
 | LTX one-step Diffusion VAE | Explicit experimental complete-component decoder selection; Conv remains the default, with strict workspace and checkpoint admission | CPU/header/release checks, tiny numerical comparisons, retained 1344 × 768/89-frame decode and complete 768 × 448/49-frame Dev Euler/refinement job; no Conv pixel-parity or isolated performance claim |
@@ -155,7 +155,7 @@ Ingredients has separate explicit sampler controls: version-18 ancestral uses ei
 forwards with no refinement; the existing version-11 CFG++ uses sixteen, not the ordinary
 15/12/10 schedules. Inherited deterministic recipes and the approved official 2.5 default are
 unchanged. The new ancestral job passes media/lifecycle checks and sampled two-character diner
-composition; owner motion/dialogue review is pending. Earlier CFG++ reference-board failures
+composition; the owner approved the clip on October 9. Earlier CFG++ reference-board failures
 remain failures and do not qualify that separate sampler. A developer-only version-17
 request tests the older 2.3 adapter with an unmerged 2.5 Dev base, 30 Euler updates, CFG 4,
 video-only STG at block 29/scale 1, strength 1.4 and full-length repeated RGB-sheet encoding.
@@ -1649,7 +1649,7 @@ within its runtime policy; it does not establish Torch/ComfyUI pixel parity.
 The new ancestral job completed 768 × 448/121-frame audiovisual generation without Python,
 including one decoded preview, progress and ordered release. Nine sampled frames retain two
 distinct aliens in a diner with changing mug/espresso actions and no animated reference board;
-owner motion/dialogue review is pending. Observed launch-to-exit was 235.58 seconds, MLX peak
+the owner approved this clip on October 9. Observed launch-to-exit was 235.58 seconds, MLX peak
 3.83 GiB and worker physical peak 5.10 GiB, excluding FFmpeg. User background work was active,
 so these are functional observations, not an isolated performance comparison or a new default.
 Ordinary LoRAs, DFR and audio drivers cannot be combined with these single-adapter profiles.
