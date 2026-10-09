@@ -183,7 +183,7 @@ def _execute(request, target, analyze_only=False):
     from wee_todd_nodes.sampling import TRANSFORMER_RUNTIME, H3Latents, H3TransformerSpec
 
     components = H3ComponentSetSpec(**dict(recipe["components"], preview_override=None))
-    config = H3GenerationConfig(**recipe["config"])
+    config = H3GenerationConfig.from_recipe_fields(recipe["config"])
     loras = motion_lora_stack(recipe)
     video_spec = H3VideoVAESpec.from_components(components)
     audio_spec = H3AudioVAESpec.from_components(components)

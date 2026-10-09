@@ -42,6 +42,8 @@ extension Clip {
   }
 
   private mutating func synchronizeEndpointTask() {
+    // An inherited control recipe can accept anchors without changing its task or sampling settings.
+    guard generationSelection != nil || !attachments.contains(where: { $0.role == .control }) else { return }
     guard generationSelection == nil || ["t2v", "i2v", "fflf"].contains(generationSelection!.task) else { return }
     let task = attachments.contains { $0.role == .last } ? "fflf"
       : attachments.contains { $0.role == .keyframe } ? "fflf"

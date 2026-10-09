@@ -48,6 +48,7 @@ public enum H3FL2VAContinuationRunner {
     }
     let text = try H3FL2VARunner.encodeText(request, admission: admission.ordinary, progress: progress)
     let keyframes = try H3FL2VARunner.encodeKeyframes(request, admission: admission.ordinary, progress: progress)
+    var backendReport: H3BackendReport?
     let raw = try autoreleasepool { () throws -> ([Float], [Float]) in
       let state = try H3ReferenceDiTState(checkpointURL: base.transformer,
         layout: admission.layout,
@@ -87,6 +88,7 @@ public enum H3FL2VAContinuationRunner {
       guard videoRows.allSatisfy(\.isFinite), audioRows.allSatisfy(\.isFinite) else {
         throw H3CheckpointError.invalid("FL2VA continuation sampled nonfinite AV latents.")
       }
+      backendReport = state.backendReport
       return (videoRows, audioRows)
     }
     Stream.gpu.synchronize()
@@ -97,6 +99,8 @@ public enum H3FL2VAContinuationRunner {
     return try H3AVOutputDecoder.decode(videoRows: raw.0, audioRows: raw.1,
       geometry: base.geometry, videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       videoDecodeMemoryMode: base.videoDecodeMemoryMode,
+      videoDecodePrecision: base.videoDecodePrecision,
+      backendReport: backendReport,
       onFrame: onFrame, onAudio: onAudio, progress: progress)
   }
 }

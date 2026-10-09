@@ -15,7 +15,7 @@ public enum MLXStudioRecipe {
     return try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONSerialization.data(
       withJSONObject:compileFields(data:data,outputDirectory:outputDirectory)))
   }
-  static func compileFields(data:Data,outputDirectory:String,requiresSpatialUpscaler:Bool=true) throws -> [String:Any] {
+  static func compileFields(data:Data,outputDirectory:String,requiresSpatialUpscaler:Bool=true,singleStageGuided:Bool=false) throws -> [String:Any] {
     guard data.count <= 1024*1024,
       let root=try JSONSerialization.jsonObject(with:data) as? [String:Any] else {
       throw LTXError.invalid("Studio recipe must be a JSON object of at most 1 MiB.")
@@ -72,6 +72,10 @@ public enum MLXStudioRecipe {
     }
     if guidedMode != nil {
       guard !dfrEnabled else { throw reject("guided DFR") }
+      if singleStageGuided {
+        guard guidedMode == .guided, !singleStage, durationMode == "manual", config["stg_mode"] as? String == "video" else { throw reject("single-stage Dev Ingredients") }
+        fixed.removeValue(forKey:"stage2_steps")
+      }
       for key in ["pipeline_mode","stage1_steps","stage1_sampler","video_cfg_scale","audio_cfg_scale",
         "stg_scale","video_rescale_scale","audio_rescale_scale","modality_scale","stg_blocks"] {
         fixed.removeValue(forKey:key)
@@ -86,7 +90,7 @@ public enum MLXStudioRecipe {
       "stg_scale","video_rescale_scale","audio_rescale_scale","modality_scale","stg_blocks",
       "duration_mode","auto_duration_min_seconds","auto_duration_max_seconds","generated_keyframes",
       "dfr_enabled","dfr_detailing_lora_path","dfr_detailing_lora_strength","dfr_temporal_upsampler_path","dfr_temporal_rounds",
-      "ic_lora_single_stage","cfg_pp_schedule","stage2_steps","stage1_eta"]),"config")
+      "ic_lora_single_stage","cfg_pp_schedule","stage2_steps","stage1_eta"]).union(singleStageGuided ? ["stg_mode"] : []),"config")
     for (key,expected) in fixed where config[key] != nil {
       let actual=config[key]!
       // JSON equality must distinguish booleans from 0/1.
@@ -145,7 +149,7 @@ public enum MLXStudioRecipe {
     if let mode=guidedMode {
       let steps=try integer(config,"stage1_steps",1...64)
       guard (config["stage1_sampler"] as? String) == (mode == .guided ? "euler_guided":"res_2s_guided"),
-        try integer(config,"stage2_steps",3...3) == 3,
+        try integer(config,"stage2_steps",(singleStageGuided ? 0 : 3)...(singleStageGuided ? 0 : 3)) == (singleStageGuided ? 0 : 3),
         let adapter=components["distilled_lora_path"] as? String else { throw reject("Dev sampler/refinement") }
       func scale(_ name:String,_ fallback:Double) throws -> Float {
         config[name] == nil ? Float(fallback) : Float(try number(config,name))
@@ -166,7 +170,8 @@ public enum MLXStudioRecipe {
         stg:scale("stg_scale",mode == .guided ? 1 : 0),
         videoRescale:scale("video_rescale_scale",mode == .guided ? 0.7 : 0.45),
         audioRescale:scale("audio_rescale_scale",mode == .guided ? 0.7 : 1),
-        modality:scale("modality_scale",3),stgBlocks:blocks,sigmas:sigmas,distilledAdapterPath:adapter)
+        modality:scale("modality_scale",3),stgBlocks:blocks,sigmas:sigmas,distilledAdapterPath:adapter,
+        singleStage:singleStageGuided,stgAudio:!singleStageGuided)
     }
     var adapters:[[String:Any]]=[]
     if let value=components["loras"] {

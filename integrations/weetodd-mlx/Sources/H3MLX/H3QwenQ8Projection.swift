@@ -14,6 +14,14 @@ public struct H3QwenQ8Projection {
 
   public init(packed: MLXArray, scales: MLXArray, biases: MLXArray,
     columns: Int) throws {
+    try self.init(packed: packed, scales: scales, biases: biases,
+      columns: columns, materializeWeights: true)
+  }
+
+  // The single-layer Qwen owner defers these waits; public initialization
+  // and the vision loader retain their established behavior.
+  init(packed: MLXArray, scales: MLXArray, biases: MLXArray,
+    columns: Int, materializeWeights: Bool) throws {
     guard packed.ndim == 2, packed.dtype == .uint32,
       columns > 0, columns.isMultiple(of: 64),
       packed.shape[1] == columns / 4,
@@ -29,7 +37,7 @@ public struct H3QwenQ8Projection {
     rows = packed.shape[0]
     self.columns = columns
     storageBytes = packed.nbytes + scales.nbytes + biases.nbytes
-    eval([packed, scales, biases])
+    if materializeWeights { eval(parametersToMaterialize) }
   }
 
   public init(file: SafeTensorFile, name: String) throws {
@@ -37,7 +45,8 @@ public struct H3QwenQ8Projection {
   }
 
   init(file: SafeTensorFile, name: String,
-    tensor: ((String) throws -> MLXArray)?) throws {
+    tensor: ((String) throws -> MLXArray)?,
+    materializeWeights: Bool = true) throws {
     let layout = try MLXAffineQ8(file: file, weight: name, groupSize: 64)
     let stem = String(name.dropLast(".weight".count))
     func read(_ key: String) throws -> MLXArray {
@@ -57,7 +66,8 @@ public struct H3QwenQ8Projection {
       }
     }
     try self.init(packed: read(name), scales: read(stem + ".scales"),
-      biases: read(stem + ".biases"), columns: layout.shape[1])
+      biases: read(stem + ".biases"), columns: layout.shape[1],
+      materializeWeights: materializeWeights)
     guard rows == layout.shape[0] else {
       throw H3CheckpointError.invalid("H3 Qwen projection changed after header admission.")
     }
@@ -68,6 +78,9 @@ public struct H3QwenQ8Projection {
     try self.init(file: file, name: name)
     try file.checkUnchanged(at: checkpointURL)
   }
+
+  // References to existing packed storage, never dense copies.
+  var parametersToMaterialize: [MLXArray] { [packed, scales, biases] }
 
   public func project(_ input: MLXArray) throws -> MLXArray {
     guard input.ndim >= 2, input.shape.last == columns, input.dtype.isFloatingPoint else {

@@ -107,7 +107,7 @@ private final class MovieWorkerEvents:@unchecked Sendable {
     var request:MLXDistilledRequest
     if let direct=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any],
       ((direct["version"] as? Int == 5 && direct["task"] as? String == "union_control") ||
-        ((direct["version"] as? Int == 6 || direct["version"] as? Int == 11) && direct["task"] as? String == "ingredients") ||
+        (([6,11,17].contains(direct["version"] as? Int ?? -1)) && direct["task"] as? String == "ingredients") ||
         ((direct["version"] as? Int == 7 || direct["version"] as? Int == 16) && direct["task"] as? String == "msr") ||
         ((direct["version"] as? Int == 8 || direct["version"] as? Int == 9) && direct["task"] as? String == "dfr") ||
         (direct["version"] as? Int == 10 && direct["task"] as? String == "ic_control") ||
@@ -225,8 +225,9 @@ private final class MovieWorkerEvents:@unchecked Sendable {
       try MLXDFRTemporalPlan.outputFrames(inputFrames:request.frames,rounds:$0.temporalRounds)
     } ?? request.frames
     let firstUpdates=request.guidedSampling.map { $0.steps+($0.mode == .guidedHQ ? 1 : 0) } ?? 8
+    let noRefinement=request.singleStageSampling != nil || request.ingredientsSheet != nil || request.msr != nil
     var progress=MLXStudioProgress(temporalRounds:request.dfr?.temporalRounds ?? 0,
-      samplingSteps:request.singleStageSampling == nil ? firstUpdates+3 : 8)
+      samplingSteps:firstUpdates+(noRefinement ? 0 : 3))
     var lastPreview=Date.distantPast,revision=0
     var result:[String:Any]=[:]
     defer { try? FileManager.default.removeItem(at:preview) }

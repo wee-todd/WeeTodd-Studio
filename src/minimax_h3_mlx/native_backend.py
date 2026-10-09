@@ -167,7 +167,7 @@ def preflight_native_recipe(recipe):
     from wee_todd_nodes.lora import H3LoRAStack
     from wee_todd_nodes.runtime import H3GenerationConfig
 
-    config = H3GenerationConfig(**recipe["config"])
+    config = H3GenerationConfig.from_recipe_fields(recipe["config"])
     if config.transformer_backend != "nnc_experimental":
         return None
     if recipe.get("conditioning", {}).get("task", "ref2va") != "ref2va":

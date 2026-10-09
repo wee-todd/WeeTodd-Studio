@@ -1,3 +1,5 @@
+import Foundation
+
 // MLX Steel primitives and attention body: MIT licensed, not Apache-2.0.
 // Embedded from mlx-swift 901941965d82e4a216d4d117231d847d194c563d.
 // Indexed padded-tile adaptation preserves the native BQ=32/BK=16 accumulator order.
@@ -2195,4 +2197,55 @@ struct DivOp {
   }
 
 """#
+  // Same MMA/softmax body, with a row-indexed loader. Padding remains only
+  // in the small tile metadata/output; Q/K/V stay in original row storage.
+  static let originalRowLoader = #"""
+  template <typename T, short BR, short BC, short DR, short DC,
+      short REDUCTION, short THREADS>
+  struct H3MappedBlockLoader {
+    const device T* source;
+    ulong stride;
+    threadgroup T* destination;
+    uint lane;
+    const device int* rows;
+    uint start;
+    H3MappedBlockLoader(const device T* p, ulong s, threadgroup T* d,
+        uint group, uint lane_id, const device int* r, uint offset)
+      : source(p), stride(s), destination(d), lane(group*32+lane_id), rows(r), start(offset) {}
+    void load_safe(short2 size) {
+      constexpr uint VECTOR = BR*BC/THREADS;
+      constexpr uint COLUMN_THREADS = BC/VECTOR;
+      constexpr uint ROW_THREADS = THREADS/COLUMN_THREADS;
+      uint row = lane/COLUMN_THREADS;
+      uint column = (lane%COLUMN_THREADS)*VECTOR;
+      #pragma clang loop unroll(full)
+      for(uint r=row; r<BR; r+=ROW_THREADS) {
+        ulong address = r<uint(size.y) ? ulong(rows[start+r])*stride+column : 0;
+        #pragma clang loop unroll(full)
+        for(uint c=0; c<VECTOR; ++c) {
+          destination[r*DR+(column+c)*DC] = (r<uint(size.y) && column+c<uint(size.x))
+            ? source[address+c] : T(0);
+        }
+      }
+    }
+    void load_unsafe() { load_safe(short2(BC,BR)); }
+  };
+  """#
+
+  static let originalRowBody = indexedBody
+    .replacingOccurrences(of:"ulong(query_offset) * params->Q_strides[2]",with:"ulong(0)")
+    .replacingOccurrences(of:"BlockLoaderT<",with:"H3MappedBlockLoader<")
+    .replacingOccurrences(of:"Q, params->Q_strides[2], Qs, simd_group_id, simd_lane_id);",
+      with:"Q, params->Q_strides[2], Qs, simd_group_id, simd_lane_id, ROW_MAP, PREFIX_TILES*64+query_offset);")
+    .replacingOccurrences(of:"K, params->K_strides[2], Ks, simd_group_id, simd_lane_id);",
+      with:"K, params->K_strides[2], Ks, simd_group_id, simd_lane_id, ROW_MAP, 0);")
+    .replacingOccurrences(of:"V, params->V_strides[2], Vs, simd_group_id, simd_lane_id);",
+      with:"V, params->V_strides[2], Vs, simd_group_id, simd_lane_id, ROW_MAP, 0);")
+    .replacingOccurrences(of:"K + ulong(kb * 64 + key_chunk * BK) * params->K_strides[2]",with:"K")
+    .replacingOccurrences(of:"V + ulong(kb * 64 + key_chunk * BK) * params->V_strides[2]",with:"V")
+    .replacingOccurrences(of:"params->K_strides[2], Ks, simd_group_id, simd_lane_id);",
+      with:"params->K_strides[2], Ks, simd_group_id, simd_lane_id, ROW_MAP, kb*64+key_chunk*BK);")
+    .replacingOccurrences(of:"params->V_strides[2], Vs, simd_group_id, simd_lane_id);",
+      with:"params->V_strides[2], Vs, simd_group_id, simd_lane_id, ROW_MAP, kb*64+key_chunk*BK);")
+
 }

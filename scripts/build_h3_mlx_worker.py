@@ -16,7 +16,7 @@ def build_worker(root, *, swift="swift", env=None, build_arguments=("--build-sys
     subprocess.run(
         [str(swift), "build", "--package-path", str(package), "-c", "release",
          "--product", "WeeToddH3MLXWorker", "--jobs", "2",
-         "--disable-automatic-resolution", *build_arguments],
+         "--disable-automatic-resolution", *build_arguments, "-Xcxx", "-DNDEBUG"],
         check=True, env=env,
     )
     folder = package / ".build/h3-mlx-worker-distribution"

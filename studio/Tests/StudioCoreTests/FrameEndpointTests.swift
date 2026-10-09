@@ -75,4 +75,20 @@ final class FrameEndpointTests: XCTestCase {
     XCTAssertThrowsError(try clip.assignEndpoint(MediaAsset(name: "Movie", kind: .video), role: .last, fps: 24))
     XCTAssertTrue(clip.attachments.isEmpty)
   }
+
+  func testInheritedGuidedTaskRemainsInheritedWhenEndpointsChange() throws {
+    var clip = Clip(engine: .ltx25)
+    clip.attachments = [Attachment(assetID: UUID(), role: .control)]
+    for role in [MediaRole.first, .last] {
+      try clip.assignEndpoint(MediaAsset(name: role.label, kind: .image), role: role,
+        fps: 24, supportedTasks: ["control", "fflf"])
+      XCTAssertNil(clip.generationSelection)
+      XCTAssertEqual(clip.inferredTask, "control")
+    }
+    clip.removeEndpoint(.first)
+    clip.removeEndpoint(.last)
+    XCTAssertNil(clip.generationSelection)
+    XCTAssertEqual(clip.inferredTask, "control")
+    XCTAssertEqual(clip.attachments.count, 1)
+  }
 }

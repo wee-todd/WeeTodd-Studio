@@ -1,7 +1,7 @@
 import CoreGraphics
 import Darwin
 import Foundation
-import H3MLX
+@_spi(H3SolDiagnostic) import H3MLX
 import ImageIO
 import InferenceContracts
 import InferenceMedia
@@ -233,6 +233,12 @@ import UniformTypeIdentifiers
       expectedOutputDirectory: arguments[4])
     let recipeData = try readRequest(envelope.recipePath)
     try envelope.validateRecipe(recipeData)
+    // Inspect the untouched saved selection before wrappers/media/weights.
+    // Diagnostic environment may agree with a recipe, never replace it.
+    _ = try H3SolDiagnostic.validateSavedRecipe(data: recipeData,
+      environment: ProcessInfo.processInfo.environment)
+    guard let untouchedRecipe = try JSONSerialization.jsonObject(with:recipeData) as? [String:Any] else { throw invalid("Invalid H3 recipe.") }
+    _ = try H3TransformerWeightCachePolicy.admitRecipe(untouchedRecipe)
     let motionRecipe = try H3MotionFidelityRecipe.prepare(data: recipeData)
     let jointRefinement = try H3JointRefinementRecipe.prepare(data: motionRecipe?.ordinaryRecipe ?? recipeData)
     let canvasAdmission = jointRefinement?.targetGeometry.canvasAdmission ?? H3CanvasAdmission.ordinary
@@ -240,6 +246,19 @@ import UniformTypeIdentifiers
     var recipe = try JSONSerialization.jsonObject(with: baseRecipeData) as! [String: Any]
     let hasVDN = recipe["vdn"] != nil
     let hasFastH3 = recipe["fasth3"] != nil
+    // Private qualification opt-in; this is not a saved recipe or UI setting.
+    let preparationTraceSetting = ProcessInfo.processInfo.environment["WEETODD_H3_TRACE_PREPARATION"] ?? "0"
+    guard preparationTraceSetting == "0" || preparationTraceSetting == "1" else {
+      throw invalid("WEETODD_H3_TRACE_PREPARATION requires 0 or 1.")
+    }
+    let traceFastPreparation = hasFastH3 && preparationTraceSetting == "1"
+    var preparationMeasurements: [[String: Any]] = []
+    let onPreparationMeasurement: ((String, Double, Bool) -> Void)?
+    if traceFastPreparation {
+      onPreparationMeasurement = { phase, seconds, succeeded in
+        preparationMeasurements.append(["phase": phase, "seconds": seconds, "succeeded": succeeded])
+      }
+    } else { onPreparationMeasurement = nil }
     if hasFastH3 { _ = try H3FastStudioRecipe.compile(data:recipeData) }
     if hasVDN {
       // Validate the untouched source before wrappers can strip a control.
@@ -589,7 +608,11 @@ import UniformTypeIdentifiers
     }
     let videoDecodeMemoryMode = stillRequest?.videoDecodeMemoryMode
       ?? endpointRequest?.base.videoDecodeMemoryMode ?? textRequest?.videoDecodeMemoryMode
-    let videoDecodeDiagnostics = H3VideoDecodeMemoryMode.diagnostics(for: videoDecodeMemoryMode)
+    let requestedVideoPrecision = stillRequest?.videoDecodePrecision
+      ?? endpointRequest?.base.videoDecodePrecision ?? textRequest?.videoDecodePrecision ?? .float32
+    var videoDecodeDiagnostics = H3VideoDecodeMemoryMode.diagnostics(for: videoDecodeMemoryMode)
+    videoDecodeDiagnostics.merge(H3VideoDecodePrecision.executionDiagnostics(
+      requested: requestedVideoPrecision, applied: nil)) { _, value in value }
     let preflightSeconds = Date().timeIntervalSince(started)
     if arguments[0] == "preflight" {
       try emit(["status": "success", "result": [
@@ -603,6 +626,18 @@ import UniformTypeIdentifiers
         "productionQualified": false, "videoDecode": videoDecodeDiagnostics]])
       return
     }
+
+    // Active rendering is user-requested work even while Studio is in the
+    // background. Preserve idle system sleep and retire the assertion on every
+    // throwing/cancelled exit before main publishes status or exits the process.
+    let renderActivity = ProcessInfo.processInfo.beginActivity(
+      options: .userInitiatedAllowingIdleSystemSleep, reason: "Generating H3 video and audio")
+    defer { ProcessInfo.processInfo.endActivity(renderActivity) }
+    try emit(["event": "progress", "stage": "execution_policy", "fraction": 0,
+      "message": "Starting user-initiated H3 rendering",
+      "executionPolicy": "user_initiated_allowing_idle_system_sleep",
+      "requestedTaskPriority": "userInitiated", "taskPriority": Int(Task.currentPriority.rawValue),
+      "latencyCritical": false, "idleSystemSleepAllowed": true])
 
     let output = URL(fileURLWithPath: arguments[4]).standardizedFileURL
     let parent = output.deletingLastPathComponent()
@@ -694,10 +729,14 @@ import UniformTypeIdentifiers
           height: admission.geometry.height, output: previewURL)
         lastPreview = Date()
         revision += 1
+        let progress = H3WorkerReceipt.progress(stage: "video_decode",
+          completed: index + 1, total: admission.geometry.frames,
+          evaluations: admission.evaluations, publishedFrames: publishedFrames,
+          overlapFrames: overlapFrames, previousFraction: lastFraction)
+        lastFraction = progress.fraction
         try emit(["event": "progress", "stage": "video_decode",
-          "completed": outputIndex + 1, "total": publishedFrames,
-          "fraction": min(0.97, 0.84 + 0.13 * Double(outputIndex + 1) /
-            Double(publishedFrames)),
+          "completed": progress.completed, "total": progress.total,
+          "fraction": lastFraction,
           "message": "Decoding H3 video · frame \(outputIndex + 1)/\(publishedFrames)",
           "previewPath": previewURL.path, "previewRevision": revision])
       }
@@ -731,17 +770,11 @@ import UniformTypeIdentifiers
           recordStage(boundary)
         }
       }
-      let part = total > 0 ? Double(completed) / Double(total) : 0
-      var next = lastFraction
-      if let sampling = H3WorkerProgress.fraction(stage: stage,
-        completed: completed, total: total,
-        evaluations: admission.evaluations) { next = sampling }
-      else if stage == "control_video_encode" { next = 0.01 + 0.01 * part }
-      else if stage == "text" { next = 0.02 + 0.04 * part }
-      else if stage == "reference_video_weights_released" { next = 0.08 }
-      else if stage == "video_decode" { next = 0.84 + 0.13 * part }
-      else if stage == "audio_decode" { next = 0.97 + 0.02 * part }
-      lastFraction = max(lastFraction, min(0.995, next))
+      let progress = H3WorkerReceipt.progress(stage: stage, completed: completed,
+        total: total, evaluations: admission.evaluations,
+        publishedFrames: publishedFrames, overlapFrames: overlapFrames,
+        previousFraction: lastFraction)
+      lastFraction = progress.fraction
       let message: String
       if stage.hasPrefix("sampling_block_") {
         let step = stage.dropFirst("sampling_block_".count)
@@ -750,11 +783,13 @@ import UniformTypeIdentifiers
         message = stage.replacingOccurrences(of: "_", with: " ")
       }
       try? emit(["event": "progress", "stage": stage,
-        "completed": completed, "total": total,
+        "completed": progress.completed, "total": progress.total,
         "fraction": lastFraction,
         "message": message])
     }
     let result: (videoFrames: Int, audioSamplesPerChannel: Int, audioSampleRate: Int)
+    var backendReport: H3BackendReport?
+    var appliedVideoPrecision: H3VideoDecodePrecision?
     var savedContextSHA256: String?,savedPayloadSHA256:String?
     var savedJointSHA256: String?, savedJointPayloadSHA256: String?
     let onLatents: ([Float], [Float]) throws -> Void = { video, audio in
@@ -797,6 +832,8 @@ import UniformTypeIdentifiers
       let rendered = try H3MotionFidelityRunner.run(prepared, source: source,
         onFrame: onFrame, onAudio: onAudio, onLatents: onLatents, progress: onProgress)
       result = (rendered.videoFrames, rendered.audioSamplesPerChannel, rendered.audioSampleRate)
+      backendReport = rendered.backendReport
+      appliedVideoPrecision = rendered.videoDecodePrecision
     } else if let stillRequest {
       let rendered = try H3Ref2VAStillRunner.run(stillRequest,
         contextFrames: continuationRows == nil ? 0 : refContinuation!.plan.contextFrames,
@@ -805,17 +842,23 @@ import UniformTypeIdentifiers
         onLatents: onLatents, progress: onProgress)
       result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
         rendered.audioSampleRate)
+      backendReport = rendered.backendReport
+      appliedVideoPrecision = rendered.videoDecodePrecision
     } else if let endpointRequest {
       if let continuation, let rows = continuationRows {
         let rendered = try H3FL2VAContinuationRunner.run(endpointRequest,
           contextFrames: continuation.contextFrames, context: rows,
           onFrame: onFrame, onAudio: onAudio, onLatents: onLatents, progress: onProgress)
         result = (rendered.videoFrames, rendered.audioSamplesPerChannel, rendered.audioSampleRate)
+        backendReport = rendered.backendReport
+        appliedVideoPrecision = rendered.videoDecodePrecision
       } else {
         let rendered = try H3FL2VARunner.run(endpointRequest,
           initialRows: fullInitialRows, refinement: jointRefinement?.controls,
           onFrame: onFrame, onAudio: onAudio, onLatents: onLatents, progress: onProgress)
         result = (rendered.videoFrames, rendered.audioSamplesPerChannel, rendered.audioSampleRate)
+        backendReport = rendered.backendReport
+        appliedVideoPrecision = rendered.videoDecodePrecision
       }
     } else if let textRequest {
       if let continuation, let rows = continuationRows {
@@ -825,13 +868,18 @@ import UniformTypeIdentifiers
           onLatents: onLatents, progress: onProgress)
         result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
           rendered.audioSampleRate)
+        backendReport = rendered.backendReport
+        appliedVideoPrecision = rendered.videoDecodePrecision
       } else {
         let rendered = try H3T2VARunner.run(textRequest,
           initialRows: fullInitialRows, refinement: jointRefinement?.controls,
           onFrame: onFrame, onAudio: onAudio,
-          onLatents: onLatents, progress: onProgress)
+          onLatents: onLatents, onPreparationMeasurement: onPreparationMeasurement,
+          progress: onProgress)
         result = (rendered.videoFrames, rendered.audioSamplesPerChannel,
           rendered.audioSampleRate)
+        backendReport = rendered.backendReport
+        appliedVideoPrecision = rendered.videoDecodePrecision
       }
     } else {
       throw invalid("The H3 task was not admitted.")
@@ -842,6 +890,8 @@ import UniformTypeIdentifiers
     try mux(ffmpeg: URL(fileURLWithPath: configuredFFmpeg), directory: staging)
     if H3WorkerStageBoundary.tracks(task: reportedTask) { recordStage("mux") }
     let usage = try H3RenderResourceUsage.capture(peakMLXBytes: Memory.peakMemory)
+    videoDecodeDiagnostics.merge(H3VideoDecodePrecision.executionDiagnostics(
+      requested: requestedVideoPrecision, applied: appliedVideoPrecision)) { _, value in value }
     let metadata: [String: Any] = ["status": "complete",
       "nativeRuntime": "swift-mlx", "productionQualified": false,
       "jobID": envelope.jobID.uuidString,
@@ -863,6 +913,13 @@ import UniformTypeIdentifiers
       "preflightSeconds": preflightSeconds,
       "seconds": Date().timeIntervalSince(started)]
     var completeMetadata = metadata
+    if traceFastPreparation {
+      completeMetadata["transformerPreparationDiagnostics"] = [
+        "version": 1, "phases": preparationMeasurements,
+        "scope": "Exclusive existing completion intervals nested within transformer preparation; callback time excluded; admission and local teardown remain outer residual",
+        "newGPUCompletions": 0]
+    }
+    if let backendReport { completeMetadata["transformerExecution"] = backendReport.metadata }
     if let variant = textRequest?.fastVariant {
       completeMetadata["fasth3"] = ["variant":variant.rawValue,"evaluations":4,
         "attention":variant == .vsaV1 ? "trained-vsa-64-90":"dense"]
@@ -924,7 +981,7 @@ import UniformTypeIdentifiers
   static func main() async {
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
-    let job = Task.detached { try execute() }
+    let job = Task.detached(priority: .userInitiated) { try execute() }
     let signals = [SIGINT, SIGTERM].map { number in
       let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
       source.setEventHandler { @Sendable in job.cancel() }

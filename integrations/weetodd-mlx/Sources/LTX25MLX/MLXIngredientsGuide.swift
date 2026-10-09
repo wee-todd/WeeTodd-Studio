@@ -8,13 +8,14 @@ import LTX25Engine
 /// guides continue through the separate causal video encoder.
 enum MLXIngredientsGuide {
   static func prepare(_ sheet:MLXIngredientsSheet,geometry:AVGeometry,
-    ffmpeg:URL,directory:URL) throws -> URL {
+    ffmpeg:URL,directory:URL,repeatedFrames:Bool=false) throws -> URL {
     try NativeMediaSource(path:sheet.path,sha256:sheet.sourceSHA256).verify()
     let pixels=try MLXReferenceImage.prepare(URL(fileURLWithPath:sheet.path),
       width:geometry.width,height:geometry.height,crf:0,ffmpeg:ffmpeg,
       temporaryParent:directory)
     let output=directory.appendingPathComponent("ingredients-guide.rgb")
-    try writeStaticRGB(pixels: pixels, geometry: geometry, to: output)
+    if repeatedFrames { try writeRepeatedRGB(pixels:pixels,geometry:geometry,to:output) }
+    else { try writeStaticRGB(pixels: pixels, geometry: geometry, to: output) }
     try NativeMediaSource(path:sheet.path,sha256:sheet.sourceSHA256).verify()
     return output
   }

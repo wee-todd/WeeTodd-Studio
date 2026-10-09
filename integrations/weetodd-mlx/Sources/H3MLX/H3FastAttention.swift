@@ -73,8 +73,11 @@ enum H3FastAttention {
   static func selectedTileCount(videoTiles:Int,sparsity:Double) -> Int {
     max(1,Int(ceil(Double(1-sparsity)*Double(videoTiles))))
   }
+  enum Consumer { case originalRowsIndexed, groupedSparse, dense }
+
   static func evaluate(query:MLXArray,key:MLXArray,value:MLXArray,gate:MLXArray,
-    tiles:H3FastTiles,sparsity:Double = 0.9,minimumSparseRows:Int = 4096) throws -> MLXArray {
+    tiles:H3FastTiles,sparsity:Double = 0.9,minimumSparseRows:Int = 4096,
+    onConsumer: (Consumer) -> Void = { _ in }) throws -> MLXArray {
     guard query.ndim == 4,query.shape == key.shape,key.shape == value.shape,
       query.shape == gate.shape,query.shape[0] == 1,query.shape[2] == tiles.rows,
       query.dtype == key.dtype,key.dtype == value.dtype,gate.dtype == value.dtype,
@@ -92,27 +95,37 @@ enum H3FastAttention {
     func pooled(_ input:MLXArray) -> MLXArray {
       input.asType(.float32).reshaped([1,heads,count,64,width]).sum(axis:3)/sizes
     }
-    // Keep the packed BF16 tensors available for every consumer group, and
-    // release each full Float32 pooling temporary before starting the next.
-    let tq = packed(query);eval(tq)
-    let pq = pooled(tq);eval(pq)
-    let tk = packed(key);eval(tk)
-    let pk = pooled(tk);eval(pk)
-    let tv = packed(value);eval(tv)
-    let pv = pooled(tv);eval(pv)
+    let originalRows = query.dtype == .bfloat16 && width == 128 &&
+      tiles.rows >= minimumSparseRows && Device.defaultDevice().deviceType == .gpu
+    let tq: MLXArray?, tk: MLXArray?, tv: MLXArray?
+    let pq: MLXArray, pk: MLXArray, pv: MLXArray
+    if originalRows {
+      let summaries = try H3TileSummary.evaluate(query:query,key:key,value:value,tiles:tiles)
+      pq=summaries[0];pk=summaries[1];pv=summaries[2]
+      tq=nil;tk=nil;tv=nil
+    } else {
+      let q=packed(query);eval(q);pq=pooled(q);eval(pq)
+      let k=packed(key);eval(k);pk=pooled(k);eval(pk)
+      let v=packed(value);eval(v);pv=pooled(v);eval(pv)
+      tq=q;tk=k;tv=v
+    }
     let scores = matmul(pq,pk.swappedAxes(-1,-2))*scale
     let compression = matmul(softmax(scores,axis:-1),pv)
-    let rowTiles = MLXArray(tiles.rowSlots.map { $0/64 })
-    let expanded = take(compression,rowTiles,axis:2).asType(value.dtype)
-    eval([scores,expanded])
+    let expanded: MLXArray?
+    if originalRows {
+      expanded = nil
+      eval([scores,compression])
+    } else {
+      let rowTiles = MLXArray(tiles.rowSlots.map { $0/64 })
+      expanded = take(compression,rowTiles,axis:2).asType(value.dtype)
+      eval([scores,expanded!])
+    }
     let output:MLXArray
     if tiles.rows < minimumSparseRows {
       output = MLXFast.scaledDotProductAttention(queries:query,keys:key,values:value,scale:scale,mask:nil)
     } else {
       let prefix = tiles.prefixTiles,video = count-prefix
       let keep = selectedTileCount(videoTiles:video,sparsity:sparsity)
-      let tiledKeys = tk.reshaped([heads,count,64,width])
-      let tiledValues = tv.reshaped([heads,count,64,width])
       let tiledValidity = MLXArray(valid,[count,64])
       // Keep the existing sorted route order, but sort each score row once
       // for the whole block instead of launching a sort per query group.
@@ -123,12 +136,20 @@ enum H3FastAttention {
       var headGroups:[MLXArray] = []
       let videoScatter = MLXArray(tiles.rowSlots.dropFirst(tiles.prefixRows).map { $0-Int32(prefix*64) })
       let videoOutput: MLXArray
-      if query.dtype == .bfloat16, width == 128, Device.defaultDevice().deviceType == .gpu {
+      if originalRows {
         let paddedVideo = try H3IndexedAttention.evaluate(
-          query: tq[.ellipsis,(prefix*64)..<(count*64),0..<width], key: tk, value: tv,
-          routes: routes, tiles: tiles)
-        videoOutput = take(paddedVideo,videoScatter,axis:2)
+          query: query, key: key, value: value,
+          routes: routes, tiles: tiles, originalRows:true)
+        let prefixOutput = MLXFast.scaledDotProductAttention(
+          queries:query[.ellipsis,0..<tiles.prefixRows,0..<width],
+          keys:key,values:value,scale:scale,mask:nil)
+        let result = try H3VSAEpilogue.evaluate(prefixOutput:prefixOutput,
+          paddedVideo:paddedVideo,compression:compression,gate:gate,tiles:tiles)
+        onConsumer(.originalRowsIndexed)
+        return result
       } else {
+        let tiledKeys = tk!.reshaped([heads,count,64,width])
+        let tiledValues = tv!.reshaped([heads,count,64,width])
         // Bound each gathered K/V and masked SDPA call to four independent
         // heads, matching the maintained low-memory grouped consumer policy.
         for headStart in stride(from:0,to:heads,by:4) {
@@ -145,7 +166,7 @@ enum H3FastAttention {
             let values = try gatherTiles(blocks:headValues,routes:selectedTiles)
             let validKeys = take(tiledValidity,selectedTiles.reshaped([-1]),axis:0).reshaped([headCount*group,1,1,keyRows])
             let attentionMask = which(validKeys .> 0,MLXArray(Float(0)),MLXArray(-Float.infinity)).asType(query.dtype)
-            let queries = tq[0..<1,headStart..<headEnd,((prefix+start)*64)..<((prefix+end)*64),0..<width].reshaped([headCount*group,1,64,width])
+            let queries = tq![0..<1,headStart..<headEnd,((prefix+start)*64)..<((prefix+end)*64),0..<width].reshaped([headCount*group,1,64,width])
             let attended = MLXFast.scaledDotProductAttention(queries:queries,keys:keys,values:values,scale:scale,mask:attentionMask)
               .reshaped([1,headCount,group*64,width])
             eval(attended);groups.append(attended)
@@ -158,9 +179,10 @@ enum H3FastAttention {
       let prefixOutput = MLXFast.scaledDotProductAttention(queries:query[.ellipsis,0..<tiles.prefixRows,0..<width],keys:key,values:value,scale:scale,mask:nil)
       output = concatenated([prefixOutput,videoOutput],axis:2)
     }
-    let result = output+expanded*gate
+    let result = output+expanded! * gate
     eval(result)
     try Task.checkCancellation()
+    onConsumer(tiles.rows < minimumSparseRows ? .dense : .groupedSparse)
     return result
   }
 }

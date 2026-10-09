@@ -81,7 +81,8 @@ public enum H3VideoVAEDecoder {
   }
 
   private static func decodeClip(checkpointURL: URL, latent: MLXArray,
-    session: H3VideoVAEDecodeSession?, spatialBatchSize: Int) throws -> MLXArray {
+    session: H3VideoVAEDecodeSession?, spatialBatchSize: Int,
+    precision: H3VideoDecodePrecision) throws -> MLXArray {
     let y = splitTiles(latent.shape[2] * 16)
     let x = splitTiles(latent.shape[3] * 16)
     let count = y.starts.count * x.starts.count
@@ -90,7 +91,7 @@ public enum H3VideoVAEDecoder {
     }
     if count == 1 {
       return try H3VideoVAETileDecoder.decode(checkpointURL: checkpointURL,
-        latent: latent, session: session, observe: { _, _ in })
+        latent: latent, session: session, precision:precision, observe: { _, _ in })
     }
     var inputs: [MLXArray] = []
     for row in y.starts.indices {
@@ -107,7 +108,7 @@ public enum H3VideoVAEDecoder {
       let end = min(start + spatialBatchSize, count)
       let batch = concatenated(Array(inputs[start..<end]), axis: 0)
       let decoded = try H3VideoVAETileDecoder.decode(
-        checkpointURL: checkpointURL, latent: batch, session: session,
+        checkpointURL: checkpointURL, latent: batch, session: session, precision:precision,
         observe: { _, _ in })
       for index in 0..<(end - start) {
         let tile = decoded[index..<(index + 1), 0..<decoded.shape[1],
@@ -158,9 +159,11 @@ public enum H3VideoVAEDecoder {
 
   public static func decodeChunks(checkpointURL: URL, latent: MLXArray,
     memoryMode: H3VideoDecodeMemoryMode? = nil,
+    precision: H3VideoDecodePrecision = .float32,
     onChunk: (MLXArray) throws -> Void) throws {
+    try precision.validate(memoryMode: memoryMode)
     try decodeChunks(checkpointURL: checkpointURL, latent: latent,
-      retainWeights: true, memoryMode: memoryMode, onChunk: onChunk)
+      retainWeights: true, memoryMode: memoryMode, precision: precision, onChunk: onChunk)
   }
 
   /// The legacy streamed-weight path remains available internally for exact
@@ -168,11 +171,22 @@ public enum H3VideoVAEDecoder {
   static func decodeChunks(checkpointURL: URL, latent: MLXArray,
     retainWeights: Bool,
     memoryMode: H3VideoDecodeMemoryMode? = nil,
-    spatialBatchSize: Int = 4,
+    precision: H3VideoDecodePrecision = .defaultPrecision,
+    spatialBatchSize: Int? = nil,
+    allocationCacheLimitBytes: Int = H3VideoVAEDecodeSession.defaultAllocationCacheLimitBytes,
+    groupedStageLoading: Bool? = nil,
     onSessionClosed: (H3VideoVAEDecodeSession.Statistics) -> Void = { _ in },
     onChunk: (MLXArray) throws -> Void) throws {
+    try H3VideoVAEDecodeSession.validateAllocationCacheLimit(allocationCacheLimitBytes,
+      memoryMode: memoryMode)
+    let resolvedGroup = groupedStageLoading ?? retainWeights
+    let spatialBatchSize = spatialBatchSize ?? H3VideoDecodeMemoryMode.spatialBatchSize(for:memoryMode)
     guard memoryMode == nil || retainWeights else {
       throw H3CheckpointError.invalid("Selected video memory mode requires a resident decoder session.")
+    }
+    guard !resolvedGroup || (retainWeights
+      && allocationCacheLimitBytes == H3VideoVAEDecodeSession.defaultAllocationCacheLimitBytes) else {
+      throw H3CheckpointError.invalid("Grouped H3 video loading requires a resident128MiB session.")
     }
     guard (1...4).contains(spatialBatchSize), latent.ndim == 5, latent.shape[0] == 1,
       (7...128).contains(latent.shape[1]),
@@ -181,21 +195,25 @@ public enum H3VideoVAEDecoder {
       latent.shape[4] == 24, latent.dtype == .float32 else {
       throw H3CheckpointError.invalid("Invalid H3 video VAE temporal decode geometry.")
     }
+    try precision.validateHalfCastInput(latent)
     if retainWeights {
       try H3VideoVAEDecodeSession.withSession(checkpointURL: checkpointURL,
-        memoryMode: memoryMode, onClose: onSessionClosed) { session in
+        memoryMode: memoryMode, precision:precision, allocationCacheLimitBytes: allocationCacheLimitBytes,
+        groupedStageLoading: resolvedGroup,
+        onClose: onSessionClosed) { session in
         try decodeChunks(checkpointURL: checkpointURL, latent: latent,
-          session: session, spatialBatchSize: spatialBatchSize, onChunk: onChunk)
+          session: session, spatialBatchSize: spatialBatchSize, precision:precision, onChunk: onChunk)
       }
     } else {
       _ = try H3VideoVAELayout(url: checkpointURL)
       try decodeChunks(checkpointURL: checkpointURL, latent: latent,
-        session: nil, spatialBatchSize: spatialBatchSize, onChunk: onChunk)
+        session: nil, spatialBatchSize: spatialBatchSize, precision:precision, onChunk: onChunk)
     }
   }
 
   private static func decodeChunks(checkpointURL: URL, latent: MLXArray,
     session: H3VideoVAEDecodeSession?, spatialBatchSize: Int,
+    precision: H3VideoDecodePrecision,
     onChunk: (MLXArray) throws -> Void) throws {
     let originalTokens = latent.shape[1]
     let chunkTokens = 5
@@ -249,7 +267,7 @@ public enum H3VideoVAEDecoder {
       let clip = try decodeClip(checkpointURL: checkpointURL,
         latent: padded[0..<1, start..<end,
           0..<latent.shape[2], 0..<latent.shape[3], 0..<24], session: session,
-        spatialBatchSize: spatialBatchSize)
+        spatialBatchSize: spatialBatchSize,precision:precision)
       for part in 0..<2 {
         let frameStart = part * chunkFrames
         let frameEnd = min(frameStart + chunkFrames, clip.shape[1])

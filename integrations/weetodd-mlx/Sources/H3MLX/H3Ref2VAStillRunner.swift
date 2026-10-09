@@ -4,6 +4,7 @@ import MLX
 /// An in-memory, ordered visual-reference request. The worker is responsible
 /// for bounded decode and source-file identity before constructing RGB bytes.
 public struct H3Ref2VAStillRequest: Sendable {
+  public let transformerWeightCacheGB:Int
   public let prompt: String
   public let references: [H3Ref2VAReference]
   public let geometry: H3Geometry
@@ -16,12 +17,15 @@ public struct H3Ref2VAStillRequest: Sendable {
   public let qwenVision: URL
   public let tokenizer: URL
   public let videoDecodeMemoryMode: H3VideoDecodeMemoryMode?
+  public let videoDecodePrecision: H3VideoDecodePrecision
   public let videoVAE: URL
   public let audioVAE: URL
   public let turboLoRA: URL?
   public let turboLoRAStrength: Float
   public let additionalLoRAs: [H3LoRAAdapter]
   public let loRAAdapters: [H3LoRAAdapter]
+  public let transformerBackend: H3TransformerBackend
+  public let attentionPolicy: H3AttentionPolicy
 
   public init(prompt: String, references: [H3StillReference], width: Int,
     height: Int, durationSeconds: Double, seed: UInt64, requestedSteps: Int,
@@ -31,9 +35,12 @@ public struct H3Ref2VAStillRequest: Sendable {
     additionalLoRAs: [H3LoRAAdapter] = [],
     loRAAdapters: [H3LoRAAdapter]? = nil,
     videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil,
+    videoDecodePrecision: H3VideoDecodePrecision = .float32,
     samplingMethod: H3SamplingMethod = .euler,
     referenceNoise: H3ReferenceNoiseControls? = nil,
-    canvasAdmission: H3CanvasAdmission = .ordinary) throws {
+    canvasAdmission: H3CanvasAdmission = .ordinary,
+    transformerBackend: H3TransformerBackend = .mlx,
+    attentionPolicy: H3AttentionPolicy = .dense, transformerWeightCacheGB:Int = 0) throws {
     try self.init(prompt: prompt, mediaReferences: references.map { .image($0) },
       width: width, height: height, durationSeconds: durationSeconds,
       seed: seed, requestedSteps: requestedSteps, transformer: transformer,
@@ -41,8 +48,9 @@ public struct H3Ref2VAStillRequest: Sendable {
       videoVAE: videoVAE, audioVAE: audioVAE, turboLoRA: turboLoRA,
       turboLoRAStrength: turboLoRAStrength,
       additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters,
-      videoDecodeMemoryMode: videoDecodeMemoryMode, samplingMethod: samplingMethod,
-      referenceNoise: referenceNoise, canvasAdmission: canvasAdmission)
+      videoDecodeMemoryMode: videoDecodeMemoryMode, videoDecodePrecision: videoDecodePrecision, samplingMethod: samplingMethod,
+      referenceNoise: referenceNoise, canvasAdmission: canvasAdmission,
+      transformerBackend: transformerBackend, attentionPolicy: attentionPolicy, transformerWeightCacheGB:transformerWeightCacheGB)
   }
 
   public init(prompt: String, mediaReferences: [H3Ref2VAReference], width: Int,
@@ -53,9 +61,19 @@ public struct H3Ref2VAStillRequest: Sendable {
     additionalLoRAs: [H3LoRAAdapter] = [],
     loRAAdapters: [H3LoRAAdapter]? = nil,
     videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil,
+    videoDecodePrecision: H3VideoDecodePrecision = .float32,
     samplingMethod: H3SamplingMethod = .euler,
     referenceNoise: H3ReferenceNoiseControls? = nil,
-    canvasAdmission: H3CanvasAdmission = .ordinary) throws {
+    canvasAdmission: H3CanvasAdmission = .ordinary,
+    transformerBackend: H3TransformerBackend = .mlx,
+    attentionPolicy: H3AttentionPolicy = .dense, transformerWeightCacheGB:Int = 0) throws {
+    if attentionPolicy == .solExperimental {
+      try H3SolTaskPolicy.validateTask(task: "ref2va", contextFrames: 0,
+        isRefinement: false, ordinaryCanvas: canvasAdmission == .ordinary,
+        mlxBackend: transformerBackend == .mlx, hasFast: false, hasVDN: false,
+        hasFun: false, hasMotion: false)
+    }
+    try videoDecodePrecision.validate(memoryMode: videoDecodeMemoryMode)
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
       [transformer, qwenPages, qwenVision, tokenizer, videoVAE, audioVAE]
@@ -115,6 +133,7 @@ public struct H3Ref2VAStillRequest: Sendable {
     self.qwenVision = qwenVision
     self.tokenizer = tokenizer
     self.videoDecodeMemoryMode = videoDecodeMemoryMode
+    self.videoDecodePrecision = videoDecodePrecision
     self.videoVAE = videoVAE
     self.audioVAE = audioVAE
     self.turboLoRA = turboLoRA
@@ -129,7 +148,19 @@ public struct H3Ref2VAStillRequest: Sendable {
       throw H3CheckpointError.invalid("H3 requires at most eight distinct LoRA descriptors.")
     }
     for adapter in effective { try adapter.validate(requestedSteps: requestedSteps, samplingMethod: samplingMethod) }
+    if attentionPolicy == .solExperimental {
+      try H3SolTaskPolicy.validateSettings(steps: requestedSteps, samplingMethod: samplingMethod,
+        adapters: effective, packedRows: try geometry.packedRows(textRows: 1,
+          conditionVideoRows: conditionRows, conditionAudioRows: conditionAudioRows))
+    }
     self.loRAAdapters = effective
+    self.transformerBackend = transformerBackend
+    guard H3TransformerCachePlan.budgets.contains(transformerWeightCacheGB),
+      transformerWeightCacheGB == 0 || (transformerBackend == .mlx && canvasAdmission == .ordinary && effective.allSatisfy({ $0.startAfterEvaluations == 0 })) else {
+      throw H3CheckpointError.invalid("H3 weight cache requires ordinary MLX generation without deferred adapters or refinement.")
+    }
+    self.transformerWeightCacheGB=transformerWeightCacheGB
+    self.attentionPolicy = attentionPolicy
   }
 }
 
@@ -146,6 +177,8 @@ public enum H3Ref2VAStillRunner {
     let videoSchedule: H3Schedule
     let audioSchedule: H3Schedule
     let rowSchedule: H3ReferenceRowSchedule
+    let nativeWorkerURL: URL?
+    let experimentalSol: H3SolTaskPolicy?
   }
 
   public typealias Result = H3AVOutputDecoder.Result
@@ -156,6 +189,42 @@ public enum H3Ref2VAStillRunner {
       throw H3CheckpointError.invalid("Expanded H3 canvas requires explicit initialized spatial refinement.")
     }
     try Task.checkCancellation()
+    if let diagnostic = H3SolTaskContext.policy {
+      guard request.attentionPolicy == .solExperimental, diagnostic.tau == 0.5 else {
+        throw H3CheckpointError.invalid("Diagnostic Sol policy conflicts with the fixed saved Ref attention selection.")
+      }
+    }
+    if request.transformerWeightCacheGB > 0 {
+      _ = try H3TransformerCachePlan.inspect(checkpointURL:request.transformer,blockCount:50,budgetGB:request.transformerWeightCacheGB,adapters:request.loRAAdapters)
+    }
+    let experimentalSol = request.attentionPolicy == .solExperimental ? try H3SolTaskPolicy(tau: 0.5) : nil
+    if experimentalSol != nil {
+      try H3SolTaskPolicy.validateTask(task: "ref2va", contextFrames: contextFrames,
+        isRefinement: refinement != nil, ordinaryCanvas: request.geometry.canvasAdmission == .ordinary,
+        mlxBackend: request.transformerBackend == .mlx, hasFast: false, hasVDN: false,
+        hasFun: false, hasMotion: false)
+      try H3SolTaskPolicy.validateSettings(steps: request.requestedSteps,
+        samplingMethod: request.samplingMethod, adapters: request.loRAAdapters, packedRows: 1)
+      let adapter = request.loRAAdapters[0] // count admitted above
+      try H3SolTaskPolicy.inspectQualifiedFiles(checkpoint: request.transformer, adapter: adapter.url)
+      let checkpoint = try H3CheckpointLayout(url: request.transformer)
+      guard checkpoint.fastVariant == nil, checkpoint.curveRank == nil else {
+        throw H3CheckpointError.invalid("Experimental Sol rejects Fast and curve-rank checkpoints.")
+      }
+    }
+    let nativeWorkerURL: URL?
+    if request.transformerBackend == .nncExperimental {
+      try H3NativeBlockAdmission.validateSettings(task: "ref2va", steps: request.requestedSteps,
+        samplingMethod: request.samplingMethod, adapters: request.loRAAdapters,
+        contextFrames: contextFrames, isRefinement: refinement != nil, packedRows: 1)
+      let worker = try H3NativeBlockWorker.resolve(
+        executableURL: URL(fileURLWithPath: CommandLine.arguments[0]),
+        environment: ProcessInfo.processInfo.environment)
+      try H3NativeBlockWorker.preflight(workerURL: worker)
+      try H3NativeBlockAdmission.inspect(checkpoint: request.transformer,
+        adapter: request.loRAAdapters[0].url)
+      nativeWorkerURL = worker
+    } else { nativeWorkerURL = nil }
     let prepared = try H3VideoReferencePreparation.prepare(prompt: request.prompt,
       geometry: request.geometry, references: request.references,
       tokenizerURL: request.tokenizer)
@@ -177,6 +246,15 @@ public enum H3Ref2VAStillRunner {
       cleanVideoPrefixRows: contextVideoRows, cleanAudioPrefixRows: contextAudioRows)
     guard layout.tags.count <= request.geometry.maximumPackedRows else {
       throw H3CheckpointError.invalid("H3 reference packed rows exceed engine admission.")
+    }
+    if experimentalSol != nil {
+      try H3SolTaskPolicy.validateSettings(steps: request.requestedSteps,
+        samplingMethod: request.samplingMethod, adapters: request.loRAAdapters, packedRows: layout.tags.count)
+    }
+    if nativeWorkerURL != nil {
+      try H3NativeBlockAdmission.validateSettings(task: "ref2va", steps: request.requestedSteps,
+        samplingMethod: request.samplingMethod, adapters: request.loRAAdapters,
+        contextFrames: contextFrames, isRefinement: refinement != nil, packedRows: layout.tags.count)
     }
     _ = try H3QwenCheckpointLayout.inspect(root: request.qwenPages)
     if !prepared.qwenRequest.visualRanges.isEmpty {
@@ -203,7 +281,8 @@ public enum H3Ref2VAStillRunner {
       packedRows: layout.tags.count,
       evaluations: video.timesteps.count, layout: layout, referenceLayout: prepared.layout,
       contextVideoRows: contextVideoRows, contextAudioRows: contextAudioRows,
-      videoSchedule: video, audioSchedule: audio, rowSchedule: rows)
+      videoSchedule: video, audioSchedule: audio, rowSchedule: rows, nativeWorkerURL: nativeWorkerURL,
+      experimentalSol: experimentalSol)
   }
 
   public static func run(_ request: H3Ref2VAStillRequest,
@@ -273,17 +352,22 @@ public enum H3Ref2VAStillRunner {
     }
     try Task.checkCancellation()
 
+    var backendReport: H3BackendReport?
     let rawRows = try autoreleasepool { () throws -> ([Float], [Float]) in
       let state = try H3ReferenceDiTState(checkpointURL: request.transformer,
         layout: admission.layout,
         textEmbeddings: MLXArray(textRows,
           [1, admission.textRows, 5120]).asType(.bfloat16),
         timestepTable: admission.rowSchedule.table,
+        blockCount: 50, transformerWeightCacheGB:request.transformerWeightCacheGB,
+        allowMPP: H3MPPProjection.isTaskEligible(.ref2va, contextFrames: contextFrames,
+          isRefinement: refinement != nil),
+        nativeWorkerURL: admission.nativeWorkerURL, experimentalSol: admission.experimentalSol,
         turboLoRAURL: request.turboLoRA,
         turboLoRAStrength: request.turboLoRAStrength,
-        additionalLoRAs: request.additionalLoRAs, loRAAdapters: request.loRAAdapters) { completed, total in
+        additionalLoRAs: request.additionalLoRAs, loRAAdapters: request.loRAAdapters, progress: { completed, total in
           progress("transformer_prepare", completed, total)
-        }
+        })
       defer { state.unload() }
       let initial = try H3Noise.makeReference(seed: request.seed,
         conditionVideo: conditionVideoRows, conditionAudio: conditionAudioRows,
@@ -318,8 +402,10 @@ public enum H3Ref2VAStillRunner {
       let targetAudio = sampled.audio[0..<1,
         admission.layout.conditionAudioIndices.count..<admission.layout.audioIndices.count,
         0..<32]
-      return (targetVideo.asType(.float32).asArray(Float.self),
-        refinement?.preserveAudio == true ? initialRows!.audio : targetAudio.asType(.float32).asArray(Float.self))
+      let videoRows = targetVideo.asType(.float32).asArray(Float.self)
+      let audioRows = refinement?.preserveAudio == true ? initialRows!.audio : targetAudio.asType(.float32).asArray(Float.self)
+      backendReport = state.unloadAndReport()
+      return (videoRows, audioRows)
     }
     Stream.gpu.synchronize()
     Memory.clearCache()
@@ -329,6 +415,8 @@ public enum H3Ref2VAStillRunner {
     return try H3AVOutputDecoder.decode(videoRows: rawRows.0,
       audioRows: rawRows.1, geometry: geometry, videoVAE: request.videoVAE,
       audioVAE: request.audioVAE, videoDecodeMemoryMode: request.videoDecodeMemoryMode,
+      videoDecodePrecision: request.videoDecodePrecision,
+      backendReport: backendReport,
       onFrame: onFrame, onAudio: onAudio,
       progress: progress)
   }

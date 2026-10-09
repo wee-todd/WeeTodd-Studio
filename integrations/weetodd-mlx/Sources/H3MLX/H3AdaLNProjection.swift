@@ -18,13 +18,15 @@ public enum H3AdaLNProjection {
 
   static func evaluate(checkpointURL: URL, blockIndex: Int,
     timeEmbeddings: MLXArray, projectionMode: H3ProjectionMode = .weightDecoded,
-    rowWindow: Int = 16384, lora: (any H3LoRAApplying)?, loraInput: MLXArray? = nil) throws -> MLXArray {
+    rowWindow: Int = 16384, lora: (any H3LoRAApplying)?, loraInput: MLXArray? = nil,
+    deferredFastLoading: Bool = true) throws -> MLXArray {
     guard (0..<50).contains(blockIndex), timeEmbeddings.ndim == 2,
       (1...128).contains(timeEmbeddings.shape[0]),
       [64, 2688].contains(timeEmbeddings.shape[1]),
       timeEmbeddings.dtype.isFloatingPoint else {
       throw H3CheckpointError.invalid("Invalid H3 AdaLN block or time embedding shape.")
     }
+    try Task.checkCancellation()
     let layout = try H3CheckpointLayout(url: checkpointURL)
     guard timeEmbeddings.shape[1] == (layout.curveRank ?? 2688) else {
       throw H3CheckpointError.invalid("H3 AdaLN coordinates differ from the checkpoint.")
@@ -52,9 +54,26 @@ public enum H3AdaLNProjection {
     if layout.fastVariant != nil {
       let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, block: blockIndex)
       let file = try SafeTensorFile(url: tensorURL)
-      let projection = try H3QwenQ8Projection(file: file, name: name)
-      let bias = try file.withTensorBytes(named: layout.prefix + "blocks.\(blockIndex).adaln_proj.linear.bias") {
-        MLXArray($0, [96768], type: UInt16.self).view(dtype: .bfloat16)
+      let stem = String(name.dropLast(".weight".count))
+      // Admit all four factors before the first deferred payload request.
+      try validateFastFactors(tensors:file.tensors.mapValues {
+        H3TensorInfo(dtype:$0.dtype,shape:$0.shape)
+      },weightName:name)
+      try file.checkUnchanged(at:tensorURL)
+      try Task.checkCancellation()
+      let page = deferredFastLoading ? H3NativePage(file:file,url:tensorURL) : nil
+      defer { page?.clear() }
+      let reader: ((String) throws -> MLXArray)? = page.map { native in
+        { try native.read($0,materialize:false) }
+      }
+      let projection = try H3QwenQ8Projection(file:file,name:name,tensor:reader,
+        materializeWeights:!deferredFastLoading)
+      let bias: MLXArray
+      if let page { bias = try page.read(stem + ".bias",materialize:false) }
+      else {
+        bias = try file.withTensorBytes(named:stem + ".bias") {
+          MLXArray($0,[96768],type:UInt16.self).view(dtype:.bfloat16)
+        }
       }
       let activated = silu(timeEmbeddings.asType(.float32)).asType(.bfloat16)
       let result = try projection.project(activated) + bias
@@ -98,5 +117,18 @@ public enum H3AdaLNProjection {
     let result = parts.count == 1 ? parts[0] : concatenated(parts, axis: 0)
     eval(result)
     return result
+  }
+
+  /// Header-only admission shared with focused malformed-factor tests.
+  static func validateFastFactors(tensors:[String:H3TensorInfo],weightName:String) throws {
+    let stem = String(weightName.dropLast(".weight".count))
+    for (name,dtype,shape) in [(weightName,"U32",[UInt64(96768),672]),
+      (stem + ".scales","BF16",[UInt64(96768),42]),
+      (stem + ".biases","BF16",[UInt64(96768),42]),
+      (stem + ".bias","BF16",[UInt64(96768)])] {
+      guard tensors[name] == H3TensorInfo(dtype:dtype,shape:shape) else {
+        throw H3CheckpointError.invalid("Invalid deferred FastH3 AdaLN factor: \(name)")
+      }
+    }
   }
 }

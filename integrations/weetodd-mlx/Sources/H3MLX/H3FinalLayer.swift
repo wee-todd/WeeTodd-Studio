@@ -5,6 +5,19 @@ import TensorIO
 
 /// H3's shared final modulation and separate FP32 velocity heads.
 public enum H3FinalLayer {
+  /// Internal retained NNC admission. Ordinary MLX execution keeps its BF16 residual policy.
+  enum ResidualPrecision: Sendable {
+    case bfloat16
+    case float32
+
+    var dtype: DType {
+      switch self {
+      case .bfloat16: return .bfloat16
+      case .float32: return .float32
+      }
+    }
+  }
+
   public struct Output {
     public let video: MLXArray
     public let audio: MLXArray
@@ -26,10 +39,12 @@ public enum H3FinalLayer {
   static func evaluate(checkpointURL: URL, input: MLXArray,
     timeEmbeddings: MLXArray, timestepIndices: MLXArray,
     videoIndices: MLXArray, audioIndices: MLXArray,
-    maximumRows: Int = 40_000, lora: (any H3LoRAApplying)? = nil, loraInput: MLXArray? = nil, observe: (String, MLXArray) throws -> Void) throws -> Output {
+    maximumRows: Int = 40_000, residualPrecision: ResidualPrecision = .bfloat16,
+    lora: (any H3LoRAApplying)? = nil, loraInput: MLXArray? = nil,
+    observe: (String, MLXArray) throws -> Void) throws -> Output {
     guard input.ndim == 3, input.shape[0] == 1,
       [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(input.shape[1]), input.shape[2] == 5376,
-      input.dtype == .bfloat16, timeEmbeddings.ndim == 2,
+      input.dtype == residualPrecision.dtype, timeEmbeddings.ndim == 2,
       (1...128).contains(timeEmbeddings.shape[0]),
       [64, 2688].contains(timeEmbeddings.shape[1]),
       timeEmbeddings.dtype.isFloatingPoint,
@@ -91,8 +106,8 @@ public enum H3FinalLayer {
     let scale = take(modulation[0..<timeEmbeddings.shape[0], 5376..<10752],
       timestepIndices, axis: 0)
     let normWeight = try read("norm.weight", shape: [5376], dtype: "BF16")
-    let normalized = MLXFast.rmsNorm(input, weight: normWeight, eps: 1e-5)
-      * (1 + scale) + shift
+    let normalized = modulatedNormalization(input: input,
+      normWeight: normWeight, shift: shift, scale: scale)
     eval(normalized)
     try observe("normalized", normalized)
     func outputHead(_ suffix: String, rows: Int) throws -> MLXArray {
@@ -112,5 +127,13 @@ public enum H3FinalLayer {
     try H3CheckpointSource.checkUnchanged(checkpointURL)
     try Task.checkCancellation()
     return result
+  }
+
+  /// Python's retained NNC path leaves x in FP32 through FinalLayer.norm_out. MLX promotes
+  /// the BF16 norm weight to x's FP32 dtype. Modulation stays in its original dtype; there
+  /// is no FP16/BF16 residual cast before RMS normalization or before the FP32 heads.
+  static func modulatedNormalization(input: MLXArray, normWeight: MLXArray,
+    shift: MLXArray, scale: MLXArray) -> MLXArray {
+    MLXFast.rmsNorm(input, weight: normWeight, eps: 1e-5) * (1 + scale) + shift
   }
 }

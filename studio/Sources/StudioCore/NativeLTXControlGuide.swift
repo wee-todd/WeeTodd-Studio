@@ -6,11 +6,12 @@ import Foundation
 import ImageIO
 
 /// Preprocessed control movies are decoded and resampled one frame at a time.
-/// Union's guide is half the stage-one canvas, hence one quarter of the final canvas.
+/// Each guide uses its trained downscale relative to the active sampling canvas.
 enum NativeLTXControlGuide {
   static func prepare(source: URL, destination: URL, width: Int, height: Int,
-    frames: Int, fps: Double, editorialDuration: Double, referenceDownscale:Int=2) async throws -> String {
-    guard (128...4096).contains(width),(128...4096).contains(height),[1,2].contains(referenceDownscale),width % (64*referenceDownscale) == 0,height % (64*referenceDownscale) == 0,
+    frames: Int, fps: Double, editorialDuration: Double, referenceDownscale:Int=2,
+    stageDownscale:Int=2) async throws -> String {
+    guard (64...4096).contains(width),(64...4096).contains(height),[1,2].contains(referenceDownscale),[1,2].contains(stageDownscale),width % (32*stageDownscale*referenceDownscale) == 0,height % (32*stageDownscale*referenceDownscale) == 0,
       (9...2401).contains(frames),(frames-1)%8 == 0,fps.isFinite,(1...120).contains(fps),
       editorialDuration.isFinite,(0.01...20).contains(editorialDuration) else {
       throw StudioError.invalid("Invalid Union guide canvas or timing.")
@@ -33,7 +34,7 @@ enum NativeLTXControlGuide {
     guard duration.isFinite,duration+0.001>=editorialDuration else {
       throw StudioError.invalid("The Union guide is shorter than the requested clip. Choose a longer guide or shorten the clip.")
     }
-    let w=width/(2*referenceDownscale),h=height/(2*referenceDownscale),frameBytes=w*h*3,totalBytes=frameBytes*frames
+    let w=width/(stageDownscale*referenceDownscale),h=height/(stageDownscale*referenceDownscale),frameBytes=w*h*3,totalBytes=frameBytes*frames
     let free=try FileManager.default.attributesOfFileSystem(forPath:destination.deletingLastPathComponent().path)[.systemFreeSize] as? NSNumber
     guard let free,free.int64Value>=Int64(totalBytes)+64*1024*1024 else {
       throw StudioError.invalid("Free disk space is insufficient for the frozen Union guide.")
@@ -93,7 +94,7 @@ enum NativeLTXControlGuide {
     return hash.finalize().map { String(format:"%02x",$0) }.joined()
   }
   static func prepareSheet(source:URL,destination:URL,width:Int,height:Int,frames:Int) throws -> String {
-    guard (32...2048).contains(width),(32...2048).contains(height),width%32 == 0,height%32 == 0,
+    guard (32...4096).contains(width),(32...4096).contains(height),width%32 == 0,height%32 == 0,
       (121...2401).contains(frames),(frames-1)%8 == 0,
       let input=CGImageSourceCreateWithURL(source as CFURL,[kCGImageSourceShouldCache:false] as CFDictionary),
       let properties=CGImageSourceCopyPropertiesAtIndex(input,0,nil) as? [CFString:Any],

@@ -129,7 +129,7 @@ public enum H3MotionFidelityRunner {
       startVideoSigma: prepared.plan.settings.strength, evaluations: prepared.plan.settings.evaluations,
       preserveAudio: true)
     var cursor = 0
-    _ = try H3T2VARunner.run(prepared.request, initialRows: rows, refinement: controls,
+    let rendered = try H3T2VARunner.run(prepared.request, initialRows: rows, refinement: controls,
       publicationAudio: prepared.originalAudio,
       onFrame: { index, rgb in
         guard cursor < prepared.plan.recovery.count else { return }
@@ -141,7 +141,8 @@ public enum H3MotionFidelityRunner {
     guard cursor == source.frames else { throw H3CheckpointError.invalid("Recovered motion frame count differs from the source.") }
     try source.identity.verify()
     return .init(videoFrames: prepared.request.geometry.frames,
-      audioSamplesPerChannel: prepared.originalAudio.frames, audioSampleRate: 32_000)
+      audioSamplesPerChannel: prepared.originalAudio.frames, audioSampleRate: 32_000,
+      backendReport: rendered.backendReport, videoDecodePrecision: rendered.videoDecodePrecision)
   }
 
   static func expandedPixels(_ pixels: [UInt8], width: Int, height: Int,
@@ -195,7 +196,7 @@ public enum H3MotionFidelityRunner {
       durationSeconds: Double(frames) / 24, seed: settings.seed, requestedSteps: base.requestedSteps,
       transformer: base.transformer, qwenPages: base.qwenPages, tokenizer: base.tokenizer,
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
-      loRAAdapters: base.loRAAdapters, videoDecodeMemoryMode: base.videoDecodeMemoryMode,
+      loRAAdapters: base.loRAAdapters, videoDecodeMemoryMode: base.videoDecodeMemoryMode, videoDecodePrecision: base.videoDecodePrecision,
       samplingMethod: base.samplingMethod)
   }
   private static func validateBaselineMetadata(_ url: URL) throws {

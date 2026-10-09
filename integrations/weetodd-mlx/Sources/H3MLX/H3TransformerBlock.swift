@@ -12,6 +12,11 @@ struct H3RotaryAngles {
 /// One released H3 diffusion block. The five quantized projections are loaded
 /// sequentially from the installed Comfy checkpoint and discarded after use.
 public enum H3TransformerBlock {
+  static func validateAttendedOverrideLayout(fastVariant: H3FastVariant?, curveRank: Int?) throws {
+    guard fastVariant == nil, curveRank == nil || curveRank == 64 else {
+      throw H3CheckpointError.invalid("Attended-only override requires ordinary Ref2VA or rank-64 FL attention.")
+    }
+  }
   static func trainedCompressionGate(_ input:MLXArray,weight:MLXArray,heads:Int,headWidth:Int) -> MLXArray {
     // The trained correction is signed and unbounded, including an exact zero
     // for zero weights. A sigmoid changes the checkpoint's attention function.
@@ -97,6 +102,10 @@ public enum H3TransformerBlock {
     lora: (any H3LoRAApplying)? = nil,
     rotaryAngles: H3RotaryAngles? = nil, maximumRows: Int = 40_000,
     rowWindow: Int = 16384, vdn: H3VDNRuntime? = nil,fastTiles:H3FastTiles? = nil,
+    preparedWeights: H3PreparedBlock? = nil,
+    preparedFeedRowChunk: Int = 8192,
+    attendedOverride: ((MLXArray, MLXArray, MLXArray) throws -> MLXArray)? = nil,
+    onAttentionBackend: @escaping (H3FastAttention.Consumer) -> Void = { _ in },
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard (0..<50).contains(index), input.ndim == 3,
       input.shape[0] == 1, [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(input.shape[1]),
@@ -106,29 +115,50 @@ public enum H3TransformerBlock {
       modulationIndices.shape == [input.shape[1]],
       modulationIndices.dtype == .int32,
       positions.shape == [input.shape[1], 3],
-      positions.dtype == .float32 else {
+      positions.dtype == .float32, [8192,16_384].contains(preparedFeedRowChunk) else {
       throw H3CheckpointError.invalid("Invalid H3 diffusion block inputs.")
     }
-    let layout = try H3CheckpointLayout(url: checkpointURL)
+    if let preparedWeights {
+      guard preparedWeights.checkpointURL == checkpointURL, preparedWeights.index == index,
+        projectionMode == .weightDecoded else {
+        throw H3CheckpointError.invalid("Prepared H3 weights differ from the requested block.")
+      }
+      try preparedWeights.checkUnchanged()
+    }
+    if attendedOverride != nil {
+      guard preparedWeights != nil, projectionMode == .weightDecoded,
+        fastTiles == nil, vdn == nil, maximumRows == 40_000 else {
+        throw H3CheckpointError.invalid("Experimental attended-only override requires ordinary prepared attention.")
+      }
+    }
+    let blockLoRA = try preparedWeights?.prepareLoRA(lora) ?? lora
+    let layout = try preparedWeights?.layout ?? H3CheckpointLayout(url: checkpointURL)
     try validateTrainedAttentionGeometry(variant:layout.fastVariant,tiles:fastTiles,rows:input.shape[1])
+    if attendedOverride != nil {
+      try validateAttendedOverrideLayout(fastVariant: layout.fastVariant, curveRank: layout.curveRank)
+    }
     let indices = modulationIndices.asArray(Int32.self)
     guard indices.allSatisfy({ (0..<(modulation.shape[0] * 3)).contains(Int($0)) }) else {
       throw H3CheckpointError.invalid("H3 modulation index exceeds the timestep table.")
     }
     try Task.checkCancellation()
     let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, block: index)
-    let file = try SafeTensorFile(url: tensorURL)
+    let file = try preparedWeights?.file ?? SafeTensorFile(url: tensorURL)
     let prefix = layout.prefix + "blocks.\(index)."
     let previousCacheLimit = Memory.cacheLimit
-    Memory.cacheLimit = 128 * 1024 * 1024
-    let nativePage = layout.fastVariant == nil ? nil : H3NativePage(file: file, url: tensorURL)
+    Memory.cacheLimit = H3SamplingAllocationPolicy.blockLimit(
+      previous: previousCacheLimit, prepared: preparedWeights != nil)
+    let nativePage = layout.fastVariant == nil || preparedWeights != nil ? nil : H3NativePage(file: file, url: tensorURL)
     defer {
       nativePage?.clear()
-      Stream.gpu.synchronize()
-      Memory.clearCache()
+      if preparedWeights == nil {
+        Stream.gpu.synchronize()
+        Memory.clearCache()
+      }
       Memory.cacheLimit = previousCacheLimit
     }
     func read(_ name: String, shape: [Int], dtype: String = "BF16") throws -> MLXArray {
+      if let preparedWeights { return try preparedWeights.read(name,shape:shape,dtype:dtype) }
       guard let descriptor = file.tensors[name], descriptor.dtype == dtype,
         descriptor.shape == shape.map(UInt64.init) else {
         throw H3CheckpointError.invalid("Missing H3 block tensor: \(name)")
@@ -147,7 +177,10 @@ public enum H3TransformerBlock {
       rows: Int, columns: Int, qkv: Bool = false) throws -> MLXArray {
       let base: MLXArray
       let name = prefix + suffix + ".weight"
-      if file.tensors[name]?.dtype == "U32" {
+      if let preparedWeights {
+        base = try preparedWeights.project(suffix,activation:activation,
+          rows:rows,columns:columns,qkv:qkv)
+      } else if file.tensors[name]?.dtype == "U32" {
         let reader: ((String) throws -> MLXArray)? = nativePage.map { page in { try page.read($0) } }
         let weight = try H3QwenQ8Projection(file: file, name: name, tensor: reader)
         guard weight.rows == rows, weight.columns == columns else {
@@ -181,11 +214,15 @@ public enum H3TransformerBlock {
           rowWindow: rowWindow)
         base = matmul(activation, weight.T)
       }
-      let value = try lora?.apply(base: base, input: activation,
-        target: "diffusion_model.blocks.\(index).\(suffix)",
-        reorderQKV: qkv) ?? base
-      eval(value)
-      Memory.clearCache()
+      let value: MLXArray
+      if let lora = blockLoRA {
+        let target="diffusion_model.blocks.\(index).\(suffix)"
+        value = try preparedWeights == nil
+          ? lora.apply(base:base,input:activation,target:target,reorderQKV:qkv)
+          : lora.applyQueued(base:base,input:activation,target:target,reorderQKV:qkv)
+      } else { value=base }
+      if preparedWeights != nil { asyncEval(value) }
+      else { eval(value); Memory.clearCache() }
       try Task.checkCancellation()
       return value
     }
@@ -206,7 +243,7 @@ public enum H3TransformerBlock {
       hybrid = { first,_,query,key,value in
         let weight = try read(prefix + "attn.gate_compress.weight",shape:[7168,5376])
         let gate = trainedCompressionGate(first,weight:weight,heads:56,headWidth:128)
-        let attended = try H3FastAttention.evaluate(query:query,key:key,value:value,gate:gate,tiles:fastTiles)
+        let attended = try H3FastAttention.evaluate(query:query,key:key,value:value,gate:gate,tiles:fastTiles,onConsumer:onAttentionBackend)
           .transposed(0,2,1,3).reshaped([1,count,7168])
         return try project(attended,"attn.out_proj",rows:5376,columns:7168)
       }
@@ -220,7 +257,15 @@ public enum H3TransformerBlock {
       modulationIndices: modulationIndices, angles: angles,
       read: { try read(prefix + $0, shape: $1) },
       project: { try project($0, $1, rows: $2, columns: $3, qkv: $4) },
-      hybridAttention:hybrid,
+      hybridAttention:hybrid, attendedOverride: attendedOverride,
+      feedRowChunk: preparedWeights != nil && count >= 16_384 ? preparedFeedRowChunk:nil,
+      drainAttentionInputs: preparedWeights != nil && fastTiles == nil,
+      queueBranches: preparedWeights != nil && layout.fastVariant != nil && count <= 16_384,
+      retireQKV: { preparedWeights?.retireProjection("attn.qkv_proj") },
+      retireAttention: {
+        preparedWeights?.retireProjection("attn.qkv_proj")
+        preparedWeights?.retireProjection("attn.out_proj")
+      },
       observe: { name,value in
         if maximumRows == 64_000, UInt64(Memory.activeMemory) > H3CanvasAdmission.maximumStageBytes {
           throw H3CheckpointError.invalid("H3 spatial block exceeded its 32 GiB active-memory budget.")
@@ -244,50 +289,72 @@ public enum H3TransformerBlock {
     read: (String, [Int]) throws -> MLXArray,
     project: (MLXArray, String, Int, Int, Bool) throws -> MLXArray,
     hybridAttention: ((MLXArray, MLXArray, MLXArray, MLXArray, MLXArray) throws -> MLXArray)? = nil,
+    attendedOverride: ((MLXArray, MLXArray, MLXArray) throws -> MLXArray)? = nil,
+    feedRowChunk: Int? = nil,
+    drainAttentionInputs: Bool = false,
+    queueBranches: Bool = false,
+    retireQKV: () -> Void = {},
+    retireAttention: () -> Void = {},
     observe: (String, MLXArray) throws -> Void = { _, _ in }) throws -> MLXArray {
+    guard attendedOverride == nil || (hybridAttention == nil && drainAttentionInputs && !queueBranches) else {
+      throw H3CheckpointError.invalid("Attended-only override cannot retain hybrid attention inputs.")
+    }
     let count = input.shape[1]
     let mod = modulation.reshaped([modulation.shape[0] * 3, 6 * hiddenWidth])
-    // Retain the small timestep table, not six expanded token-width arrays.
-    // Each gather belongs to its consumer and can release after that consumer
-    // materializes. The indexed rows and BF16 arithmetic are unchanged.
-    func table(_ slot: Int) -> MLXArray {
-      take(mod[0..<(modulation.shape[0] * 3),
-        (slot * hiddenWidth)..<((slot + 1) * hiddenWidth)],
-        modulationIndices, axis: 0)
-    }
     func rotate(_ value: MLXArray) -> MLXArray {
-      let first = value[.ellipsis, 0..<(rotaryWidth / 2)]
-      let second = value[.ellipsis, (rotaryWidth / 2)..<rotaryWidth]
-      let rotated = concatenated([-second, first], axis: -1)
-      let leading = value[.ellipsis, 0..<rotaryWidth] * angles.cosine
-        + rotated * angles.sine
-      return concatenated([leading, value[.ellipsis, rotaryWidth..<headWidth]], axis: -1)
+      H3Rotary.apply(value, cosine: angles.cosine, sine: angles.sine, rotaryWidth: rotaryWidth)
     }
     func runAttention() throws -> MLXArray {
-      let firstNorm = try read("norm1.weight", [hiddenWidth])
-      let first = MLXFast.rmsNorm(input, weight: firstNorm, eps: 1e-5)
-        * (1 + table(1)) + table(0)
-      try observe("norm1_adaln", first)
-      let qkv = try project(first, "attn.qkv_proj",
-        (3 * heads * headWidth), hiddenWidth, true)
-        .reshaped([1, count, heads, 3, headWidth])
-      try observe("qkv", qkv)
-      let qNorm = try read("attn.q_norm.weight", [headWidth])
-      let kNorm = try read("attn.k_norm.weight", [headWidth])
-      let query = rotate(MLXFast.rmsNorm(qkv[.ellipsis, 0, 0..<headWidth],
-        weight: qNorm, eps: 1e-5).transposed(0, 2, 1, 3))
-      let key = rotate(MLXFast.rmsNorm(qkv[.ellipsis, 1, 0..<headWidth],
-        weight: kNorm, eps: 1e-5).transposed(0, 2, 1, 3))
-      let value = qkv[.ellipsis, 2, 0..<headWidth].transposed(0, 2, 1, 3)
-      try observe("query", query)
-      try observe("key", key)
+      func prepareInputs() throws -> (MLXArray?, MLXArray?, MLXArray, MLXArray, MLXArray) {
+        let firstNorm = try read("norm1.weight", [hiddenWidth])
+        let first = H3Modulation.scaleShift(MLXFast.rmsNorm(input, weight: firstNorm, eps: 1e-5),
+          table:mod,indices:modulationIndices,shift:0,scale:1)
+        try observe("norm1_adaln", first)
+        let qkv = try project(first, "attn.qkv_proj",
+          (3 * heads * headWidth), hiddenWidth, true)
+          .reshaped([1, count, heads, 3, headWidth])
+        try observe("qkv", qkv)
+        let qNorm = try read("attn.q_norm.weight", [headWidth])
+        let kNorm = try read("attn.k_norm.weight", [headWidth])
+        let query = rotate(MLXFast.rmsNorm(qkv[.ellipsis, 0, 0..<headWidth],
+          weight: qNorm, eps: 1e-5).transposed(0, 2, 1, 3))
+        // Bound in-flight QKV/LoRA and rotary scratch before submitting SDPA.
+        // The GPU completion fence retires their Metal buffers; detaching an
+        // async graph alone does not release command-buffer input storage.
+        if drainAttentionInputs { eval(query) }
+        let key = rotate(MLXFast.rmsNorm(qkv[.ellipsis, 1, 0..<headWidth],
+          weight: kNorm, eps: 1e-5).transposed(0, 2, 1, 3))
+        if drainAttentionInputs { eval(key) }
+        var value = qkv[.ellipsis, 2, 0..<headWidth].transposed(0, 2, 1, 3)
+        if drainAttentionInputs && hybridAttention == nil {
+          // The strided V view otherwise retains the three-times-larger QKV
+          // allocation throughout SDPA. Own V and retire QKV before attention.
+          value = contiguous(value)
+          eval(value)
+          retireQKV()
+        }
+        try observe("query", query)
+        try observe("key", key)
+        return (hybridAttention == nil ? nil:first, hybridAttention == nil ? nil:qkv, query,key,value)
+      }
+      let (first,qkv,query,key,value) = try prepareInputs()
       let attention: MLXArray
       if let hybridAttention {
+        guard let first, let qkv else { throw H3CheckpointError.invalid("Missing H3 hybrid attention inputs.") }
         attention = try hybridAttention(first, qkv, query, key, value)
       } else {
-        let attended = MLXFast.scaledDotProductAttention(queries: query,
-          keys: key, values: value, scale: 1 / Float(headWidth).squareRoot(),
-          mask: nil).transposed(0, 2, 1, 3).reshaped([1, count, (heads * headWidth)])
+        let attended: MLXArray
+        if let attendedOverride {
+          let headMajor = try attendedOverride(query, key, value)
+          guard headMajor.shape == [1, heads, count, headWidth], headMajor.dtype == input.dtype else {
+            throw H3CheckpointError.invalid("Experimental attention output differs from admitted geometry or precision.")
+          }
+          attended = headMajor.transposed(0, 2, 1, 3).reshaped([1, count, heads * headWidth])
+        } else {
+          attended = MLXFast.scaledDotProductAttention(queries: query,
+            keys: key, values: value, scale: 1 / Float(headWidth).squareRoot(),
+            mask: nil).transposed(0, 2, 1, 3).reshaped([1, count, (heads * headWidth)])
+        }
         try observe("attended", attended)
         attention = try project(attended, "attn.out_proj",
           hiddenWidth, (heads * headWidth), false)
@@ -296,28 +363,45 @@ public enum H3TransformerBlock {
     }
     let attention = try runAttention()
     try observe("attention", attention)
-    let residual = input + table(2) * attention
-    eval(residual)
+    let residual = H3Modulation.residual(input,branch:attention,table:mod,
+      indices:modulationIndices,gate:2)
+    if queueBranches { asyncEval(residual) } else { eval(residual) }
     try observe("attention_residual", residual)
+    retireAttention()
     func runFeed() throws -> MLXArray {
       let secondNorm = try read("norm2.weight", [hiddenWidth])
-      let feedInput = MLXFast.rmsNorm(residual, weight: secondNorm,
-        eps: 1e-5) * (1 + table(4)) + table(3)
+      let feedInput = H3Modulation.scaleShift(MLXFast.rmsNorm(residual, weight: secondNorm,eps:1e-5),
+        table:mod,indices:modulationIndices,shift:3,scale:4)
       try observe("norm2_adaln", feedInput)
-      let fused = try project(feedInput, "mlp.fc1",
-        (2 * feedWidth), hiddenWidth, false)
-      try observe("fused", fused)
-      let gate = fused[.ellipsis, 0..<feedWidth]
-      let gated = silu(gate) * fused[.ellipsis, feedWidth..<(2 * feedWidth)]
-      try observe("gated", gated)
-      let feed = try project(gated, "mlp.fc2",
-        hiddenWidth, feedWidth, false)
-      try observe("feed", feed)
+      func part(_ partInput: MLXArray) throws -> MLXArray {
+        let fused = try project(partInput, "mlp.fc1", (2 * feedWidth), hiddenWidth, false)
+        try observe("fused", fused)
+        let gate = fused[.ellipsis, 0..<feedWidth]
+        let gated = silu(gate) * fused[.ellipsis, feedWidth..<(2 * feedWidth)]
+        try observe("gated", gated)
+        let feed = try project(gated, "mlp.fc2", hiddenWidth, feedWidth, false)
+        try observe("feed", feed)
+        return feed
+      }
+      let feed:MLXArray
+      if let feedRowChunk, count > feedRowChunk {
+        guard feedRowChunk > 0 else { throw H3CheckpointError.invalid("Invalid H3 feed-forward row chunk.") }
+        var parts:[MLXArray]=[]
+        for start in stride(from:0,to:count,by:feedRowChunk) {
+          try Task.checkCancellation()
+          let value=try part(feedInput[0..<1,start..<min(start+feedRowChunk,count),0..<hiddenWidth])
+          eval(value) // Retire this chunk's wide gate/up graph before the next.
+          parts.append(value)
+        }
+        feed=concatenated(parts,axis:1);eval(feed)
+      } else { feed=try part(feedInput) }
+
       return feed
     }
     let feed = try runFeed()
-    let output = residual + table(5) * feed
-    eval(output)
+    let output = H3Modulation.residual(residual,branch:feed,table:mod,
+      indices:modulationIndices,gate:5)
+    if queueBranches { asyncEval(output) } else { eval(output) }
     try observe("output", output)
     return output
   }

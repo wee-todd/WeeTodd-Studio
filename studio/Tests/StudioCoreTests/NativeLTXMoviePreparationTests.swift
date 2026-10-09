@@ -2,6 +2,20 @@ import AVFoundation
 import XCTest
 @testable import StudioCore
 final class NativeLTXMoviePreparationTests:XCTestCase {
+  func testMovieUpscaleRejectsH3PrecisionAndWeightCacheBeforeMedia() throws {
+    var clip = Clip(engine: .ltx25)
+    var settings = LTX25MovieUpscaleSettings(); settings.experimentalEnabled = true
+    clip.generationSelection = GenerationSelection(task: "video_upscale")
+    XCTAssertNoThrow(try NativeLTXMoviePreparation.validateEditor(clip: clip, settings: settings))
+    for precision in [true, false] {
+      var invalid = clip
+      if precision { invalid.generationSelection?.h3VideoDecodePrecision = .float16 }
+      else { invalid.generationSelection?.h3TransformerWeightCacheGB = 8 }
+      XCTAssertThrowsError(try NativeLTXMoviePreparation.validateEditor(clip: invalid, settings: settings),
+        "Movie upscaling must reject H3-only settings before decoding media")
+    }
+  }
+
   private func ffmpeg() throws -> URL {
     for path in [ProcessInfo.processInfo.environment["WEETODD_FFMPEG"],"/opt/homebrew/bin/ffmpeg"].compactMap({ $0 }) {
       if FileManager.default.isExecutableFile(atPath:path) { return URL(fileURLWithPath:path) }

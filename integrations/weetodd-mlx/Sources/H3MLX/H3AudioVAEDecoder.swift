@@ -3,9 +3,27 @@ import MLX
 import TensorIO
 
 /// Stage-loaded BigVGAN decoder for H3's two mono batches (left and right).
-/// Checkpoint weights stay in their installed safetensors file; each weighted
-/// convolution is released before the next one is read.
+/// Only decoder parameters reside during this bounded stage. The installed
+/// checkpoint stays read-only; no encoder weights or cross-stage cache are retained.
 public enum H3AudioVAEDecoder {
+  /// Header-only resident admission; checked before any decoder payload read.
+  static func admittedResidentDecoderByteCount(_ byteCounts: [UInt64]) throws -> UInt64 {
+    let maximumTensorBytes: UInt64 = 64 * 1024 * 1024
+    let maximumResidentBytes: UInt64 = 300 * 1024 * 1024
+    guard byteCounts.count == 779 else {
+      throw H3CheckpointError.invalid("H3 audio resident stage requires 779 decoder parameters.")
+    }
+    var total: UInt64 = 0
+    for bytes in byteCounts {
+      guard bytes > 0, bytes <= maximumTensorBytes,
+        bytes <= maximumResidentBytes - total else {
+        throw H3CheckpointError.invalid("H3 audio resident decoder exceeds its bounded payload budget.")
+      }
+      total += bytes
+    }
+    return total
+  }
+
   public static func decode(checkpointURL: URL, latent: MLXArray,
     progress: (Int, Int) -> Void = { _, _ in }) throws -> MLXArray {
     try decode(checkpointURL: checkpointURL, latent: latent,
@@ -20,25 +38,55 @@ public enum H3AudioVAEDecoder {
       latent.dtype == .float32 else {
       throw H3CheckpointError.invalid("Invalid H3 stereo audio VAE latent geometry.")
     }
+    try Task.checkCancellation()
     let layout = try H3AudioVAELayout(url: checkpointURL)
     let file = try SafeTensorFile(url: checkpointURL)
+    var resident: [String: MLXArray] = [:]
     let previousCacheLimit = Memory.cacheLimit
     Memory.cacheLimit = 128 * 1024 * 1024
     defer {
       Stream.gpu.synchronize()
+      resident.removeAll(keepingCapacity: false)
       Memory.clearCache()
       Memory.cacheLimit = previousCacheLimit
     }
-    func read(_ name: String) throws -> MLXArray {
+    let names = file.tensors.keys.filter {
+      $0.hasPrefix("dec_in_proj.") || $0.hasPrefix("decoder.")
+    }.sorted()
+    var byteCounts: [UInt64] = []
+    for name in names {
       guard let descriptor = file.tensors[name], descriptor.dtype == "F32",
         descriptor.byteCount <= 64 * 1024 * 1024 else {
         throw H3CheckpointError.invalid("Missing or oversized H3 audio tensor: \(name)")
+      }
+      byteCounts.append(descriptor.byteCount)
+    }
+    _ = try admittedResidentDecoderByteCount(byteCounts)
+    resident.reserveCapacity(names.count)
+    for name in names {
+      try Task.checkCancellation()
+      try file.checkUnchanged(at: checkpointURL)
+      guard let descriptor = file.tensors[name] else {
+        throw H3CheckpointError.invalid("Missing admitted H3 audio tensor: \(name)")
       }
       let shape = descriptor.shape.map(Int.init)
       let value = try file.withTensorBytes(named: name) { bytes in
         MLXArray(bytes, shape, type: Float.self)
       }
-      eval(value)
+      resident[name] = value
+      asyncEval(value)
+    }
+    eval(Array(resident.values))
+    try file.checkUnchanged(at: checkpointURL)
+    try Task.checkCancellation()
+    func read(_ name: String) throws -> MLXArray {
+      try Task.checkCancellation()
+      guard let descriptor = file.tensors[name], descriptor.dtype == "F32",
+        descriptor.byteCount <= 64 * 1024 * 1024,
+        let value = resident[name], value.dtype == .float32,
+        value.shape == descriptor.shape.map(Int.init) else {
+        throw H3CheckpointError.invalid("Missing or changed resident H3 audio tensor: \(name)")
+      }
       return value
     }
     func finish(_ value: MLXArray) throws -> MLXArray {
@@ -58,9 +106,7 @@ public enum H3AudioVAEDecoder {
         var output = conv1d(input, weight.transposed(0, 2, 1),
           padding: padding, dilation: dilation)
         if bias { output = output + (try read(name + ".bias")) }
-        let result = try finish(output)
-        Memory.clearCache()
-        return result
+        return try finish(output)
       }
     }
     func transpose(_ input: MLXArray, stage: Int,
@@ -74,9 +120,7 @@ public enum H3AudioVAEDecoder {
         let output = convTransposed1d(input,
           weight.transposed(1, 2, 0), stride: rate,
           padding: (kernel - rate) / 2) + (try read(base + ".bias"))
-        let result = try finish(output)
-        Memory.clearCache()
-        return result
+        return try finish(output)
       }
     }
     func activation(_ input: MLXArray, _ name: String) throws -> MLXArray {
@@ -109,7 +153,6 @@ public enum H3AudioVAEDecoder {
         signal = conv1d(signal, downFilter, stride: 2)
         let result = try finish(signal.reshaped([batch, channels, frames])
           .transposed(0, 2, 1))
-        Memory.clearCache()
         return result
       }
     }

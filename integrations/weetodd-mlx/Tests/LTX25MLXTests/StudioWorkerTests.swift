@@ -3,6 +3,16 @@ import ImageIO
 @testable import LTX25MLX
 
 final class StudioWorkerTests: XCTestCase {
+  func testIngredientsGuidanceReportsThirtyUpdatesWithoutAnEightStepJump() {
+    var progress=MLXStudioProgress(samplingSteps:30)
+    let first=progress.event(stage:"ingredients:transformer",completed:24,total:48)
+    XCTAssertTrue((first["message"] as! String).contains("1/30"))
+    XCTAssertEqual(first["fraction"] as! Double,0.1+0.72*0.5/30,accuracy:1e-12)
+    _=progress.event(stage:"sampling",completed:12,total:30)
+    let later=progress.event(stage:"ingredients:transformer",completed:24,total:48)
+    XCTAssertTrue((later["message"] as! String).contains("13/30"))
+    XCTAssertEqual(later["fraction"] as! Double,0.1+0.72*12.5/30,accuracy:1e-12)
+  }
   func testSingleStageProgressAdvancesWithinAllEightUpdates() {
     var progress=MLXStudioProgress(samplingSteps:8)
     let first=progress.event(stage:"single_stage:transformer",completed:24,total:48)

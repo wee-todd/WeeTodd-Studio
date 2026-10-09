@@ -100,12 +100,12 @@ final class MLXGuidedSamplingRunner {
   private let sampling: MLXGuidedSampling
   private let gate=NSLock()
   init(configuration: AVBlockConfiguration, sampling: MLXGuidedSampling,
-    maximumActivationBytes: Int,keyframeMarkerRows:Int=0) throws {
+    maximumActivationBytes: Int,keyframeMarkerRows:Int=0,leadingKeyframeMarkerRows:Int=0) throws {
     self.sampling=sampling
     let reserve=MLXGuidedSampling.reserveBytes(videoTokens:configuration.videoTokens,audioTokens:configuration.audioTokens)
     guard reserve < maximumActivationBytes else { throw LTXError.invalid("Dev guidance latents and contexts exceed the admitted workspace.") }
     denoiser=try MLXDenoiser(configuration:configuration,maximumActivationBytes:maximumActivationBytes-reserve,
-      keyframeMarkerRows:keyframeMarkerRows)
+      keyframeMarkerRows:keyframeMarkerRows,leadingKeyframeMarkerRows:leadingKeyframeMarkerRows)
   }
   func evaluate(_ inputs: [String:MLXArray], schedule: SamplingSchedule,
     negativeContexts: [String:MLXArray], videoConditioning: MLXVideoDenoiseCondition?, frozenAudio: Bool,
@@ -160,14 +160,14 @@ final class MLXGuidedSamplingRunner {
       let conditional=try branch()
       let negative=sampling.videoCFG != 1 || sampling.audioCFG != 1 ? try branch(negativeContexts) : nil
       let perturbed=sampling.stg != 0 ? try branch(nil,
-        MLXGuidancePerturbation(videoSelfAttentionBlocks:Set(sampling.stgBlocks),audioSelfAttentionBlocks:Set(sampling.stgBlocks))) : nil
+        MLXGuidancePerturbation(videoSelfAttentionBlocks:Set(sampling.stgBlocks),audioSelfAttentionBlocks:sampling.stgAudio ? Set(sampling.stgBlocks) : [])) : nil
       let isolated=sampling.modality != 1 ? try branch(nil,MLXGuidancePerturbation(skipCrossModality:true)) : nil
       var clean:[String:MLXArray]=[:]
       for name in ["video","audio"] {
         if name == "audio" && frozenAudio { clean[name]=state[name]; continue }
         var value=MLXGuidanceMath.combine(conditional[name]!,negative:negative?[name],perturbed:perturbed?[name],
           isolated:isolated?[name],cfg:name == "video" ? sampling.videoCFG : sampling.audioCFG,
-          stg:sampling.stg,modality:sampling.modality,rescale:name == "video" ? sampling.videoRescale : sampling.audioRescale).asType(.float32)
+          stg:name == "video" || sampling.stgAudio ? sampling.stg : 0,modality:sampling.modality,rescale:name == "video" ? sampling.videoRescale : sampling.audioRescale).asType(.float32)
         if name == "video",let mask,let condition=videoConditioning {
           value=value*mask+condition.clean*(1-mask)
         }

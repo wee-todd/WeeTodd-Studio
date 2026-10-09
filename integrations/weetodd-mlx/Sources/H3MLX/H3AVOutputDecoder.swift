@@ -8,15 +8,29 @@ public enum H3AVOutputDecoder {
     public let videoFrames: Int
     public let audioSamplesPerChannel: Int
     public let audioSampleRate: Int
+    public let backendReport: H3BackendReport?
+    public let videoDecodePrecision: H3VideoDecodePrecision?
+
+    public init(videoFrames: Int, audioSamplesPerChannel: Int, audioSampleRate: Int,
+      backendReport: H3BackendReport? = nil, videoDecodePrecision: H3VideoDecodePrecision? = nil) {
+      self.videoFrames = videoFrames
+      self.audioSamplesPerChannel = audioSamplesPerChannel
+      self.audioSampleRate = audioSampleRate
+      self.backendReport = backendReport
+      self.videoDecodePrecision = videoDecodePrecision
+    }
   }
 
   public static func decode(videoRows: [Float], audioRows: [Float],
     geometry: H3Geometry, videoVAE: URL, audioVAE: URL,
     videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil,
+    videoDecodePrecision: H3VideoDecodePrecision = .float32,
     publicationAudio: H3AudioReference? = nil,
+    backendReport: H3BackendReport? = nil,
     onFrame: (Int, Data) throws -> Void,
     onAudio: ([Float], Int) throws -> Void,
     progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
+    try videoDecodePrecision.validate(memoryMode: videoDecodeMemoryMode)
     guard videoRows.count == geometry.videoRows * 96,
       audioRows.count == geometry.audioRows * 32 else {
       throw H3CheckpointError.invalid("H3 decoded AV row lengths disagree with geometry.")
@@ -39,8 +53,12 @@ public enum H3AVOutputDecoder {
       standardDeviation: videoLayout.latentsStandardDeviation)
     let frameBytes = geometry.width * geometry.height * 3
     var written = 0
+    var appliedPrecision: H3VideoDecodePrecision?
     try H3VideoVAEDecoder.decodeChunks(checkpointURL: videoVAE,
-      latent: video, memoryMode: videoDecodeMemoryMode) { chunk in
+      latent: video, retainWeights: true, memoryMode: videoDecodeMemoryMode,
+      precision: videoDecodePrecision, onSessionClosed: { stats in
+        appliedPrecision = H3VideoDecodePrecision(rawValue: stats.computePrecision)
+      }) { chunk in
       try Task.checkCancellation()
       let bytes = try H3LatentCodec.videoPixelsRGB8(chunk).asArray(UInt8.self)
       guard bytes.count == chunk.shape[1] * frameBytes else {
@@ -53,7 +71,7 @@ public enum H3AVOutputDecoder {
         progress("video_decode", written, geometry.frames)
       }
     }
-    guard written == geometry.frames else {
+    guard appliedPrecision == videoDecodePrecision, written == geometry.frames else {
       throw H3CheckpointError.invalid("H3 video decoder frame count disagrees with the AV clock.")
     }
     Stream.gpu.synchronize()
@@ -65,7 +83,7 @@ public enum H3AVOutputDecoder {
       try onAudio(publicationAudio.samples, 32_000)
       progress("source_audio_preserved", 1, 1)
       return Result(videoFrames: written, audioSamplesPerChannel: publicationAudio.frames,
-        audioSampleRate: 32_000)
+        audioSampleRate: 32_000, backendReport: backendReport, videoDecodePrecision: appliedPrecision)
     }
     let audioLayout = try H3AudioVAELayout(url: audioVAE)
     let audio = try H3LatentCodec.audioDecoderInput(
@@ -87,6 +105,6 @@ public enum H3AVOutputDecoder {
     Memory.clearCache()
     progress("audio_weights_released", 1, 1)
     return Result(videoFrames: written,
-      audioSamplesPerChannel: samples.count / 2, audioSampleRate: 32_000)
+      audioSamplesPerChannel: samples.count / 2, audioSampleRate: 32_000, backendReport: backendReport, videoDecodePrecision: appliedPrecision)
   }
 }

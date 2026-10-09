@@ -269,9 +269,43 @@ def resolve_generation_selection(selection, clip, profiles, capabilities, *, val
         "memoryPolicy",
         "projectionBackend",
         "transformerBackend",
+        "h3VideoDecodePrecision",
+        "h3AttentionPolicy",
+        "h3TransformerWeightCacheGB",
     }
     if unknown:
         raise ValueError(f"Unsupported generation controls: {sorted(unknown)}")
+    cache = selection.get("h3TransformerWeightCacheGB")
+    if cache is not None:
+        if (
+            clip["engine"] != "h3"
+            or isinstance(cache, bool)
+            or not isinstance(cache, int)
+            or cache not in {0, 8, 16, 32, 48, 64, 96}
+        ):
+            raise ValueError("h3TransformerWeightCacheGB requires an H3 cache budget in GiB")
+        if cache:
+            raise ValueError("Transformer weight cache requires the Swift MLX runtime")
+    attention = selection.get("h3AttentionPolicy")
+    if attention is not None:
+        if (
+            clip["engine"] != "h3"
+            or not isinstance(attention, str)
+            or attention not in {"dense", "sol_experimental"}
+        ):
+            raise ValueError("h3AttentionPolicy supports dense or sol_experimental for H3 only")
+        if attention == "sol_experimental":
+            raise ValueError("Experimental Sol attention requires the Swift MLX runtime")
+    precision = selection.get("h3VideoDecodePrecision")
+    if precision is not None:
+        if (
+            clip["engine"] != "h3"
+            or not isinstance(precision, str)
+            or precision not in {"float32", "float16"}
+        ):
+            raise ValueError("h3VideoDecodePrecision supports float32 or float16 for H3 only")
+        if precision == "float16":
+            raise ValueError("FP16 H3 video decoding requires the Swift MLX runtime")
     explicit = bool(selection)
     acceleration = None
     if explicit and clip["engine"] == "h3" and selection.get("preset", "custom") != "custom":
@@ -435,6 +469,19 @@ def resolve_generation_selection(selection, clip, profiles, capabilities, *, val
             recipe, capabilities["attached_loras"], task
         )
     config = recipe.setdefault("config", {})
+    if clip["engine"] == "h3":
+        resolved_attention = (
+            attention if attention is not None else config.get("attention_policy", "dense")
+        )
+        if (
+            not isinstance(resolved_attention, str)
+            or resolved_attention not in {"dense", "sol_experimental"}
+        ):
+            raise ValueError("attention_policy must be dense or sol_experimental")
+        if resolved_attention == "sol_experimental":
+            raise ValueError("Experimental Sol attention requires the Swift MLX runtime")
+        if attention is not None:
+            config["attention_policy"] = attention
     checkpoint_sampling = h3_checkpoint_sampling(recipe)
     fixed_points = checkpoint_sampling.get("schedule_points")
     if fixed_points is not None and config.get("steps", 16) != fixed_points:
@@ -499,6 +546,8 @@ def resolve_generation_selection(selection, clip, profiles, capabilities, *, val
             recipe["block_residency"] = "resident" if policy == "resident" else "checkpoint_default"
         else:
             config.update(low_memory=True, low_ram_streaming=policy == "paged")
+    if precision == "float32":
+        config["video_decode_precision"] = "float32"
     backend = selection.get("projectionBackend")
     if backend is not None:
         if clip["engine"] != "h3" or backend not in {"mlx", "auto"}:
@@ -512,6 +561,8 @@ def resolve_generation_selection(selection, clip, profiles, capabilities, *, val
     descriptor = describe_resolved()
     if clip["engine"] == "h3":
         descriptor["transformerBackend"] = config.get("transformer_backend", "mlx")
+        descriptor["attentionPolicy"] = config.get("attention_policy", "dense")
+        descriptor["attentionPolicyEditable"] = False
     if acceleration:
         from wee_todd_mlx.acceleration import effective_h3_acceleration_report
 

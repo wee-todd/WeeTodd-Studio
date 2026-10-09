@@ -5,6 +5,19 @@ import MLX
 
 final class MLXStudioMemoryPlanTests:XCTestCase {
   let gib=1024*1024*1024
+  func testSmallerHostAdmissionUsesTheSameShortRecipeAndRejectsAnOversizedJob() throws {
+    let short=try request(frames:49,width:512,height:256)
+    for (physical,metal) in [(16,12),(24,18),(32,24),(64,48)] {
+      let plan=try MLXStudioMemoryPlan(request:short,physicalMemory:UInt64(physical*gib),recommendedWorkingSet:UInt64(metal*gib))
+      XCTAssertLessThanOrEqual(plan.transformerActivationBytes,plan.activationCeilingBytes)
+      XCTAssertLessThanOrEqual(plan.videoActivationBytes,plan.activationCeilingBytes)
+      XCTAssertLessThanOrEqual(plan.activationCeilingBytes,physical*gib/2-4*gib)
+      print("SIMULATED host \(physical) GiB short: transformer=\(plan.transformerActivationBytes), video=\(plan.videoActivationBytes), ceiling=\(plan.activationCeilingBytes)")
+    }
+    for (physical,metal) in [(8,6),(16,12),(24,18)] {
+      XCTAssertThrowsError(try MLXStudioMemoryPlan(request:request(),physicalMemory:UInt64(physical*gib),recommendedWorkingSet:UInt64(metal*gib)))
+    }
+  }
   func testAuthoredIngredientsReserveIsAdmittedConsistentlyBeforeWeights() throws {
     let helper=MLXDistilledRequestTests()
     var value=try decoderRequestBase(helper.base());value["version"]=11;value["task"]="ingredients"

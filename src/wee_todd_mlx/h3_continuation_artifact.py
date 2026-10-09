@@ -163,7 +163,7 @@ def continuation_identity(recipe):
     fields = dict(recipe["components"])
     fields.pop("preview_override", None)
     components = H3ComponentSetSpec(**fields)
-    config = H3GenerationConfig(**recipe["config"])
+    config = H3GenerationConfig.from_recipe_fields(recipe["config"])
     config.validate()
     cache = {}
 

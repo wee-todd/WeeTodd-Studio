@@ -12,11 +12,13 @@ public struct MLXGuidedSampling: Codable, Sendable {
   public let stgBlocks: [Int]
   public let sigmas: [Double]?
   public let distilledAdapterPath: String
+  public let singleStage, stgAudio: Bool
   enum CodingKeys: String, CodingKey, CaseIterable {
     case mode, steps, sigmas
     case negativePrompt = "negative_prompt", videoCFG = "video_cfg_scale", audioCFG = "audio_cfg_scale"
     case stg = "stg_scale", videoRescale = "video_rescale_scale", audioRescale = "audio_rescale_scale"
     case modality = "modality_scale", stgBlocks = "stg_blocks", distilledAdapterPath = "distilled_adapter_path"
+    case singleStage = "single_stage", stgAudio = "stg_audio"
   }
   private struct Key: CodingKey {
     let stringValue: String
@@ -27,13 +29,13 @@ public struct MLXGuidedSampling: Codable, Sendable {
   public init(mode: Mode, steps: Int, negativePrompt: String = "", videoCFG: Float = 3,
     audioCFG: Float = 7, stg: Float, videoRescale: Float, audioRescale: Float,
     modality: Float = 3, stgBlocks: [Int], sigmas: [Double]? = nil,
-    distilledAdapterPath: String) throws {
+    distilledAdapterPath: String, singleStage: Bool = false, stgAudio: Bool = true) throws {
     guard (1...64).contains(steps), negativePrompt.utf8.count <= 16384,
       [videoCFG, audioCFG, stg, modality].allSatisfy({ $0.isFinite && (0...100).contains($0) }),
       [videoRescale, audioRescale].allSatisfy({ $0.isFinite && (0...1).contains($0) }),
       stgBlocks.allSatisfy({ (0..<48).contains($0) }), Set(stgBlocks).count == stgBlocks.count,
       stg == 0 || !stgBlocks.isEmpty,
-      distilledAdapterPath.hasPrefix("/"), distilledAdapterPath.utf8.count <= 4096,
+      (singleStage ? mode == .guided && distilledAdapterPath.isEmpty : distilledAdapterPath.hasPrefix("/")), distilledAdapterPath.utf8.count <= 4096,
       !distilledAdapterPath.utf8.contains(0) else {
       throw LTXError.invalid("Dev guidance needs finite scales, valid STG blocks and an explicit distilled refinement adapter.")
     }
@@ -48,6 +50,7 @@ public struct MLXGuidedSampling: Codable, Sendable {
     self.videoCFG = videoCFG; self.audioCFG = audioCFG; self.stg = stg
     self.videoRescale = videoRescale; self.audioRescale = audioRescale; self.modality = modality
     self.stgBlocks = stgBlocks; self.sigmas = sigmas; self.distilledAdapterPath = distilledAdapterPath
+    self.singleStage = singleStage; self.stgAudio = stgAudio
   }
   public init(from decoder: Decoder) throws {
     let all = try decoder.container(keyedBy: Key.self)
@@ -66,10 +69,16 @@ public struct MLXGuidedSampling: Codable, Sendable {
       modality: c.decodeIfPresent(Float.self, forKey: .modality) ?? 3,
       stgBlocks: c.decodeIfPresent([Int].self, forKey: .stgBlocks) ?? (hq ? [] : [28]),
       sigmas: c.decodeIfPresent([Double].self, forKey: .sigmas),
-      distilledAdapterPath: c.decode(String.self, forKey: .distilledAdapterPath))
+      distilledAdapterPath: c.decode(String.self, forKey: .distilledAdapterPath),
+      singleStage: c.decodeIfPresent(Bool.self, forKey: .singleStage) ?? false,
+      stgAudio: c.decodeIfPresent(Bool.self, forKey: .stgAudio) ?? true)
   }
   public func schedule(videoTokens: Int) throws -> SamplingSchedule {
     try SamplingSchedule(sigmas: sigmas ?? Self.adaptiveSigmas(steps: steps, videoTokens: videoTokens), eta: 0)
+  }
+  public var transformerEvaluations:Int {
+    let branches=1+(videoCFG != 1 || audioCFG != 1 ? 1 : 0)+(stg != 0 ? 1 : 0)+(modality != 1 ? 1 : 0)
+    return (mode == .guided ? steps : steps*2+1)*branches
   }
   public static func adaptiveSigmas(steps: Int, videoTokens: Int) throws -> [Double] {
     guard (1...64).contains(steps), (1...131072).contains(videoTokens) else {

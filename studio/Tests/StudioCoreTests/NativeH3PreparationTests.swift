@@ -7,6 +7,148 @@ import XCTest
 @testable import StudioCore
 
 final class NativeH3PreparationTests: XCTestCase {
+  func testSolAttentionIsExplicitSavedAndOrdinaryTurboRefOnly() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    let initial=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    XCTAssertNil((initial["config"] as! [String:Any])["attention_policy"])
+    project.clips[0].generationSelection?.h3AttentionPolicy = .solExperimental
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    let profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="ref2va";definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"ref2va","inputs":[],"audio_policy":"generated"]
+    var legacyConfig=definition["config"] as! [String:Any];legacyConfig.removeValue(forKey:"drop_adaln")
+    definition["config"]=legacyConfig
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    project.clips[0].generationSelection?.task="ref2va"
+    let image=root.appendingPathComponent("reference.png");try Data([1]).write(to:image)
+    let reference=MediaAsset(name:"Reference",kind:.image,path:image.path);project.assets.append(reference)
+    project.clips[0].attachments=[Attachment(assetID:reference.id,role:.reference)]
+    let turbo=try loraFile(root,metadata:["adapter_profile":"turbo","inference_steps":"4","qkv_layout":"contiguous_qkv"])
+    attachLoRA(turbo,profile:"turbo",to:&project)
+    let prepared=try NativeH3Preparation.compose(request:request(project,runtime))
+    let recipe=prepared["recipe"] as! [String:Any],config=recipe["config"] as! [String:Any]
+    XCTAssertEqual(config["attention_policy"] as? String,"sol_experimental")
+    XCTAssertEqual(config["steps"] as? Int,5)
+    XCTAssertEqual(((prepared["report"] as! [String:Any])["generation"] as! [String:Any])["attentionPolicy"] as? String,"sol_experimental")
+    let restored=try JSONDecoder().decode(StudioProject.self,from:JSONEncoder().encode(project))
+    XCTAssertEqual(restored.clips[0].generationSelection?.h3AttentionPolicy,.solExperimental)
+    project.clips[0].selectLocalModel(.ltx25);project.clips[0].selectLocalModel(.h3)
+    XCTAssertEqual(project.clips[0].generationSelection?.h3AttentionPolicy,.solExperimental)
+    var invalid=project;invalid.clips[0].attachments[1].strength=0.5
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(invalid,runtime)))
+    invalid=project;invalid.clips[0].generationSelection?.steps=3
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(invalid,runtime)))
+    invalid=project;invalid.clips[0].continuity = .init(mode:"frame")
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(invalid,runtime)))
+    var invalidDefinition=definition;var invalidConfig=definition["config"] as! [String:Any]
+    for flag:Any in [false,1] {
+      invalidConfig["drop_adaln"]=flag;invalidDefinition["config"]=invalidConfig
+      try JSONSerialization.data(withJSONObject:invalidDefinition).write(to:profile)
+      XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    }
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    invalid=project
+    let second=try loraFile(root,name:"second",metadata:["adapter_profile":"turbo","inference_steps":"4"])
+    attachLoRA(second,profile:"turbo",to:&invalid)
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(invalid,runtime)))
+    project.clips[0].generationSelection?.h3AttentionPolicy = .dense
+    let dense=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    XCTAssertEqual((dense["config"] as! [String:Any])["attention_policy"] as? String,"dense")
+  }
+
+  func testTransformerCacheBudgetPersistsAndCompilesWithoutChangingStaging() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    project.clips[0].generationSelection=GenerationSelection(task:"t2v")
+    project.clips[0].generationSelection?.h3TransformerWeightCacheGB=48
+    let prepared=try NativeH3Preparation.compose(request:request(project,runtime))
+    let recipe=prepared["recipe"] as! [String:Any]
+    XCTAssertEqual((recipe["config"] as! [String:Any])["transformer_weight_cache_gb"] as? Int,48)
+    XCTAssertEqual(recipe["block_residency"] as? String ?? "checkpoint_default","checkpoint_default")
+    let restored=try JSONDecoder().decode(StudioProject.self,from:JSONEncoder().encode(project))
+    XCTAssertEqual(restored.clips[0].generationSelection?.h3TransformerWeightCacheGB,48)
+    for budget in [-1,1,7,Int.max] {
+      project.clips[0].generationSelection?.h3TransformerWeightCacheGB=budget
+      XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    }
+    project.clips[0].generationSelection?.resetOverrides()
+    XCTAssertNil(project.clips[0].generationSelection?.h3TransformerWeightCacheGB)
+    XCTAssertEqual(try NativeH3Preparation.catalog(directory:root.path).count,1)
+  }
+
+  func testSolFirstFrameCatalogAndRecipePreserveEndpointTransport() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    let profile=root.appendingPathComponent("h3.json")
+    var definition=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var components=definition["components"] as! [String:Any];components["task"]="fl2va";components["vision_encoder"]="/model/vision";definition["components"]=components
+    definition["conditioning"]=["version":1,"task":"fflf","inputs":[],"audio_policy":"generated"]
+    try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    let imageURL=root.appendingPathComponent("first.png")
+    try Data([1,2,3]).write(to:imageURL)
+    let image=MediaAsset(name:"First",kind:.image,path:imageURL.path)
+    project.assets=[image];project.clips[0].attachments=[Attachment(assetID:image.id,role:.first)]
+    project.clips[0].generationSelection=GenerationSelection(task:"i2v")
+    project.clips[0].generationSelection?.h3AttentionPolicy = .solExperimental
+    let adapter=try loraFile(root,metadata:["adapter_profile":"turbo","inference_steps":"4"])
+    attachLoRA(adapter,profile:"turbo",to:&project)
+    let composed=try NativeH3Preparation.compose(request:request(project,runtime))
+    let recipe=composed["recipe"] as! [String:Any]
+    XCTAssertEqual((recipe["config"] as! [String:Any])["attention_policy"] as? String,"sol_experimental")
+    let conditioning=recipe["conditioning"] as! [String:Any]
+    XCTAssertEqual(conditioning["task"] as? String,"fflf")
+    XCTAssertEqual((conditioning["inputs"] as! [[String:Any]]).first?["frame_index"] as? Int,0)
+    let descriptor=try NativeH3Preparation.catalog(directory:root.path)[0]["generation"] as! [String:Any]
+    XCTAssertEqual(descriptor["attentionPolicyEditable"] as? Bool,true)
+  }
+
+  func testAttentionPolicyInvalidProfileValuesNeverSilentlyBecomeDense() throws {
+    let(root,_,_)=try fixture();let profile=root.appendingPathComponent("h3.json")
+    var recipe=try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var config=recipe["config"] as! [String:Any]
+    for value:Any in ["sol",true,1,NSNull()] {
+      config["attention_policy"]=value;recipe["config"]=config
+      try JSONSerialization.data(withJSONObject:recipe).write(to:profile)
+      XCTAssertTrue(try NativeH3Preparation.catalog(directory:root.path).isEmpty)
+    }
+  }
+
+
+  func testFP16VideoPrecisionIsExplicitSavedAndLowerMemoryOnlyWithoutChangingDefaults() throws {
+    let(root,original,runtime) = try fixture();var project = original
+    let profile = root.appendingPathComponent("h3.json")
+    let defaultResult = try NativeH3Preparation.compose(request:request(project,runtime))
+    let defaultConfig = (defaultResult["recipe"] as! [String:Any])["config"] as! [String:Any]
+    XCTAssertNil(defaultConfig["video_decode_precision"])
+    project.clips[0].generationSelection?.h3VideoDecodePrecision = .float16
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime))) {
+      XCTAssertTrue(String(describing:$0).contains("low_memory_bf16"))
+    }
+    var definition = try JSONSerialization.jsonObject(with:Data(contentsOf:profile)) as! [String:Any]
+    var config = definition["config"] as! [String:Any];config["memory_mode"] = "low_memory_bf16"
+    definition["config"] = config;try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+    let result = try NativeH3Preparation.compose(request:request(project,runtime))
+    let recipe = result["recipe"] as! [String:Any],resolved = recipe["config"] as! [String:Any]
+    XCTAssertEqual(resolved["video_decode_precision"] as? String,"float16")
+    XCTAssertEqual(resolved["memory_mode"] as? String,"low_memory_bf16")
+    let restored = try JSONDecoder().decode(StudioProject.self,from:JSONEncoder().encode(project))
+    XCTAssertEqual(restored.clips[0].generationSelection?.h3VideoDecodePrecision,.float16)
+    try JSONSerialization.data(withJSONObject:recipe).write(to:profile)
+    project.clips[0].generationSelection?.h3VideoDecodePrecision = nil
+    let inherited = try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    XCTAssertEqual((inherited["config"] as! [String:Any])["video_decode_precision"] as? String,"float16")
+    project.clips[0].generationSelection?.h3VideoDecodePrecision = .float32
+    let overridden = try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    XCTAssertEqual((overridden["config"] as! [String:Any])["video_decode_precision"] as? String,"float32")
+    let generation = (try NativeH3Preparation.catalog(directory:root.path)[0])["generation"] as! [String:Any]
+    XCTAssertEqual(generation["videoDecodePrecision"] as? String,"float16")
+    XCTAssertEqual(generation["videoDecodePrecisionEditable"] as? Bool,true)
+    for invalid: Any in ["bfloat16",true,1,NSNull()] {
+      config["video_decode_precision"] = invalid;definition["config"] = config
+      try JSONSerialization.data(withJSONObject:definition).write(to:profile)
+      XCTAssertTrue(try NativeH3Preparation.catalog(directory:root.path).isEmpty)
+    }
+  }
+
   func testAudioOnlyRefRequiresEveryInputTimedAndKeepsAuthoredOrder() throws {
     let(root,original,runtime)=try fixture();var project=original
     let profile=root.appendingPathComponent("h3.json")
@@ -145,6 +287,13 @@ func testReferenceDensitySidecarAndAudioCapMatchWorkerAdmission() throws {
     XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
     project.clips[0].generationSelection?.ltx25Keyframes=nil
     XCTAssertNoThrow(try NativeH3Preparation.compose(request:request(project,runtime)))
+  }
+  func testH3RejectsLTXDFRSelectionRatherThanIgnoringIt() throws {
+    let(_,original,runtime)=try fixture();var project=original
+    for enabled in [true,false] {
+      project.clips[0].generationSelection?.ltx25DFR = .init(enabled:enabled,experimentalEnabled:true)
+      XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    }
   }
   func testResMultistepProfileAndSelectionPreserveStepsWithoutPython() throws {
     let (root, original, runtime) = try fixture()

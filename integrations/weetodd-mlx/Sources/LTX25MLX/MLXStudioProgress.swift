@@ -67,9 +67,9 @@ public struct MLXStudioProgress {
       message="Sampling · \(completed)/\(total) steps"
     }
     else if stage.hasPrefix("ripple:") || stage.hasPrefix("ingredients:") || stage.hasPrefix("msr:") {
-      next=0.1+0.72*min(1,(Double(steps)+part)/8)
+      next=0.1+0.72*min(1,(Double(steps)+part)/Double(samplingSteps))
       let name=stage.hasPrefix("ingredients:") ? "Ingredients" : stage.hasPrefix("msr:") ? "MSR" : "Ripple"
-      message="Sampling \(name) · step \(min(steps+1,8))/8 · block \(completed)/\(total)"
+      message="Sampling \(name) · step \(min(steps+1,samplingSteps))/\(samplingSteps) · block \(completed)/\(total)"
     }
     else if stage.hasPrefix("stage1:") || stage.hasPrefix("stage2:") || stage.hasPrefix("single_stage:") {
       next=0.1+(temporalRounds>0 ? 0.52 : 0.72)*min(1,(Double(steps)+part)/Double(samplingSteps))

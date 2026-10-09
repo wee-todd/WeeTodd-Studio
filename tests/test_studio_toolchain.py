@@ -174,3 +174,16 @@ def test_standalone_worker_builds_keep_the_packaged_artifact_layout(module, tmp_
     assert command[1] == "build"
     assert "--build-system" in command
     assert command[command.index("--build-system") + 1] == "native"
+    if module in {"build_h3_mlx_worker", "build_ltx_worker"}:
+        assert command[command.index("-c") + 1] == "release"
+        assert command[-2:] == ["-Xcxx", "-DNDEBUG"]
+    else:
+        assert "-DNDEBUG" not in command
+
+
+def test_native_mlx_release_validation_matches_packaged_cpp_configuration():
+    # Switching the shared package's C++ release flags recompiles every MLX dependency.
+    script = (Path(__file__).parents[1] / "integrations/weetodd-mlx/scripts/test.sh").read_text()
+    build = next(line for line in script.splitlines() if line.startswith("swift build "))
+    assert "-c release" in build
+    assert "-Xcxx -DNDEBUG" in build

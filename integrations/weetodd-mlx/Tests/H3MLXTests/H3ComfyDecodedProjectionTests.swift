@@ -1,5 +1,6 @@
 import Foundation
 import MLX
+import MLXRandom
 import TensorIO
 import XCTest
 @testable import H3MLX
@@ -64,6 +65,28 @@ final class H3ComfyDecodedProjectionTests: XCTestCase {
           XCTAssertTrue(String(describing: error).contains("Unsupported Comfy H3"))
         }
       }
+    }
+  }
+
+  func testSuccessfulWeightDecodePreservesStageAllocationPool() throws {
+    let previous = Memory.cacheLimit
+    Stream.gpu.synchronize(); Memory.clearCache()
+    Memory.cacheLimit = 128 * 1024 * 1024
+    defer { Stream.gpu.synchronize(); Memory.clearCache(); Memory.cacheLimit = previous }
+    autoreleasepool {
+      let scratch = MLXRandom.normal([4096, 1024], key: MLXRandom.key(914))
+      eval(scratch)
+    }
+    Stream.gpu.synchronize()
+    let cachedBefore = Memory.cacheMemory
+    XCTAssertGreaterThan(cachedBefore, 8 * 1024 * 1024)
+    try withSmallMetadata(marker: ["format": "int8_tensorwise", "convrot": false],
+      scales: [0.5, 1]) { url in
+      let value = try H3ComfyDecodedProjection.load(checkpointURL: url,
+        name: "projection.weight", rows: 2, columns: 4)
+      XCTAssertEqual(value.asArray(Float.self), Array(repeating: 0, count: 8))
+      XCTAssertGreaterThanOrEqual(Memory.cacheMemory, cachedBefore)
+      XCTAssertEqual(Memory.cacheLimit, 128 * 1024 * 1024)
     }
   }
 

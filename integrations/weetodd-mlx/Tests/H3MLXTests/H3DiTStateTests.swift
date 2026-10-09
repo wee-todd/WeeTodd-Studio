@@ -4,6 +4,28 @@ import XCTest
 @testable import H3MLX
 
 final class H3DiTStateTests: XCTestCase {
+  func testNativeConfigurationRequiresOrdinaryFullReferenceBackboneBeforeWeights() throws {
+    let geometry = try H3Geometry(width: 64, height: 64, durationSeconds: 2.5)
+    let references = try H3ReferenceLayout(geometry: geometry, textTags: [1],
+      references: [.image(latentHeight: 4, latentWidth: 4)])
+    let ordinary = try H3PackedLayout(geometry: geometry, textTags: [1], anchors: [])
+    let adapter = try H3LoRAAdapter(url: URL(fileURLWithPath: "/missing/turbo"), strength: 1,
+      profile: .turbo, qkvLayout: .contiguousQKV)
+    func validate(_ layout: H3WeightedDiTState.Layout? = nil,
+      blocks: Int = 50, fun: Bool = false, vdn: Bool = false, tables: Int = 8,
+      adapters: [H3LoRAAdapter]? = nil) throws {
+      try H3WeightedDiTState.validateNativeConfiguration(layout: layout ?? .references(references), blockCount: blocks,
+        projectionMode: .weightDecoded, hasFunControl: fun, hasVDN: vdn,
+        tableRows: tables, adapters: adapters ?? [adapter])
+    }
+    XCTAssertNoThrow(try validate())
+    XCTAssertThrowsError(try validate(.audiovisual(ordinary)))
+    XCTAssertThrowsError(try validate(blocks: 49))
+    XCTAssertThrowsError(try validate(fun: true))
+    XCTAssertThrowsError(try validate(vdn: true))
+    XCTAssertThrowsError(try validate(tables: 0))
+    XCTAssertThrowsError(try validate(adapters: []))
+  }
   func testInstalledAllFiftyBlocksRunOneJointAVPrediction() throws {
     guard ProcessInfo.processInfo.environment["WEETODD_H3_FULL_TEST"] == "1",
       let checkpoint = ProcessInfo.processInfo.environment["WEETODD_H3_TEST_CHECKPOINT"],
@@ -92,6 +114,13 @@ final class H3DiTStateTests: XCTestCase {
       timestepIndices: [Int32](repeating: 1, count: layout.tags.count))
     XCTAssertEqual(result.video.shape, [1, geometry.videoRows, 96])
     XCTAssertEqual(result.audio.shape, [1, geometry.audioRows, 32])
+    let residentAfterFirst = state.residentActivationBytes
+    let repeated = try state.predict(videoLatents:video,audioLatents:audio,
+      timestepIndices:[Int32](repeating:1,count:layout.tags.count))
+    XCTAssertEqual(repeated.video.asArray(Float.self),result.video.asArray(Float.self))
+    XCTAssertEqual(repeated.audio.asArray(Float.self),result.audio.asArray(Float.self))
+    XCTAssertEqual(state.residentActivationBytes,residentAfterFirst,
+      "Immutable geometry must not accumulate across denoiser evaluations.")
     state.unload()
     XCTAssertFalse(state.isResident)
     XCTAssertEqual(state.residentActivationBytes, 0)

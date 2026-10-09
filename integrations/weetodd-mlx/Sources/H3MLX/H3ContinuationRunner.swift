@@ -68,6 +68,7 @@ public enum H3ContinuationRunner {
       context.video.allSatisfy(\.isFinite), context.audio.allSatisfy(\.isFinite) else {
       throw H3CheckpointError.invalid("H3 continuation latent tail disagrees with admission.")
     }
+    var backendReport: H3BackendReport?
     let raw = try autoreleasepool { () throws -> ([Float], [Float]) in
       let encoded = try H3QwenTextEncoder.encode(prompt: request.prompt,
         checkpointRoot: request.qwenPages, tokenizerURL: request.tokenizer) {
@@ -114,6 +115,7 @@ public enum H3ContinuationRunner {
       let targetAudio = sampled.audio[0..<1,
         admission.layout.conditionAudioIndices.count..<admission.layout.audioIndices.count,
         0..<32]
+      backendReport = state.backendReport
       return (targetVideo.asType(.float32).asArray(Float.self),
         targetAudio.asType(.float32).asArray(Float.self))
     }
@@ -126,6 +128,8 @@ public enum H3ContinuationRunner {
       audioRows: raw.1, geometry: request.geometry,
       videoVAE: request.videoVAE, audioVAE: request.audioVAE,
       videoDecodeMemoryMode: request.videoDecodeMemoryMode,
+      videoDecodePrecision: request.videoDecodePrecision,
+      backendReport: backendReport,
       onFrame: onFrame, onAudio: onAudio, progress: progress)
   }
 }

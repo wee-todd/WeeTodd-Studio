@@ -5,6 +5,23 @@ import LTX25Engine
 @testable import LTX25MLX
 
 final class MLXGuidedSamplingTests: XCTestCase {
+  func testSingleStageDevCannotHideRefinementOrChangeHQAndLegacyDefaults() throws {
+    var fields:[String:Any]=["mode":"guided","steps":30,"single_stage":true,
+      "stg_audio":false,"distilled_adapter_path":"","stg_scale":1,"stg_blocks":[29],
+      "video_cfg_scale":4,"audio_cfg_scale":4,"modality_scale":1]
+    func decode() throws -> MLXGuidedSampling {
+      try JSONDecoder().decode(MLXGuidedSampling.self,from:JSONSerialization.data(withJSONObject:fields))
+    }
+    let admitted=try decode()
+    XCTAssertTrue(admitted.singleStage);XCTAssertFalse(admitted.stgAudio)
+    XCTAssertEqual(admitted.transformerEvaluations,90)
+    fields["mode"]="guided_hq";XCTAssertThrowsError(try decode())
+    fields["mode"]="guided";fields["distilled_adapter_path"]="/unexpected.safetensors"
+    XCTAssertThrowsError(try decode())
+    fields["single_stage"]=false;fields.removeValue(forKey:"stg_audio")
+    let legacy=try decode();XCTAssertFalse(legacy.singleStage);XCTAssertTrue(legacy.stgAudio)
+    fields["stg_audio"]=1;XCTAssertThrowsError(try decode())
+  }
   private func policy(_ mode: MLXGuidedSampling.Mode = .guided, sigmas: [Double]? = nil) throws -> MLXGuidedSampling {
     try MLXGuidedSampling(mode: mode, steps: sigmas.map { $0.count-1 } ?? 3,
       stg: 0, videoRescale: 0, audioRescale: 0, modality: 1, stgBlocks: [],

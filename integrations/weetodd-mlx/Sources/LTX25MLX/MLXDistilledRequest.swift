@@ -135,7 +135,13 @@ public struct MLXDistilledRequest:Codable,Sendable {
       ingredientsSheet == nil && msr == nil && dfr == nil && audioReference == nil &&
       ((task == "ic_control" && icControl != nil && unionControlGuide == nil) ||
        (task == "union_control" && unionControlGuide != nil && icControl == nil))
-    guard ordinaryKeyframes || singleStageControl || ((version == 12 && guidedSampling != nil || version == 13 && automaticDuration != nil) && noisePolicy == .releasedMLX &&
+    let guidedIngredients = version == 17 && task == "ingredients" && roles.isEmpty && frames >= 121 &&
+      ingredientsSheet?.referenceStrength == 1 && guidedSampling?.singleStage == true &&
+      guidedSampling?.mode == .guided && ingredientsSampling == .deterministic &&
+      stageOneLoras.isEmpty && stageTwoLoras.isEmpty && noisePolicy == .releasedMLX &&
+      audioReference == nil && unionControlGuide == nil && msr == nil && dfr == nil && icControl == nil &&
+      automaticDuration == nil && generatedKeyframes == nil && singleStageSampling == nil
+    guard ordinaryKeyframes || singleStageControl || guidedIngredients || ((version == 12 && guidedSampling != nil || version == 13 && automaticDuration != nil) && noisePolicy == .releasedMLX &&
       unionControlGuide == nil && ingredientsSheet == nil && msr == nil && dfr == nil && icControl == nil &&
       ((task == "t2v" && roles.isEmpty && audioReference == nil) ||
        (task == "i2v" && roles == ["first"] && audioReference == nil) ||
@@ -174,11 +180,14 @@ public struct MLXDistilledRequest:Codable,Sendable {
       throw LTXError.invalid("Only bounded LTX2.5 distilled audiovisual requests are supported.")
     }
     if let guidedSampling {
+      guard guidedSampling.singleStage == guidedIngredients else {
+        throw LTXError.invalid("Single-stage Dev guidance requires its dedicated Ingredients request.")
+      }
       guard stageTwoLoras.count < 16,
         !(stageOneLoras+stageTwoLoras).contains(where: { $0.path == guidedSampling.distilledAdapterPath }) else {
         throw LTXError.invalid("The Dev refinement adapter must appear only in its dedicated stage-two slot.")
       }
-      _ = try guidedSampling.schedule(videoTokens:recipe().low.videoTokens)
+      _ = try guidedSampling.schedule(videoTokens:guidedIngredients ? recipe().high.videoTokens*2 : recipe().low.videoTokens)
     }
     if let automaticDuration {
       _ = try automaticDuration.maximumFrames(fps:fps)
@@ -217,7 +226,7 @@ public struct MLXDistilledRequest:Codable,Sendable {
     }
     guard singleStageSampling?.method != .cfgpp || audioReference == nil else { throw LTXError.invalid("Single-stage CFG++ cannot freeze source audio.") }
     var requiredPaths=[gemmaRoot,transformerRoot,connectorCheckpoint,videoCheckpoint,audioCheckpoint,outputDirectory]
-    if !spatialUpscalerCheckpoint.isEmpty || ![6,7,11,15,16].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
+    if !spatialUpscalerCheckpoint.isEmpty || ![6,7,11,15,16,17].contains(version) { requiredPaths.append(spatialUpscalerCheckpoint) }
     for path in requiredPaths {
       guard path.hasPrefix("/"), path.utf8.count <= 4096, !path.utf8.contains(0) else {
         throw LTXError.invalid("Model and output paths must be explicit absolute local paths.")

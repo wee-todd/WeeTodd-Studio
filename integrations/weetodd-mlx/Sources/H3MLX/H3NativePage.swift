@@ -15,7 +15,9 @@ final class H3NativePage {
 
   func clear() { pending.removeAll(); closed = true }
 
-  func read(_ name: String) throws -> MLXArray {
+  // Deferred factors are owned by a single Qwen layer. That owner must eval
+  // the complete admitted layer and recheck file identity before inference.
+  func read(_ name: String, materialize: Bool = true) throws -> MLXArray {
     do {
       try Task.checkCancellation()
       guard !closed, let descriptor = file.tensors[name], descriptor.byteCount <= 512 * 1024 * 1024 else {
@@ -41,7 +43,7 @@ final class H3NativePage {
         value.shape == descriptor.shape.map(Int.init), value.dtype == dtype else {
         throw H3CheckpointError.invalid("Native H3 factor shape or dtype changed, or factor was already consumed.")
       }
-      eval(value)
+      if materialize { eval(value) }
       try file.checkUnchanged(at: url)
       try Task.checkCancellation()
       return value

@@ -81,12 +81,12 @@ public enum H3ComfyDecodedProjection {
     return result
   }
 
-  /// Materialize only the active projection. The 8192-row default balances
-  /// installed block latency against temporary MLX allocation; callers must
-  /// release this projection before advancing to the next weighted stage.
+  /// Materialize only the active projection. Small row windows avoid large F32
+  /// inverse-rotation scratch. The owning stage clears its allocation pool;
+  /// successful projections must not evict that shared pool individually.
   public static func load(checkpointURL: URL, name: String, rows: Int,
     columns: Int, reorderQKV: Bool = false,
-    rowWindow: Int = 8192) throws -> MLXArray {
+    rowWindow: Int = 1024) throws -> MLXArray {
     let file = try SafeTensorFile(url: checkpointURL)
     return try load(file: file, checkpointURL: checkpointURL, name: name,
       rows: rows, columns: columns, reorderQKV: reorderQKV,
@@ -98,7 +98,7 @@ public enum H3ComfyDecodedProjection {
   /// reparsing the whole checkpoint header four times per block.
   static func load(file: SafeTensorFile, checkpointURL: URL, name: String,
     rows: Int, columns: Int, reorderQKV: Bool = false,
-    rowWindow: Int = 8192) throws -> MLXArray {
+    rowWindow: Int = 1024) throws -> MLXArray {
     let metadata = try metadata(file: file, name: name, rows: rows, columns: columns)
     guard [1024, 2048, 4096, 8192, 16384].contains(rowWindow) else {
       throw H3CheckpointError.invalid("H3 decode row window is unsupported.")
@@ -108,10 +108,11 @@ public enum H3ComfyDecodedProjection {
     }
     let rotation = metadata.group == 0 ? nil : basis(group: metadata.group)
     let previousCacheLimit = Memory.cacheLimit
-    Memory.cacheLimit = 128 * 1024 * 1024
+    Memory.cacheLimit = min(previousCacheLimit, H3SamplingAllocationPolicy.maximum)
+    var succeeded = false
     defer {
       Stream.gpu.synchronize()
-      Memory.clearCache()
+      if !succeeded { Memory.clearCache() }
       Memory.cacheLimit = previousCacheLimit
     }
     var parts: [MLXArray] = []
@@ -130,6 +131,7 @@ public enum H3ComfyDecodedProjection {
     eval(value)
     try file.checkUnchanged(at: checkpointURL)
     try Task.checkCancellation()
+    succeeded = true
     return value
   }
 

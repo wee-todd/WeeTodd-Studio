@@ -4,7 +4,43 @@ import XCTest
 
 final class H3StudioRecipeTests: XCTestCase {
   private var recipeMemoryMode = "normal"
+  private var recipeVideoDecodePrecision: String?
   private var recipeSamplingMethod = "euler"
+  private var recipeTransformerWeightCacheGB = 0
+  func testExplicitNativeBlockBackendSurvivesOrdinaryRefRecipeAndRejectsOtherSettingsBeforeMedia() throws {
+    var root = try JSONSerialization.jsonObject(with: recipe()) as! [String: Any]
+    var components = root["components"] as! [String: Any]
+    components["task"] = "ref2va"
+    components["loras"] = [["/tmp/turbo.safetensors", 1.0]]
+    root["components"] = components
+    var config = root["config"] as! [String: Any]
+    config["transformer_backend"] = "nnc_experimental"
+    root["config"] = config
+    root["conditioning"] = ["version": 1, "task": "ref2va", "audio_policy": "generated",
+      "inputs": [["id": "reference", "kind": "image", "role": "reference",
+        "path": "/tmp/reference.png", "sha256": String(repeating: "a", count: 64)]]]
+    var resolutions = 0
+    func compile(_ object: [String: Any]) throws -> H3Ref2VAStillRequest {
+      try H3StudioRecipe.compileMediaReferences(data: JSONSerialization.data(withJSONObject: object)) { _, _, _ in
+        resolutions += 1
+        return .image(H3StillReference(rgb8: Data(count: 64 * 64 * 3), width: 64, height: 64))
+      }
+    }
+    let native = try compile(root)
+    XCTAssertEqual(native.transformerBackend, .nncExperimental)
+    XCTAssertEqual(resolutions, 1)
+    for change in [["steps": 9], ["sampling_method": "res_multistep"], ["transformer_backend": "unknown"]] as [[String: Any]] {
+      var invalid = root
+      invalid["config"] = config.merging(change) { _, new in new }
+      resolutions = 0
+      XCTAssertThrowsError(try compile(invalid))
+      XCTAssertEqual(resolutions, 0)
+    }
+    var ordinary = root
+    ordinary["config"] = config.merging(["transformer_backend": "mlx"]) { _, new in new }
+    XCTAssertEqual(try compile(ordinary).transformerBackend, .mlx)
+    XCTAssertThrowsError(try H3StudioRecipe.compile(data: recipe(controls: ["transformer_backend": "nnc_experimental"])))
+  }
   func testExternalExtensionRequiresPromptAndAnchorsTheTrueLastFrame() throws {
     var root = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])
     var components = try XCTUnwrap(root["components"] as? [String: Any])
@@ -45,7 +81,9 @@ final class H3StudioRecipeTests: XCTestCase {
     let request = try compile()
     XCTAssertTrue(resolved)
     XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(request.videoDecodePrecision.rawValue, recipeVideoDecodePrecision ?? "float32")
     XCTAssertEqual(request.samplingMethod.rawValue, recipeSamplingMethod)
+    XCTAssertEqual(request.transformerWeightCacheGB, recipeTransformerWeightCacheGB)
     XCTAssertEqual(request.references.count, 2)
     if case .timedImage(let anchor, let frame) = request.references[1] {
       XCTAssertEqual(frame, 0)
@@ -67,10 +105,12 @@ final class H3StudioRecipeTests: XCTestCase {
       "text_encoder": "/tmp/qwen-pages", "tokenizer": "/tmp/tokenizer.json",
       "video_vae": "/tmp/video.safetensors",
       "audio_vae": "/tmp/audio.safetensors", "task": "t2va"]
-    let config: [String: Any] = ["width": 32, "height": 32,
+    var config: [String: Any] = ["width": 32, "height": 32,
       "duration_seconds": 2.5, "steps": 5, "seed": 123,
       "memory_mode": recipeMemoryMode, "sampling_method": recipeSamplingMethod]
       .merging(controls) { _, new in new }
+    if recipeTransformerWeightCacheGB != 0 { config["transformer_weight_cache_gb"] = recipeTransformerWeightCacheGB }
+    if let precision = recipeVideoDecodePrecision { config["video_decode_precision"] = precision }
     return try JSONSerialization.data(withJSONObject: ["format": "weetodd-headless-v2",
       "engine": "h3", "prompt": "A person walks", "components": paths,
       "config": config, "conditioning": conditioning])
@@ -91,7 +131,9 @@ final class H3StudioRecipeTests: XCTestCase {
     var root = try JSONSerialization.jsonObject(with:recipe()) as! [String:Any]
     for name in ["dense-v1","vsa-v1"] {
       root["fasth3"] = ["variant":name]
-      XCTAssertEqual(try H3FastStudioRecipe.compile(data:JSONSerialization.data(withJSONObject:root)).fastVariant?.rawValue,name)
+      let compiled = try H3FastStudioRecipe.compile(data:JSONSerialization.data(withJSONObject:root))
+      XCTAssertEqual(compiled.fastVariant?.rawValue,name)
+      XCTAssertEqual(compiled.videoDecodePrecision.rawValue, recipeVideoDecodePrecision ?? "float32")
       var changed = root;changed["loras"] = ["adapters":[]]
       XCTAssertThrowsError(try H3FastStudioRecipe.compile(data:JSONSerialization.data(withJSONObject:changed)))
       changed = root;changed["fasth3"] = ["variant":name,"sparsity":0.8]
@@ -102,7 +144,9 @@ final class H3StudioRecipeTests: XCTestCase {
   func testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs() throws {
     let request = try H3StudioRecipe.compile(data: recipe())
     XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(request.videoDecodePrecision.rawValue, recipeVideoDecodePrecision ?? "float32")
     XCTAssertEqual(request.samplingMethod.rawValue, recipeSamplingMethod)
+    XCTAssertEqual(request.transformerWeightCacheGB, recipeTransformerWeightCacheGB)
     XCTAssertEqual(request.seed, 123)
     XCTAssertEqual(request.requestedSteps, 5)
     XCTAssertEqual(request.geometry.frames, 73)
@@ -178,7 +222,9 @@ final class H3StudioRecipeTests: XCTestCase {
     let request = try compile(root)
     XCTAssertEqual(paths, ["/tmp/a.png", "/tmp/b.png"])
     XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(request.videoDecodePrecision.rawValue, recipeVideoDecodePrecision ?? "float32")
     XCTAssertEqual(request.samplingMethod.rawValue, recipeSamplingMethod)
+    XCTAssertEqual(request.transformerWeightCacheGB, recipeTransformerWeightCacheGB)
     XCTAssertEqual(request.references.count, 2)
     XCTAssertEqual(request.qwenVision.path, "/tmp/qwen-vision.safetensors")
     var rejected = root
@@ -237,7 +283,9 @@ final class H3StudioRecipeTests: XCTestCase {
     let result = try compile(root)
     XCTAssertEqual(result.references.count, 3)
     XCTAssertEqual(result.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(result.videoDecodePrecision.rawValue, recipeVideoDecodePrecision ?? "float32")
     XCTAssertEqual(result.samplingMethod.rawValue, recipeSamplingMethod)
+    XCTAssertEqual(result.transformerWeightCacheGB, recipeTransformerWeightCacheGB)
     XCTAssertEqual(seen, ["image:/tmp/face.png", "video:/tmp/motion.mp4",
       "audio:/tmp/voice.wav"])
     var invalid = root
@@ -273,7 +321,9 @@ final class H3StudioRecipeTests: XCTestCase {
     }
     let audioOnly = try compile(root)
     XCTAssertEqual(audioOnly.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(audioOnly.videoDecodePrecision.rawValue, recipeVideoDecodePrecision ?? "float32")
     XCTAssertEqual(audioOnly.samplingMethod.rawValue, recipeSamplingMethod)
+    XCTAssertEqual(audioOnly.transformerWeightCacheGB, recipeTransformerWeightCacheGB)
     XCTAssertEqual(loaded.map(\.0), ["/tmp/voice.wav"])
     XCTAssertEqual(loaded[0].1, 2)
     XCTAssertEqual(loaded[0].2, 2.5)
@@ -299,7 +349,9 @@ final class H3StudioRecipeTests: XCTestCase {
           count: 2 * 80_000), frames: 80_000))
       }
     XCTAssertEqual(imageAndSound.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(imageAndSound.videoDecodePrecision.rawValue, recipeVideoDecodePrecision ?? "float32")
     XCTAssertEqual(imageAndSound.samplingMethod.rawValue, recipeSamplingMethod)
+    XCTAssertEqual(imageAndSound.transformerWeightCacheGB, recipeTransformerWeightCacheGB)
     XCTAssertEqual(imageAndSound.references.count, 2)
     if case .timedImage(_, let frame) = imageAndSound.references[0] {
       XCTAssertEqual(frame, 0)
@@ -338,7 +390,9 @@ final class H3StudioRecipeTests: XCTestCase {
     }
     let admitted = try compile(root)
     XCTAssertEqual(admitted.base.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(admitted.base.videoDecodePrecision.rawValue, recipeVideoDecodePrecision ?? "float32")
     XCTAssertEqual(admitted.base.samplingMethod.rawValue, recipeSamplingMethod)
+    XCTAssertEqual(admitted.base.transformerWeightCacheGB, recipeTransformerWeightCacheGB)
     XCTAssertEqual(admitted.anchors, [.first, .last])
     XCTAssertEqual(loaded, ["/tmp/first.png", "/tmp/last.png"])
     var visibleLast = root
@@ -388,6 +442,17 @@ final class H3StudioRecipeTests: XCTestCase {
     XCTAssertThrowsError(try compile([input("a", 0), input("z", 999)]))
     XCTAssertEqual(loaded.count, 3)
   }
+  func testWeightCacheSurvivesEveryOrdinaryTaskRecipeCopy() throws {
+    recipeTransformerWeightCacheGB = 8
+    defer { recipeTransformerWeightCacheGB = 0 }
+    try testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs()
+    try testExternalExtensionRequiresPromptAndAnchorsTheTrueLastFrame()
+    try testStillReferenceRecipePreservesInputOrderAndRejectsDroppedControls()
+    try testMixedMediaRecipeRetainsInputOrderAndRequiresVisualForAudio()
+    try testA2VRecipePlacesDriverAtTargetStartAndRetainsSourceInterval()
+    try testFL2VARecipeKeepsOrderedEndpointRolesAndRejectsUnportedInputs()
+  }
+
   func testResMultistepPropagatesThroughAllExistingTaskFixtures() throws {
     recipeSamplingMethod = "res_multistep"
     try testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs()
@@ -408,6 +473,46 @@ final class H3StudioRecipeTests: XCTestCase {
     try testFL2VARecipeKeepsOrderedEndpointRolesAndRejectsUnportedInputs()
   }
 
+  func testFP16PrecisionPropagatesThroughAllTaskRecipeCopiesWithoutChangingMemoryMode() throws {
+    recipeMemoryMode = "low_memory_bf16"; recipeVideoDecodePrecision = "float16"
+    defer { recipeMemoryMode = "normal";recipeVideoDecodePrecision = nil }
+    try testTextOnlyRecipeRetainsSeedAndRejectsUnimplementedInputs()
+    try testExternalExtensionRequiresPromptAndAnchorsTheTrueLastFrame()
+    try testStillReferenceRecipePreservesInputOrderAndRejectsDroppedControls()
+    try testMixedMediaRecipeRetainsInputOrderAndRequiresVisualForAudio()
+    try testA2VRecipePlacesDriverAtTargetStartAndRetainsSourceInterval()
+    try testFL2VARecipeKeepsOrderedEndpointRolesAndRejectsUnportedInputs()
+    try testFastRecipeVariantSurvivesAndRejectsUnqualifiedCombinations()
+  }
+
+  func testPrecisionRejectsInvalidValuesAndUnqualifiedModesBeforeWeights() throws {
+    XCTAssertEqual(try H3StudioRecipe.compile(data:recipe()).videoDecodePrecision,.float32)
+    XCTAssertEqual(try H3StudioRecipe.compile(data:recipe(controls:["video_decode_precision":"float32"])).videoDecodePrecision,.float32)
+    for value: Any in ["bfloat16",true,1,NSNull(),["float16"]] {
+      XCTAssertThrowsError(try H3StudioRecipe.compile(data:recipe(controls:["video_decode_precision":value])))
+    }
+    XCTAssertThrowsError(try H3StudioRecipe.compile(data:recipe(controls:["video_decode_precision":"float16"]))) {
+      XCTAssertTrue(String(describing:$0).contains("low_memory_bf16"))
+    }
+    XCTAssertEqual(try H3StudioRecipe.compile(data:recipe(controls:["video_decode_precision":"float16","memory_mode":"low_memory_bf16"])).videoDecodePrecision,.float16)
+  }
+
+  func testVDNRecipeCopyPreservesDecoderPrecisionWithoutLoadingBranchWeights() throws {
+    recipeMemoryMode = "low_memory_bf16";recipeVideoDecodePrecision = "float16"
+    defer { recipeMemoryMode = "normal";recipeVideoDecodePrecision = nil }
+    var root = try JSONSerialization.jsonObject(with:recipe(controls:["steps":51])) as! [String:Any]
+    let repository = "/tmp/precision-vdn",stage = repository + "/stage-b-step-2000"
+    root["vdn"] = ["repository":repository,"checkpoint":stage,"model_spec":stage + "/model_spec.json",
+      "linear_branch":stage + "/linear_branch/model.safetensors",
+      "default_adapter":stage + "/adapters/default/adapter_model.safetensors","turbo_adapter":NSNull(),
+      "schedule_points":51,"stage":"stage-b-step-2000","inference_backend":"verified"]
+    root["loras"] = ["version":1,"adapters":[["path":stage + "/adapters/default/adapter_model.safetensors",
+      "strength":1,"profile":"standard","qkv_layout":"contiguous_qkv"]]]
+    let request = try H3VDNStudioRecipe.compile(data:JSONSerialization.data(withJSONObject:root))
+    XCTAssertEqual(request.videoDecodePrecision,.float16);XCTAssertEqual(request.videoDecodeMemoryMode,.lowMemoryBF16)
+    XCTAssertEqual(request.requestedSteps,51)
+  }
+
   func testMemoryModePolicyDiagnosticsAndDirectConstructorDefault() throws {
     let legacy = try H3T2VARequest(prompt: "A person walks", width: 32, height: 32,
       durationSeconds: 2.5, seed: 123, requestedSteps: 5,
@@ -417,14 +522,15 @@ final class H3StudioRecipeTests: XCTestCase {
       videoVAE: URL(fileURLWithPath: "/tmp/video.safetensors"),
       audioVAE: URL(fileURLWithPath: "/tmp/audio.safetensors"))
     XCTAssertNil(legacy.videoDecodeMemoryMode)
+    XCTAssertEqual(legacy.videoDecodePrecision,.float32)
     XCTAssertEqual(legacy.samplingMethod, .euler)
     XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: nil)["materializationPolicy"] as? String, "eager")
-    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: .normal)["materializationPolicy"] as? String, "defer_projections_and_residual")
-    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: .lowMemoryBF16)["materializationPolicy"] as? String, "defer_projections")
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: .normal)["materializationPolicy"] as? String, "adaptive_normal_spatial_batch")
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: .lowMemoryBF16)["materializationPolicy"] as? String, "defer_projections_and_small_tile_residual")
     XCTAssertTrue(H3VideoDecodeMemoryMode.materializesProjection(for: nil))
     XCTAssertTrue(H3VideoDecodeMemoryMode.materializesFirstResidual(for: nil))
     XCTAssertFalse(H3VideoDecodeMemoryMode.materializesProjection(for: .normal))
-    XCTAssertFalse(H3VideoDecodeMemoryMode.materializesFirstResidual(for: .normal))
+    XCTAssertTrue(H3VideoDecodeMemoryMode.materializesFirstResidual(for: .normal))
     XCTAssertFalse(H3VideoDecodeMemoryMode.materializesProjection(for: .lowMemoryBF16))
     XCTAssertTrue(H3VideoDecodeMemoryMode.materializesFirstResidual(for: .lowMemoryBF16))
     var implicit = try XCTUnwrap(JSONSerialization.jsonObject(with: recipe()) as? [String: Any])

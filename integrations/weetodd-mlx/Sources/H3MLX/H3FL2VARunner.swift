@@ -10,10 +10,11 @@ public struct H3FL2VARequest: Sendable {
   public let images: [H3StillReference]
   public let anchors: [H3PackedLayout.Anchor]
   public let referenceNoise: H3ReferenceNoiseControls?
+  public let attentionPolicy: H3AttentionPolicy
 
   public init(base: H3T2VARequest, vision: URL,
     images: [H3StillReference], anchors: [H3PackedLayout.Anchor],
-    referenceNoise: H3ReferenceNoiseControls? = nil) throws {
+    referenceNoise: H3ReferenceNoiseControls? = nil, attentionPolicy: H3AttentionPolicy = .dense) throws {
     guard base.funControl == nil, base.vdn == nil, vision.isFileURL, vision.path.hasPrefix("/"),
       (1...8).contains(images.count), images.count == anchors.count,
       anchors.enumerated().allSatisfy({ index, anchor in
@@ -43,6 +44,7 @@ public struct H3FL2VARequest: Sendable {
     self.images = images
     self.anchors = anchors
     self.referenceNoise = referenceNoise
+    self.attentionPolicy = attentionPolicy
   }
 }
 
@@ -56,6 +58,7 @@ public enum H3FL2VARunner {
     let videoSchedule: H3Schedule
     let audioSchedule: H3Schedule
     let rowSchedule: H3RowSchedule
+    let experimentalSol: H3SolTaskPolicy?
   }
 
   public typealias Result = H3AVOutputDecoder.Result
@@ -66,6 +69,12 @@ public enum H3FL2VARunner {
     }
     try Task.checkCancellation()
     let base = request.base
+    let experimentalSol=request.attentionPolicy == .solExperimental ? try H3SolTaskPolicy() : nil
+    if experimentalSol != nil {
+      try H3SolTaskPolicy.validateTask(task:"fl2va",contextFrames:0,isRefinement:refinement != nil,ordinaryCanvas:base.geometry.canvasAdmission == .ordinary,mlxBackend:true,hasFast:false,hasVDN:false,hasFun:false,hasMotion:false)
+      try H3SolTaskPolicy.validateSettings(steps:base.requestedSteps,samplingMethod:base.samplingMethod,adapters:base.loRAAdapters,packedRows:1)
+      try H3SolTaskPolicy.inspectQualifiedFiles(checkpoint:base.transformer,adapter:base.loRAAdapters[0].url,task:"fl2va")
+    }
     let tokenizer = try H3QwenTokenizer(url: base.tokenizer)
     let qwen = try H3FL2VAQwenFrames.prepare(images: request.images,
       prompt: base.prompt, tokenizer: tokenizer).request
@@ -78,6 +87,9 @@ public enum H3FL2VARunner {
       visualConditionStrength: request.referenceNoise?.visual ?? 0.999)
     guard rows.table.count <= 128, layout.tags.count <= base.geometry.maximumPackedRows else {
       throw H3CheckpointError.invalid("H3 FL2VA packed rows exceed engine admission.")
+    }
+    if experimentalSol != nil {
+      try H3SolTaskPolicy.validateSettings(steps:base.requestedSteps,samplingMethod:base.samplingMethod,adapters:base.loRAAdapters,packedRows:layout.tags.count)
     }
     _ = try H3QwenCheckpointLayout.inspect(root: base.qwenPages)
     let vision = try H3QwenCheckpointLayout.inspect(root: request.vision)
@@ -95,10 +107,13 @@ public enum H3FL2VARunner {
       _ = try H3LoRAFile(url: adapter.url, strength: adapter.strength,
         requestedSteps: video.timesteps.count + 1, samplingMethod: base.samplingMethod, qkvLayout: adapter.qkvLayout, profile: adapter.profile, startAfterEvaluations: adapter.startAfterEvaluations, requiresStandardProfile: refinement.map { $0.strength < 1 || $0.startVideoSigma != nil } ?? false)
     }
+    if base.transformerWeightCacheGB > 0 {
+      _ = try H3TransformerCachePlan.inspect(checkpointURL:base.transformer,blockCount:50,budgetGB:base.transformerWeightCacheGB,adapters:base.loRAAdapters)
+    }
     return Admission(geometry: base.geometry, packedRows: layout.tags.count,
       evaluations: video.timesteps.count, textRows: qwen.tags.count,
       layout: layout, videoSchedule: video, audioSchedule: audio,
-      rowSchedule: rows)
+      rowSchedule: rows, experimentalSol:experimentalSol)
   }
 
   static func encodeText(_ request: H3FL2VARequest, admission: Admission,
@@ -182,17 +197,21 @@ public enum H3FL2VARunner {
     let textRows = try encodeText(request, admission: admission, progress: progress)
     let conditionRows = try encodeKeyframes(request, admission: admission, progress: progress)
 
+    var backendReport: H3BackendReport?
     let rawRows = try autoreleasepool { () throws -> ([Float], [Float]) in
       let state = try H3DiTState(checkpointURL: base.transformer,
         layout: admission.layout,
         textEmbeddings: MLXArray(textRows,
           [1, admission.textRows, 5120]).asType(.bfloat16),
-        timestepTable: admission.rowSchedule.table,
+        timestepTable: admission.rowSchedule.table, blockCount:50,
+        transformerWeightCacheGB:base.transformerWeightCacheGB,
+        allowMPP: H3MPPProjection.isTaskEligible(.fl2va, isRefinement: refinement != nil),
+        experimentalSol:admission.experimentalSol,
         turboLoRAURL: base.turboLoRA,
         turboLoRAStrength: base.turboLoRAStrength,
-        additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters) { completed, total in
+        additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters, progress: { completed, total in
           progress("transformer_prepare", completed, total)
-        }
+        })
       defer { state.unload() }
       let noise = try H3Noise.makeWithCondition(seed: base.seed,
         conditionRows: admission.layout.conditionVideoRows,
@@ -231,6 +250,7 @@ public enum H3FL2VARunner {
       guard videoRows.allSatisfy(\.isFinite), audioRows.allSatisfy(\.isFinite) else {
         throw H3CheckpointError.invalid("H3 FL2VA sampled AV latents contain non-finite values.")
       }
+      backendReport = state.unloadAndReport()
       return (videoRows, audioRows)
     }
     Stream.gpu.synchronize()
@@ -242,6 +262,8 @@ public enum H3FL2VARunner {
       audioRows: rawRows.1, geometry: geometry,
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       videoDecodeMemoryMode: base.videoDecodeMemoryMode,
+      videoDecodePrecision: base.videoDecodePrecision,
+      backendReport: backendReport,
       onFrame: onFrame, onAudio: onAudio, progress: progress)
   }
 }

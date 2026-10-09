@@ -49,7 +49,7 @@ public struct MLXStudioMemoryPlan:Sendable {
           audioTokens:msrAudio?.audioTokens ?? guide?.audioTokens ?? geometry.audioFrames,textTokens:1024),
         perTokenVideo:singleStage?.requiresPerTokenVideo == true || ordinary?.anchors.isEmpty == false || layout != nil || guide != nil || union != nil || ic != nil || ingredients != nil || msr != nil ||
           (dfr?.referenceTokens ?? 0)>0 || (dfr != nil && !request.referenceImages.isEmpty),perTokenAudio:guide != nil || msrAudio != nil) + (index == 0 && request.guidedSampling != nil ?
-          MLXGuidedSampling.reserveBytes(videoTokens:ordinary?.videoTokens ?? layout?.videoTokens ?? geometry.videoTokens,
+          MLXGuidedSampling.reserveBytes(videoTokens:ingredients?.videoTokens ?? ordinary?.videoTokens ?? layout?.videoTokens ?? geometry.videoTokens,
             audioTokens:geometry.audioFrames) : 0))
     }
     if request.singleStageSampling?.method == .cfgpp {
@@ -89,7 +89,7 @@ public struct MLXStudioMemoryPlan:Sendable {
         .tiles.map(\.ownedBufferBytes).max() ?? 0
     } ?? 0
     let ingredientsGuideEncoder=try request.ingredientsSheet.map { _ in
-      try MLXVideoEncodeTilePlan(frames:1,width:recipe.high.width,
+      try MLXVideoEncodeTilePlan(frames:request.guidedSampling?.singleStage == true ? recipe.high.frames : 1,width:recipe.high.width,
         height:recipe.high.height,maximumOwnedBufferBytes:Int.max)
         .tiles.map(\.ownedBufferBytes).max() ?? 0
     } ?? 0

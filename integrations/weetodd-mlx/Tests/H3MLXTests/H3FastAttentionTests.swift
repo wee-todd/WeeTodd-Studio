@@ -5,6 +5,35 @@ import CryptoKit
 @testable import H3MLX
 
 final class H3FastAttentionTests: XCTestCase {
+  func testOriginalRowIndexedAttentionMatchesPaddedConsumerExactly() throws {
+    let tiles=try H3FastTiles(prefixSegments:[3,65],videoGrid:[3,5,6])
+    let count=tiles.sizes.count,video=count-tiles.prefixTiles,heads=3
+    let backing=MLXRandom.normal([1,heads,tiles.rows*2,256],key:MLXRandom.key(940)).asType(.bfloat16)
+    let q=backing[.ellipsis,.stride(by:2),0..<128]
+    let k=backing[.ellipsis,.stride(by:2),128..<256]
+    let fused=MLXRandom.normal([1,tiles.rows,heads,3,128],key:MLXRandom.key(942)).asType(.bfloat16)
+    let v=fused[.ellipsis,2,0..<128].transposed(0,2,1,3)
+    let routeValues=(0..<(heads*video)).flatMap { i in [Int32(i%count),Int32((i+2)%count),Int32(i%count)] }
+    let routes=MLXArray(routeValues,[1,heads,video,3])
+    let slots=MLXArray(tiles.indices)
+    let valid=MLXArray(tiles.sizes.flatMap { n in (0..<64).map { Float($0<n ? 1:0) } },[1,1,count*64,1]).asType(.bfloat16)
+    func padded(_ x:MLXArray) -> MLXArray { take(x,slots,axis:2)*valid }
+    let expected=try H3IndexedAttention.evaluate(
+      query:padded(q)[.ellipsis,(tiles.prefixTiles*64)..<(count*64),0..<128],
+      key:padded(k),value:padded(v),routes:routes,tiles:tiles)
+    let actual=try H3IndexedAttention.evaluate(query:q,key:k,value:v,routes:routes,
+      tiles:tiles,originalRows:true)
+    XCTAssertEqual(actual.asType(.float32).asArray(Float.self),expected.asType(.float32).asArray(Float.self))
+    let sliced=MLXArray(routeValues.flatMap { [$0,Int32(0)] },[1,heads,video,6])[.ellipsis,.stride(by:2)]
+    let viewed=try H3IndexedAttention.evaluate(query:q,key:k,value:v,routes:sliced,tiles:tiles,originalRows:true)
+    XCTAssertEqual(viewed.asType(.float32).asArray(Float.self),expected.asType(.float32).asArray(Float.self))
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:backing[.ellipsis,.stride(by:2),.stride(by:2)],
+      key:k,value:v,routes:routes,tiles:tiles,originalRows:true))
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:q[.ellipsis,.stride(by:-1),0..<128],
+      key:k,value:v,routes:routes,tiles:tiles,originalRows:true))
+    XCTAssertThrowsError(try H3IndexedAttention.evaluate(query:q,key:k,
+      value:v[0..<1,.stride(by:-1),.ellipsis],routes:routes,tiles:tiles,originalRows:true))
+  }
   func testProductionBF16D128ConsumerAcceptsSortedRoutesAndRetainsSignedCompression() throws {
     let tiles = try H3FastTiles(prefixSegments: [3,65], videoGrid: [3,5,6])
     let shape = [1,3,tiles.rows,128]

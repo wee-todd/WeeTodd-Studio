@@ -4,13 +4,14 @@ import XCTest
 
 final class H3FunControlRecipeTests: XCTestCase {
   private var recipeMemoryMode = "normal"
+  private var recipeVideoDecodePrecision = "float32"
   private func recipe() -> [String: Any] {
     ["format": "weetodd-headless-v2", "engine": "h3", "prompt": "A dancer moves",
       "components": ["task": "t2va", "transformer": "/tmp/h3.safetensors",
         "text_encoder": "/tmp/qwen-pages", "tokenizer": "/tmp/tokenizer.json",
         "video_vae": "/tmp/video.safetensors", "audio_vae": "/tmp/audio.safetensors",
         "fun_controlnet": "/tmp/fun.safetensors"],
-      "config": ["width": 32, "height": 32, "duration_seconds": 2.5, "steps": 5, "seed": 17, "memory_mode": recipeMemoryMode],
+      "config": ["width": 32, "height": 32, "duration_seconds": 2.5, "steps": 5, "seed": 17, "memory_mode": recipeMemoryMode,"video_decode_precision":recipeVideoDecodePrecision],
       "conditioning": ["version": 1, "task": "control", "audio_policy": "generated",
         "inputs": [["id": "guide", "kind": "video", "role": "control",
           "path": "/tmp/pose.mp4", "sha256": String(repeating: "a", count: 64),
@@ -26,6 +27,7 @@ final class H3FunControlRecipeTests: XCTestCase {
         frameCount: geometry.frames, width: 32, height: 32)
     }
     XCTAssertEqual(request.videoDecodeMemoryMode?.rawValue, recipeMemoryMode)
+    XCTAssertEqual(request.videoDecodePrecision.rawValue,recipeVideoDecodePrecision)
     XCTAssertEqual(request.funControl?.strength, 0.75)
     XCTAssertEqual(request.funControl?.checkpoint.path, "/tmp/fun.safetensors")
     XCTAssertEqual(request.seed, 17)
@@ -76,6 +78,10 @@ final class H3FunControlRecipeTests: XCTestCase {
             audio: changed ? nil : H3AudioReference(samples: [], frames: 0))
         })
     }
+  }
+  func testFP16PrecisionSurvivesFunRequestClone() throws {
+    recipeMemoryMode = "low_memory_bf16";recipeVideoDecodePrecision = "float16"
+    try testControlRecipePreservesGuideStrengthAndExactAlignedGeometry()
   }
   func testLowerMemoryModeSurvivesFunRequestClone() throws {
     recipeMemoryMode = "low_memory_bf16"

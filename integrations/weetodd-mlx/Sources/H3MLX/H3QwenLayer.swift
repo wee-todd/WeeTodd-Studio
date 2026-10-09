@@ -51,12 +51,28 @@ public struct H3QwenLayer {
   private let down: H3QwenQ8Projection
 
   public init(file: SafeTensorFile, index: Int) throws {
+    try self.init(file: file, index: index, tensor: nil)
+  }
+
+  private init(file: SafeTensorFile, index: Int,
+    tensor: ((String) throws -> MLXArray)?) throws {
+    try Task.checkCancellation()
+    try file.checkUnchanged()
     let headers = file.tensors.mapValues { H3TensorInfo(dtype: $0.dtype, shape: $0.shape) }
     try H3QwenCheckpointLayout.validateLayer(index: index, tensors: headers)
     let root = "model.layers.\(index)."
     func norm(_ suffix: String) throws -> MLXArray {
+      try Task.checkCancellation()
       let name = root + suffix
       let descriptor = file.tensors[name]!
+      if let tensor {
+        let result = try tensor(name)
+        guard result.shape == descriptor.shape.map(Int.init),
+          result.dtype == (descriptor.dtype == "BF16" ? .bfloat16 : .float16) else {
+          throw H3CheckpointError.invalid("H3 Qwen norm changed after admission.")
+        }
+        return result
+      }
       let result: MLXArray = try file.withTensorBytes(named: name) { bytes in
         let shape = descriptor.shape.map(Int.init)
         switch descriptor.dtype {
@@ -65,21 +81,36 @@ public struct H3QwenLayer {
         default: throw H3CheckpointError.invalid("Unsupported H3 Qwen norm dtype.")
         }
       }
-      eval(result)
       return result
     }
     inputNorm = try norm("input_layernorm.weight")
     postAttentionNorm = try norm("post_attention_layernorm.weight")
     queryNorm = try norm("self_attn.q_norm.weight")
     keyNorm = try norm("self_attn.k_norm.weight")
-    query = try H3QwenQ8Projection(file: file, name: root + "self_attn.q_proj.weight")
-    key = try H3QwenQ8Projection(file: file, name: root + "self_attn.k_proj.weight")
-    value = try H3QwenQ8Projection(file: file, name: root + "self_attn.v_proj.weight")
-    output = try H3QwenQ8Projection(file: file, name: root + "self_attn.o_proj.weight")
-    gate = try H3QwenQ8Projection(file: file, name: root + "mlp.gate_proj.weight")
-    up = try H3QwenQ8Projection(file: file, name: root + "mlp.up_proj.weight")
-    down = try H3QwenQ8Projection(file: file, name: root + "mlp.down_proj.weight")
+    query = try H3QwenQ8Projection(file: file, name: root + "self_attn.q_proj.weight",
+      tensor: tensor, materializeWeights: false)
+    key = try H3QwenQ8Projection(file: file, name: root + "self_attn.k_proj.weight",
+      tensor: tensor, materializeWeights: false)
+    value = try H3QwenQ8Projection(file: file, name: root + "self_attn.v_proj.weight",
+      tensor: tensor, materializeWeights: false)
+    output = try H3QwenQ8Projection(file: file, name: root + "self_attn.o_proj.weight",
+      tensor: tensor, materializeWeights: false)
+    gate = try H3QwenQ8Projection(file: file, name: root + "mlp.gate_proj.weight",
+      tensor: tensor, materializeWeights: false)
+    up = try H3QwenQ8Projection(file: file, name: root + "mlp.up_proj.weight",
+      tensor: tensor, materializeWeights: false)
+    down = try H3QwenQ8Projection(file: file, name: root + "mlp.down_proj.weight",
+      tensor: tensor, materializeWeights: false)
+    try Task.checkCancellation()
     try file.checkUnchanged()
+    // A single admitted layer uses MLX-owned packed arrays. A native page
+    // lets MLX read the tensors through its bounded parallel file reader;
+    // the direct initializer has already copied each scoped tensor mapping.
+    // Materialize the full layer once. No future layer is requested.
+    eval([inputNorm, postAttentionNorm, queryNorm, keyNorm] +
+      [query, key, value, output, gate, up, down].flatMap(\.parametersToMaterialize))
+    try file.checkUnchanged()
+    try Task.checkCancellation()
   }
 
   private static func rotary(_ x: MLXArray, cosine: MLXArray,
@@ -209,8 +240,15 @@ public struct H3QwenLayer {
   static func evaluate(checkpointURL: URL, index: Int, input: MLXArray,
     positions: [[Int32]]?,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
+    try Task.checkCancellation()
     let file = try SafeTensorFile(url: checkpointURL)
-    let layer = try Self(file: file, index: index)
+    try file.checkUnchanged(at: checkpointURL)
+    let page = H3NativePage(file: file, url: checkpointURL)
+    defer { page.clear() }
+    let layer = try Self(file: file, index: index,
+      tensor: { try page.read($0, materialize: false) })
+    try file.checkUnchanged(at: checkpointURL)
+    try Task.checkCancellation()
     let result = try layer.callAsFunction(input, positions: positions,
       observe: observe)
     eval(result)

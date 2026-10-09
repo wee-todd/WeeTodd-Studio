@@ -15,6 +15,35 @@ struct GenerationInspector: View {
     return try? JSONDecoder().decode(GenerationDescriptor.self,
       from: JSONSerialization.data(withJSONObject: object))
   }
+  var ltxRendererSummary: String {
+    guard store.runtime.usesNativeLTX25 else { return "Renderer: Python MLX" }
+    if clip.inferredTask == "video_upscale" {
+      return "Renderer: Swift MLX · source movie 2× · decoded previews"
+    }
+    let generation = descriptor ?? store.profiles.first(where: { $0.id == clip.profileID })?.generation
+    let summary = (clip.generationSelection?.ltx25DFR?.enabled ?? generation?.dfrEnabled ?? false)
+      ? "DFR refinement" : generation?.ltx25ExecutionSummary ?? "sampling settings pending"
+    return "Renderer: Swift MLX · \(summary) · decoded previews"
+  }
+  var resolvedVideoDecodePrecision: NativeH3VideoDecodePrecision {
+    .resolved(selection: clip.generationSelection?.h3VideoDecodePrecision,
+      recipeValue: descriptor?.videoDecodePrecision ?? store.profiles.first(where: {
+        $0.id == clip.profileID && $0.engine == clip.engine.rawValue
+      })?.generation?.videoDecodePrecision)
+  }
+  var resolvedAttentionPolicy: NativeH3AttentionPolicy {
+    .resolved(selection:clip.generationSelection?.h3AttentionPolicy,
+      recipeValue:descriptor?.attentionPolicy ?? store.profiles.first(where: {
+        $0.id == clip.profileID && $0.engine == clip.engine.rawValue
+      })?.generation?.attentionPolicy)
+  }
+  var solAttentionAvailable: Bool {
+    ["ref2va", "i2v", "fflf"].contains(clip.inferredTask) && clip.continuityMode == "independent"
+      && clip.extensionDirection.isEmpty && !isFastH3 && !isVDN
+      && clip.generationSelection?.h3Joint == nil && clip.generationSelection?.h3MotionFidelity == nil
+      && clip.generationSelection?.transformerBackend != "nnc_experimental"
+      && descriptor?.attentionPolicyEditable == true
+  }
   var tasks: [String] {
     if let selected=store.profiles.first(where: { $0.id==clip.profileID && $0.engine==clip.engine.rawValue }),
       (selected.generation?.vdn == true || selected.generation?.fasth3 == true) { return ["t2v"] }
@@ -28,6 +57,10 @@ struct GenerationInspector: View {
       $0.id == clip.profileID && $0.engine == clip.engine.rawValue
     }) else { return true }
     if clip.inferredTask == "video_upscale" { return false }
+    if clip.engine == .ltx25, let dfr = clip.generationSelection?.ltx25DFR {
+      if (profile.generation?.dfrEnabled ?? false) != dfr.enabled { return true }
+      if dfr.enabled && dfr.temporalRounds > 0 && profile.generation?.dfrTemporalAvailable != true { return true }
+    }
     if clip.engine == .ltx25, store.runtime.usesNativeLTX25,
       (profile.generation?.pipelineMode ?? "distilled") != (clip.generationSelection?.ltx25Guidance?.mode.rawValue ?? "distilled") { return true }
     return profile.generation.map { !$0.supportedTasks.contains(clip.inferredTask) } ?? false
@@ -92,10 +125,45 @@ struct GenerationInspector: View {
           Text("Experimental multistep sampling. Turbo adapters require Euler.").font(.caption2).foregroundStyle(.secondary)
         }
       }
+      if clip.engine == .h3, store.runtime.usesNativeH3 {
+        DisclosureGroup("Advanced attention") {
+          Picker("Attention", selection:Binding(get: {
+            clip.generationSelection?.h3AttentionPolicy?.rawValue ?? "recipe"
+          }, set: { value in edit {
+            $0.h3AttentionPolicy = value == "recipe" ? nil : NativeH3AttentionPolicy(rawValue:value)
+          } })) {
+            Text("Recipe default (Dense unless specified)").tag("recipe")
+            Text(NativeH3AttentionPolicy.dense.label).tag(NativeH3AttentionPolicy.dense.rawValue)
+            Text(NativeH3AttentionPolicy.solExperimental.label).tag(NativeH3AttentionPolicy.solExperimental.rawValue)
+              .disabled(!solAttentionAvailable)
+          }
+          .accessibilityIdentifier("h3-attention-policy")
+          Text("Resolved: \(resolvedAttentionPolicy.label)")
+          Text("Sol approximates generated-video attention and may change video and audio. Only ordinary independent Swift MLX Ref2VA or FL2VA with one immediate strength-1 Turbo adapter, Euler, 4 evaluations and Drop AdaLN is supported. Checkpoint and packed-row eligibility are checked before rendering. The first two evaluations remain dense; tau is fixed at 0.5.")
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+        DisclosureGroup("Advanced video decoding") {
+          Picker("Precision", selection: Binding(get: {
+            clip.generationSelection?.h3VideoDecodePrecision?.rawValue ?? "recipe"
+          }, set: { value in edit {
+            $0.h3VideoDecodePrecision = value == "recipe" ? nil : NativeH3VideoDecodePrecision(rawValue:value)
+          } })) {
+            Text("Recipe default (FP32 unless specified)").tag("recipe")
+            ForEach(NativeH3VideoDecodePrecision.allCases) { Text($0.label).tag($0.rawValue) }
+          }
+          .accessibilityIdentifier("h3-video-decode-precision")
+          Text("Resolved: \(resolvedVideoDecodePrecision == .float16 ? "FP16" : "FP32")")
+          Text("FP32 preserves the default decoder. FP16 may change pixels and requires Swift MLX with a lower-memory profile. Sampling and audio decoding are unchanged.")
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+      }
       if clip.engine == .ltx25, store.runtime.usesNativeLTX25 {
         DiffusionVAEInspector(clip:clip)
         if clip.inferredTask == "video_upscale" { MovieUpscaleInspector(clip:clip) }
-        else { guidedControls; automaticDurationControls; singleStageControls; ordinaryKeyframeControls }
+        else {
+          LTXDFRInspector(clip: clip, generation: descriptor ?? store.profiles.first(where: { $0.id == clip.profileID })?.generation)
+          guidedControls; automaticDurationControls; singleStageControls; ordinaryKeyframeControls
+        }
       }
       ForEach(store.generationDescriptions[clip.id]?["warnings"] as? [String] ?? [], id: \.self) { warning in
         Text(warning).font(.caption2).foregroundStyle(.secondary)
@@ -110,11 +178,7 @@ struct GenerationInspector: View {
       }
       Button("Set up or repair models…") { store.showRuntime = true }
       if clip.engine == .ltx25 {
-        Text(store.runtime.usesNativeLTX25
-          ? (clip.inferredTask == "video_upscale" ? "Renderer: Swift MLX · source movie 2× · decoded previews" : clip.generationSelection?.ltx25Guidance == nil
-            ? "Renderer: Swift MLX · distilled 8 + 3 steps · decoded previews"
-            : "Renderer: Swift MLX · experimental Dev guidance · decoded previews")
-          : "Renderer: Python MLX")
+        Text(ltxRendererSummary)
           .font(.caption2).foregroundStyle(.secondary)
       }
       if clip.engine == .h3 {
@@ -137,6 +201,18 @@ struct GenerationInspector: View {
             Text("Native NNC: Ref2VA with the ComfyUI BF16 Turbo LoRA at strength 1, four Euler evaluations and Drop AdaLN. Uses one GPU block plus one CPU prefetch, FP16 projections and FP32 attention. MLX handles conditioning and decoding. Native core buffers use a fixed policy; MLX chunk controls apply only outside the native core. Advanced cache/control/refinement settings are not supported.")
               .font(.caption2).foregroundStyle(.secondary)
           }
+          if clip.engine == .h3 && store.runtime.usesNativeH3 {
+            Picker("Transformer weight cache", selection:Binding(get:{
+              clip.generationSelection?.h3TransformerWeightCacheGB ?? -1
+            },set:{ value in edit { $0.h3TransformerWeightCacheGB = value < 0 ? nil : value } })) {
+              Text("Recipe default").tag(-1)
+              Text("Stream blocks · 0 GiB").tag(0)
+              ForEach([8,16,32,48,64,96],id: \.self) { budget in Text("Up to \(budget) GiB").tag(budget) }
+            }
+            .disabled(descriptor?.transformerWeightCacheEditable != true || clip.generationSelection?.transformerBackend == "nnc_experimental")
+            Text("Reuses a fixed set of block weights between sampling steps. The rest stream normally. All cached weights release before decoding. The worker checks available memory and reserves space for activations; this is a weight budget, not total app memory.")
+              .font(.caption2).foregroundStyle(.secondary)
+          } else {
           Picker("Sampling weights", selection: Binding(get: {
             clip.generationSelection?.memoryPolicy ?? "recipe"
           }, set: { value in edit { $0.memoryPolicy = value == "recipe" ? nil : value } })) {
@@ -144,6 +220,7 @@ struct GenerationInspector: View {
             Text("Paged · lower memory").tag("paged")
             Text("Paged · larger workspace").tag("pagedNormal")
             Text("Resident · experimental high RAM").tag("resident")
+          }
           }
           Picker("Projection", selection: Binding(get: {
             clip.generationSelection?.projectionBackend ?? "recipe"
@@ -159,8 +236,10 @@ struct GenerationInspector: View {
             Text(acceleration["explanation"] as? String ?? "")
               .font(.caption2).foregroundStyle(.secondary)
           }
-          Text("Paged · larger workspace retains checkpoint pagination with larger working buffers; fit on 36 GB hardware has not been qualified. Resident sampling requires high RAM and no page cache. Components still unload between stages. It has not been qualified on 36 GB hardware.")
-            .font(.caption2).foregroundStyle(.secondary)
+          if !store.runtime.usesNativeH3 {
+            Text("Paged · larger workspace retains checkpoint pagination with larger working buffers; fit on 36 GB hardware has not been qualified. Resident sampling requires high RAM and no page cache. Components still unload between stages. It has not been qualified on 36 GB hardware.")
+              .font(.caption2).foregroundStyle(.secondary)
+          }
         }
         }
       }
@@ -175,9 +254,14 @@ struct GenerationInspector: View {
     let available=(store.generationDescriptions[clip.id]?["generation"] as? [String:Any])?["singleStageAvailable"] as? Bool ?? false
     if available || clip.generationSelection?.ltx25SingleStage != nil {
       DisclosureGroup("Full-resolution single-stage sampling") {
-        Toggle("Use single-stage sampling",isOn:Binding(get:{ clip.generationSelection?.ltx25SingleStage != nil },set:{ enabled in
+        Toggle("Override with single-stage sampling",isOn:Binding(get:{ clip.generationSelection?.ltx25SingleStage != nil },set:{ enabled in
           edit { $0.ltx25SingleStage=enabled ? LTX25SingleStageSettings():nil }
         })).disabled(!available && clip.generationSelection?.ltx25SingleStage == nil)
+        if clip.generationSelection?.ltx25SingleStage == nil,
+          (store.generationDescriptions[clip.id]?["generation"] as? [String:Any])?["singleStageEnabled"] as? Bool == true {
+          Text("The model profile uses single-stage sampling. Enable the override to change its sampler or negative schedule. Select a two-stage profile to use 8 + 3 sampling.")
+            .font(.caption2).foregroundStyle(.secondary)
+        }
         if let settings=clip.generationSelection?.ltx25SingleStage {
           Toggle("Enable experimental execution",isOn:Binding(get:{ settings.experimentalEnabled },set:{ enabled in edit { $0.ltx25SingleStage?.experimentalEnabled=enabled } }))
           Picker("Sampler",selection:Binding(get:{ settings.method },set:{ method in edit {
@@ -223,7 +307,8 @@ struct GenerationInspector: View {
   @ViewBuilder func controls(_ controls: GenerationControls) -> some View {
     if let steps = controls.evaluations {
       HStack {
-        Text(controls.refinementSteps == nil ? "Steps" : "Stage one steps")
+        Text(clip.engine == .ltx25 && controls.refinementSteps == 0
+          ? "Evaluations" : controls.refinementSteps == nil ? "Steps" : "Stage one steps")
         TextField("Steps", value: controls.stepsEditable ? integer(\.steps, default: steps) : .constant(steps), format: .number.grouping(.never))
           .disabled(!controls.stepsEditable)
       }
@@ -275,7 +360,7 @@ struct GenerationInspector: View {
       $0.ltx25Guidance = LTX25GuidanceMode(rawValue: value).map { LTX25GuidanceSettings(mode: $0) }
       $0.steps = nil; $0.refinementSteps = nil; $0.cfg = nil
     } })) {
-      Text("Fast distilled · 8 + 3").tag("distilled")
+      Text("Fast distilled").tag("distilled")
       ForEach(LTX25GuidanceMode.allCases) { Text($0.label).tag($0.rawValue) }
     }
     if let guidance = clip.generationSelection?.ltx25Guidance {

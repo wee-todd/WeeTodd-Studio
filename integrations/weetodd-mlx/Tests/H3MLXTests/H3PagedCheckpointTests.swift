@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Darwin
 import MLX
 import XCTest
 @testable import H3MLX
@@ -195,6 +197,151 @@ final class H3PagedCheckpointTests: XCTestCase {
     XCTAssertThrowsError(try H3CheckpointSource.fileURL(root))
     XCTAssertThrowsError(try H3CheckpointSource.checkUnchanged(root))
     XCTAssertThrowsError(try H3CheckpointLayout(url: root))
+  }
+
+  func testUnchangedWrapperAdmitsFreshSourceAndRejectsCachedMutations() throws {
+    for name in ["config.json", "quant_config.json", "paged_manifest.json",
+      "pages/fixed.safetensors", "pages/block-000.safetensors", "pages/block-049.safetensors"] {
+      let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+      // First call exercises uncached admission; subsequent calls exercise inspection.
+      try H3CheckpointSource.checkUnchanged(root)
+      try H3CheckpointSource.checkUnchanged(root)
+      let handle = try FileHandle(forWritingTo: root.appendingPathComponent(name))
+      try handle.seekToEnd(); try handle.write(contentsOf: Data([0])); try handle.close()
+      XCTAssertThrowsError(try H3CheckpointSource.checkUnchanged(root), name)
+    }
+    for directory in ["", "pages"] {
+      let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+      try H3CheckpointSource.checkUnchanged(root)
+      let folder = directory.isEmpty ? root : root.appendingPathComponent(directory)
+      try Data().write(to: folder.appendingPathComponent("unexpected-entry"))
+      XCTAssertThrowsError(try H3CheckpointSource.checkUnchanged(root), directory)
+    }
+  }
+
+  func testUnchangedWrapperRejectsFreshMalformedSourcesAndReplacedPages() throws {
+    for cached in [false, true] {
+      for failure in 0..<5 {
+        let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        if cached { try H3CheckpointSource.checkUnchanged(root) }
+        switch failure {
+        case 0: try alter(root, "paged_manifest.json") { $0["num_blocks"] = 49 }
+        case 1:
+          let handle = try FileHandle(forWritingTo: root.appendingPathComponent("pages/block-049.safetensors"))
+          try handle.truncate(atOffset: 8); try handle.close()
+        case 2:
+          try Data([0]).write(to: root.appendingPathComponent("pages/fixed.safetensors"), options: .atomic)
+        case 3:
+          let page = root.appendingPathComponent("pages/block-049.safetensors")
+          try FileManager.default.removeItem(at: page)
+          try FileManager.default.createSymbolicLink(at: page,
+            withDestinationURL: root.appendingPathComponent("pages/fixed.safetensors"))
+        default:
+          let pages = root.appendingPathComponent("pages")
+          try FileManager.default.removeItem(at: pages)
+          try Data([0]).write(to: pages)
+        }
+        XCTAssertThrowsError(try H3CheckpointSource.checkUnchanged(root), "cached=\(cached), failure=\(failure)")
+      }
+    }
+  }
+
+  func testUnchangedWrapperCancellationForFreshAndCachedSources() async throws {
+    for cached in [false, true] {
+      let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+      if cached { try H3CheckpointSource.checkUnchanged(root) }
+      let job = Task {
+        while !Task.isCancelled { await Task.yield() }
+        try H3CheckpointSource.checkUnchanged(root)
+      }
+      job.cancel()
+      do { try await job.value; XCTFail("Cancelled identity check succeeded") }
+      catch is CancellationError {} catch { XCTFail("Unexpected cancellation: \(error)") }
+      // Cancellation must not poison the source cache or alter its identity.
+      try H3CheckpointSource.checkUnchanged(root)
+    }
+  }
+
+  func testInstalledIdentityWalkDeduplicationABBAABBA() throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let checkpointPath = environment["WEETODD_H3_IDENTITY_TIMING_CHECKPOINT"],
+      let outputPath = environment["WEETODD_H3_IDENTITY_TIMING_RECEIPT"] else {
+      throw XCTSkip("Opt-in actual FastH3 metadata-only identity timing; no MLX arrays or model payload reads.")
+    }
+    guard !FileManager.default.fileExists(atPath: outputPath) else {
+      throw H3CheckpointError.invalid("Identity timing receipt must be fresh.")
+    }
+    let root = URL(fileURLWithPath: checkpointPath)
+    let source = try H3CheckpointSource.inspect(root) // Header admission is outside timing.
+    guard source.layout.fastVariant == .vsaV1 else {
+      throw H3CheckpointError.invalid("Identity timing requires the actual admitted FastH3 VSA checkpoint.")
+    }
+    func sha(_ data: Data) -> String {
+      SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+    func pin(_ url: URL, directory: Bool) throws -> [String: Any] {
+      var status = stat()
+      guard lstat(url.path, &status) == 0,
+        status.st_mode & S_IFMT == (directory ? S_IFDIR : S_IFREG) else {
+        throw H3CheckpointError.invalid("Identity timing input changed type.")
+      }
+      return ["path": url.path, "device": Int(status.st_dev), "inode": UInt64(status.st_ino),
+        "bytes": Int64(status.st_size), "mtimeSeconds": Int(status.st_mtimespec.tv_sec),
+        "mtimeNanoseconds": Int(status.st_mtimespec.tv_nsec),
+        "ctimeSeconds": Int(status.st_ctimespec.tv_sec), "ctimeNanoseconds": Int(status.st_ctimespec.tv_nsec)]
+    }
+    let directories = [root, root.appendingPathComponent("pages")]
+    let metadata = ["config.json", "quant_config.json", "paged_manifest.json"].map { root.appendingPathComponent($0) }
+    let files = metadata + [source.fixed] + source.blocks
+    func identities() throws -> Data {
+      let values = try directories.map { try pin($0, directory: true) }
+        + files.map { try pin($0, directory: false) }
+      return try JSONSerialization.data(withJSONObject: values, options: .sortedKeys)
+    }
+    let before = try identities()
+    let metadataHashes = try metadata.map { ["path": $0.path, "sha256": sha(try Data(contentsOf: $0))] }
+    // Declared before measurement: at least 0.5 s median gain across the
+    // successful canonical path's 1,568 checks is required for a speed claim.
+    let calls = 1568, minimumMedianGainSeconds = 0.5
+    var oldSeconds: [Double] = [], newSeconds: [Double] = [], runs: [[String: Any]] = []
+    func oldCheck() throws {
+      if H3CheckpointSource.isPaged(root) { try H3CheckpointSource.inspect(root).checkUnchanged() }
+    }
+    // Warm both routes before the matched ABBAABBA sequence.
+    try oldCheck()
+    try H3CheckpointSource.checkUnchanged(root)
+    for old in [true, false, false, true, true, false, false, true] {
+      try H3CheckpointSource.checkUnchanged(root)
+      let began = DispatchTime.now().uptimeNanoseconds
+      for _ in 0..<calls {
+        if old { try oldCheck() }
+        else { try H3CheckpointSource.checkUnchanged(root) }
+      }
+      let seconds = Double(DispatchTime.now().uptimeNanoseconds - began) / 1_000_000_000
+      if old { oldSeconds.append(seconds) } else { newSeconds.append(seconds) }
+      runs.append(["route": old ? "old_duplicate_walk" : "production_deduplicated", "seconds": seconds])
+      XCTAssertEqual(try identities(), before, "Every pinned source identity must remain unchanged.")
+    }
+    func median(_ values: [Double]) -> Double {
+      let ordered = values.sorted(); return (ordered[1] + ordered[2]) / 2
+    }
+    let gain = median(oldSeconds) - median(newSeconds)
+    let package = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .deletingLastPathComponent().deletingLastPathComponent()
+    let sourceURL = package.appendingPathComponent("Sources/H3MLX/H3CheckpointSource.swift")
+    let receipt: [String: Any] = ["scope": "Actual installed FastH3 VSA header-only identity timing; no inference, MLX arrays or model payload reads; not a whole-render speed proof.",
+      "checkpoint": root.path, "identities": try JSONSerialization.jsonObject(with: before),
+      "metadata": metadataHashes, "sourceSHA256": sha(try Data(contentsOf: sourceURL)),
+      "testSHA256": sha(try Data(contentsOf: URL(fileURLWithPath: #filePath))),
+      "testExecutable": CommandLine.arguments.first ?? "", "callsPerBatch": calls,
+      "identityStatsPerWalk": 56, "runs": runs, "oldMedianSeconds": median(oldSeconds),
+      "newMedianSeconds": median(newSeconds), "medianGainSeconds": gain,
+      "predeclaredMinimumMedianGainSeconds": minimumMedianGainSeconds,
+      "meaningfulSpeedGatePassed": gain >= minimumMedianGainSeconds]
+    try JSONSerialization.data(withJSONObject: receipt, options: [.prettyPrinted, .sortedKeys])
+      .write(to: URL(fileURLWithPath: outputPath), options: .withoutOverwriting)
+    XCTAssertGreaterThanOrEqual(gain, minimumMedianGainSeconds,
+      "Do not promote this candidate as a meaningful speed fix below the predeclared metadata-only gate.")
   }
 
 }

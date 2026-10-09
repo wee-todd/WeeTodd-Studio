@@ -7,6 +7,75 @@ import XCTest
 @testable import H3MLX
 
 final class H3TransformerBlockTests: XCTestCase {
+  func testPreparedAttentionLifetimeAndRaggedMLPChunksPreserveDenseBlock() throws {
+    let rows = 7, width = 4
+    let x = MLXRandom.normal([1, rows, width], key: MLXRandom.key(963)).asType(.bfloat16)
+    let modulation = (MLXRandom.normal([1, 18 * width], key: MLXRandom.key(964)) * Float(0.1)).asType(.bfloat16)
+    let indices = MLXArray((0..<rows).map { Int32($0 % 3) })
+    let angles = H3RotaryAngles(rows: rows,
+      cosine: MLXArray.ones([1, 1, rows, 4], dtype: .bfloat16),
+      sine: MLXArray.zeros([1, 1, rows, 4], dtype: .bfloat16))
+    let weights = Dictionary(uniqueKeysWithValues: [
+      ("attn.qkv_proj", 24, 4), ("attn.out_proj", 4, 8),
+      ("mlp.fc1", 12, 4), ("mlp.fc2", 4, 6),
+    ].enumerated().map { i, item in
+      (item.0, (MLXRandom.normal([item.1, item.2], key: MLXRandom.key(UInt64(965 + i))) * Float(0.1)).asType(.bfloat16))
+    })
+    func run(chunk: Int?, bounded: Bool) throws -> (MLXArray, [String]) {
+      var order: [String] = []
+      let output = try H3TransformerBlock.evaluateKernel(input: x, modulation: modulation,
+        modulationIndices: indices, angles: angles,
+        hiddenWidth: 4, heads: 2, headWidth: 4, feedWidth: 6, rotaryWidth: 4,
+        read: { _, shape in MLXArray.ones(shape, dtype: .bfloat16) },
+        project: { activation, name, _, _, _ in
+          order.append(name)
+          return matmul(activation, weights[name]!.T)
+        }, feedRowChunk: chunk, drainAttentionInputs: bounded,
+        retireQKV: { order.append("retire_qkv") },
+        retireAttention: { order.append("retire_attention") })
+      return (output, order)
+    }
+    let expected = try run(chunk: nil, bounded: false).0.view(dtype: .uint16).asArray(UInt16.self)
+    for chunk in [1, 2, 3, 8] {
+      let (actual, order) = try run(chunk: chunk, bounded: true)
+      XCTAssertEqual(actual.view(dtype: .uint16).asArray(UInt16.self), expected)
+      XCTAssertLessThan(try XCTUnwrap(order.firstIndex(of: "attn.qkv_proj")),
+        try XCTUnwrap(order.firstIndex(of: "retire_qkv")))
+      XCTAssertLessThan(try XCTUnwrap(order.firstIndex(of: "retire_qkv")),
+        try XCTUnwrap(order.firstIndex(of: "attn.out_proj")))
+      XCTAssertLessThan(try XCTUnwrap(order.firstIndex(of: "attn.out_proj")),
+        try XCTUnwrap(order.firstIndex(of: "retire_attention")))
+      XCTAssertLessThan(try XCTUnwrap(order.firstIndex(of: "retire_attention")),
+        try XCTUnwrap(order.firstIndex(of: "mlp.fc1")))
+      XCTAssertEqual(order.filter { $0 == "mlp.fc1" }.count, (rows + chunk - 1) / chunk)
+    }
+    XCTAssertThrowsError(try run(chunk: 0, bounded: true))
+  }
+
+  func testCancellationAtMLPChunkBoundaryStopsBeforeTheNextProjection() async throws {
+    let task = Task { () throws -> Bool in
+      let input = MLXArray.ones([1, 5, 2], dtype: .bfloat16)
+      let mod = MLXArray.ones([1, 36], dtype: .bfloat16) * Float(0.1)
+      var completedChunks = 0
+      do {
+        _ = try H3TransformerBlock.evaluateKernel(input: input, modulation: mod,
+          modulationIndices: MLXArray.zeros([5], dtype: .int32),
+          angles: H3RotaryAngles(rows: 5,
+            cosine: MLXArray.ones([1, 1, 5, 2], dtype: .bfloat16),
+            sine: MLXArray.zeros([1, 1, 5, 2], dtype: .bfloat16)),
+          hiddenWidth: 2, heads: 1, headWidth: 2, feedWidth: 2, rotaryWidth: 2,
+          read: { _, shape in MLXArray.ones(shape, dtype: .bfloat16) },
+          project: { x, name, rows, columns, _ in
+            if name == "mlp.fc2" { completedChunks += 1; withUnsafeCurrentTask { $0?.cancel() } }
+            return matmul(x, MLXArray.ones([rows, columns], dtype: .bfloat16).T)
+          }, feedRowChunk: 2)
+        return false
+      } catch is CancellationError { return completedChunks == 1 }
+    }
+    let stopped = try await task.value
+    XCTAssertTrue(stopped)
+  }
+
   func testInstalledAffineProjectionLoadingComparison() throws {
     let environment = ProcessInfo.processInfo.environment
     guard let outputPath = environment["WEETODD_H3_AFFINE_LOAD_OUTPUT"],
@@ -109,6 +178,7 @@ final class H3TransformerBlockTests: XCTestCase {
     if let expected = environment["WEETODD_H3_VSA_BLOCK_EXPECTED_SHA256"] { XCTAssertEqual(hash, expected) }
     if let budget = environment["WEETODD_H3_VSA_BLOCK_MAX_MLX_BYTES"].flatMap(Int.init) { XCTAssertLessThanOrEqual(peak, budget) }
     var stages: [[String: Any]] = []
+    Memory.peakMemory = Memory.activeMemory
     var start = CFAbsoluteTimeGetCurrent()
     let diagnostic = try H3TransformerBlock.evaluate(checkpointURL: checkpoint, index: 0,
       input: input, modulation: modulation, modulationIndices: indices,
@@ -117,6 +187,7 @@ final class H3TransformerBlockTests: XCTestCase {
         let end = CFAbsoluteTimeGetCurrent()
         stages.append(["boundary": name, "secondsSincePriorBoundary": end - start,
           "activeMLXBytes": Memory.activeMemory, "peakMLXBytes": Memory.peakMemory])
+        Memory.peakMemory = Memory.activeMemory
         start = end
       })
     XCTAssertEqual(diagnostic.asArray(Float.self), values)

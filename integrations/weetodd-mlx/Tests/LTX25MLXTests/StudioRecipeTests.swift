@@ -2,6 +2,40 @@ import XCTest
 @testable import LTX25MLX
 
 final class StudioRecipeTests: XCTestCase {
+  func testDevIngredientsAdmitsSingleStagePublisherGuidanceWithoutRefinement() throws {
+    var recipe=fixture(),config=recipe["config"] as! [String:Any]
+    config["duration_seconds"]=5;config["pipeline_mode"]="guided"
+    config["ic_lora_single_stage"]=true;config["stage1_sampler"]="euler_guided"
+    config["stage1_steps"]=30;config["stage2_steps"]=0
+    config["video_cfg_scale"]=4;config["audio_cfg_scale"]=4
+    config["stg_scale"]=1;config["stg_blocks"]=[29];config["stg_mode"]="video"
+    config["modality_scale"]=1;config["video_rescale_scale"]=0;config["audio_rescale_scale"]=0
+    recipe["config"]=config
+    var components=recipe["components"] as! [String:Any]
+    components["ic_loras"]=[["/models/ingredients-23.safetensors",1.4]]
+    components["spatial_upscaler_path"]="";components["distilled_lora_path"]=""
+    recipe["components"]=components
+    recipe["conditioning"]=["version":1,"task":"control","audio_policy":"generated","inputs":[
+      ["id":"sheet","kind":"image","role":"control","control_type":"ingredients_reference_sheet",
+       "path":"/sheet.png","sha256":String(repeating:"a",count:64),"strength":1,"description":"Two distinct warriors"]]]
+    let request=try compile(recipe)
+    XCTAssertEqual(request.version,17);XCTAssertEqual(request.task,"ingredients")
+    let policy=try XCTUnwrap(request.guidedSampling)
+    let fields=try JSONSerialization.jsonObject(with:JSONEncoder().encode(policy)) as! [String:Any]
+    XCTAssertEqual(fields["single_stage"] as? Bool,true)
+    XCTAssertEqual(fields["stg_audio"] as? Bool,false)
+    XCTAssertEqual(policy.distilledAdapterPath,"");XCTAssertEqual(policy.steps,30)
+    XCTAssertEqual(policy.videoCFG,4);XCTAssertEqual(policy.stgBlocks,[29])
+    XCTAssertEqual(policy.transformerEvaluations,90)
+    XCTAssertTrue(request.stageOneLoras.isEmpty);XCTAssertTrue(request.stageTwoLoras.isEmpty)
+    XCTAssertEqual(try JSONDecoder().decode(MLXDistilledRequest.self,from:JSONEncoder().encode(request)).version,17)
+    var bad=recipe;var badConfig=config;badConfig["stage2_steps"]=3;bad["config"]=badConfig
+    XCTAssertThrowsError(try compile(bad))
+    badConfig=config;badConfig["stg_mode"]="ignored";bad["config"]=badConfig
+    XCTAssertThrowsError(try compile(bad))
+    bad=recipe;bad["conditioning"]=["version":1,"task":"t2v","audio_policy":"generated","inputs":[]]
+    XCTAssertThrowsError(try compile(bad))
+  }
   func testAutomaticDurationPinsTheHeadAndResolvesThroughStrictRequestGeometry() throws {
     var recipe=fixture(),config=recipe["config"] as! [String:Any],components=recipe["components"] as! [String:Any]
     config["duration_mode"]="automatic";config["auto_duration_min_seconds"]=0.25

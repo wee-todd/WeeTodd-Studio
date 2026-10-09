@@ -751,7 +751,7 @@ def _recipe(preset, components, memory_mode, memory_gb):
         fields = asdict(config)
         if memory_mode == "lower_memory":
             fields.update(attention_head_chunk_size="2", ffn_row_chunk_size="128")
-        config = H3GenerationConfig(**fields)
+        config = H3GenerationConfig.from_recipe_fields(fields)
         config.validate()
         report = preflight_components(
             H3ComponentSetSpec(**components),

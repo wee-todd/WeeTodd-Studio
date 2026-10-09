@@ -55,6 +55,9 @@ public enum H3VDNStudioRecipe {
       }
       if let path = adapter["adaln_input_grid"] as? String { inputGrid = URL(fileURLWithPath:path) }
     }
+    guard try H3TransformerCachePlan.budget(config:root["config"] as? [String:Any] ?? [:]) == 0 else {
+      throw H3CheckpointError.invalid("Transformer weight cache is not admitted for FastH3 or VDN.")
+    }
     let base = try H3StudioRecipe.compile(data: JSONSerialization.data(withJSONObject: root))
     return try H3T2VARequest(prompt: base.prompt, width: base.geometry.width,
       height: base.geometry.height, durationSeconds: base.durationSeconds,
@@ -62,6 +65,6 @@ public enum H3VDNStudioRecipe {
       transformer: base.transformer, qwenPages: base.qwenPages, tokenizer: base.tokenizer,
       videoVAE: base.videoVAE, audioVAE: base.audioVAE,
       vdn: H3VDNSelection(stage: stage, variant: turbo ? .eightStep : .fiftyStep, adalnInputGrid:inputGrid),
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode, samplingMethod: base.samplingMethod)
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode, videoDecodePrecision: base.videoDecodePrecision, samplingMethod: base.samplingMethod)
   }
 }

@@ -35,8 +35,18 @@ public struct H3LoRAAdapter: Sendable {
 }
 
 protocol H3LoRAApplying {
+  func prepareBlock(index: Int) throws -> H3LoRABlock?
   func apply(base: MLXArray, input: MLXArray,
     target: String, reorderQKV: Bool) throws -> MLXArray
+  func applyQueued(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool) throws -> MLXArray
+}
+extension H3LoRAApplying {
+  func prepareBlock(index: Int) throws -> H3LoRABlock? { nil }
+  func applyQueued(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool) throws -> MLXArray {
+    try apply(base:base,input:input,target:target,reorderQKV:reorderQKV)
+  }
 }
 
 /// Ordered activation-space updates. Each file maps only the active projection;
@@ -56,6 +66,12 @@ final class H3LoRAStack: H3LoRAApplying {
       strength: $0.strength, qkvLayout: $0.qkvLayout, profile: $0.profile, startAfterEvaluations: $0.startAfterEvaluations) }
   }
 
+  func prepareBlock(index: Int) throws -> H3LoRABlock? {
+    try H3LoRABlock(index: index, files: zip(files, adapters).compactMap { entry in
+      entry.1.isActive(evaluation: evaluation) ? entry.0 : nil
+    })
+  }
+
   func apply(base: MLXArray, input: MLXArray,
     target: String, reorderQKV: Bool = false) throws -> MLXArray {
     var value = base
@@ -65,6 +81,98 @@ final class H3LoRAStack: H3LoRAApplying {
     }
     return value
   }
+  func applyQueued(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool = false) throws -> MLXArray {
+    var value=base
+    for (file,adapter) in zip(files,adapters) where adapter.isActive(evaluation:evaluation) {
+      value=try file.applyQueued(base:value,input:input,target:target,reorderQKV:reorderQKV)
+    }
+    return value
+  }
+
+}
+
+/// Lazy adapter pairs for one prepared diffusion block and evaluation snapshot.
+/// The enclosing H3PreparedBlock drains GPU consumers before closing this scope.
+final class H3LoRABlock: H3LoRAApplying {
+  let index: Int
+  private let files: [H3LoRAFile]
+  private var pairs: [ObjectIdentifier: [String: H3LoRAFile.PreparedPair]] = [:]
+  private var retiredTargets: Set<String> = []
+  private(set) var isClosed = false
+  private(set) var acquiredPairCount = 0
+
+  var storageBytes: Int {
+    pairs.values.reduce(0) { total, targets in
+      total + targets.values.reduce(0) { $0 + $1.a.nbytes + $1.b.nbytes }
+    }
+  }
+  var residentPairCount: Int { pairs.values.reduce(0) { $0 + $1.count } }
+
+  init(index: Int, files: [H3LoRAFile]) throws {
+    guard (0..<50).contains(index) else {
+      throw H3CheckpointError.invalid("Invalid prepared H3 LoRA block index.")
+    }
+    try Task.checkCancellation()
+    self.index = index
+    self.files = files
+  }
+
+  func apply(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool = false) throws -> MLXArray {
+    try compute(base: base, input: input, target: target, reorderQKV: reorderQKV, queued: false)
+  }
+  func applyQueued(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool = false) throws -> MLXArray {
+    try compute(base: base, input: input, target: target, reorderQKV: reorderQKV, queued: true)
+  }
+  private func compute(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool, queued: Bool) throws -> MLXArray {
+    let prefix = "diffusion_model.blocks.\(index)."
+    guard !isClosed, !retiredTargets.contains(target),
+      ["attn.qkv_proj", "attn.out_proj", "mlp.fc1", "mlp.fc2"].contains(where: { target == prefix + $0 }),
+      input.ndim >= 2, base.ndim >= 2 else {
+      throw H3CheckpointError.invalid("Invalid or retired prepared H3 LoRA target.")
+    }
+    try Task.checkCancellation()
+    var value = base
+    for file in files {
+      try file.checkUnchanged()
+      let key = ObjectIdentifier(file)
+      let pair: H3LoRAFile.PreparedPair
+      if let cached = pairs[key]?[target] { pair = cached }
+      else {
+        guard let loaded = try file.loadPair(target: target,
+          inputWidth: input.shape.last!, outputWidth: base.shape.last!) else { continue }
+        // Publish only a complete pair whose source identity still matches.
+        try file.checkUnchanged()
+        try Task.checkCancellation()
+        pairs[key, default: [:]][target] = loaded
+        acquiredPairCount += 1
+        pair = loaded
+      }
+      guard pair.a.shape[1] == input.shape.last!, pair.b.shape[0] == base.shape.last! else {
+        throw H3CheckpointError.invalid("Prepared H3 LoRA projection widths changed.")
+      }
+      value = try file.apply(pair: pair, base: value, input: input,
+        reorderQKV: reorderQKV, queued: queued)
+    }
+    try Task.checkCancellation()
+    return value
+  }
+
+  /// Invoke at the same drained branch boundary as the base projection.
+  func retire(target: String) {
+    for key in Array(pairs.keys) { pairs[key]?.removeValue(forKey: target) }
+    retiredTargets.insert(target)
+  }
+  /// The owner must drain consumers first; clearing this scope adds no fence.
+  func close() {
+    pairs.removeAll()
+    retiredTargets.removeAll()
+    isClosed = true
+  }
+  deinit { close() }
 }
 
 /// Apply a LoRA in activation space. H3's installed transformer projections
@@ -262,11 +370,34 @@ final class H3LoRAFile: H3LoRAApplying {
 
   func apply(base: MLXArray, input: MLXArray,
     target: String, reorderQKV: Bool = false) throws -> MLXArray {
-    guard let info = targets[target] else { return base }
+    try compute(base:base,input:input,target:target,reorderQKV:reorderQKV,queued:false)
+  }
+  func applyQueued(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool = false) throws -> MLXArray {
+    try compute(base:base,input:input,target:target,reorderQKV:reorderQKV,queued:true)
+  }
+  struct PreparedPair {
+    let a: MLXArray
+    let b: MLXArray
+    let alpha: Float
+  }
+
+  func prepareBlock(index: Int) throws -> H3LoRABlock? {
+    try H3LoRABlock(index: index, files: [self])
+  }
+  func checkUnchanged() throws { try file.checkUnchanged(at: url) }
+
+  func loadPair(target: String, inputWidth: Int, outputWidth: Int) throws -> PreparedPair? {
+    try Task.checkCancellation()
+    guard let info = targets[target] else { return nil }
     let aName = target + ".lora_A.weight"
     let bName = target + ".lora_B.weight"
-    let aShape = [info.rank, input.shape.last!]
-    let bShape = [base.shape.last!, info.rank]
+    let aShape = [info.rank, inputWidth]
+    let bShape = [outputWidth, info.rank]
+    guard file.tensors[aName]?.shape == aShape.map(UInt64.init),
+      file.tensors[bName]?.shape == bShape.map(UInt64.init) else {
+      throw H3CheckpointError.invalid("H3 LoRA projection widths differ from its checkpoint.")
+    }
     let a = try H3TensorPayload.withTensorBytes(file: file, name: aName,
       maximumBufferedBytes: 16 * 1024 * 1024) { bytes in
       MLXArray(bytes, aShape, type: UInt16.self).view(dtype: .bfloat16)
@@ -275,12 +406,29 @@ final class H3LoRAFile: H3LoRAApplying {
       maximumBufferedBytes: 16 * 1024 * 1024) { bytes in
       MLXArray(bytes, bShape, type: UInt16.self).view(dtype: .bfloat16)
     }
+    try checkUnchanged()
+    try Task.checkCancellation()
+    return PreparedPair(a: a, b: b, alpha: info.alpha)
+  }
+
+  func apply(pair: PreparedPair, base: MLXArray, input: MLXArray,
+    reorderQKV: Bool, queued: Bool) throws -> MLXArray {
+    try Task.checkCancellation()
     let output = H3LoRAProjection.apply(base: base, input: input,
-      a: a, b: b, alpha: info.alpha, strength: strength,
+      a: pair.a, b: pair.b, alpha: pair.alpha, strength: strength,
       reorderQKV: reorderQKV && qkvLayout != .nativeInterleaved)
-    eval(output)
-    try file.checkUnchanged(at: url)
+    if !queued { eval(output) }
+    try checkUnchanged()
     try Task.checkCancellation()
     return output
+  }
+
+  private func compute(base: MLXArray, input: MLXArray,
+    target: String, reorderQKV: Bool, queued: Bool) throws -> MLXArray {
+    try Task.checkCancellation()
+    guard targets[target] != nil else { return base }
+    guard let pair = try loadPair(target: target,
+      inputWidth: input.shape.last!, outputWidth: base.shape.last!) else { return base }
+    return try apply(pair: pair, base: base, input: input, reorderQKV: reorderQKV, queued: queued)
   }
 }

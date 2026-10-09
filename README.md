@@ -48,6 +48,24 @@ Local H3, LTX 2.3 and LTX 2.5 expose their available tasks, sampling controls an
 directly. Component recipes are selected automatically; optional recipe and execution overrides
 remain under **Advanced generation**. Existing clips retain their saved settings.
 
+For supported H3 Ref2VA and FL2VA image/keyframe jobs, **Advanced attention → Sol** offers an explicit experimental
+attention optimization. Dense remains the default, including older saved jobs. Sol can change
+video and audio, and its saved policy has strict model, adapter and sampling limits. See the
+[H3 control and qualification guide](studio/README.md#current-swift-controls-and-qualification).
+
+For compatible ordinary Swift H3 models, **Memory and execution → Transformer weight cache**
+lets you trade available RAM for less repeated weight loading. Choose a stage-local limit from
+8 to 96 GiB, or keep **Stream blocks · 0 GiB**. The worker checks available memory and reserves
+working space before loading. Retained weights are released before video decoding. This setting
+does not keep models warm between jobs; specialized H3 variants and advanced controls have separate limits.
+The October 8 signed-v18 first-frame replay took 797.331 seconds at 1344 × 768/124 frames,
+with Sol and a 48 GiB cache, versus the retained 1007.169-second streamed/dense run.
+It preserved every decoded video pixel and audio sample from the approved Sol take. Worker
+physical peak was 48.02 GiB, versus 8.33 GiB for the streamed/dense run. Draw Things took
+793.288 seconds with a different weight format and sampler; the strict speed gate remains
+failed by 4.043 seconds / 0.51%. The full v18 replay used the signed packaged worker CLI and
+exact Studio export. The cache is an explicit memory tradeoff.
+
 ### Use Draw Things
 
 For a local development build with the Draw Things connection helper:
@@ -84,8 +102,31 @@ Use the [model setup guide](studio/README.md#guided-model-setup) and
 [clip generation controls](studio/README.md#clip-generation-controls) for the supported combinations.
 No ComfyUI installation is needed.
 
-For measured Swift H3 memory improvements and remaining speed limits, see the
-[native performance results](studio/README.md#swift-h3-indexed-attention).
+Swift H3 runs through MLX-owned arrays and native Metal execution. It loads only the current
+Qwen page, prepares one ordinary transformer block or at most two FastH3 Q8 blocks, and unloads
+text, transformer, video and audio weights in order. Reuse stays within the active stage;
+installed model weights are shared in place. Eligible ordinary H3 projections use native MPP
+after a first-use BF16 comparison; trained VSA uses its indexed attention consumer. A native
+`projection_backend=mlx`
+recipe can still use these internal kernels. The execution receipt reports what actually ran.
+
+The retained v10 T2VA and Dense comparisons are 25.9% and 26.7% faster than their strongest
+qualified Python controls, with exact accepted media and lower whole-worker memory. The October 8
+signed-v17 packaged FastH3 VSA replay also passed: **133.276 seconds** against the unchanged
+**137.793-second** limit, with exact video/audio and lower memory peaks. This closes VSA's frozen
+gate. The signed-v18 dense still Ref2VA replay passed: **942.041 seconds** against the unchanged
+**998.675-second** limit and strongest Python control of **951.119 seconds**, with exact accepted
+video/audio and lower memory peaks. All four original cases have a retained passing qualification
+across worker versions; they were not all rerun on v18. Earlier failed runs remain documented;
+fresh controls do not replace historical targets. These task-specific results do not establish Draw Things performance parity.
+The four original H3 performance cases have retained passes; the separate Draw Things comparison
+and broader feature qualifications retain their stated limits. An explicit **FP16 · experimental** video-decoder option is available with
+Swift lower-memory profiles; FP32 remains the default. Its saved-latent test reduced decoder time
+by 11.1%, with small pixel differences and essentially unchanged peak allocation. It does not
+qualify whole-job speed or change the failed FP32 gates. A later complete packaged FastH3 VSA
+job at 672 × 384 passed requested/applied FP16, progress, live previews and staged release,
+with exact retained audio. Published video differs; visual acceptance remains separate. See
+[current policies, limits and measurements](studio/README.md#swift-h3-performance-follow-up).
 
 Native clips expose **Model**, **Task**, sampling controls, render size and seed directly in the
 inspector, without a required template step. Execution presets and custom recipes remain under
@@ -398,7 +439,11 @@ Ingredients, Union, Motion Track and CrossView profiles. The merged native catal
 checkpoint/task admission and complete clean-machine installation remain separately qualified.
 Native setup can convert the admitted raw LTX 2.5 Dev transformer to unmerged Q8 pages in a new directory. Other source conversions and unsupported adapters retain their explicit setup paths. A final-app isolated clean-registry check passed eight setup/header cases against the then-current 23 catalog contracts,
 including Diffusion VAE adoption, without Python, network, conversion reruns or weight copies.
-Complete clean-machine acquisition of all weights remains pending.
+The acquisition audit passes pinned HTTPS transfer/checksum, resume, cancellation, corruption and
+access-error tests, and covers every non-import-only setup component in the 24-package catalog.
+It does not establish first installation of every large package. Simulated lower-RAM admission
+rejects oversized LTX requests and unsafe H3 cache budgets before weighted work; physical
+smaller-Mac speed and peak memory remain unmeasured.
 
 Supported H3/LTX 2.5 jobs select Swift by default; saved explicit Python selections remain
 available. Studio, exported native jobs and the recipe-backed ComfyUI node reuse the same
@@ -410,10 +455,17 @@ up to eight timed images and zero to eight generated keyframe slots. Ordinary ge
 participate in stage one only. One actual HQ/automatic-duration take with two timed images
 and two generated slots completed; it establishes execution of that combination, not broad quality.
 Full-resolution single-stage Euler, ancestral and CFG++ controls skip the upscaler and second
-stage. Direct single-stage requests can combine ordinary images/slots with IC or Union guides;
-IC and Union are mutually exclusive, and CFG++ cannot freeze an A2V driver. Guide compositions retain their CPU/header qualification. One ordinary balanced CFG++ take
-with first/last images and generated slots completed; that take does not qualify IC/Union composition
-or every sampler schedule. It was a functional run, not an isolated benchmark or broad quality approval.
+stage. Studio and direct single-stage requests can combine ordinary images/slots with IC or Union guides;
+IC and Union are mutually exclusive, and CFG++ cannot freeze an A2V driver. A packaged Swift
+CLI job combined a Canny guide, first-image anchor and one generated slot with balanced CFG++:
+33 frames at 512 × 256/24 fps, 69.05 seconds, 1.60 GiB active MLX peak and 2.96 GiB worker
+physical peak (FFmpeg excluded). Progress, decoded previews, ordered stage release, cancellation,
+accepted-project reopening and no-inference resume passed. This qualifies one bounded Union
+composition; Motion Track/CrossView compositions retain contract/preparation coverage. Actual
+ordinary Euler, ancestral, CFG++ full and speed takes now pass complete worker/media checks
+with first/last images and generated slots. Their 8/8/15/10 forwards are independently counted
+in video/audio events. These bounded checks do not establish broad quality. The earlier balanced take with
+first/last images and generated slots remains a separate functional check.
 
 Continuous-scene version 2 retains up to 32 global first/interior/last image anchors under a
 256 MiB encoded-reference budget. It preserves shared take ranges and explicit automatic/strict
@@ -444,7 +496,9 @@ fidelity/compute trade, not a guarantee of preserved motion or likeness.
 The native migration's historical route/lifecycle acceptance does not certify every new feature.
 Matched performance, useful-size quality, Ingredients scene adherence and full clean-machine acquisition
 remain separate work. Native Diffusion VAE now has CPU/header/release checks, tiny numerical comparisons and an actual
-retained 1344×768, 89-frame decoder-only take with exact source PCM. The experimental tiled Metal
+retained 1344×768, 89-frame decoder-only take with exact source PCM. A complete 768 × 448,
+49-frame Dev Euler/refinement job also passes the standard-layout Diffusion VAE path, previews,
+finite audio and staged release without Python. The experimental tiled Metal
 mode passed the same declared tiny numerical limits; it is not BF16/RGB byte parity or a whole-job
 benchmark. The default convolutional VAE remains unchanged. Studio, headless and saved-recipe
 Swift nodes preserve native DiffVAE selection and settings; the legacy typed composable Comfy generator
@@ -467,8 +521,9 @@ new official 2.5 Ingredients adapter to pass its pinned payload hash and install
 The first 121-frame native take omitted the second character. A clearer two-shot prompt included
 both identities with the unchanged default and experimental CFG++ samplers. The official
 2.5 default two-character take was human-approved on 2026-10-04; other compositions,
-checkpoints and sampler variants require their own quality review. The supported 2.3 adapter
-remains available, and the current authored 2.5 example also uses it.
+checkpoints and sampler variants require their own quality review. The structurally compatible 2.3 adapter
+remains available, and the current authored 2.5 example also uses it; its retained collage
+failure is not a quality-approved 2.5 configuration.
 The retained 2.3 collage failure has no proven engine cause. See the [current Studio controls](studio/README.md#current-swift-controls-and-qualification)
 and [implementation status](STATUS.md) for the qualified scope and remaining restrictions.
 
@@ -582,7 +637,10 @@ two-round temporal presets. It scans installed Pixel-Spatial and temporal adapte
 headers, links their weights in place and preflights the resulting profile. Such a
 profile supports Swift T2V, I2V or FFLF; ordinary LoRAs, A2V, extension and
 continuous scenes are rejected for DFR.
-Studio's dedicated DFR editor controls still use Python. A separate experimental
+The native generation inspector exposes **DFR spatial and temporal refinement**: inherit the
+model profile, disable DFR, or choose spatial refinement with zero, one or two temporal rounds.
+Detailing strength is saved with the clip. Automatic profile selection requires the requested
+components; temporal rounds preserve duration and cannot exceed 120 fps. A separate experimental
 headless Ingredients route accepts a frozen static
 reference sheet, encodes one RGB still and repeats its normalized latent across at least 121 frames, then samples with the compatible
 rank-128 task adapter in one full-resolution stage. Saved Ingredients recipes retain their
@@ -643,8 +701,9 @@ have packaged native CLI execution, accepted-project reopening and no-inference 
 Spatial and two-round temporal profiles also passed Studio rendering, decoded previews,
 acceptance and reopening with Python unavailable, joining the earlier one-round check.
 Spatial CLI media matches the new Studio take; the older direct baseline differs despite
-matching request fields and remains unresolved. Studio's dedicated DFR editor controls
-still use Python; audiovisual quality and matched production-size performance need broader review.
+matching request fields and remains unresolved. Studio's DFR mode and strength controls now
+use native preparation, with save/reopen/reset and packaged preflight checks for both temporal
+round counts. Audiovisual quality and matched production-size performance need broader review.
 Independent H3 A2V with a bounded timeline audio driver and optional opening image is
 experimental; its source conditions generated sound and motion rather than being copied.
 
@@ -783,10 +842,13 @@ A separate same-guide/checkpoint encoder comparison reduced MLX stage peak from 
 versus 11.13 seconds. This control-guide-only optimization does not establish a new
 whole-generation speed or memory result; the full render above predates it.
 
-Swift H3 now carries the saved recipe's `memory_mode` into video decoding. `normal`
-defers projection and first-residual evaluations; `low_memory_bf16` defers projections
-while retaining the residual boundary. Both release packed weights before audio decoding.
-On one saved 124-frame, 768 × 448 latent, separate isolated ABBA comparisons preserved
+Swift H3 carries the saved recipe's `memory_mode` into video decoding. Lower-memory mode
+uses one spatial tile; normal mode uses up to four. Normal batches of one or two evaluate
+each first residual and block output; batches of three or four defer them to the tile head.
+Lower-memory tiles with at most 2,048 rows also defer residuals; larger tiles retain a bounded
+two-block residual window. Both modes release packed video weights before audio decoding.
+See the [current execution policy](studio/README.md#swift-h3-performance-follow-up).
+An earlier October 3 saved-latent comparison used a 124-frame, 768 × 448 latent and preserved
 every Float32 chunk and RGB8 hash: normal reduced decoder time by 25.1% with about
 345 MB more peak MLX allocation; lower-memory mode reduced time by 15.4% with about
 4 MB more allocation. These are decoder-only measurements. Direct Swift APIs without
@@ -1190,7 +1252,8 @@ single matched development comparison, slower than the earlier native Q8-paged r
 DT application benchmark or a physical 36 GB qualification. Direct packed-int8 matrix multiplication,
 a full saved ComfyUI DT-file render and broad visual-quality qualification remain future work.
 
-New DT recipes using normal working memory select `projection_backend=auto`. The renderer enables
+In the legacy Python H3 renderer, new DT recipes using normal working memory select
+`projection_backend=auto`. That renderer enables
 MPP projections only on its qualified GPU architecture and macOS version, verifies each new
 projection shape against standard MLX on first use, and falls back on unsupported configurations,
 kernel failures or a verification mismatch. Lower-memory recipes retain standard MLX. Existing
@@ -1819,7 +1882,14 @@ A saved recipe-backed ComfyUI graph produced the same movie bytes as Studio. The
 packaged native CLI also reproduced the Studio media, reopened its accepted project and
 resumed with zero new generations. See the
 [export qualification boundary](studio/README.md#headless-movie-and-clip-jobs).
-Existing composable nodes retain their Python sampler.
+A developer-only version-17 request separately admits manual, single-stage Dev Ingredients:
+30 Euler updates, CFG 4, video-only STG at block 29/scale 1, adapter strength 1.4, and
+full-length repeated RGB-sheet encoding. It reuses the shared serial guidance runner and
+omits distilled refinement. This is a 2.5 Dev compatibility test of the older 2.3 adapter,
+not the publisher's original 2.3 base recipe. It is not selectable in Studio or a new default;
+unsupported mixtures fail before weights load. The 121-frame test completed 90 serial forwards
+and removed the board collage, but omitted the second character. Scene adherence failed, so the
+older adapter/base mix remains unqualified. Existing composable nodes retain their Python sampler.
 
 Use **LTX 2.5 IC-LoRA Control Guide** for Canny edges, depth maps, pose skeletons, Motion Track, or
 another preprocessed control video. Connect the IMAGE batch from the matching preprocessor.
@@ -2551,7 +2621,7 @@ qualification are reported separately in [implementation status](STATUS.md).
 | LTX 2.5 automatic duration | Usability | Low runtime cost | A real Q8 prompt probe spent 0.027 s in the MLX duration head after prompt encoding. | Opt-in modifier; manual duration remains authoritative unless connected. Raw predicted seconds and resolved `8k+1` frames are recorded. |
 | LTX 2.5 Diffusion VAE width tiling | Decode memory | Experimental | A 32-cell stage-four stripe reduced 512×512 peak from 8.27 GB to 7.62 GB. | Decode slowed from 61.99 s to 100.13 s and output was not pixel-identical. Select `stage4_width_tiles` only when memory is the priority. |
 | LTX 2.5 DFR | Full-resolution detail | Experimental | Exact prebaked Q8 pages completed the matched 256×256 probe in 19.41 s versus 89.91 s with live fusion. At 768×512 for five seconds, sampling took 102.36 s at a 28.91 GB MLX peak. The exact Diffusion VAE then took 966.45 s and drove complete-process peak to 164.58 GB. | Decoded video and PCM audio hashes matched the live-Q8 control at 256×256. Use prebaked pages for DFR sampling. Do not treat the exact Diffusion VAE workflow as a low-memory default. DFR changes composition and motion but preserves stage-one audio. |
-| LTX 2.5 DFR temporal refinement | Motion smoothness | Not production-ready | An older Python/MLX 768×512 Q8-paged I2V probe took 127.97 s and peaked at 9.65 GB, but developed color corruption. The direct Swift worker produced a 193-frame 512×256/96 fps two-round clip in 136.15 s at a 4.06 GB Swift-process peak, excluding FFmpeg. | Reviewed Swift seam frames retained normal color after generated-slot noise and pinned-prefix fixes. Spatial and both temporal round counts passed packaged native CLI execution, reopening and no-inference resume; all three have Studio execution checks. Spatial CLI matches its new Studio take, but its older direct baseline differs despite matching request fields. Higher-resolution memory, matched performance, dedicated editor controls and broad audiovisual quality remain unqualified. |
+| LTX 2.5 DFR temporal refinement | Motion smoothness | Not production-ready | An older Python/MLX 768×512 Q8-paged I2V probe took 127.97 s and peaked at 9.65 GB, but developed color corruption. The direct Swift worker produced a 193-frame 512×256/96 fps two-round clip in 136.15 s at a 4.06 GB Swift-process peak, excluding FFmpeg. | Reviewed Swift seam frames retained normal color after generated-slot noise and pinned-prefix fixes. Spatial and both temporal round counts passed packaged native CLI execution, reopening and no-inference resume; all three have Studio execution checks. Native editor modes and strength passed save/reopen/reset and exported-job preflight. Spatial CLI matches its new Studio take, but its older direct baseline differs despite matching request fields. Higher-resolution memory, matched performance and broad audiovisual quality remain unqualified. |
 
 ### Remaining optimization priorities
 

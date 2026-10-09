@@ -13,10 +13,10 @@ public enum NativeH3Preparation {
     "processor", "tokenizer", "video_vae", "audio_vae", "task", "loras",
     "vision_encoder", "allow_fl2va_weights_for_ref2va", "fun_controlnet"]
   private static let configKeys: Set<String> = ["width", "height", "duration_seconds", "steps",
-    "seed", "drop_adaln", "resolution_mode", "resolution_tier", "aspect_ratio", "memory_mode",
+    "seed", "drop_adaln", "resolution_mode", "resolution_tier", "aspect_ratio", "memory_mode", "video_decode_precision", "attention_policy",
     "attention_chunk_size", "attention_head_chunk_size", "ffn_row_chunk_size",
     "projection_backend", "transformer_backend", "sampling_method",
-    "inference_optimization", "paging_cache_gb", "visual_condition_strength", "audio_condition_strength"]
+    "inference_optimization", "paging_cache_gb", "transformer_weight_cache_gb", "visual_condition_strength", "audio_condition_strength"]
 
   private static func unsupported(_ detail: String) -> StudioError {
     .invalid("Swift H3 generation is experimental: \(detail).")
@@ -99,6 +99,9 @@ public enum NativeH3Preparation {
       recipe["format"] as? String == "weetodd-headless-v2", recipe["engine"] as? String == "h3" else {
       throw StudioError.invalid("Select an H3 headless v2 profile.")
     }
+    try validateDecodePrecision(recipe["config"] as? [String:Any] ?? [:])
+    try validateAttentionPolicy(recipe)
+    try validateWeightCache(recipe)
     return recipe
   }
   private static func supportedLoRA(_ value: Any?) -> Bool {
@@ -133,6 +136,103 @@ public enum NativeH3Preparation {
       adapters[0]["profile"] as? String == "turbo",
       adapters[0]["qkv_layout"] as? String == "contiguous_qkv" else { return nil }
     return [path, strength.doubleValue]
+  }
+  private static func validateDecodePrecision(_ config: [String:Any]) throws {
+    if let value = config["video_decode_precision"] {
+      guard let text = value as? String, ["float32","float16"].contains(text) else {
+        throw unsupported("video decode precision must be float32 or float16")
+      }
+      guard text != "float16" || config["memory_mode"] as? String == "low_memory_bf16" else {
+        throw unsupported("FP16 video decoding requires Swift MLX and low_memory_bf16; normal mode is not qualified")
+      }
+    }
+  }
+  private static func attentionPolicy(_ config: [String:Any]) throws -> NativeH3AttentionPolicy {
+    guard let value = config["attention_policy"] else { return .dense }
+    guard let name = value as? String, let policy = NativeH3AttentionPolicy(rawValue:name) else {
+      throw unsupported("attention_policy must be dense or sol_experimental")
+    }
+    return policy
+  }
+  private static func validateWeightCache(_ recipe:[String:Any]) throws {
+    let config=recipe["config"] as? [String:Any] ?? [:]
+    guard let value=config["transformer_weight_cache_gb"] else { return }
+    guard let n=value as? NSNumber,CFGetTypeID(n) != CFBooleanGetTypeID(),
+      n.doubleValue.isFinite,n.doubleValue == Double(n.intValue),[0,8,16,32,48,64,96].contains(n.intValue) else {
+      throw unsupported("Transformer weight cache must be 0, 8, 16, 32, 48, 64 or 96 GiB")
+    }
+    if n.intValue == 0 { return }
+    guard recipe["fasth3"] == nil,recipe["vdn"] == nil,recipe["joint_refinement"] == nil,
+      recipe["refinement"] == nil,recipe["joint_latents"] == nil,recipe["continuation"] == nil,recipe["motion_fidelity"] == nil,
+      (recipe["components"] as? [String:Any])?["fun_controlnet"] == nil,
+      (config["transformer_backend"] as? String ?? "mlx") == "mlx" else {
+      throw unsupported("Transformer weight cache requires ordinary Swift MLX generation")
+    }
+    let adapters=(recipe["loras"] as? [String:Any])?["adapters"] as? [[String:Any]] ?? []
+    guard adapters.allSatisfy({ ($0["start_after_evaluations"] as? Int ?? 0) == 0 }) else {
+      throw unsupported("Transformer weight cache cannot combine deferred adapters")
+    }
+  }
+  private static func validateAttentionPolicy(_ recipe: [String:Any]) throws {
+    let config = recipe["config"] as? [String:Any] ?? [:]
+    guard try attentionPolicy(config) == .solExperimental else { return }
+    let components = recipe["components"] as? [String:Any] ?? [:]
+    let modelTask = components["task"] as? String
+    let conditioningTask = (recipe["conditioning"] as? [String:Any])?["task"] as? String
+    guard (modelTask == "ref2va" && conditioningTask == "ref2va")
+      || (modelTask == "fl2va" && conditioningTask == "fflf"),
+      (config["transformer_backend"] as? String ?? "mlx") == "mlx",
+      recipe["fasth3"] == nil, recipe["vdn"] == nil, components["fun_controlnet"] == nil,
+      recipe["continuation"] == nil, recipe["refinement"] == nil, recipe["joint_refinement"] == nil,
+      recipe["joint_latents"] == nil, recipe["motion_fidelity"] == nil,
+      (recipe["block_residency"] as? String ?? "checkpoint_default") == "checkpoint_default" else {
+      throw unsupported("Experimental Sol requires independent ordinary MLX Ref2VA or FL2VA without continuation, refinement or controls")
+    }
+  }
+  // Final settings are checked after Turbo composition resolves the actual schedule.
+  // Complete I8 checkpoint / BF16 adapter headers and the packed-row bound remain worker preflight.
+  private static func validateAttentionExecution(_ config:[String:Any], stack:NativeH3LoRAComposition.Result,
+    profileStack:Any?, clip:Clip, assets:[MediaAsset]) throws {
+    guard try attentionPolicy(config) == .solExperimental else { return }
+    var dropAdaLN=true
+    if let value=config["drop_adaln"] {
+      guard let flag=value as? NSNumber,CFGetTypeID(flag) == CFBooleanGetTypeID() else {
+        throw unsupported("Experimental Sol requires a Boolean Drop AdaLN setting")
+      }
+      dropAdaLN=flag.boolValue
+    }
+    guard config["steps"] as? Int == 5,
+      (config["sampling_method"] as? String ?? "euler") == "euler",
+      dropAdaLN,stack.pairs.count == 1,
+      let path=stack.pairs[0][0] as? String,let strength=stack.pairs[0][1] as? Double,strength == 1 else {
+      throw unsupported("Experimental Sol requires Drop AdaLN, Euler, 4 evaluations and exactly one Turbo adapter at strength 1")
+    }
+    let descriptor=(stack.descriptors?["adapters"] as? [[String:Any]])?.first
+      ?? ((profileStack as? [String:Any])?["adapters"] as? [[String:Any]])?.first
+    let attachment=clip.attachments.first { item in
+      item.role == .lora && item.isEnabled && assets.contains { $0.id == item.assetID && URL(fileURLWithPath:$0.path).standardizedFileURL.resolvingSymlinksInPath().path == path }
+    }
+    let asset=attachment.flatMap { item in assets.last { $0.id == item.assetID } }
+    let selected=descriptor?["profile"] as? String
+      ?? attachment?.h3LoRA?.profile.rawValue ?? asset?.loraProfile
+    let info=try NativeLoRAInspection.validateH3Sampling(path:path,
+      selectedProfile:selected == "auto" ? nil : selected,schedulePoints:5)
+    let layout=descriptor?["qkv_layout"] as? String
+      ?? attachment?.h3LoRA?.qkvLayout.rawValue ?? asset?.loraLayout ?? info["loraLayout"] as? String
+    guard (selected == "turbo" || info["loraProfile"] as? String == "turbo"),
+      layout != "native_interleaved",info["loraLayout"] as? String != "native_interleaved",
+      asset?.loraLayout != "native_interleaved",(descriptor?["start_after_evaluations"] as? Int ?? 0) == 0,
+      (attachment?.h3LoRA?.startAfterEvaluations ?? 0) == 0 else {
+      throw unsupported("Experimental Sol requires one immediate contiguous Turbo adapter; native-interleaved or deferred adapters are not supported")
+    }
+  }
+  private static func validateAttentionSelection(_ policy: NativeH3AttentionPolicy, clip: Clip,
+    continuity: Bool = false) throws {
+    guard policy != .solExperimental || (["ref2va", "i2v", "fflf"].contains(clip.inferredTask) && clip.continuityMode == "independent"
+      && clip.extensionDirection.isEmpty && clip.generationSelection?.h3Joint == nil
+      && clip.generationSelection?.h3MotionFidelity == nil && !continuity) else {
+      throw unsupported("Experimental Sol requires independent ordinary MLX Ref2VA or FL2VA without continuation, refinement or controls")
+    }
   }
   private static func validReferenceStrength(_ value:Any?) -> Bool {
     guard let value else { return true }
@@ -180,6 +280,9 @@ public enum NativeH3Preparation {
       (config["resolution_tier"] as? String ?? "custom") == "custom",
       (config["aspect_ratio"] as? String ?? "custom") == "custom",
       ["normal", "low_memory_bf16"].contains(config["memory_mode"] as? String ?? "normal"),
+      (try? validateDecodePrecision(config)) != nil,
+      (try? validateAttentionPolicy(recipe)) != nil,
+      (try? validateWeightCache(recipe)) != nil,
       (config["attention_chunk_size"] as? String ?? "automatic") == "automatic",
       ["automatic", "disabled"].contains(config["attention_head_chunk_size"] as? String ?? "automatic"),
       (config["ffn_row_chunk_size"] as? String ?? "automatic") == "automatic",
@@ -204,8 +307,18 @@ public enum NativeH3Preparation {
     let task = (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
       : modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"
     let vdn=recipe["vdn"] != nil,fast=recipe["fasth3"] != nil
-    return ["samplingMethod": config["sampling_method"] as? String ?? "euler", "vdn":vdn,"fasth3":fast,
-      "supportedTasks": task == "ref2va" ? ["ref2va", "a2v", "extension"] : [task], "controls": [
+    return ["samplingMethod": config["sampling_method"] as? String ?? "euler",
+      "videoDecodePrecision": config["video_decode_precision"] as? String ?? "float32",
+      "videoDecodePrecisionEditable": true,
+      "transformerWeightCacheGB":config["transformer_weight_cache_gb"] as? Int ?? 0,
+      "transformerWeightCacheEditable":!vdn && !fast && (recipe["components"] as? [String:Any])?["fun_controlnet"] == nil,
+      "attentionPolicy": config["attention_policy"] as? String ?? "dense",
+      "attentionPolicyEditable": ["ref2va", "fl2va"].contains(modelTask ?? "") && !vdn && !fast
+        && (recipe["components"] as? [String:Any])?["fun_controlnet"] == nil
+        && (config["transformer_backend"] as? String ?? "mlx") == "mlx",
+      "vdn":vdn,"fasth3":fast,
+      "supportedTasks": config["attention_policy"] as? String == "sol_experimental" ? (modelTask == "fl2va" ? ["i2v", "fflf"] : ["ref2va"])
+        : task == "ref2va" ? ["ref2va", "a2v", "extension"] : [task], "controls": [
       "evaluations": max(0, (config["steps"] as? Int ?? 20) - 1),
       "stepsEditable": !vdn && !fast, "refinementStepsEditable": false,
       "cfgEditable": false, "shiftEditable": false,
@@ -241,6 +354,7 @@ public enum NativeH3Preparation {
     guard let clip = project.clips.first(where: { $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }),
       clip.engine == .h3 else { throw StudioError.invalid("Select an H3 clip.") }
     let task = clip.inferredTask
+    if let policy = clip.generationSelection?.h3AttentionPolicy { try validateAttentionSelection(policy,clip:clip) }
     guard ["independent","motion"].contains(clip.continuityMode), !project.isContinuousSceneMember(clip),
       (clip.audioDriverSelection == nil || task == "a2v"), clip.musicSource == nil,
       clip.extensionDirection.isEmpty, clip.extensionSource.isEmpty else {
@@ -278,7 +392,7 @@ public enum NativeH3Preparation {
     let selection = clip.generationSelection
     try selection?.h3Reference?.validate(task:task)
     guard selection?.refinementSteps == nil, selection?.cfg == nil, selection?.shift == nil,
-      selection?.ltx25Guidance == nil,selection?.ltx25Keyframes == nil,
+      selection?.ltx25Guidance == nil,selection?.ltx25Keyframes == nil,selection?.ltx25DFR == nil,
       selection?.ltx25DiffusionVAE == nil,selection?.ltx25AutomaticDuration == nil,selection?.ltx25SingleStage == nil,selection?.ltx25MovieUpscale == nil,
       selection?.memoryPolicy == nil || selection?.memoryPolicy == "recipe",
       selection?.projectionBackend == nil || ["auto", "mlx"].contains(selection!.projectionBackend!),
@@ -299,6 +413,14 @@ public enum NativeH3Preparation {
     }
     let recipe = try profile(path)
     guard supported(recipe) else { throw unsupported("the selected profile changed or contains unported settings") }
+    var policyRecipe = recipe
+    var policyConfig = recipe["config"] as? [String:Any] ?? [:]
+    if let policy = selection?.h3AttentionPolicy { policyConfig["attention_policy"] = policy.rawValue }
+    if let budget = selection?.h3TransformerWeightCacheGB { policyConfig["transformer_weight_cache_gb"] = budget }
+    policyRecipe["config"] = policyConfig
+    try validateAttentionSelection(try attentionPolicy(policyConfig),clip:clip)
+    try validateAttentionPolicy(policyRecipe)
+    try validateWeightCache(policyRecipe)
     if recipe["fasth3"] != nil { try NativeH3FastProfile.validate(clip:clip,project:project,motion:motion,recipe:recipe) }
     if recipe["vdn"] != nil { try NativeH3VDNProfile.validate(clip:clip,project:project,motion:motion,recipe:recipe) }
     return (project, clip, runtime, path, recipe,motion)
@@ -478,8 +600,17 @@ public enum NativeH3Preparation {
     config["duration_seconds"] = motion?.duration ?? clip.duration; config["seed"] = clip.seed
     config["steps"] = steps
     if let method = clip.generationSelection?.h3SamplingMethod { config["sampling_method"] = method.rawValue }
+    if let precision = clip.generationSelection?.h3VideoDecodePrecision {
+      config["video_decode_precision"] = precision.rawValue
+    }
+    if let policy = clip.generationSelection?.h3AttentionPolicy { config["attention_policy"] = policy.rawValue }
+    if let budget = clip.generationSelection?.h3TransformerWeightCacheGB { config["transformer_weight_cache_gb"] = budget }
+    try validateAttentionSelection(try attentionPolicy(config),clip:clip,continuity:continuity != nil || motion != nil)
+    try validateDecodePrecision(config)
     if let backend = clip.generationSelection?.projectionBackend { config["projection_backend"] = backend }
     recipe["config"] = config; recipe["prompt"] = prompt
+    try validateAttentionPolicy(recipe)
+    try validateWeightCache(recipe)
     let advancedH3 = clip.generationSelection?.h3Reference != nil || clip.generationSelection?.h3Joint != nil
       || clip.attachments.contains { $0.h3LoRA != nil || $0.h3ReferencePlacement != nil }
     guard !advancedH3 || ((config["projection_backend"] as? String ?? "mlx") == "mlx" &&
@@ -636,6 +767,7 @@ public enum NativeH3Preparation {
       } else { components["loras"]=adapterStack.pairs }
       steps=adapterStack.schedulePoints;config["steps"]=steps
     }
+    try validateAttentionExecution(config,stack:adapterStack,profileStack:profileStack,clip:clip,assets:availableAssets)
     if let controls=clip.generationSelection?.h3Reference {
       try controls.validate(task:clip.inferredTask)
       if let strength=controls.visualConditionStrength { config["visual_condition_strength"]=strength }
@@ -677,6 +809,8 @@ public enum NativeH3Preparation {
     }
     recipe["ffmpeg"] = try canonical(ffmpeg)
     recipe=try NativeH3MotionFidelityPreparation.apply(clip.generationSelection?.h3MotionFidelity,to:recipe,clip:clip)
+    try validateAttentionPolicy(recipe)
+    try validateWeightCache(recipe)
     var report: [String: Any] = ["profile": URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent,
       "generation": descriptor(recipe), "resolvedFingerprint": try fingerprint(continuity == nil ? recipe : ["recipe":recipe,"continuity":continuity!]),
       "selectionFingerprint": try fingerprint(original),

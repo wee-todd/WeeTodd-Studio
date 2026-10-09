@@ -165,6 +165,45 @@ public struct LTX25SingleStageSettings:Codable,Equatable {
   }
 }
 
+/// Nil preserves the selected model profile, including older DFR recipes.
+public struct LTX25DFRSettings: Codable, Equatable {
+  public var enabled: Bool
+  public var temporalRounds: Int
+  public var detailingStrength: Double
+  public var experimentalEnabled: Bool
+  public init(enabled: Bool = true, temporalRounds: Int = 0,
+    detailingStrength: Double = 0.5, experimentalEnabled: Bool = false) {
+    self.enabled = enabled; self.temporalRounds = temporalRounds
+    self.detailingStrength = detailingStrength; self.experimentalEnabled = experimentalEnabled
+  }
+  public func validate() throws {
+    guard (0...2).contains(temporalRounds), detailingStrength.isFinite,
+      detailingStrength > 0, detailingStrength <= 3, !enabled || experimentalEnabled else {
+      throw StudioError.invalid("DFR requires experimental opt-in, zero to two temporal rounds and detailing strength above zero through 3.")
+    }
+  }
+}
+
+/// Dense remains the behavior of older saved selections and recipes.
+public enum NativeH3AttentionPolicy: String, Codable, CaseIterable, Identifiable {
+  case dense
+  case solExperimental = "sol_experimental"
+  public var id: String { rawValue }
+  public var label: String { self == .dense ? "Dense" : "Sol · approximate / experimental" }
+  public static func resolved(selection: Self?, recipeValue: String?) -> Self {
+    selection ?? recipeValue.flatMap(Self.init(rawValue:)) ?? .dense
+  }
+}
+
+public enum NativeH3VideoDecodePrecision: String, Codable, CaseIterable, Identifiable {
+  case float32, float16
+  public var id: String { rawValue }
+  public var label: String { self == .float32 ? "FP32" : "FP16 · experimental" }
+  public static func resolved(selection: Self?, recipeValue: String?) -> Self {
+    selection ?? recipeValue.flatMap(Self.init(rawValue:)) ?? .float32
+  }
+}
+
 /// Explicit user intent. Nil on older clips preserves their exact recipe behavior.
 public struct GenerationSelection: Codable, Equatable {
   public var task: String
@@ -177,6 +216,9 @@ public struct GenerationSelection: Codable, Equatable {
   public var projectionBackend: String?
   public var transformerBackend: String?
   public var h3SamplingMethod: NativeH3SamplingMethod?
+  public var h3VideoDecodePrecision: NativeH3VideoDecodePrecision?
+  public var h3AttentionPolicy: NativeH3AttentionPolicy?
+  public var h3TransformerWeightCacheGB:Int?
   public var h3Reference:H3ReferenceSettings?
   public var h3Joint:H3JointSettings?
   public var h3MotionFidelity:H3MotionFidelitySettings?
@@ -185,6 +227,7 @@ public struct GenerationSelection: Codable, Equatable {
   public var ltx25AutomaticDuration: LTX25AutomaticDurationSettings?
   public var ltx25Keyframes:LTX25KeyframeSettings?
   public var ltx25SingleStage:LTX25SingleStageSettings?
+  public var ltx25DFR:LTX25DFRSettings?
   public var ltx25MovieUpscale:LTX25MovieUpscaleSettings?
   public init(task: String = "t2v", preset: GenerationPreset = .balanced) {
     self.task = task
@@ -193,15 +236,15 @@ public struct GenerationSelection: Codable, Equatable {
   public var isModified: Bool {
     steps != nil || refinementSteps != nil || cfg != nil || shift != nil
       || memoryPolicy != nil || projectionBackend != nil || transformerBackend != nil
-      || ltx25DiffusionVAE != nil || h3SamplingMethod != nil || h3Reference != nil || h3Joint != nil || h3MotionFidelity != nil || ltx25Guidance != nil || ltx25AutomaticDuration != nil || ltx25Keyframes != nil || ltx25SingleStage != nil || ltx25MovieUpscale != nil
+      || ltx25DiffusionVAE != nil || h3SamplingMethod != nil || h3VideoDecodePrecision != nil || h3AttentionPolicy != nil || h3TransformerWeightCacheGB != nil || h3Reference != nil || h3Joint != nil || h3MotionFidelity != nil || ltx25Guidance != nil || ltx25AutomaticDuration != nil || ltx25Keyframes != nil || ltx25SingleStage != nil || ltx25DFR != nil || ltx25MovieUpscale != nil
   }
   public mutating func resetOverrides() {
     steps = nil; refinementSteps = nil; cfg = nil; shift = nil
     memoryPolicy = nil; projectionBackend = nil; transformerBackend = nil
     h3Reference=nil;h3Joint=nil;h3MotionFidelity=nil
-    h3SamplingMethod = nil; ltx25Guidance = nil; ltx25AutomaticDuration = nil
+    h3SamplingMethod = nil; h3VideoDecodePrecision = nil; h3AttentionPolicy = nil; h3TransformerWeightCacheGB = nil; ltx25Guidance = nil; ltx25AutomaticDuration = nil
     ltx25DiffusionVAE=nil
-    ltx25Keyframes = nil;ltx25SingleStage = nil;ltx25MovieUpscale = nil
+    ltx25Keyframes = nil;ltx25SingleStage = nil;ltx25DFR = nil;ltx25MovieUpscale = nil
   }
   public static func taskLabel(_ task: String) -> String {
     switch task {
@@ -242,8 +285,32 @@ public struct GenerationDescriptor: Codable, Equatable {
   public var presets: [Preset]
   public var pipelineMode: String? = nil
   public var samplingMethod: String? = nil
+  public var videoDecodePrecision: String? = nil
+  public var videoDecodePrecisionEditable: Bool? = nil
+  public var attentionPolicy: String? = nil
+  public var attentionPolicyEditable: Bool? = nil
+  public var transformerWeightCacheGB:Int? = nil
+  public var transformerWeightCacheEditable:Bool? = nil
   public var vdn: Bool? = nil
   public var fasth3: Bool? = nil
+  public var dfrEnabled: Bool? = nil
+  public var dfrTemporalAvailable: Bool? = nil
+  public var dfrTemporalRounds: Int? = nil
+  public var dfrDetailingStrength: Double? = nil
+  public var singleStageEnabled: Bool? = nil
+
+  /// Present the validated recipe rather than assuming the ordinary distilled schedule.
+  public var ltx25ExecutionSummary: String {
+    if dfrEnabled == true { return "DFR refinement" }
+    if let pipelineMode, pipelineMode != "distilled" { return "experimental Dev guidance" }
+    if singleStageEnabled == true || controls.refinementSteps == 0 {
+      return controls.evaluations.map { "single-stage · \($0) evaluations" } ?? "single-stage sampling"
+    }
+    if let first = controls.evaluations, let second = controls.refinementSteps {
+      return "two-stage · \(first) + \(second) evaluations"
+    }
+    return "sampling settings pending"
+  }
 }
 
 public struct AccelerationSettings: Codable, Equatable {

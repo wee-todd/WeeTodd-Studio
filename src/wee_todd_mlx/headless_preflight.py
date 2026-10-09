@@ -34,7 +34,7 @@ def preflight_recipe(recipe):
         spec = H3ComponentSetSpec(
             **fields, preview_override=H3PreviewConfig(**preview) if preview else None
         )
-        config = H3GenerationConfig(**recipe["config"])
+        config = H3GenerationConfig.from_recipe_fields(recipe["config"])
         config.validate()
         from minimax_h3_mlx.native_backend import preflight_native_recipe
         preflight_native_recipe(recipe)

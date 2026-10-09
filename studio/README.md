@@ -19,17 +19,109 @@ feature in the current app.
 
 | Control | Native behavior and limit | Current evidence |
 | --- | --- | --- |
-| LTX Dev guidance | Experimental Production Euler or HQ `res_2s`, editable negative/guidance controls, followed by three distilled refinement updates | CPU numerical/contract checks; one real HQ + automatic duration + timed/generated-keyframe combination |
+| LTX Dev guidance | Experimental Production Euler or HQ `res_2s`, editable negative/guidance controls, followed by three distilled refinement updates | CPU numerical/contract checks; one real HQ + automatic duration + timed/generated-keyframe combination and one complete Dev Euler/refinement/Diffusion VAE job |
 | LTX automatic duration | Explicit opt-in for ordinary T2V/I2V/FFLF; duration head resolves the `8k+1` grid before sampling, with 0.25–30-second bounds | Pinned head and CPU tests; actual 57-frame combined take completed |
 | LTX ordinary keyframes | Up to eight distinct timed images and 0–8 generated slots; arbitrary integer frames are allowed; first-frame input replaces the main opening plane | CPU/header tests and the combined take; ordinary slots are stage-one-only |
-| LTX full-resolution single stage | Eight updates; Euler/ancestral use eight forwards and CFG++ full/balanced/speed use 15/12/10 forwards; no spatial upscaler or second stage | CPU math/header checks and one functional balanced 12-forward take with first/last images and generated slots; other schedules and guide compositions have CPU/header qualification only |
+| LTX full-resolution single stage | Eight updates; Euler/ancestral use eight forwards and CFG++ full/balanced/speed use 15/12/10 forwards; no spatial upscaler or second stage | CPU math/header checks; actual Euler, ancestral, CFG++ full/balanced/speed takes with first/last images and generated slots; one balanced Union composition; other guide combinations retain contract/preparation coverage |
 | LTX scene anchors | Experimental scene v2: at most 32 global first/interior/last anchors and 256 MiB encoded references; two to six shots, at most 30 seconds | CPU routing/budget checks and actual two-window/five-anchor/source-PCM Studio take, previews, acceptance and save/reopen; retained clip human-approved October 5; broader configurations remain unqualified |
 | LTX movie upscale | Experimental learned 2× only, learned 2× + refine, or Pixel-Spatial 2× + refine; exact source frame count/rate with explicit source/sidecar/silent audio | CPU source/movie/acceptance tests plus actual learned 2×/three-evaluation refinement/source interval with exact sidecar PCM; actual StudioCore export/native CLI acceptance, zero-generation resume and Store.load reopen passed |
-| LTX one-step Diffusion VAE | Explicit experimental complete-component decoder selection; Conv remains the default, with strict workspace and checkpoint admission | CPU/header/release checks, tiny numerical comparisons and actual retained 1344 × 768/89-frame decode; no whole-job or Conv pixel-parity claim |
+| LTX one-step Diffusion VAE | Explicit experimental complete-component decoder selection; Conv remains the default, with strict workspace and checkpoint admission | CPU/header/release checks, tiny numerical comparisons, retained 1344 × 768/89-frame decode and complete 768 × 448/49-frame Dev Euler/refinement job; no Conv pixel-parity or isolated performance claim |
 | H3 reference preparation | Optional 50–400% image pixel budget; movie match-output/native-H3 budget; full/half/quarter/automatic density; explicit frame or Last placement and replacement soundtrack | CPU tests; new policies are not a general likeness/motion-quality approval |
 | H3 LoRA composition | Up to eight distinct ordered adapters, signed strengths −10 to 10, explicit QKV layout/profile and deferred standard-adapter start | Header/CPU arithmetic checks; historical real stacks qualify only those adapters |
 | H3 full latent refinement | Save complete AV latents; initialize at the same canvas or enlarge both axes by at most 2×; exact source duration/task/component identity | Full saving/initialized/interpolation packets completed; retained initialized and corrected learned 1920 × 1088/73-frame takes human-approved October 5; older interpolation failure and broader settings remain separate |
 | H3 Motion Fidelity | Experimental independent T2VA movie repair; 24 fps matching canvas/trim, at least 15 base evaluations, immediate standard adapters, bounded expansion | CPU producer/acceptance/lifecycle tests and actual native repair with exact selected source PCM; retained repair human-approved October 5; broader fidelity improvement remains unqualified |
+| H3 video decode precision | Explicit experimental FP16 for Swift lower-memory profiles; FP32 stays default | Complete 1376 × 768 saved-latent numerical/release comparison and one complete packaged 672 × 384 VSA job with exact audio, progress, previews and release; published pixels differ and human visual review is pending |
+| H3 Sol attention | Explicit approximate attention for independent Swift MLX Ref2VA with ordinary signed-I8 weights, or FL2VA image/keyframes with rank-64 BF16 weights; one strength-1 BF16 Turbo adapter, four Euler evaluations and Drop AdaLN; at most 40000 packed rows | Ref2VA signed-app generation and review passed; FL installed-weight execution and complete Studio generation passed at 38937 rows; exact linked FL take human-approved October 8 |
+| H3 transformer weight cache | Explicit stage-local budget: 0, 8, 16, 32, 48, 64 or 96 GiB; ordinary signed-I8 or BF16 block projections with immediate adapters | Installed I8/BF16 projection reuse and teardown passed; complete 48 GiB FL Studio run loaded 50 blocks once and served 150 hits |
+
+Use **Advanced attention → Attention → Sol · approximate / experimental** for the admitted H3
+reference or FL2VA image/keyframe workflow. Keep **Dense** for other tasks or for the existing numerical behavior. Sol
+policy version 1 fixes tau at 0.5, leaves the first two evaluations and five sensitive layers dense,
+and releases routing buffers before later stages. The selected policy is saved with jobs and takes;
+unsupported combinations fail before inference. Existing jobs without the setting remain dense.
+
+Use **Memory and execution → Transformer weight cache** to retain a fixed prefix of prepared
+transformer blocks across sampling evaluations. Blocks beyond the budget stream normally.
+The budget includes retained BF16 matrices and prepared LoRA pairs; activations and decoder
+memory are separate. Admission reserves at least 16 GiB (or one eighth of physical RAM, whichever
+is larger), respects the recommended GPU working set and available memory, and checks retained
+bytes during sampling. It rejects an unsafe requested budget instead of silently exceeding it.
+Weights are released on success, failure or cancellation, before the video/audio decoder stages.
+The default is zero, preserving streamed execution. FastH3, VDN, NNC, continuation, refinement,
+motion/control jobs and deferred adapters currently reject a nonzero budget. Recipes store
+`config.transformer_weight_cache_gb`; result metadata reports loads, hits, retained bytes and release.
+This is a within-job cache, not a cross-job warm-model policy.
+
+Eligible ordinary prepared H3 sampling also reuses temporary Metal allocations within each
+evaluation. The automatic soft pool limit scales to 1/2/4 GiB on 64/128/256+ GiB hardware when
+available memory and the recommended GPU working set permit it. It falls back under pressure
+or for unqualified variants, and clears before later stages. This pool is separate from the
+explicit retained-weight budget. Result metadata reports its soft limit and maximum observed
+cached bytes sampled at block completion; this counter is not a transient high-water measurement.
+The soft limit can be exceeded. Actual lower-RAM hardware is not benchmark-qualified.
+
+The October 8 first-frame comparison used the same native BF16 FL checkpoint, full-strength
+FL Turbo adapter, prompt, first-frame bytes, seed, 1344 × 768 canvas, 124 frames, four Euler
+evaluations and FP32 decoder. Changing dense/streamed to Sol/48 GiB cache reduced whole-job
+time from 1007.169 to 891.733 seconds (11.46%) and sampling from 861.736 to 732.259 seconds
+(15.03%). The changes were measured together; their individual contributions are unqualified.
+Retained weights reached 37.64 GiB, whole MLX peak 43.92 GiB and worker lifetime physical peak
+45.49 GiB, versus the previous worker's 8.33 GiB. Sampling completed with 48 active MLX bytes
+and 0.505 GiB worker footprint before decoding. Swap stayed unchanged. The timed v15 result
+captured its release flag too early; actual release is confirmed by the event and memory drop.
+The subsequent retirement-before-report correction passed installed I8 and BF16 state tests;
+that metadata-only correction did not trigger another full generation.
+
+Draw Things took 793.288 seconds, so that v15 native run remained 12.41% slower. DT used Q8 FL
+weights and DDIM Trailing, versus native BF16 and Euler; DT's sampled app footprint also has
+a different scope from the fresh native worker. No universal speed claim or runtime parity is
+established. The 48 GiB cache remains opt-in. A real-sized block probe found only about 2%
+improvement from a larger temporary allocation cache and no convincing gain from larger FFN
+chunks or removing QKV fences in that earlier streamed-block probe; those diagnostic changes
+were not promoted. A later retained-FL grouping candidate also failed its whole-job speed gate
+and was reverted; it is not active in the qualified app.
+
+The subsequent signed-v17 Studio run used the identical prepared recipe with verified MPP
+projections enabled in the ordinary FL runner. It took **861.363 seconds**, versus v15's
+**891.733 seconds** (3.41% less whole-job time); sampling took **707.681 / 732.259 seconds**.
+Every decoded RGB pixel and PCM sample matched v15. Actual execution recorded 2394 MPP calls,
+six verified geometries and zero rejected geometries. Whole MLX peak remained **43.92 GiB**;
+worker lifetime physical peak was **45.17 GiB**. All 124 decode-frame totals and monotonic
+progress passed, and cached transformer weights released before decoding. The resulting take
+was saved and reopened in Studio; the user approved the exact linked FF take on October 8. That v17 run remained
+**68.075 seconds / 8.58% slower** than the retained DT run. These are serial observations with
+the weight, sampler and footprint-scope differences described above, not universal timings.
+
+The signed-v13 app completed the 1376 × 768/124-frame Sol recipe in 841.856 seconds,
+versus its dense run's 1008.059 seconds (16.487% less whole-job time). Sampling took 697.240
+versus 868.743 seconds. Whole MLX peak stayed at 7.693 GB; worker physical peak was 9.058
+versus 9.402 GB. These are first-attempt M3 Ultra measurements with uncontrolled OS/file caches
+and desktop activity. They do not establish universal speed or Draw Things runtime parity.
+
+Complete video and audio match the user-approved private Sol clip exactly. The isolated Studio
+app passed selection, save/reopen, reset and accepted-take reopening. A real exported Studio job
+passed the packaged native CLI preflight with four evaluations and the matched reference layout;
+the exported job was not rerendered. Sol differs from dense and does not close the original dense
+byte-exact speed gate. V13 dense Ref2VA and FastH3 VSA failed their unchanged speed limits.
+The October 8 signed-v17 packaged VSA replay subsequently passed: 133.276 seconds against
+the same 137.793-second limit, with exact accepted video/audio and lower memory peaks.
+The v17 dense Ref2VA replay took 1037.260 seconds against its fixed 998.675-second limit and
+failed speed; exact accepted media, both memory gates, progress and live previews passed.
+WindowServer CPU activity exceeded the conservative observer threshold throughout that run;
+this does not establish the cause or change the failed result. Dense Ref2VA qualification and
+the remaining Draw Things speed gap stayed open in v17. The subsequent signed-v18 dense replay
+passed its unchanged gate in **942.041 seconds**, with exact complete video/audio, **7.16 GiB**
+active MLX peak and **12.07 GiB** worker lifetime physical peak. Its desktop was quieter, so the
+observed improvement cannot be attributed entirely to the allocation changes. The v18 first-frame
+exported-job replay took **797.331 seconds**: its fixed DT gate still failed by **4.043 seconds / 0.51%**.
+The worker peak was **48.02 GiB** with the explicit 48 GiB cache. V18 app playback, save/restart/file-reopen,
+real export/preflight and installed-worker cancellation passed. The full render used the signed
+packaged worker CLI with the exact Studio export; it was not a new GUI generation.
+
+For the measured full-reference layout, set **H3 reference placement → Override image pixel
+budget** to **100%**. Existing compact-reference jobs retain their saved preparation policy.
+Turbo adapter metadata must identify the `turbo` profile and `contiguous_qkv` layout. The recipe
+uses five scheduler grid points for four transformer evaluations; Studio displays four evaluations.
 
 For **Dev guidance**, **Automatic duration**, **Timed images and generated keyframes** and
 **Full-resolution single-stage sampling**, enable the corresponding experimental execution
@@ -40,13 +132,39 @@ Scene anchors cannot combine Dev guidance, automatic duration, generated slots, 
 DFR or specialized control adapters. The ordinary image limit stays eight; the larger scene limit
 belongs only to the dedicated scene contract.
 
-Generic single-stage direct worker recipes can compose timed images/generated slots with either
+Studio and generic single-stage direct worker recipes can compose timed images/generated slots with either
 IC or Union guides and compatible generic LoRAs. The shared layout includes every guide in memory
-admission, applies its task adapter once and retains global attention. This direct composition
-is not an ordinary Studio control preset. CFG++ generates audio and rejects a frozen A2V driver.
+admission, applies its task adapter once and retains global attention. Select a Union, Motion Track
+or CrossView profile, open **Full-resolution single-stage sampling**, and enable experimental
+execution. Attach First, Last or Keyframe images alongside the control guides. Use **Timed images
+and generated keyframes** to add generated slots. The guide uses the active sampling canvas;
+existing two-stage profiles keep their original guide size and sampling schedule. These combinations
+remain experimental. CFG++ generates audio and rejects a frozen A2V driver; CrossView retains its
+separate source-audio publication contract.
+First and Last timeline slots follow the resolved native capabilities. Assigning an endpoint
+keeps the control task, guide and inherited profile settings.
+A real exported Studio job combined a Canny guide, photographic first-image anchor and one
+generated slot using balanced CFG++ (12 evaluations). Its packaged Swift worker published
+33 frames at 512 × 256/24 fps in 69.05 seconds, with 1.60 GiB active MLX and 2.96 GiB worker
+physical peaks, excluding FFmpeg. Two decoded preview revisions, monotonic progress, staged
+release, cancellation, accepted-take reopening and zero-inference resume passed. This is one
+bounded Union execution check; it does not qualify all IC combinations, production performance
+or audiovisual quality. The inspector's renderer summary follows the resolved schedule.
 Ingredients uses its separate version-11 authored option: sixteen forwards, not the ordinary
 15/12/10 schedules. Its latest marker-corrected sample still animated the reference board instead
-of composing the requested scene; it is not quality-approved.
+of composing the requested scene; it is not quality-approved. A developer-only version-17
+request tests the older 2.3 adapter with an unmerged 2.5 Dev base, 30 Euler updates, CFG 4,
+video-only STG at block 29/scale 1, strength 1.4 and full-length repeated RGB-sheet encoding.
+It has no refinement pass and is not selectable in Studio. This tests cross-version compatibility,
+not exact parity with the publisher's original 2.3 base recipe; the accepted official 2.5 default is unchanged.
+The 121-frame compatibility test executed all 90 serial forwards and removed the reference-board
+collage, but omitted the second character. Scene adherence failed; this mix is not quality-approved.
+The four remaining ordinary sampler checks each published 49 frames at 512 × 256/24 fps,
+with two endpoints and two generated slots. Observed video/audio completion events match
+8/8/15/10 forwards for Euler/ancestral/CFG++ full/speed. Timing, finite audio, previews and
+ordered stage release passed. The separate Dev Euler/Diffusion VAE job published 49 frames
+at 768 × 448/24 fps after 120 guided forwards and three refinement forwards. These are bounded
+execution checks with sampled visual review; the controls remain experimental.
 
 In an H3 attachment, **H3 reference placement** controls optional image/movie policies and
 replacement audio. Defaults retain the prior bounded preparation. Explicit movie policies admit
@@ -137,7 +255,7 @@ CrossView/Ingredients Studio lifecycle and native exported CLI route passed. Sta
 Motion Track and CrossView also passed packaged Studio previews, acceptance and reopening,
 then native CLI generation with matching media and no-inference resume. Broader control
 quality and matched production-size performance remain pending. Other specialized IC-LoRAs
-and dedicated DFR editor controls still use the explicitly selected Python route.
+retain their task-specific admission limits.
 An experimental direct Swift worker can execute spatial DFR from a version-8
 request with an installed Pixel-Spatial x2 adapter, including first/last images.
 Version-9 direct-worker requests add one or two learned temporal x2 rounds; an
@@ -147,8 +265,12 @@ presets. Select installed components in **Studio Settings → Model setup**; the
 recognizes the Pixel-Spatial detailing adapter and temporal latent upscaler from their
 headers, and the worker preflights the linked profile without Python. Such a profile
 supports T2V, I2V and FFLF. Ordinary LoRAs, A2V, extension and continuous scenes
-are not supported with this route; the dedicated Studio DFR editor controls are not
-yet wired to it. Spatial and two-round temporal profiles passed actual packaged Studio
+are not supported with this route. Open **Generation → DFR spatial and temporal refinement**
+to inherit the profile, disable DFR, or select spatial refinement with zero, one or two temporal
+rounds. The detailing-strength field and temporal selection persist with the clip. Select
+**Use Automatic components** when changing to a mode the current profile cannot supply.
+Each temporal round doubles frame rate while preserving duration; output is limited to 120 fps.
+Spatial and two-round temporal profiles passed actual packaged Studio
 rendering, previews, acceptance and reopening with Python unavailable, joining the earlier
 one-round check. All three passed native exported CLI generation, accepted-project reopening
 and no-inference resume. Spatial CLI matches its new Studio take; the older direct baseline
@@ -220,10 +342,10 @@ process peak, excluding FFmpeg; its exact cut began at frame 48. A Studio run pr
 rendered, accepted both shot ranges as one take, saved and reopened the project with
 Python unavailable. The experimental Swift route also supports MSR still images and one
 Ingredients sheet through dedicated setup profiles. A dedicated Union Control preset accepts
-one preprocessed Canny, depth or pose movie. Studio streams a quarter-canvas RGB24 guide,
+one preprocessed Canny, depth or pose movie. Its default two-stage route streams a quarter-canvas RGB24 guide,
 resamples presentation timestamps to the target cadence and freezes its checksum. A source
 shorter than the editorial clip fails before inference; the last source frame can fill rounded
-model-grid padding. Union requires final width and height divisible by 128. The compatible
+model-grid padding. Two-stage Union requires final width and height divisible by 128. The compatible
 LTX 2.3 rank-64 Union adapter is active only in stage one
 of the distilled 8 + 3 schedule. Experimental Swift Motion Track accepts one preprocessed
 colored-trajectory movie with its dedicated adapter. CrossView accepts ordered, explicitly
@@ -740,14 +862,16 @@ This first release is experimental and limited to text-to-video with generated a
 model families, first/last/reference frames and audio inputs need separate adapters/qualification.
 LoRAs, resident execution and accelerators other than verified MPP projections have not been
 qualified with DT weights. Use the checkpoint's default paging. Performance
-and memory differ from the DT app; the VAEs currently execute in FP32. The transformer's packed
+and memory differ from the DT app; the VAEs default to FP32. The explicit Swift lower-memory
+[FP16 video-decoder option](#swift-h3-performance-follow-up) is separate. The transformer's packed
 weights now decode and reorder on Metal automatically, retaining the previous native weight values.
 Existing DT-weight recipes use this improvement without reimporting models. The matched 512×512,
 124-frame, 19-evaluation run fell from 15:25 to 12:05 with a byte-identical movie, and process peak
 fell from 18.07 to 16.35 GiB on M3 Ultra/256 GiB. Transformer MLX peak rose by 0.37 GiB; overall
 MLX peak was unchanged. A physical 36 GB hardware test remains outstanding.
 
-New DT recipes with normal working memory use **Automatic** projections. The renderer checks GPU
+In the legacy Python renderer, new DT recipes with normal working memory use **Automatic**
+projections. That renderer checks GPU
 and macOS support, compares each new projection shape with standard MLX on first use and falls
 back if verification fails. Lower-memory setup retains standard MLX. Existing recipes remain
 unchanged; choose **Automatic** in the clip's projection control to opt in, or **MLX** to disable it.
@@ -899,12 +1023,13 @@ configure the native MLX engines.
    request supported memory-saving settings, or **Custom** to retain the preset policy for later
    advanced adjustment. Memory information is advisory and does not promise fit, allocate RAM, or
    enforce a hard limit. Clip size/duration and other resident applications still matter.
-   Swift H3 preserves this saved policy during video decoding: normal mode defers projection
-   and first-residual evaluations; lower-memory mode keeps the residual boundary. Both release
-   packed video weights before audio decoding. Resident modes also defer block-output evaluation
-   to the next residual boundary or the tile's final normalization; direct eager APIs retain
-   their evaluation barriers. Spatial tile batch remains four. The worker reports the actual policy and cache
-   limit; the allocation cache limit is not a bound on total process memory.
+   Swift H3 preserves this saved policy during video decoding. Lower-memory mode uses one
+   spatial tile; normal mode uses up to four. Normal batches of one or two evaluate each first
+   residual and block output; batches of three or four defer them to the tile head.
+   Lower-memory tiles with at most 2,048 rows defer residuals; larger tiles retain a bounded
+   two-block residual window. Both modes release packed video weights before audio decoding.
+   Direct eager APIs retain their evaluation barriers. The worker reports the actual policy
+   and cache limit; the allocation cache limit does not bound total process memory.
 4. **Create Recipe** runs the shared component/configuration preflight and writes a new recipe.
    Image/reference presets still need media attached to a clip before full render preflight can pass.
    For a Swift text-to-video preset, the selected worker runs preflight before the profile is kept;
@@ -1069,11 +1194,20 @@ prompt/settings review remain available. Clip/movie headless export uses the sam
 The residency and projection-backend controls in this subsection describe the explicitly selected
 legacy Python renderer. Swift H3 uses staged checkpoint streaming and rejects resident execution,
 nonzero retained page budgets and Python optimizer switches before loading weights. Swift preserves
-its supported normal/lower-memory video-decoder policy. See [current native controls](#current-swift-controls-and-qualification).
+its supported normal/lower-memory video-decoder policy. The native worker selects its eligible
+Metal Performance Primitives (MPP) projections internally, with empirical first-use verification.
+The legacy Python **Projection** selector does not control that native dispatch. See
+[current native controls](#current-swift-controls-and-qualification) and
+[the native execution policy](#swift-h3-performance-follow-up).
 
-App-level H3 acceleration preferences are separate from creative sampling settings. Automatic
-projections use the existing hardware-qualified backend and numerical fallback checks; **MLX**
-explicitly uses the standard backend. Automatic memory selection uses the lower-memory policy on
+App-level H3 acceleration preferences are separate from creative sampling settings. In the legacy
+Python renderer, Automatic projections select its hardware-qualified backend and numerical fallback
+checks; **MLX** selects its standard projection backend. Studio also shows **Projection** controls for
+ordinary native H3. For Swift, a recipe resolved as `projection_backend=mlx` still permits the worker
+to select its internally qualified MPP kernels: MLX owns all arrays and execution, while actual
+projection dispatch is reported as `mlx` or `mlx_with_verified_mpp`. That selector does not disable
+Swift's internal custom kernels or make its algorithms identical to the Python recipe. Automatic
+memory selection uses the lower-memory policy on
 Macs with 64 GiB or less, and retains the recipe policy on larger Macs pending further qualification.
 The detected RAM figure is advisory, not available RAM or a hard allocation limit.
 
@@ -1207,7 +1341,8 @@ seeds, references, four Euler evaluations and the same MLX Metal library. All si
 with Python unavailable to inference. Every decoded video pixel and audio sample matched;
 all text, transformer, video and audio stages released in order. Ref2VA used the full
 1376 × 768 canvas, five seconds, one Beowulf image and strength-1 LightX2V four-step Turbo LoRA.
-T2VA and VSA used their retained 672 × 384 recipes. All published 124 frames at 24 fps.
+T2VA used 768 × 448 with seed 20260929; VSA used 672 × 384 with seed 20260922.
+All published 124 frames at 24 fps.
 
 | Fresh Swift pair | Total seconds, control → candidate | Sampling MLX peak, GB | Whole-job MLX peak, GB | Worker physical peak, GB |
 | --- | ---: | ---: | ---: | ---: |
@@ -1279,6 +1414,147 @@ ran with Python unavailable; Python runs were explicit comparison jobs. GB is de
 physical footprint excludes FFmpeg and differs from MLX allocation. Desktop/system activity
 and OS/file/Metal caches were uncontrolled. No machine-exclusive GPU claim follows.
 H3 VSA's remaining speed gap is open; the LTX fixed-recipe confirmation passed.
+
+### Swift H3 performance follow-up
+
+Swift H3 uses MLX-owned arrays, one current Qwen page, one ordinary transformer block or two
+packed FastH3 blocks, and ordered text/transformer/video/audio unloading. Ordinary BF16 weights
+and FastH3 Q8 factors materialize as admitted groups. Raw LoRA factors remain block-local.
+Trained VSA retains its compression gates, indexed video attention and dense multimodal prefix.
+Weights are shared in place; no Python inference fallback or cross-job weight cache is added.
+
+Ordinary T2VA, zero-context still Ref2VA and ordinary FL2VA can use independently implemented MPP projections
+on the measured M3 Ultra architecture with macOS 26 or later. Each new eligible stage-local
+geometry compares stored BF16 bits and returns the MLX reference on first use. Later calls use
+MPP only after that empirical check passes; unsupported tasks retain MLX. This does not prove
+all later operands or provide recovery from fatal GPU errors. A native `projection_backend=mlx`
+recipe can still select these kernels; the actual receipt reports their use. Legacy Python
+Projection settings control a separate implementation.
+
+Normal video decoding fences residuals and block outputs for spatial batches of one or two;
+batches of three or four defer them to the tile head. Lower-memory mode uses one tile and the
+existing bounded residual policy. Video weights and geometry caches retire before the audio
+stage. Audio retains only its bounded decoder parameters. Every stage releases owned arrays
+and restores its allocation-cache limit on success, failure or cancellation. A cache limit is
+not a cap on active MLX memory.
+
+#### Optional FP16 video decoding
+
+In a Swift H3 clip, open **Advanced video decoding → Precision** and choose **FP16 · experimental**.
+Use a lower-memory profile (`memory_mode=low_memory_bf16`). Exported native recipes retain
+`config.video_decode_precision`; its values are `float32` and `float16`. Normal-memory or legacy
+Python FP16 requests reject before model loading. Missing settings preserve the FP32 default.
+
+FP16 changes video-decoder activations and may change pixels. Latents, post-quantization,
+normalization, decoded pixels and temporal/spatial blending retain Float32 boundaries. Sampling
+and audio decoding are unchanged. Nonfinite or out-of-range half inputs reject without clamping
+or silent precision fallback. Receipts distinguish requested precision from precision actually used.
+
+One complete saved-latent comparison decoded 124 frames at 1376 × 768: FP32 took **110.418 seconds**
+and FP16 **98.153 seconds**, an **11.1% decoder-only reduction**. Peak MLX was **5.69967 / 5.69933 GB**,
+essentially unchanged. Complete RGB comparison measured **65.504 dB PSNR** and a maximum 8-bit
+channel difference of **2**. This was one serial FP32-then-FP16 pair, not a warm benchmark or
+whole-generation comparison. Sampling and audio inference did not run. Numerical checks and
+release passed; human quality review remains separate. FP16 is not the byte-exact FP32 path.
+
+#### Retained whole-generation results
+
+The October 8 signed-v17 packaged-worker VSA replay took **133.276 seconds** launch to exit,
+against the unchanged **137.793-second** limit and **131.232-second** strongest Python control.
+Complete accepted RGB and PCM matched exactly. Whole MLX peak was **4.494 GB** and worker
+lifetime physical peak **5.285 GB**, below every frozen Python control. Live previews, progress
+and preview cleanup passed. No build or other inference ran alongside this replay; one WebKit
+CPU-load observation occurred among 65 samples. This closes VSA's frozen gate. Dense Ref2VA remained open at v17; the later v18 qualification
+closes it. Draw Things comparisons retain their separate results. Earlier failed runs remain failed, including
+a 151.534-second v17 replay that overlapped a test build. The route was the signed packaged
+worker CLI; this was not a new GUI generation or a newly promoted sampling optimization.
+
+The final signed-v17 dense Ref2VA replay took **1037.260 seconds** launch to exit against the
+unchanged **998.675-second** limit and **951.119-second** strongest Python control. Its speed
+gate failed. Complete accepted RGB/PCM was exact; whole MLX **7.693 GB** and worker lifetime
+physical **9.216 GB** passed both lower-peak gates. Sampling took **887.347 seconds** and video
+decoding **129.520 seconds**. Live previews, progress and preview cleanup passed. No build or
+second inference ran concurrently. WindowServer crossed the conservative CPU activity threshold
+in all 506 observer samples; this retained desktop-load confound does not establish causation.
+The run remains a failure, with no automatic rerun or altered acceptance target.
+
+These October 6 results belong to earlier signed workers; they do not qualify later app builds.
+The speed gate remains at most 5% slower than the strongest retained qualified Python control,
+with lower whole MLX and worker physical peaks and exact accepted FP32 video/audio.
+
+| Earlier worker and frozen task | Swift / strongest Python seconds | Outcome |
+| --- | ---: | --- |
+| v7 T2VA, 768 × 448 | 226.467 / 301.807 | 25.0% faster; exact media and lower peaks |
+| v7 FastH3 Dense, 672 × 384 | 165.314 / 218.777 | 24.4% faster; exact media and lower peaks |
+| v9 FastH3 VSA, 672 × 384 | 138.452 / 131.232 | Speed failed: 5.502% slower; exact media and lower peaks |
+| C5 still Ref2VA, 1376 × 768, four-step Turbo | 937.746 / 951.119 | Historical pass; later-worker qualification remains separate |
+
+V9 VSA exceeded its fixed 137.793-second limit by 0.659 seconds. The failed attempt remains failed.
+The earlier C5 four-case matrix, inherited replays and cancellation/recovery receipts remain dated
+evidence. Desktop activity and caches were uncontrolled; no causal timing adjustment is applied.
+
+The retained signed v10 worker completed all four frozen FP32 recipes. T2VA and Dense passed the fixed strongest-Python
+speed band and both lower-peak gates. VSA and Ref2VA failed the unchanged speed gates. All four retained every accepted
+software-decoded RGB24 pixel and PCM Float32 audio sample, and both whole-worker memory peaks were lower than all pinned controls.
+Exact media and lower memory do not close either v10 failed speed gate. Later v17/v18 retained
+qualifications close the four original cases; they do not change these historical outcomes.
+
+| Retained v10 FP32 case | Swift / strongest Python seconds | Swift delta | Whole MLX / worker physical GB | Time + memory gate |
+| --- | ---: | ---: | ---: | --- |
+| T2VA · 768 × 448 | 223.538 / 301.807 | -25.933% | 4.553 / 5.375 | Passed |
+| FastH3 Dense · 672 × 384 | 160.404 / 218.777 | -26.682% | 4.494 / 5.288 | Passed |
+| FastH3 VSA · 672 × 384 | 155.320 / 131.232 | +18.355% | 4.494 / 5.226 | Speed failed; both peaks passed |
+| Still Ref2VA · 1376 × 768 | 1054.353 / 951.119 | +10.854% | 7.693 / 9.116 | Speed failed; both peaks passed |
+
+VSA took 155.320 seconds, **18.355% slower** than its strongest Python control. Its fixed +5% limit is 137.793 seconds.
+Ref2VA took 1054.353 seconds, **10.854% slower** than its 951.119-second strongest control; its limit is 998.675 seconds.
+Ref2VA sampling took 905.280 seconds and video decoding 125.448 seconds. The retained C5 native run sampled in 791.798
+seconds and decoded in 125.463 seconds. The later total increased by 116.608 seconds, with 113.482 seconds in sampling.
+This is a historical native-stage comparison, not a matched Python phase timing or proof of a source-caused regression.
+The selected numerical routes still report one ordinary owner, 2,394 verified MPP dispatches and six first-use references.
+VSA reports two packed owners and 200 original-row indexed consumers, with no MPP dispatches.
+
+Desktop load, OS/file caches and scheduling were not controlled exclusively. Process CPU markers do not measure GPU
+utilization or authorize correcting the failed timing. The v10 initialized, FFLF and continuation media/context checks,
+cancellation/recovery, ordered unloading, settings persistence and accepted-take reopening passed. Continuation progress
+failed because its decode phase used raw rather than published frame counts. A shared progress-clock correction has
+focused passing tests and passed the installed v11 replay: 90 raw frames, 22 context frames and 68 published frames,
+with all decode events using the published total and monotonic progress. V11 retained exact complete media and saved
+context, with four live preview revisions, in 236.723 seconds; this was a functional replay, not a matched speed test.
+A separate v11 VSA run took 144.081 seconds against the unchanged 137.793-second limit and failed speed, with exact
+complete decoded media, seven live preview revisions and lower whole MLX/worker physical peaks (4.494/5.332 GB).
+It does not replace the v10 failure. The 1 MP Ref2VA recipe was not rerun in v11. Final-source combined validation
+and the staged commit gate remain pending.
+The FP16 saved-decoder result above does not change these FP32 whole-job gate outcomes.
+
+The signed v12 worker completed fresh VSA and 1 MP Ref2VA tests with exact accepted RGB24/PCM Float32
+media, live previews, actual dispatch checks and ordered stage release. VSA took 145.570 seconds;
+Ref2VA took 1,021.472 seconds. Both failed the unchanged historical limits of 137.793 and 998.675
+seconds. Whole MLX / worker physical peaks were 4.494 / 5.301 GB for VSA and 7.693 / 9.300 GB for Ref2VA.
+
+Fresh original Python controls on the same current software and recipes took 137.589 seconds for
+VSA and 1,016.080 for Ref2VA. Swift was 5.801% and 0.531% slower respectively. Ref2VA Python used
+12.142 GB whole MLX and 24.872 GB worker physical memory; Swift used 36.641% and 62.607% less.
+These current-condition comparisons do not replace the strongest historical controls or qualify
+the failed historical speed gates. Complete decoded media matched the preserved Python output.
+A preserved C5 worker also completed the current VSA recipe in 137.718 seconds; that result does
+not qualify v12. Desktop activity and OS/file cache residency remain uncontrolled.
+
+First-pass attribution isolated the Fast difference to preparation and evaluation one; later
+v12 sampling passes were faster than C5. An all-50 AdaLN test with two fresh process orders
+showed deferred loading faster in both orders, so no loader reversal is justified from total
+setup time alone. A combined Ref full-feed-forward/cache prototype gained 2.409% in its bounded
+fixture, below the declared 3% screen, and increased active MLX by 2.466 GB. It was removed.
+No Draw Things or h3.c runtime parity is claimed. Later v13 validation passed; staged review remains required.
+
+Totals measure process launch-to-exit. Native MLX peaks are cumulative; Python controls preserve
+their existing reset policy and observed whole maximum. Worker physical peaks exclude FFmpeg and
+are separate from MLX allocations and process-tree sums. GB is decimal. The implementations use
+different residency policies; matched creative settings do not mean identical execution.
+Final progress/preview/release, cancellation/recovery, inherited media/context, installed-app,
+validation and commit checks require current-worker evidence. Full performance closure remains
+open because two current speed gates failed. These fixed-workload measurements establish neither Draw Things runtime parity nor
+all-hardware performance; LTX is unchanged.
 
 ## Progress, measurements, and H3 page retention
 
@@ -1513,6 +1789,12 @@ endpoint capabilities. LTX IC-LoRAs and movie/audio references have no qualified
 the current helper. Software and transport tests do not establish real-model quality or memory fit.
 
 ## H3 reference clips with paged Q8 models
+
+This walkthrough uses the legacy Python renderer and its older paged-transformer/audio layout.
+For Swift Ref2VA, use [guided model setup](#guided-model-setup) with native-compatible components.
+To run this legacy recipe in Studio, open **Runtime Settings** and turn off
+**Use Swift MLX for H3 (default)** explicitly. Configure the repository and Python environment
+there. Swift does not fall back to this renderer when an imported recipe is incompatible.
 
 Import a recipe produced by `scripts/prepare_h3_reference_recipe.py`, choose **WeeTodd (local) → H3**
 and the reference task, and attach images with the **Reference** role. Compatible components are

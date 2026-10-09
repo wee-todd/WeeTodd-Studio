@@ -1,6 +1,316 @@
 # WeeTodd Studio implementation status
 
-Swift H3 indexed attention and LTX confirmation, 2026-10-06: BF16/D=128 trained VSA now
+## October 8 native LTX controls and guided composition
+
+Studio now persists native DFR mode/strength overrides: inherit profile, off, spatial, and one
+or two temporal rounds. Component dependencies, compatible profile selection, 120 fps output
+limits and unsupported combinations are checked before weighted inference. All three modes
+passed real-component preparation, native export/reopen and packaged preflight; the final app
+passed mode/strength editing, save/reopen and reset. Existing DFR sampler render qualifications
+are retained; no new DFR sampler or production-size performance claim is introduced.
+
+Single-stage Studio producers now preserve ordinary timed images, generated keyframe slots and
+generic LoRAs alongside Union, Motion Track or CrossView guides. Inherited single-stage profiles
+retain their sampler and negative schedule. Guides use the active canvas; older two-stage
+profiles retain their original sizing, adapter ordering and audio contracts. A packaged Swift
+CLI job combined one Canny guide, one photographic first-image anchor and one generated slot
+at 512 × 256/33 frames/24 fps, with balanced CFG++ and 12 evaluations. Worker initialization
+through media publication took 69.047 seconds; active MLX peak was 1.60 GiB and worker lifetime
+physical peak was 2.96 GiB, excluding FFmpeg. Progress, two decoded previews, ordered stage
+release, accepted-project reopening and zero-inference resume passed. Cancellation during text
+encoding exited 130 with no published take or preview. Python inference was unavailable.
+
+This is a bounded Union composition qualification, not production-size timing or broad
+IC/Union audiovisual quality approval. Motion Track/CrossView compositions retain synthetic
+contract and native media-preparation coverage. The unchanged sampler is shared with other
+routes. A UI check found the former hardcoded 8 + 3 renderer caption; it now reports resolved
+single-stage evaluation counts and preserves inherited-profile behavior.
+
+The LTX and H3 release builders now share the same C++ `NDEBUG` setting, avoiding an unnecessary
+MLX dependency rebuild when switching worker products. The frozen combined recipe was executed
+with both packaged workers: every decoded published RGB24 pixel and PCM Float32 sample matches,
+with the same 12 evaluations and 1.60 GiB active MLX peak. The later worker took 57.735 seconds
+and peaked at 2.75 GiB physical memory. Serial file/OS caches were uncontrolled; this does not
+establish a compiler-flag inference speedup.
+
+The retained checklist closes native DFR editor controls, representative guided/image/generated-slot
+composition, remaining representative schedule/decoder execution and the acquisition/memory-policy
+audit within their stated scopes. The older Ingredients composition failure and H3 FP16 human
+visual review remain open. The acquisition audit includes an actual pinned HTTPS transfer with
+checksum verification and 24-package setup coverage; it does not claim first installation of every
+large package. Lower-RAM simulation admits the same 512 × 256/49-frame LTX recipe on
+16/24/32/64 GiB policies and rejects oversized jobs. Physical smaller-Mac speed and peak memory
+remain unmeasured. Final staged integration is recorded separately.
+The accepted H3 v18 performance and Singularity qualifications are retained without a rerun.
+
+## October 8 remaining LTX execution checks
+
+Four frozen ordinary single-stage jobs published 49 frames at 512 × 256/24 fps, retaining
+first/last images and two generated slots. Independent video and audio completion events match
+8 forwards for Euler, 8 ancestral, 15 CFG++ full and 10 CFG++ speed. Timing, finite audio,
+progress, decoded previews, ordered stage release and no Python inference pass. Nine sampled
+frames show the cup lift and empty-shelf endpoint. Observed launch-to-exit times were
+43.107/36.910/59.657/43.446 seconds respectively; unrelated CPU work ran and these are not
+isolated speed comparisons. Controls remain explicit and experimental.
+
+A complete Dev Euler/refinement/standard-layout Diffusion VAE job published 49 frames at
+768 × 448/24 fps. Independent video/audio events confirm 120 stage-one and three refinement
+forwards. Launch-to-exit observation was 613.848 seconds; active MLX peak 9957128452 bytes and
+worker physical peak 9697002816 bytes, excluding FFmpeg. Timing, finite audio, two live previews
+and ordered release pass. Nine sampled frames show a consistent stationary goblet. This qualifies
+representative execution, not Conv pixel parity, broad audiovisual quality or isolated speed.
+The Conv default is unchanged.
+
+The older 2.3 Ingredients compatibility test used an unmerged 2.5 Dev base with 30 Euler
+updates, CFG 4, video-only STG block 29/scale 1, adapter strength 1.4 and repeated RGB reference
+encoding. The strict version-17 developer request reuses the shared guidance runner and skips
+refinement. Its 121-frame/768 × 448/24 fps job executed 90 forwards in 2455.971 observed seconds,
+with active MLX peak 4163965756 bytes and worker physical peak 5671356696 bytes. Functional,
+preview and release checks pass. The board collage disappears, but Hrothgar is omitted from the
+two-character scene. Scene adherence failed. This is not the publisher's original 2.3 base recipe;
+the older mix remains developer-only and unqualified. The accepted official 2.5 default is unchanged.
+
+Final review reproduced and fixed two saved-control issues: ordinary H3 A2V/external extension
+lost the selected transformer-cache budget, and ordinary LTX/movie admission ignored H3-only
+precision/cache overrides. Eighteen H3 recipe and 55 LTX preparation regressions pass. Default
+H3 sampling/decoding is unchanged. The final separate signed app passes six LTX model preflights,
+both Singularity profile preflights and exported endpoint-job admission without Python inference.
+
+Final combined core, Studio and workflow validation passed: 3,488 Python tests passed, six
+skipped; inference Swift ran 208 tests with 10 skips, MLX Swift 1,013 with 177 skips, and
+Studio Swift 1,004 with 50 skips. All suites reported zero failures. Installed-checkpoint and
+other optional qualification tests retain their explicit opt-in skips; the six actual Swift
+generation checks above are separate evidence. The separate final app opens the isolated
+project, retains its controls and take statistics, and plays the accepted take to its endpoint.
+These checks do not close the older Ingredients composition failure or H3 FP16 human review.
+
+## Current H3 integration and performance
+
+The later signed-v19 retained-FL grouped-Q/K/V candidate took **809.302 seconds** against the
+unchanged **793.288-second** Draw Things limit. Every decoded RGB pixel and PCM sample,
+progress, previews and stage release passed; the speed gate failed. Its active MLX peak rose
+to **45.48 GiB** and worker lifetime physical peak to **49.13 GiB**. WindowServer exceeded the
+conservative CPU observer threshold in all 395 samples, versus 11/390 in the prior FF run;
+this confounds attribution and does not turn the result into a pass. Grouped preparation was
+reverted to the qualified v18 source, with exact source/bundle binding checked. The unsuccessful
+attempt stays retained. An interleaved installed-FL feed-forward tile-size screen found no
+repeatable warm speed gain and was also not promoted.
+
+October 8 signed-v18 closes the original dense still Ref2VA gate. The unchanged 1376 × 768,
+124-frame recipe completed in 942.041 seconds against the fixed 998.675-second limit and
+strongest Python control of 951.119 seconds. Sampling took 791.290 seconds and video decoding
+120.679 seconds. Whole active MLX peak remained 7.16 GiB; worker lifetime physical peak rose
+to 12.07 GiB with allocation reuse, below the frozen memory limits. Complete accepted RGB/PCM,
+monotonic progress, live previews, cleanup and stage-release checks passed. All four original
+cases now have passing retained qualifications across worker versions; not all were rerun on v18.
+The quieter desktop is a timing confound, so the 9.18% reduction from v17 is not attributed
+entirely to code. Previous failed attempts stay failed.
+
+V18 uses smaller 1024-row signed-I8 decode windows and a RAM-admitted temporary Metal pool
+for eligible prepared ordinary H3 execution. The soft limits are 1/2/4 GiB on 64/128/256+ GiB
+hardware when available memory and the recommended GPU working set permit them; other cases
+retain the conservative limit. This pool excludes retained weights and active arrays, clears
+at evaluation and stage boundaries, and is reported separately. Observed pool use can exceed
+the soft limit: the dense test observed 4.40 GiB at a 4 GiB limit. Active-array peaks did not rise.
+
+The v18 exported-Studio first-frame recipe took 797.331 seconds versus the retained Draw Things
+793.288 seconds. The strict speed gate failed by 4.043 seconds / 0.51%; exact complete media,
+previews, progress and cache release passed. This was a signed packaged-worker CLI generation,
+not a GUI generation. Its worker physical peak was 48.02 GiB with the explicit 48 GiB weight
+budget, versus DT's differently scoped sampled app footprint of 16.13 GiB. The new app passed
+retained-take playback, save/restart/file-reopen and a fresh native headless export/preflight;
+that export contained the exact timed recipe and current bundled workers. Installed cancellation
+exited gracefully without output, staging, preview or owned-child leftovers. The recorded gate
+does not become a pass because the remaining difference is small.
+
+October 8 signed-v17 Studio completed the retained 1344 × 768/124-frame first-frame recipe in
+861.363 seconds, versus 891.733 seconds in v15 (30.369 seconds, 3.41% less whole-job time).
+Sampling took 707.681 versus 732.259 seconds. The prepared recipes were identical: BF16 FL
+weights, full-strength FL Turbo, seed, prompt, first-frame bytes, four Euler evaluations,
+Sol policy, 48 GiB transformer cache and FP32 video decoding. Complete decoded RGB and PCM
+were byte-exact. The worker reported 2394 actual MPP calls, six verified geometries and no
+rejections. Whole MLX peak was 43.92 GiB; worker lifetime physical peak was 45.17 GiB, similar
+to v15. Cached weights released before decoding; progress and all 124 decoded-frame totals
+passed. This was a real Studio generation. The user approved the exact linked FF take on October 8;
+the private review receipt binds that approval to the verified artifact hash.
+Draw Things took 793.288 seconds, leaving a 68.075-second/8.58% native gap. This closes 30.85%
+of the previously remaining timing deficit, not 30.85% of migration work. Serial timings retain
+OS/file-cache and desktop uncertainty; native BF16/Euler and DT Q8/DDIM Trailing differ.
+
+October 8 signed-v17 FastH3 VSA qualification passed the unchanged frozen speed, memory and
+complete-media gates. Launch-to-exit time was 133.276 seconds against the 137.793-second limit
+and strongest Python control of 131.232 seconds (1.56% slower, within the fixed 5% band).
+Whole MLX peak was 4.494 GB; worker lifetime physical peak was 5.285 GB. Every decoded RGB
+pixel and PCM sample matched the retained accepted clip. Live previews, progress and preview
+cleanup passed. One WebKit CPU-load observation occurred among 65 samples; no build or other
+inference ran concurrently. This packaged-worker CLI run closes the VSA gate, not the dense
+Ref2VA gate or Draw Things comparison. Three of four frozen cases now have a passing retained
+worker qualification; this does not qualify every case on v17. Earlier failed attempts remain
+failed, including a 151.534-second v17 run that overlapped a test build.
+
+The subsequent signed-v17 dense still Ref2VA replay took 1037.260 seconds against the unchanged
+998.675-second limit: speed failed by 38.585 seconds. Sampling took 887.347 seconds and video
+decoding 129.520 seconds. Every accepted decoded RGB pixel and PCM sample remained exact.
+Whole MLX peak was 7.693 GB and worker lifetime physical peak 9.216 GB; both memory gates,
+monotonic progress, live previews and preview cleanup passed. The conservative activity observer
+flagged WindowServer CPU load in all 506 samples. This is a desktop-load confound, not proof of
+the cause and not a reason to mark the speed gate passed. No build or second inference ran
+alongside the replay. One of the two previously open frozen speed gates closed this turn;
+three of four original cases have a retained pass. These percentages count benchmark cases,
+not migration effort. Dense Ref2VA and the remaining Draw Things timing gap are still open.
+
+October 8 corrects a missing FF runner flag for the existing hardware-gated MPP projections.
+Ordinary FL2VA now uses the same first-use BF16 verification policy as T2VA and still Ref2VA;
+refinement and continuation remain excluded. An installed 38937-row FL block with full-strength
+Turbo passed complete output bit equality, with six verified geometries and no rejected geometry.
+Two alternating repeats measured 3.561/3.564 seconds for ordinary MLX versus 3.441/3.456 for
+accelerated execution (about 3.2% lower block time). The Studio result above qualifies complete
+execution of this routing fix; the component probe alone does not establish whole-job speed.
+
+October 7 follow-up adds explicit Sol admission for ordinary rank-64 BF16 FL2VA image/keyframe
+jobs and a bounded stage-local transformer weight cache. The cache defaults to zero; allowed
+budgets are 8/16/32/48/64/96 GiB with available-memory/GPU checks and a separate working reserve.
+Installed FL weighted-block execution passed at the real 38937-row geometry, including exact
+dense-hook parity and repeatable Sol output. The final corrected Studio FF run completed in
+891.733 seconds versus 1007.169 streamed/dense (11.46% lower), with sampling 732.259 versus
+861.736 seconds (15.03% lower). Worker lifetime physical peak rose from 8.33 to 45.49 GiB;
+retained block weights were 37.64 GiB, with 50 loads and 150 hits. Actual 90 Sol/110 dense
+consumers completed; sampling ended with 48 active MLX bytes and 0.505 GiB footprint before
+decoding. DT took 793.288 seconds: native remains 12.41% slower, with distinct weight/sampler
+and memory-counter scopes. Combined Sol/cache attribution, broader performance and human
+review of this new FL clip remain open. The timed result's premature release flag was corrected
+separately with installed I8/BF16 retirement tests; no full clip was rerun for that reporting fix.
+A failed first attempt exposed an overlooked weighted-block curve-rank guard after
+two dense evaluations; the failure is retained and the execution regression now covers that guard.
+It is not a successful timing result. No quantization change or Python inference fallback is added.
+
+The explicit Sol attention option is integrated in native recipes and Studio; dense remains the
+default. Its fixed version-1 policy admits ordinary independent signed-I8 Ref2VA with one BF16
+Turbo adapter at strength 1, four Euler evaluations and Drop AdaLN, within 40000 packed rows.
+The final signed v13 app completed the saved-policy 1376 × 768/124-frame Sol job in 841.856
+seconds, versus its dense run's 1008.059 seconds (16.487% less whole-job time). Sampling took
+697.240 versus 868.743 seconds (19.742% less). Whole MLX peak was unchanged at 7.693 GB;
+worker physical peak was 9.058 versus 9.402 GB (3.657% lower). Complete decoded video and
+PCM match the human-approved private Sol clip exactly. Actual 90 Sol/110 dense dispatch,
+monotonic progress, seven preview revisions and staged release passed. The separate Studio
+validation app passed picker, save/reopen, reset and accepted-take reopening checks. Its real
+exported job passed packaged native CLI preflight with the matched 39954-row reference layout;
+that exported job was not rerendered. Core/Studio validation passed with zero failures.
+
+Sol is approximate and opt-in. These first attempts used the same signed worker and creative
+recipe, with uncontrolled OS/file caches and desktop activity. No Draw Things runtime parity is
+claimed. Sol does not close an older dense exact-media gate. V13 FastH3 VSA took 142.456 seconds
+against the fixed 137.793-second limit; dense Ref2VA took 1008.059 against 998.675 seconds.
+Both speed gates failed. Complete accepted RGB/PCM remained exact and both memory peaks passed.
+October 7 original speed qualification was two of four cases; memory qualification was four of four.
+
+The correctly bound native Fast diagnostic took 133.015 seconds with exact retained RGB and PCM,
+below the unchanged 137.793-second limit. This is worker evidence, not final installed-app
+qualification. The older incorrectly bound diagnostic and all earlier failed gates stay excluded
+or failed. Do not attribute diagnostic build/runtime differences to a new sampler algorithm.
+
+The retained exact H3 implementation uses staged Swift MLX execution: one Qwen page, one ordinary
+or two packed FastH3 transformer blocks, then video and audio decoding. Hardware/task-gated MPP
+uses empirical first-use BF16 verification; trained VSA routes are preserved. No automatic Python
+inference fallback is added. The retained v10 qualification completed all four frozen FP32 recipes; two speed gates failed.
+
+Earlier signed-worker comparisons remain historical: v7 T2VA took 226.467 seconds versus the
+strongest Python control's 301.807 (25.0% faster); Dense took 165.314 versus 218.777 (24.4% faster).
+Both retained exact media and lower whole MLX/worker physical peaks. V9 VSA took 138.452 seconds
+versus 131.232 and failed its fixed 137.793-second speed limit by 0.659 seconds. Its exact media
+and lower peaks do not satisfy the failed speed gate. The C5 four-case qualification does not
+qualify a later worker. Failed attempts and comparator scopes remain preserved.
+
+An explicit experimental FP16 video-decoder setting is integrated through Studio and native
+recipes. Swift MLX with `low_memory_bf16` is required; FP32 remains the default. One complete
+1376 × 768/124-frame saved-latent pair took 110.418 seconds in FP32 and 98.153 in FP16 (11.1%
+less decoder time). Peak MLX was effectively unchanged, 5.69967 → 5.69933 GB. Full RGB measured
+65.504 dB PSNR and maximum 8-bit channel difference 2. Sampling/audio inference did not run;
+this is neither byte-exact output nor a whole-job speed/memory claim. Human review is separate.
+
+October 8 complete FP16 worker check: the accepted FastH3 VSA recipe at 672 × 384/124 frames
+was replayed with only decoder precision changed. Memory mode, model, prompt, seed and sampling
+remain unchanged. The packaged Swift worker completed in 146.758 seconds with 3.79 GiB active
+MLX and 4.34 GiB physical peaks, excluding FFmpeg. Actual decoder precision is FP16; progress,
+six live preview revisions, preview cleanup and ordered stage release passed. Complete lossless
+and muxed audio match the retained FP32 clip exactly. Published RGB24 measures 39.289 dB PSNR
+with maximum channel difference 62; these encoded-video metrics differ from the raw saved-latent
+comparison above. Four sampled frames and the largest-error frame show no gross defect in agent
+review. Human visual acceptance is pending. This is a functional qualification, not an isolated
+speed comparison or all-task quality approval. FP32 remains the default.
+
+The retained signed v10 worker completed all four frozen FP32 recipes. T2VA and Dense passed the fixed strongest-Python
+speed band and both lower-peak gates. VSA and Ref2VA failed the unchanged speed gates. All four retained every accepted
+software-decoded RGB24 pixel and PCM Float32 audio sample, and both whole-worker memory peaks were lower than all pinned controls.
+Exact media and lower memory do not close either v10 failed speed gate. Later v17/v18 retained
+qualifications close the four original cases; they do not change these historical outcomes.
+
+| Retained v10 FP32 case | Swift / strongest Python seconds | Swift delta | Whole MLX / worker physical GB | Time + memory gate |
+| --- | ---: | ---: | ---: | --- |
+| T2VA · 768 × 448 | 223.538 / 301.807 | -25.933% | 4.553 / 5.375 | Passed |
+| FastH3 Dense · 672 × 384 | 160.404 / 218.777 | -26.682% | 4.494 / 5.288 | Passed |
+| FastH3 VSA · 672 × 384 | 155.320 / 131.232 | +18.355% | 4.494 / 5.226 | Speed failed; both peaks passed |
+| Still Ref2VA · 1376 × 768 | 1054.353 / 951.119 | +10.854% | 7.693 / 9.116 | Speed failed; both peaks passed |
+
+| Remaining current-worker check | Status |
+| --- | --- |
+| Progress, preview, ordered release, cancellation and recovery | v10 cancellation/recovery and ordered release passed; v11 installed continuation progress correction passed |
+| Inherited FFLF/initialized/continuation media and context | v10 media/context passed; v11 continuation retained exact media/context and published-frame progress |
+| Installed-app save/reopen | v13 Sol picker, save/reopen, reset, accepted take and matched native export/preflight passed; exported job was not rerendered |
+| Combined validation and staged commit gate | Final-source core/Studio validation passed; exact staged manual review remains required before commit |
+
+The signed v11 app completed another FastH3 VSA run in 144.081 seconds against the unchanged
+137.793-second limit: speed failed; complete decoded media remained exact. Whole MLX peak was
+4.494 GB and worker lifetime physical peak 5.332 GB, both below the frozen Python controls. This
+observation does not replace or correct v10. V11 continuation completed in 236.723 seconds with
+90 raw frames, 22 context frames and 68 published frames; all decode events used the published
+68-frame total with monotonic progress. Its media and saved context were exact, and four live
+preview revisions were observed. This closes the installed continuation-progress regression,
+not a matched performance comparison. The 1 MP Ref2VA recipe was not rerun in v11.
+
+VSA and Ref2VA failures remain failures despite exact media and lower memory. Ref2VA's measured
+extra time is in sampling, not video decoding. No corrected timing or source-causation claim is applied.
+
+October 7 component probes did not close those failures. Dense BF16 projections were 3.27% slower
+than packed Q8; FP16 projections were 8.68% slower. Guarded half-QK attention was 12.27% slower
+than native attention and increased the component MLX peak by 281.8 MB. These probes are not
+enabled in Studio. A later kernel-only half-QK test remained 8.76% slower than native attention.
+Half-score variants and a local-reduction correction also failed their speed gates; all private
+attention prototypes were removed from active source. MPSGraph copy bridges and precompiled Q8
+library cache priming also failed their declared component speed gates.
+
+A direct exact-output Qwen diagnostic took 8.229 seconds, followed by an unchanged-binary repeat
+at 2.107 seconds. A separately bound instrumented run took 2.093 seconds: 0.861 seconds loading
+all 50 layers and 0.718 seconds computing them, plus setup and cleanup. File residency was not
+controlled; these diagnostics do not replace either adverse whole-job result. The Ref2VA source
+audit also found five 8192-row feed-forward chunks per Swift block versus an unchunked Python
+control. Larger feed-forward batching saved only 0.62% in the synthetic two-block test and failed its declared speed gate. The distinct head-sliced attention layout was 18.46% slower than native MLX; paired AdaLN saved 0.085 seconds across all 50 tables, below its 0.5-second gate. A larger Metal command buffer threshold was 0.45% slower. None is promoted; rejected prototypes and diagnostic instrumentation were removed. These 39,309-row synthetic Ref screens do not qualify the 39,954-row installed recipe. The strongest Python Ref control uses one block with prefetch disabled.
+
+The signed v12 worker completed fresh VSA and 1 MP Ref2VA tests with exact accepted RGB24/PCM Float32
+media, live previews, actual dispatch checks and ordered stage release. VSA took 145.570 seconds;
+Ref2VA took 1,021.472 seconds. Both failed the unchanged historical limits of 137.793 and 998.675
+seconds. Whole MLX / worker physical peaks were 4.494 / 5.301 GB for VSA and 7.693 / 9.300 GB for Ref2VA.
+
+Fresh original Python controls on the same current software and recipes took 137.589 seconds for
+VSA and 1,016.080 for Ref2VA. Swift was 5.801% and 0.531% slower respectively. Ref2VA Python used
+12.142 GB whole MLX and 24.872 GB worker physical memory; Swift used 36.641% and 62.607% less.
+These current-condition comparisons do not replace the strongest historical controls or qualify
+the failed historical speed gates. Complete decoded media matched the preserved Python output.
+A preserved C5 worker also completed the current VSA recipe in 137.718 seconds; that result does
+not qualify v12. Desktop activity and OS/file cache residency remain uncontrolled.
+
+First-pass attribution isolated the Fast difference to preparation and evaluation one; later
+v12 sampling passes were faster than C5. An all-50 AdaLN test with two fresh process orders
+showed deferred loading faster in both orders, so no loader reversal is justified from total
+setup time alone. A combined Ref full-feed-forward/cache prototype gained 2.409% in its bounded
+fixture, below the declared 3% screen, and increased active MLX by 2.466 GB. It was removed.
+No Draw Things or h3.c runtime parity is claimed. Later v13 validation passed; staged review remains required.
+
+See [current H3 policy and measurements](studio/README.md#swift-h3-performance-follow-up).
+Whole performance closure, other hardware and Draw Things runtime parity are not claimed.
+LTX source and qualification are unchanged. Earlier dated observations below retain their scope.
+
+Earlier October 6 comparison — Swift H3 indexed attention and LTX confirmation: BF16/D=128 trained VSA now
 reads selected padded tiles directly in Metal, with unchanged routing, compression and dense
 prefix attention. The frozen attention and installed-block outputs remain exact. One fresh
 Swift pair retained every video pixel/audio sample and ordered stage release; sampling fell

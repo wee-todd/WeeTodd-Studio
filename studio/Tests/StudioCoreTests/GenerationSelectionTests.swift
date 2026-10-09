@@ -2,6 +2,32 @@ import XCTest
 @testable import StudioCore
 
 final class GenerationSelectionTests: XCTestCase {
+  func testResolvedH3DecoderPrecisionUsesCurrentOverrideThenRecipeAndDefault() {
+    XCTAssertEqual(NativeH3VideoDecodePrecision.resolved(selection:.float16,recipeValue:"float32"),.float16)
+    XCTAssertEqual(NativeH3VideoDecodePrecision.resolved(selection:.float32,recipeValue:"float16"),.float32)
+    XCTAssertEqual(NativeH3VideoDecodePrecision.resolved(selection:nil,recipeValue:"float16"),.float16)
+    XCTAssertEqual(NativeH3VideoDecodePrecision.resolved(selection:nil,recipeValue:"float32"),.float32)
+    XCTAssertEqual(NativeH3VideoDecodePrecision.resolved(selection:nil,recipeValue:nil),.float32)
+    var selection = GenerationSelection(task:"t2v",preset:.custom)
+    selection.h3VideoDecodePrecision = .float16;selection.resetOverrides()
+    XCTAssertEqual(NativeH3VideoDecodePrecision.resolved(selection:selection.h3VideoDecodePrecision,recipeValue:"float32"),.float32)
+  }
+  func testH3DecoderPrecisionPreservesLegacyKeysAndRoundTripsResettableIntent() throws {
+    var selection = try JSONDecoder().decode(GenerationSelection.self,
+      from:Data(#"{"task":"t2v","preset":"balanced"}"#.utf8))
+    XCTAssertNil(selection.h3VideoDecodePrecision)
+    XCTAssertEqual(Set((try JSONSerialization.jsonObject(with:JSONEncoder().encode(selection)) as! [String:Any]).keys),["task","preset"])
+    selection.h3VideoDecodePrecision = .float16
+    XCTAssertTrue(selection.isModified)
+    XCTAssertEqual(try JSONDecoder().decode(GenerationSelection.self,from:JSONEncoder().encode(selection)),selection)
+    var clip = Clip(engine:.h3);clip.generationSelection = selection
+    clip.selectLocalModel(.ltx25);clip.selectLocalModel(.h3)
+    XCTAssertEqual(clip.generationSelection?.h3VideoDecodePrecision,.float16)
+    selection.resetOverrides();XCTAssertNil(selection.h3VideoDecodePrecision);XCTAssertFalse(selection.isModified)
+    XCTAssertThrowsError(try JSONDecoder().decode(GenerationSelection.self,
+      from:Data(#"{"task":"t2v","preset":"balanced","h3VideoDecodePrecision":"bfloat16"}"#.utf8)))
+  }
+
   func testMovieUpscaleSelectionPreservesOldBytesAndRoundTripsExplicitSettings() throws {
     var old=try JSONDecoder().decode(GenerationSelection.self,from:Data(#"{"task":"t2v","preset":"balanced"}"#.utf8))
     XCTAssertNil(old.ltx25MovieUpscale)

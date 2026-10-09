@@ -6,19 +6,20 @@ public final class H3DiTState {
   public let layout: H3PackedLayout
   private let core: H3WeightedDiTState
 
+  public var backendReport: H3BackendReport { core.backendReport }
   public var isResident: Bool { core.isResident }
   public var residentActivationBytes: Int { core.residentActivationBytes }
 
   public convenience init(checkpointURL: URL, layout: H3PackedLayout,
     textEmbeddings: MLXArray, timestepTable: [Float],
-    projectionMode: H3ProjectionMode = .weightDecoded,
+    projectionMode: H3ProjectionMode = .weightDecoded, transformerWeightCacheGB:Int = 0,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
     loRAAdapters: [H3LoRAAdapter]? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     try self.init(checkpointURL: checkpointURL, layout: layout,
       textEmbeddings: textEmbeddings, timestepTable: timestepTable,
-      blockCount: 50, projectionMode: projectionMode,
+      blockCount: 50, projectionMode: projectionMode, transformerWeightCacheGB:transformerWeightCacheGB,
       turboLoRAURL: turboLoRAURL, turboLoRAStrength: turboLoRAStrength,
       additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters,
       progress: progress)
@@ -26,20 +27,23 @@ public final class H3DiTState {
 
   init(checkpointURL: URL, layout: H3PackedLayout,
     textEmbeddings: MLXArray, timestepTable: [Float], blockCount: Int,
-    projectionMode: H3ProjectionMode = .weightDecoded,
+    projectionMode: H3ProjectionMode = .weightDecoded, transformerWeightCacheGB:Int = 0,
+    allowMPP: Bool = false, experimentalSol: H3SolTaskPolicy? = nil,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
     loRAAdapters: [H3LoRAAdapter]? = nil,
     funControl: H3FunControlCondition? = nil,
     vdn:H3VDNSelection? = nil,
+    preparationObserver: H3PreparationObservation.Observer? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     self.layout = layout
     core = try H3WeightedDiTState(checkpointURL: checkpointURL,
       layout: .audiovisual(layout), textEmbeddings: textEmbeddings,
       timestepTable: timestepTable, blockCount: blockCount,
-      projectionMode: projectionMode, turboLoRAURL: turboLoRAURL,
+      projectionMode: projectionMode, allowMPP: allowMPP, transformerWeightCacheGB:transformerWeightCacheGB, experimentalSol:experimentalSol, turboLoRAURL: turboLoRAURL,
       turboLoRAStrength: turboLoRAStrength,
-      additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters, funControl: funControl,vdn:vdn,progress: progress)
+      additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters, funControl: funControl,vdn:vdn,
+      preparationObserver: preparationObserver, progress: progress)
   }
 
   public func predict(videoLatents: MLXArray, audioLatents: MLXArray,
@@ -50,6 +54,10 @@ public final class H3DiTState {
   }
 
   public func unload() { core.unload() }
+  func unloadAndReport() -> H3BackendReport {
+    core.unload()
+    return core.backendReport
+  }
 }
 
 /// Reference-conditioned H3 shares the same weighted transformer stage.
@@ -57,19 +65,25 @@ public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
   public let layout: H3ReferenceLayout
   private let core: H3WeightedDiTState
 
+  public var backendReport: H3BackendReport { core.backendReport }
   public var isResident: Bool { core.isResident }
   public var residentActivationBytes: Int { core.residentActivationBytes }
+  var nativeEvaluationCount: Int { core.nativeEvaluationCount }
+  var nativeKernelSeconds: Double { core.nativeKernelSeconds }
+  var nativeBridgeSeconds: Double { core.nativeBridgeSeconds }
+  var nativeTransferAndManagementSeconds: Double { core.nativeTransferAndManagementSeconds }
+  var nativeChildReaped: Bool { core.nativeChildReaped }
 
   public convenience init(checkpointURL: URL, layout: H3ReferenceLayout,
     textEmbeddings: MLXArray, timestepTable: [Float],
-    projectionMode: H3ProjectionMode = .weightDecoded,
+    projectionMode: H3ProjectionMode = .weightDecoded, transformerWeightCacheGB:Int = 0,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
     loRAAdapters: [H3LoRAAdapter]? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     try self.init(checkpointURL: checkpointURL, layout: layout,
       textEmbeddings: textEmbeddings, timestepTable: timestepTable,
-      blockCount: 50, projectionMode: projectionMode,
+      blockCount: 50, projectionMode: projectionMode, transformerWeightCacheGB:transformerWeightCacheGB,
       turboLoRAURL: turboLoRAURL, turboLoRAStrength: turboLoRAStrength,
       additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters,
       progress: progress)
@@ -77,7 +91,9 @@ public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
 
   init(checkpointURL: URL, layout: H3ReferenceLayout,
     textEmbeddings: MLXArray, timestepTable: [Float], blockCount: Int,
-    projectionMode: H3ProjectionMode = .weightDecoded,
+    projectionMode: H3ProjectionMode = .weightDecoded, transformerWeightCacheGB:Int = 0,
+    allowMPP: Bool = false, nativeWorkerURL: URL? = nil,
+    experimentalSol: H3SolTaskPolicy? = nil,
     turboLoRAURL: URL? = nil, turboLoRAStrength: Float = 1,
     additionalLoRAs: [H3LoRAAdapter] = [],
     loRAAdapters: [H3LoRAAdapter]? = nil,
@@ -86,7 +102,8 @@ public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
     core = try H3WeightedDiTState(checkpointURL: checkpointURL,
       layout: .references(layout), textEmbeddings: textEmbeddings,
       timestepTable: timestepTable, blockCount: blockCount,
-      projectionMode: projectionMode, turboLoRAURL: turboLoRAURL,
+      projectionMode: projectionMode, allowMPP: allowMPP, nativeWorkerURL: nativeWorkerURL, transformerWeightCacheGB:transformerWeightCacheGB,
+      experimentalSol: experimentalSol, turboLoRAURL: turboLoRAURL,
       turboLoRAStrength: turboLoRAStrength,
       additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters, progress: progress)
   }
@@ -99,4 +116,8 @@ public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
   }
 
   public func unload() { core.unload() }
+  func unloadAndReport() -> H3BackendReport {
+    core.unload()
+    return core.backendReport
+  }
 }

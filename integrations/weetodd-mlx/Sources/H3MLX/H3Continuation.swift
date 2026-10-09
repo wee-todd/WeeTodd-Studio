@@ -233,7 +233,7 @@ public enum H3Continuation {
       videoVAE: request.videoVAE, audioVAE: request.audioVAE,
       turboLoRA: request.turboLoRA, turboLoRAStrength: request.turboLoRAStrength,
       additionalLoRAs: request.additionalLoRAs, loRAAdapters: request.loRAAdapters,
-      videoDecodeMemoryMode: request.videoDecodeMemoryMode, samplingMethod: request.samplingMethod)
+      videoDecodeMemoryMode: request.videoDecodeMemoryMode, videoDecodePrecision: request.videoDecodePrecision, samplingMethod: request.samplingMethod)
     let root = request.qwenVision.resolvingSymlinksInPath().standardizedFileURL
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory) else {

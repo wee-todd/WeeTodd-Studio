@@ -70,8 +70,9 @@ public enum H3StudioRecipe {
       audioVAE: base.audioVAE, turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
       additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
-      samplingMethod: base.samplingMethod, referenceNoise: noise)
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode, videoDecodePrecision: base.videoDecodePrecision,
+      samplingMethod: base.samplingMethod, referenceNoise: noise,
+      transformerWeightCacheGB: base.transformerWeightCacheGB)
   }
 
   /// Admit FL2VA's timed keyframe contract before reading any image.
@@ -123,6 +124,11 @@ public enum H3StudioRecipe {
       anchors.append(anchor)
     }
     let noise = try H3ReferenceNoiseControls.parse(root["config"] as? [String: Any] ?? [:])
+    let attentionPolicy = try H3AttentionPolicy.admitRecipe(root,canvasAdmission:canvasAdmission)
+    if attentionPolicy == .solExperimental {
+      var shared=root["config"] as? [String:Any] ?? [:]
+      shared.removeValue(forKey:"attention_policy");root["config"]=shared
+    }
     removeReferenceNoise(&root)
     components.removeValue(forKey: "vision_encoder")
     components["task"] = "t2va"
@@ -130,6 +136,9 @@ public enum H3StudioRecipe {
     root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [],
       "audio_policy": "generated"]
     let base = try compile(data: JSONSerialization.data(withJSONObject: root), canvasAdmission: canvasAdmission)
+    if attentionPolicy == .solExperimental {
+      try H3SolTaskPolicy.validateSettings(steps:base.requestedSteps,samplingMethod:base.samplingMethod,adapters:base.loRAAdapters,packedRows:1)
+    }
     var priorFrame = -1
     for anchor in anchors {
       let frame: Int
@@ -147,7 +156,7 @@ public enum H3StudioRecipe {
       try resolveImage(path, index == 0, base.geometry.width, base.geometry.height)
     }
     return try H3FL2VARequest(base: base, vision: URL(fileURLWithPath: vision),
-      images: images, anchors: anchors, referenceNoise: noise)
+      images: images, anchors: anchors, referenceNoise: noise, attentionPolicy: attentionPolicy)
   }
 
   /// Reuse the strict T2VA execution-control admission after removing only the
@@ -236,6 +245,26 @@ public enum H3StudioRecipe {
       throw H3CheckpointError.invalid("H3 Ref2VA needs visual media or timed audio, at most nine images, three movies and three standalone audio/sidecar sources.")
     }
     let noise = try H3ReferenceNoiseControls.parse(root["config"] as? [String: Any] ?? [:])
+    let attentionPolicy = try H3AttentionPolicy.admitRecipe(root, canvasAdmission: canvasAdmission)
+    var backendConfig = root["config"] as? [String: Any] ?? [:]
+    guard let backend = H3TransformerBackend(rawValue: backendConfig["transformer_backend"] as? String ?? "mlx") else {
+      throw H3CheckpointError.invalid("Unsupported H3 transformer backend.")
+    }
+    if backend == .nncExperimental {
+      guard canvasAdmission == .ordinary else {
+        throw H3CheckpointError.invalid("Compiled native H3 blocks do not support initialized spatial refinement.")
+      }
+      // The ordinary compiler owns all shared settings and component parsing.
+      // Restore the explicit transformer choice on the Ref request below.
+      backendConfig["transformer_backend"] = "mlx"
+      root["config"] = backendConfig
+    }
+    if attentionPolicy == .solExperimental {
+      // The common T2VA parser owns shared settings but never accepts Sol.
+      // Restore the typed selection only on the admitted Ref request.
+      backendConfig.removeValue(forKey: "attention_policy")
+      root["config"] = backendConfig
+    }
     removeReferenceNoise(&root)
     components.removeValue(forKey: "vision_encoder")
     components.removeValue(forKey: "allow_fl2va_weights_for_ref2va")
@@ -244,6 +273,16 @@ public enum H3StudioRecipe {
     root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [],
       "audio_policy": "generated"]
     let base = try compile(data: JSONSerialization.data(withJSONObject: root), canvasAdmission: canvasAdmission)
+    if attentionPolicy == .solExperimental {
+      try H3SolTaskPolicy.validateSettings(steps: base.requestedSteps,
+        samplingMethod: base.samplingMethod, adapters: base.loRAAdapters,
+        packedRows: 1) // complete packed-row admission follows header/media preflight
+    }
+    if backend == .nncExperimental {
+      try H3NativeBlockAdmission.validateSettings(task: "ref2va", steps: base.requestedSteps,
+        samplingMethod: base.samplingMethod, adapters: base.loRAAdapters,
+        contextFrames: 0, isRefinement: false, packedRows: 1)
+    }
     // Validate every placement before resolving any media, including the last item.
     let frames = try paths.map { try H3ReferencePlacement.frame($0.placement, frames: base.geometry.frames) }
     let references = try zip(paths, frames).map { item, frame in
@@ -286,8 +325,9 @@ public enum H3StudioRecipe {
       turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
       additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
-      samplingMethod: base.samplingMethod, referenceNoise: noise, canvasAdmission: canvasAdmission)
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode, videoDecodePrecision: base.videoDecodePrecision,
+      samplingMethod: base.samplingMethod, referenceNoise: noise, canvasAdmission: canvasAdmission,
+      transformerBackend: backend, attentionPolicy: attentionPolicy, transformerWeightCacheGB:base.transformerWeightCacheGB)
   }
 
   /// An A2V driver is placed at frame zero of the target packed timeline.
@@ -418,8 +458,9 @@ public enum H3StudioRecipe {
       turboLoRA: base.turboLoRA,
       turboLoRAStrength: base.turboLoRAStrength,
       additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
-      samplingMethod: base.samplingMethod, referenceNoise: noise, canvasAdmission: canvasAdmission)
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode, videoDecodePrecision: base.videoDecodePrecision,
+      samplingMethod: base.samplingMethod, referenceNoise: noise, canvasAdmission: canvasAdmission,
+      transformerWeightCacheGB: base.transformerWeightCacheGB)
   }
 
   /// Admit one already-preprocessed structure guide and validate every ordinary
@@ -467,7 +508,7 @@ public enum H3StudioRecipe {
       turboLoRA: base.turboLoRA, turboLoRAStrength: base.turboLoRAStrength,
       additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
       funControl: control,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
+      videoDecodeMemoryMode: base.videoDecodeMemoryMode, videoDecodePrecision: base.videoDecodePrecision,
       samplingMethod: base.samplingMethod)
   }
 
@@ -583,20 +624,22 @@ public enum H3StudioRecipe {
       let config = root["config"] as? [String: Any],
       Set(config.keys).isSubset(of: ["width", "height", "duration_seconds",
         "steps", "seed", "drop_adaln", "resolution_mode", "resolution_tier",
-        "aspect_ratio", "memory_mode", "attention_chunk_size",
+        "aspect_ratio", "memory_mode", "video_decode_precision", "attention_chunk_size",
         "attention_head_chunk_size", "ffn_row_chunk_size",
-        "projection_backend", "transformer_backend", "sampling_method",
-        "inference_optimization", "paging_cache_gb"]),
+        "projection_backend", "transformer_backend", "attention_policy", "sampling_method",
+        "inference_optimization", "paging_cache_gb", "transformer_weight_cache_gb"]),
       equals(config, "drop_adaln", default: true, true),
       oneOf(config, "resolution_mode", default: "custom", ["custom"]),
       oneOf(config, "resolution_tier", default: "custom", ["custom"]),
       oneOf(config, "aspect_ratio", default: "custom", ["custom"]),
       oneOf(config, "memory_mode", default: "normal", ["normal", "low_memory_bf16"]),
+      oneOf(config, "video_decode_precision", default: "float32", ["float32", "float16"]),
       oneOf(config, "attention_chunk_size", default: "automatic", ["automatic"]),
       oneOf(config, "attention_head_chunk_size", default: "automatic", ["automatic", "disabled"]),
       oneOf(config, "ffn_row_chunk_size", default: "automatic", ["automatic"]),
       oneOf(config, "projection_backend", default: "mlx", ["auto", "mlx"]),
       oneOf(config, "transformer_backend", default: "mlx", ["mlx"]),
+      oneOf(config, "attention_policy", default: "dense", ["dense"]),
       oneOf(config, "sampling_method", default: "euler", ["euler", "res_multistep"]),
       let samplingMethod = H3SamplingMethod(rawValue: config["sampling_method"] as? String ?? "euler"),
       oneOf(config, "inference_optimization", default: "off", ["off"]),
@@ -608,6 +651,10 @@ public enum H3StudioRecipe {
       let seed = config["seed"] as? Int, (0...Int(UInt32.max)).contains(seed) else {
       throw H3CheckpointError.invalid("Swift H3 currently admits only text-to-audiovisual Euler or res_multistep recipes with up to eight distinct compatible LoRAs and no unported controls.")
     }
+    let decodePrecision = H3VideoDecodePrecision(rawValue:
+      config["video_decode_precision"] as? String ?? "float32")!
+    try decodePrecision.validate(memoryMode: H3VideoDecodeMemoryMode(rawValue:
+      config["memory_mode"] as? String ?? "normal"))
     let explicit = try descriptorStack(root["loras"])
     guard explicit == nil || emptyArray(component, "loras") else {
       throw H3CheckpointError.invalid("Select either H3 component LoRA pairs or the explicit v1 descriptor stack.")
@@ -629,6 +676,8 @@ public enum H3StudioRecipe {
       additionalLoRAs: additional, loRAAdapters: explicit,
       videoDecodeMemoryMode: H3VideoDecodeMemoryMode(rawValue:
         config["memory_mode"] as? String ?? "normal"),
-      samplingMethod: samplingMethod, canvasAdmission: canvasAdmission)
+      videoDecodePrecision: decodePrecision,
+      samplingMethod: samplingMethod, canvasAdmission: canvasAdmission,
+      transformerWeightCacheGB:try H3TransformerCachePlan.budget(config:config))
   }
 }

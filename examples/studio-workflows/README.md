@@ -53,6 +53,9 @@ recipes use eight evaluations. The explicit experimental `config.single_stage_sa
 `euler_ancestral_cfg_pp` uses eight updates and sixteen serial evaluations in the shared Swift
 worker, with full-strength sheet conditioning and a versioned native noise policy. Unsupported
 choices fail admission; exporting a recipe does not establish reference likeness or scene quality.
+A developer-only version-17 Ingredients request separately tests an unmerged 2.5 Dev base
+with the older 2.3 adapter, repeated RGB reference encoding and serial CFG/video-only STG.
+It has no refinement pass and is not selectable in Studio; it is not the accepted 2.5 default.
 It supports cut-only finishing with embedded source audio; unsupported finishing is rejected
 explicitly. Complete prepared continuous scenes retain member timing and shared take identity;
 ordinary continuity needs an accepted source before export. Pending Ripple drafts use their dedicated

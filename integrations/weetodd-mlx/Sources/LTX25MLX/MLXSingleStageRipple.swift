@@ -45,11 +45,13 @@ public final class MLXSingleStageRipple {
   private let gate = NSLock()
   private let task:AdapterTask
   private let ingredientsSampling:MLXIngredientsSampling
+  private let guidedSampling:MLXGuidedSampling?
 
   public init(geometry: AVGeometry, referenceStrength: Float,
     imageAnchors: [RippleImageAnchor] = [], transformerRoot: URL,
     adapters: [LoRAAdapter], task:AdapterTask = .ripple,
     ingredientsSampling:MLXIngredientsSampling = .deterministic,
+    guidedSampling:MLXGuidedSampling? = nil,
     maximumActivationBytes: Int = 2 * 1024 * 1024 * 1024) throws {
     guard adapters.count == 1, adapters[0].enabled,
       adapters[0].strength.isFinite, adapters[0].strength > 0 else {
@@ -68,11 +70,18 @@ public final class MLXSingleStageRipple {
     self.geometry = geometry
     self.task = task
     self.ingredientsSampling=ingredientsSampling
+    self.guidedSampling=guidedSampling
+    guard guidedSampling == nil || (task == .ingredients && referenceStrength == 1 &&
+      imageAnchors.isEmpty && ingredientsSampling == .deterministic &&
+      guidedSampling?.singleStage == true && guidedSampling?.mode == .guided) else {
+      throw LTXError.invalid("Dev reference guidance requires single-stage Ingredients with a frozen full-strength sheet.")
+    }
     // Reserve additional Float32 predictions/state and the negative text
     // contexts before admitting any transformer block. This is an owned-array
     // budget, not a prediction of process footprint or Metal allocator peak.
     let cfgReserve=ingredientsSampling == .ancestralCFGPP
-      ? Self.cfgppReserveBytes(geometry:geometry) : 0
+      ? Self.cfgppReserveBytes(geometry:geometry) : guidedSampling == nil ? 0 :
+        MLXGuidedSampling.reserveBytes(videoTokens:geometry.videoTokens*2,audioTokens:geometry.audioFrames)
     guard cfgReserve < maximumActivationBytes else {
       throw LTXError.invalid("CFG++ exceeds the configured activation budget before model loading.")
     }
@@ -86,9 +95,10 @@ public final class MLXSingleStageRipple {
       adapters: [LoRAAdapter(path: adapterURL.path, strength: adapters[0].strength)],
       ingredientsAdapterPath:task == .ingredients ? adapterURL.path : nil,
       maximumActivationBytes: blockBudget,requireKeyframeMarker:Self.leadingMarkerRows(geometry:geometry,task:task,
-        sampling:ingredientsSampling)>0)
-    guard weights.sourceCheckpoint == "ltx-2.5-22b-distilled-transformer-bf16.safetensors" else {
-      throw LTXError.invalid("Single-stage reference sampling requires the released distilled LTX 2.5 transformer.")
+        sampling:ingredientsSampling)>0 || guidedSampling != nil)
+    let expected=guidedSampling == nil ? "ltx-2.5-22b-distilled-transformer-bf16.safetensors" : "ltx-2.5-22b-dev-transformer-bf16.safetensors"
+    guard weights.sourceCheckpoint == expected else {
+      throw LTXError.invalid("Single-stage reference sampling requires matching released Dev/distilled LTX 2.5 transformer provenance.")
     }
   }
 
@@ -108,10 +118,6 @@ public final class MLXSingleStageRipple {
     let audioNoise = MLXNoisePolicy.seeded(seed &+ 1, tokens: geometry.audioFrames).asType(.float32)
     let prepared = try plan.layout.prepare(generated: videoNoise, reference: referenceVideo,
       anchors: imageAnchors)
-    let sampler = try MLXSamplingRunner(configuration: plan.configuration,
-      maximumActivationBytes: maximumActivationBytes,
-      leadingKeyframeMarkerRows:Self.leadingMarkerRows(geometry:geometry,task:task,
-        sampling:ingredientsSampling))
     let inputs: [String: MLXArray] = [
       "video_text": videoContext, "audio_text": audioContext,
       "video_latent": prepared.latent, "audio_latent": audioNoise,
@@ -119,7 +125,7 @@ public final class MLXSingleStageRipple {
       "audio_positions": MLXArray(geometry.audioPositions, [geometry.audioFrames, 1])]
     let cfgpp=ingredientsSampling == .ancestralCFGPP
     let unconditional:[String:MLXArray]?
-    if cfgpp {
+    if cfgpp || guidedSampling != nil {
       guard let unconditionalVideoContext,let unconditionalAudioContext else {
         throw LTXError.invalid("CFG++ requires learned unconditional audiovisual text contexts.")
       }
@@ -130,6 +136,24 @@ public final class MLXSingleStageRipple {
       }
       unconditional=nil
     }
+    if let guidedSampling {
+      // Use the same serial guided denoiser as ordinary Dev jobs, without
+      // adding another transformer sampler or a refinement model.
+      let reserve=MLXGuidedSampling.reserveBytes(videoTokens:plan.configuration.videoTokens,audioTokens:geometry.audioFrames)
+      let sampler=try MLXGuidedSamplingRunner(configuration:plan.configuration,sampling:guidedSampling,
+        maximumActivationBytes:maximumActivationBytes+reserve,
+        leadingKeyframeMarkerRows:geometry.latentHeight*geometry.latentWidth)
+      let sampled=try sampler.evaluate(inputs,schedule:guidedSampling.schedule(videoTokens:plan.configuration.videoTokens),
+        negativeContexts:unconditional!,videoConditioning:prepared.condition,frozenAudio:false,
+        fixedWeights:weights.readFixed,blockWeights:weights.readBlock,
+        fixedAdapters:weights.fixedAdapters,blockAdapters:weights.blockAdapters,
+        stageProgress:{ _,event in try progress("ingredients:"+event.stage,event.completedBlocks,48) },
+        progress:{ event in try progress("sampling",event.completedSteps,event.totalSteps) })
+      return ["video":sampled["video"]![0..<geometry.videoTokens],"audio":sampled["audio"]!]
+    }
+    let sampler = try MLXSamplingRunner(configuration: plan.configuration,
+      maximumActivationBytes: maximumActivationBytes,
+      leadingKeyframeMarkerRows:Self.leadingMarkerRows(geometry:geometry,task:task,sampling:ingredientsSampling))
     let schedule=try cfgpp ? SamplingSchedule(sigmas:plan.schedule.sigmas,eta:1) : plan.schedule
     let sampled = try sampler.evaluate(inputs, schedule: schedule,
       videoConditioning: prepared.condition, bfloat16State: cfgpp ? [] : ["video", "audio"],

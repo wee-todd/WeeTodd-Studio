@@ -7,11 +7,80 @@ import XCTest
 @testable import H3MLX
 
 final class H3VideoDecodeMemoryModeTests: XCTestCase {
-  func testResidentModesDeferBlockOutputAndKeepDirectEagerBehavior() {
+  func testLowMemoryDecoderReportsOneSpatialTileWhileNormalRetainsFour() {
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for:.lowMemoryBF16)["spatialBatch"] as? Int,1)
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for:.normal)["spatialBatch"] as? Int,4)
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for:nil)["spatialBatch"] as? Int,4)
+  }
+  func testResidentModesBoundPendingTileBlocksAndKeepDirectEagerBehavior() {
     for mode: H3VideoDecodeMemoryMode in [.normal, .lowMemoryBF16] {
-      XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: mode)["materializesBlockOutput"] as? Bool, false)
+      let completed = (0..<36).filter {
+        H3VideoDecodeMemoryMode.materializesBlockOutput(for: mode, blockIndex:$0)
+      }
+      XCTAssertEqual(completed, mode == .normal
+        ? Array(0..<36) : [])
+      if mode == .normal {
+        XCTAssertEqual(completed.last,35,"Normal batches must retire before the tile head.")
+      }
+      var pending = 0
+      var maximumPending = 0
+      for index in 0..<36 {
+        pending += 1
+        maximumPending = max(maximumPending,pending)
+        if H3VideoDecodeMemoryMode.materializesBlockOutput(for:mode,blockIndex:index) {
+          pending = 0
+        }
+      }
+      XCTAssertEqual(maximumPending,mode == .normal ? 1 : 36)
+      XCTAssertEqual(pending,mode == .normal ? 0 : 36)
+      let diagnostics = H3VideoDecodeMemoryMode.diagnostics(for:mode)
+      if mode == .normal {
+        XCTAssertEqual(diagnostics["materializesBlockOutput"] as? Bool,false)
+      } else { XCTAssertEqual(diagnostics["materializesBlockOutput"] as? Bool,false) }
+      XCTAssertEqual(diagnostics["blockOutputMaterializationPolicy"] as? String,
+        mode == .normal ? "batches_1_2_every_block_batches_3_4_tile_head" : "deferred_until_tile_head")
+      // Diagnostics describe the maximum production batch, including smaller tail batches.
+      XCTAssertEqual(diagnostics["blockOutputExecutionWindow"] as? Int,36)
+      XCTAssertEqual(diagnostics["maximumPendingBlockOutputs"] as? Int,36)
+      XCTAssertEqual(diagnostics["maximumPendingSpatialTileBlocks"] as? Int,mode == .normal ? 144 : 36)
+    }
+    for index in 0..<36 {
+      XCTAssertTrue(H3VideoDecodeMemoryMode.materializesBlockOutput(for:nil,blockIndex:index))
     }
     XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for: nil)["materializesBlockOutput"] as? Bool, true)
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for:nil)["blockOutputExecutionWindow"] as? Int,1)
+    XCTAssertEqual(H3VideoDecodeMemoryMode.diagnostics(for:nil)["maximumPendingBlockOutputs"] as? Int,1)
+  }
+
+  func testNormalPolicyUsesActualBatchAndKeepsLowAndDirectPolicies() {
+    for batch in 1...4 {
+      let small = batch <= 2
+      XCTAssertEqual(H3VideoDecodeMemoryMode.materializesFirstResidual(for:.normal,
+        spatialBatchSize:batch),small)
+      XCTAssertEqual(H3VideoDecodeMemoryMode.blockOutputExecutionWindow(for:.normal,
+        spatialBatchSize:batch),small ? 1 : 36)
+      for index in 0..<36 {
+        XCTAssertEqual(H3VideoDecodeMemoryMode.materializesBlockOutput(for:.normal,
+          blockIndex:index,spatialBatchSize:batch),small)
+        XCTAssertFalse(H3VideoDecodeMemoryMode.materializesBlockOutput(for:.lowMemoryBF16,
+          blockIndex:index,spatialBatchSize:batch))
+        XCTAssertTrue(H3VideoDecodeMemoryMode.materializesBlockOutput(for:nil,
+          blockIndex:index,spatialBatchSize:batch))
+      }
+      XCTAssertTrue(H3VideoDecodeMemoryMode.materializesFirstResidual(for:nil,spatialBatchSize:batch))
+      XCTAssertTrue(H3VideoDecodeMemoryMode.materializesFirstResidual(for:.lowMemoryBF16,spatialBatchSize:batch))
+    }
+    let report = H3VideoDecodeMemoryMode.diagnostics(for:.normal)
+    XCTAssertEqual(report["materializationPolicy"] as? String,"adaptive_normal_spatial_batch")
+    XCTAssertEqual(report["normalSmallBatchExecutionWindow"] as? Int,1)
+    XCTAssertEqual(report["normalLargeBatchExecutionWindow"] as? Int,36)
+    XCTAssertEqual(report["normalFirstResidualPolicy"] as? String,"batches_1_2_eager_batches_3_4_tile_head")
+    XCTAssertNoThrow(try JSONSerialization.data(withJSONObject:report))
+    // Unsupported batch values cannot enable the lazy large-batch route.
+    for invalid in [0,5,Int.max] {
+      XCTAssertTrue(H3VideoDecodeMemoryMode.materializesFirstResidual(for:.normal,spatialBatchSize:invalid))
+      XCTAssertTrue(H3VideoDecodeMemoryMode.materializesBlockOutput(for:.normal,blockIndex:0,spatialBatchSize:invalid))
+    }
   }
 
   func testSelectedModesRequireResidentSessionBeforeCheckpointAccess() throws {
@@ -30,6 +99,8 @@ final class H3VideoDecodeMemoryModeTests: XCTestCase {
 
   private struct Fixture: Decodable {
     let mode: String
+    let metalLibrary: String
+    let metalSHA256: String
     let checkpoint: String
     let checkpointStat: [Int64]
     let rawPath: String
@@ -79,6 +150,18 @@ final class H3VideoDecodeMemoryModeTests: XCTestCase {
     }
     let fixture = try JSONDecoder().decode(Fixture.self,
       from: Data(contentsOf: URL(fileURLWithPath: manifest)))
+    // Pin the production kernel library before any array or weight is loaded.
+    // Test build systems may otherwise select a different default.metallib.
+    let metalURL = URL(fileURLWithPath: fixture.metalLibrary)
+    var metalStat = stat()
+    guard fixture.metalLibrary.withCString({ Darwin.lstat($0, &metalStat) }) == 0,
+      metalStat.st_mode & S_IFMT == S_IFREG,
+      FileManager.default.isReadableFile(atPath: fixture.metalLibrary),
+      fixture.metalSHA256.count == 64,
+      sha(try Data(contentsOf: metalURL)) == fixture.metalSHA256 else {
+      throw H3CheckpointError.invalid("Missing or changed pinned decoder Metal library.")
+    }
+    GPU.metallib = metalURL
     guard let mode = H3VideoDecodeMemoryMode(rawValue: fixture.mode),
       fixture.maximumMLXBytes == 6 * 1024 * 1024 * 1024,
       fixture.maximumPhysicalBytes == 8 * 1024 * 1024 * 1024,
@@ -129,7 +212,7 @@ final class H3VideoDecodeMemoryModeTests: XCTestCase {
       // Same overload used by the public decodeChunks delegate, with close statistics only.
       try H3VideoVAEDecoder.decodeChunks(checkpointURL: checkpointURL,
         latent: latent, retainWeights: true, memoryMode: mode,
-        spatialBatchSize: fixture.spatialBatchSize ?? 4,
+        spatialBatchSize: fixture.spatialBatchSize,
         onSessionClosed: { closed = $0 }) { chunk in
         guard chunk.dtype == .float32 else {
           throw H3CheckpointError.invalid("Production decoder output precision changed.")
@@ -160,12 +243,14 @@ final class H3VideoDecodeMemoryModeTests: XCTestCase {
     let released = closed?.closed == true && closed?.remainingResidentBytes == 0
     let report: [String: Any] = ["status": failure == nil && exact && released ? "passed" : "failed",
       "memoryMode": mode.rawValue, "videoDecode": H3VideoDecodeMemoryMode.diagnostics(for: mode),
+      "metalLibrary": fixture.metalLibrary, "metalSHA256": fixture.metalSHA256,
       "explicitSpatialBatchSize": fixture.spatialBatchSize as Any? ?? NSNull(),
       "secondsInclusiveHostValidation": elapsed, "frames": frames,
       "chunkShapes": shapes, "float32ChunkSHA256": floats, "rgb8ChunkSHA256": rgb,
       "rawLatentSHA256": fixture.rawSHA256, "exactFrozenPixels": exact,
       "closed": closed?.closed ?? false, "remainingResidentBytes": closed?.remainingResidentBytes ?? -1,
       "maximumResidentBytes": closed?.maximumResidentBytes ?? -1,
+      "maximumGridCacheBytes": closed?.maximumGridCacheBytes ?? -1,
       "mlxPeakBytes": Memory.peakMemory, "mlxCacheAfterBytes": Memory.cacheMemory,
       "physicalLifetimePeakBytes": try physicalPeak(),
       "failure": failure.map { String(describing: $0) } ?? "",
@@ -176,7 +261,10 @@ final class H3VideoDecodeMemoryModeTests: XCTestCase {
     if let failure { throw failure }
     XCTAssertTrue(exact, "All Float32 chunks and RGB8 bytes must match the frozen eager oracle.")
     XCTAssertTrue(released)
-    XCTAssertEqual(closed?.maximumResidentBytes, 2_582_138_032)
+    let statistics = try XCTUnwrap(closed)
+    XCTAssertGreaterThan(statistics.maximumGridCacheBytes,0)
+    XCTAssertLessThanOrEqual(statistics.maximumGridCacheBytes,H3VideoVAEDecodeSession.maximumGridCacheBytes)
+    XCTAssertEqual(statistics.maximumResidentBytes,2_582_138_032+statistics.maximumGridCacheBytes)
     XCTAssertEqual(Memory.cacheMemory, 0)
   }
 }

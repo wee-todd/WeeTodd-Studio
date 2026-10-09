@@ -5,8 +5,19 @@ import UniformTypeIdentifiers
 
 extension StudioStore {
   func endpointTasks(for clip: Clip) -> [String]? {
-    guard clip.profileID != "auto" else { return nil }
-    return profiles.first { $0.id == clip.profileID && $0.engine == clip.engine.rawValue }?.generation?.supportedTasks
+    let profileTasks = clip.profileID == "auto" ? nil
+      : profiles.first { $0.id == clip.profileID && $0.engine == clip.engine.rawValue }?.generation?.supportedTasks
+    guard clip.engine == .ltx25, runtime.usesNativeLTX25,
+      let resolved = generationDescriptions[clip.id],
+      resolved["studioEngine"] as? String == clip.engine.rawValue,
+      resolved["studioTask"] as? String == clip.inferredTask,
+      resolved["studioProfile"] as? String == clip.profileID,
+      resolved["studioInput"] as? String == generationRequestKey(for: clip),
+      let generation = resolved["generation"] as? [String: Any],
+      generation["ordinaryKeyframesAvailable"] as? Bool == true else { return profileTasks }
+    var tasks = generation["supportedTasks"] as? [String] ?? profileTasks ?? []
+    if !tasks.contains("fflf") { tasks.append("fflf") }
+    return tasks
   }
 
   func supportsEndpoint(_ role: MediaRole, for clip: Clip) -> Bool {

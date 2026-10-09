@@ -7,6 +7,13 @@ import LTX25Engine
 enum MLXStudioSpecializedRecipe {
   static func compile(data:Data,outputDirectory:String) throws -> MLXDistilledRequest {
     if let root=try JSONSerialization.jsonObject(with:data) as? [String:Any],
+      (root["config"] as? [String:Any])?["ic_lora_single_stage"] as? Bool == true,
+      let condition=root["conditioning"] as? [String:Any],
+      let inputs=condition["inputs"] as? [[String:Any]],
+      inputs.contains(where:{ ["canny_edges","depth_map","pose_skeleton"].contains($0["control_type"] as? String ?? "") }) {
+      return try MLXStudioSingleStageControlRecipe.compileUnion(root:root,outputDirectory:outputDirectory)
+    }
+    if let root=try JSONSerialization.jsonObject(with:data) as? [String:Any],
       let condition=root["conditioning"] as? [String:Any],
       let inputs=condition["inputs"] as? [[String:Any]],
       inputs.contains(where:{ ["motion_track","crossview_warp"].contains($0["control_type"] as? String ?? "") }) {
@@ -37,6 +44,12 @@ enum MLXStudioSpecializedRecipe {
       throw invalid("ic_lora_single_stage must be a boolean")
     }
     let single=config["ic_lora_single_stage"] as? Bool ?? false
+    let ingredientsGuided=task == "control" && single && config["pipeline_mode"] as? String == "guided"
+    if ingredientsGuided {
+      guard config["stage2_steps"] as? Int == 0, config["single_stage_sampler"] == nil else {
+        throw invalid("Dev Ingredients requires zero refinement updates and no CFG++ sampler")
+      }
+    }
     let ingredientsCFGPP:Bool
     if let sampler=config["single_stage_sampler"] {
       guard task == "control",single,sampler as? String == "euler_ancestral_cfg_pp" else {
@@ -95,11 +108,15 @@ enum MLXStudioSpecializedRecipe {
     root["components"]=components;root["config"]=config
     root["conditioning"]=["version":1,"task":"t2v","audio_policy":"generated","inputs":[]]
     var request=try MLXStudioRecipe.compileFields(data:JSONSerialization.data(withJSONObject:root),
-      outputDirectory:outputDirectory,requiresSpatialUpscaler:false)
-    request["version"]=task == "ref2va" ? (audioInputs.isEmpty ? 7 : 16) : ingredientsCFGPP ? 11 : 6
+      outputDirectory:outputDirectory,requiresSpatialUpscaler:false,singleStageGuided:ingredientsGuided)
+    request["version"]=task == "ref2va" ? (audioInputs.isEmpty ? 7 : 16) : ingredientsGuided ? 17 : ingredientsCFGPP ? 11 : 6
     request["task"]=task == "ref2va" ? "msr" : "ingredients"
     request["audio_reference"]=NSNull();request["union_control_guide"]=NSNull()
     request["ingredients_sheet"]=NSNull()
+    if ingredientsGuided {
+      for key in ["msr","dfr","ic_control","automatic_duration","generated_keyframes","single_stage_sampling"] { request[key]=NSNull() }
+      request["stage_two_loras"]=[]
+    }
     if ingredientsCFGPP {
       request["msr"]=NSNull();request["dfr"]=NSNull();request["ic_control"]=NSNull()
       request["ingredients_sampling"]=MLXIngredientsSampling.ancestralCFGPP.rawValue
@@ -172,18 +189,26 @@ enum MLXStudioSpecializedRecipe {
       condition["task"] as? String == "control",
       let inputs=condition["inputs"] as? [[String:Any]],
       let pairs=components["ic_loras"] as? [[Any]],
-      config["ic_lora_single_stage"] as? Bool != true,
       (config["dfr_enabled"] as? Bool ?? false) == false,
       (components["msr_lora_path"] as? String ?? "").isEmpty else {
-      throw invalid("requires a two-stage control recipe with explicit ordered guides")
+      throw invalid("requires a control recipe with explicit ordered guides")
+    }
+    let single=config["ic_lora_single_stage"] as? Bool == true
+    let controlInputs=inputs.filter { $0["role"] as? String == "control" }
+    let imageInputs=inputs.filter { $0["role"] as? String == "keyframe" }
+    guard single || imageInputs.isEmpty,
+      controlInputs.count+imageInputs.count == inputs.count,
+      inputs.compactMap({ $0["id"] as? String }).count == inputs.count,
+      Set(inputs.compactMap({ $0["id"] as? String })).count == inputs.count else {
+      throw invalid("ordinary image anchors require single-stage sampling and unique input IDs")
     }
     let family:String,roles:[String],families:[String]
-    if inputs.count == 1,inputs[0]["control_type"] as? String == "motion_track" {
+    if controlInputs.count == 1,controlInputs[0]["control_type"] as? String == "motion_track" {
       family="motion_track";roles=["control"];families=["motion_track"]
-    } else if inputs.count == 2 || inputs.count == 3 {
-      family=inputs.count == 2 ? "crossview_warp" : "crossview_ingredients"
-      roles=inputs.count == 2 ? ["warp","source"] : ["warp","source","ingredients"]
-      families=inputs.count == 2 ? ["crossview_warp"] : ["crossview_warp","ingredients_reference_sheet"]
+    } else if controlInputs.count == 2 || controlInputs.count == 3 {
+      family=controlInputs.count == 2 ? "crossview_warp" : "crossview_ingredients"
+      roles=controlInputs.count == 2 ? ["warp","source"] : ["warp","source","ingredients"]
+      families=controlInputs.count == 2 ? ["crossview_warp"] : ["crossview_warp","ingredients_reference_sheet"]
     } else { throw invalid("MotionTrack needs one guide; CrossView needs ordered warp/source guides and an optional Ingredients guide") }
     if let declared=condition["control_family"] {
       guard let value=declared as? String,value == family else {
@@ -195,7 +220,7 @@ enum MLXStudioSpecializedRecipe {
       throw invalid("adapter count and audio policy must match the selected control family")
     }
     var ids=Set<String>()
-    let guides=try inputs.enumerated().map { index,input->[String:Any] in
+    let guides=try controlInputs.enumerated().map { index,input->[String:Any] in
       guard Set(input.keys).isSubset(of:["id","kind","role","path","sha256","strength","control_type","format","reference_role"]),
         let id=input["id"] as? String,!id.isEmpty,ids.insert(id).inserted,
         input["kind"] as? String == "video",input["role"] as? String == "control",
@@ -216,9 +241,9 @@ enum MLXStudioSpecializedRecipe {
     }
     var root=original
     components["ic_loras"]=[];root["components"]=components
-    root["conditioning"]=["version":1,"task":"t2v","audio_policy":"generated","inputs":[]]
+    root["conditioning"]=["version":1,"task":imageInputs.isEmpty ? "t2v":"fflf","audio_policy":"generated","inputs":imageInputs]
     var request=try MLXStudioRecipe.compileFields(data:JSONSerialization.data(withJSONObject:root),outputDirectory:outputDirectory)
-    request["version"]=10;request["task"]="ic_control"
+    request["version"]=single ? 15:10;request["task"]="ic_control"
     for key in ["audio_reference","union_control_guide","ingredients_sheet","msr","dfr"] { request[key]=NSNull() }
     var audio:Any=NSNull()
     if var source=condition["publication_audio"] as? [String:Any] {

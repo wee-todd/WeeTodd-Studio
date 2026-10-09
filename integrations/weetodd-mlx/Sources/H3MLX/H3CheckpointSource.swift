@@ -230,6 +230,11 @@ enum H3CheckpointSource {
     return source.fixed
   }
   static func checkUnchanged(_ root: URL) throws {
-    if isPaged(root) { try inspect(root).checkUnchanged() }
+    if isPaged(root) {
+      // Both cached inspection and fresh admission finish with the complete
+      // identity walk. Preserve its subsequent cancellation checkpoint only.
+      _ = try inspect(root)
+      try Task.checkCancellation()
+    }
   }
 }

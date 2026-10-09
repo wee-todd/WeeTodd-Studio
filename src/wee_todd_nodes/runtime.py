@@ -44,6 +44,39 @@ class H3GenerationConfig:
     inference_optimization: str = "off"
     paging_cache_gb: float = 0.0
 
+    @classmethod
+    def from_recipe_fields(cls, fields):
+        """Reject Swift-only decoder execution before a Python model is loaded."""
+        value = fields.get("video_decode_precision", "float32")
+        if not isinstance(value, str) or value not in {"float32", "float16"}:
+            raise ValueError("video_decode_precision must be float32 or float16")
+        if value == "float16":
+            raise ValueError(
+                "FP16 H3 video decoding requires the Swift MLX runtime; Python supports FP32 only"
+            )
+        attention = fields.get("attention_policy", "dense")
+        if not isinstance(attention, str) or attention not in {"dense", "sol_experimental"}:
+            raise ValueError("attention_policy must be dense or sol_experimental")
+        if attention == "sol_experimental":
+            raise ValueError(
+                "Experimental Sol attention requires the Swift MLX runtime; "
+                "Python supports dense only"
+            )
+        cache = fields.get("transformer_weight_cache_gb", 0)
+        if (
+            isinstance(cache, bool)
+            or not isinstance(cache, int)
+            or cache not in {0, 8, 16, 32, 48, 64, 96}
+        ):
+            raise ValueError("transformer_weight_cache_gb must be 0, 8, 16, 32, 48, 64 or 96 GiB")
+        if cache:
+            raise ValueError("Transformer weight cache requires the Swift MLX runtime")
+        compatible = dict(fields)
+        compatible.pop("transformer_weight_cache_gb", None)
+        compatible.pop("attention_policy", None)
+        compatible.pop("video_decode_precision", None)
+        return cls(**compatible)
+
     def validate(self) -> None:
         if self.transformer_backend not in {"mlx", "nnc_experimental"}:
             raise ValueError("transformer_backend must be mlx or nnc_experimental")

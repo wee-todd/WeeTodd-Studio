@@ -11,7 +11,7 @@ public final class SafeTensorStreamWriter {
     public let shape:[UInt64]
     public let byteCount:UInt64
     public init(dtype:String,shape:[UInt64]) throws {
-      let widths:[String:UInt64]=["F32":4,"F16":2,"BF16":2,"U32":4,"U8":1]
+      let widths:[String:UInt64]=["F32":4,"F16":2,"BF16":2,"I32":4,"U32":4,"U8":1]
       guard let width=widths[dtype],shape.count<=16 else {
         throw CheckpointError.invalid("Unsupported streaming tensor dtype or rank.")
       }

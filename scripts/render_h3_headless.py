@@ -102,7 +102,7 @@ def main():
     fields = dict(recipe["components"])
     fields["preview_override"] = H3PreviewConfig(**fields["preview_override"])
     components = H3ComponentSetSpec(**fields)
-    config = H3GenerationConfig(**recipe["config"])
+    config = H3GenerationConfig.from_recipe_fields(recipe["config"])
     attention_fields = dict(recipe["attention"])
     for name in ("prefix_segments", "video_grid"):
         attention_fields[name] = tuple(attention_fields[name])

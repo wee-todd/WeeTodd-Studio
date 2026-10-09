@@ -5,6 +5,7 @@ import MLX
 /// worker must stage every decoded frame and waveform before atomic publish.
 /// Other H3 tasks have separate conditioning contracts and cannot enter here.
 public struct H3T2VARequest: Sendable {
+  public let transformerWeightCacheGB:Int
   public let prompt: String
   public let geometry: H3Geometry
   public let durationSeconds: Double
@@ -15,6 +16,7 @@ public struct H3T2VARequest: Sendable {
   public let qwenPages: URL
   public let tokenizer: URL
   public let videoDecodeMemoryMode: H3VideoDecodeMemoryMode?
+  public let videoDecodePrecision: H3VideoDecodePrecision
   public let videoVAE: URL
   public let audioVAE: URL
   public let turboLoRA: URL?
@@ -35,8 +37,10 @@ public struct H3T2VARequest: Sendable {
     funControl: H3FunControlGuide? = nil,
     vdn:H3VDNSelection? = nil,fastVariant:H3FastVariant? = nil,
     videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil,
+    videoDecodePrecision: H3VideoDecodePrecision = .float32,
     samplingMethod: H3SamplingMethod = .euler,
-    canvasAdmission: H3CanvasAdmission = .ordinary) throws {
+    canvasAdmission: H3CanvasAdmission = .ordinary, transformerWeightCacheGB:Int = 0) throws {
+    try videoDecodePrecision.validate(memoryMode: videoDecodeMemoryMode)
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
       [transformer, qwenPages, tokenizer, videoVAE, audioVAE]
@@ -78,6 +82,7 @@ public struct H3T2VARequest: Sendable {
     self.qwenPages = qwenPages
     self.tokenizer = tokenizer
     self.videoDecodeMemoryMode = videoDecodeMemoryMode
+    self.videoDecodePrecision = videoDecodePrecision
     self.videoVAE = videoVAE
     self.audioVAE = audioVAE
     self.turboLoRA = turboLoRA
@@ -106,6 +111,11 @@ public struct H3T2VARequest: Sendable {
         throw H3CheckpointError.invalid("FastH3 Preview v1 requires four Euler evaluations without adapters or controls.")
       }
     }
+    guard H3TransformerCachePlan.budgets.contains(transformerWeightCacheGB),
+      transformerWeightCacheGB == 0 || (funControl == nil && vdn == nil && fastVariant == nil && canvasAdmission == .ordinary && effective.allSatisfy({ $0.startAfterEvaluations == 0 })) else {
+      throw H3CheckpointError.invalid("H3 weight cache requires ordinary MLX generation without deferred adapters, FastH3, VDN, controls or refinement.")
+    }
+    self.transformerWeightCacheGB = transformerWeightCacheGB
     self.fastVariant = fastVariant
     self.vdn=vdn
   }
@@ -127,6 +137,17 @@ public enum H3T2VARunner {
     public let videoFrames: Int
     public let audioSamplesPerChannel: Int
     public let audioSampleRate: Int
+    public let backendReport: H3BackendReport?
+    public let videoDecodePrecision: H3VideoDecodePrecision?
+
+    public init(videoFrames: Int, audioSamplesPerChannel: Int, audioSampleRate: Int,
+      backendReport: H3BackendReport? = nil, videoDecodePrecision: H3VideoDecodePrecision? = nil) {
+      self.videoFrames = videoFrames
+      self.audioSamplesPerChannel = audioSamplesPerChannel
+      self.audioSampleRate = audioSampleRate
+      self.backendReport = backendReport
+      self.videoDecodePrecision = videoDecodePrecision
+    }
   }
 
   /// Inspect every installed component and all task geometry before the first
@@ -173,6 +194,9 @@ public enum H3T2VARunner {
       _ = try H3LoRAFile(url: adapter.url,
         strength: adapter.strength, requestedSteps: video.timesteps.count + 1, samplingMethod: request.samplingMethod, qkvLayout: adapter.qkvLayout, profile: adapter.profile, startAfterEvaluations: adapter.startAfterEvaluations, requiresStandardProfile: refinement.map { $0.strength < 1 || $0.startVideoSigma != nil } ?? false)
     }
+    if request.transformerWeightCacheGB > 0 {
+      _ = try H3TransformerCachePlan.inspect(checkpointURL:request.transformer,blockCount:50,budgetGB:request.transformerWeightCacheGB,adapters:request.loRAAdapters)
+    }
     return Admission(geometry: request.geometry,
       textRows: qwen.tags.count, packedRows: layout.tags.count,
       evaluations: video.timesteps.count, layout: layout,
@@ -187,6 +211,9 @@ public enum H3T2VARunner {
     onFrame: (Int, Data) throws -> Void,
     onAudio: ([Float], Int) throws -> Void,
     onLatents: (([Float], [Float]) throws -> Void)? = nil,
+    // Optional scalar diagnostics; intervals are nested within preparation.
+    // The default does not read a clock or add any GPU completion.
+    onPreparationMeasurement: ((String, Double, Bool) -> Void)? = nil,
     progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
     guard (initialRows == nil) == (refinement == nil) else {
       throw H3CheckpointError.invalid("H3 refinement requires both joint initial rows and explicit controls.")
@@ -211,6 +238,7 @@ public enum H3T2VARunner {
     }
     Stream.gpu.synchronize(); Memory.clearCache()
     if controlCondition != nil { progress("control_video_weights_released", 1, 1) }
+    var backendReport: H3BackendReport?
     let rawRows = try autoreleasepool { () throws -> ([Float], [Float]) in
       try Task.checkCancellation()
       let conditioned = try H3QwenTextEncoder.encode(prompt: request.prompt,
@@ -227,11 +255,17 @@ public enum H3T2VARunner {
         textEmbeddings: conditioned.hidden
           .reshaped([1, admission.textRows, 5120]),
         timestepTable: admission.rowSchedule.table,
-        blockCount: 50,
+        blockCount: 50, transformerWeightCacheGB:request.transformerWeightCacheGB,
+        allowMPP: H3MPPProjection.isTaskEligible(.t2va, isRefinement: refinement != nil),
         turboLoRAURL: request.turboLoRA,
         turboLoRAStrength: request.turboLoRAStrength,
         additionalLoRAs: request.additionalLoRAs, loRAAdapters: request.loRAAdapters,
-        funControl: controlCondition,vdn:request.vdn) { completed, total in
+        funControl: controlCondition,vdn:request.vdn,
+        preparationObserver: onPreparationMeasurement.map { callback in
+          { measurement in
+            callback(measurement.stage.rawValue, measurement.seconds, measurement.succeeded)
+          }
+        }) { completed, total in
         progress("transformer_prepare", completed, total)
       }
       defer { state.unload() }
@@ -258,6 +292,7 @@ public enum H3T2VARunner {
         })
       let video = sampled.video.asType(.float32).asArray(Float.self)
       let audio = refinement?.preserveAudio == true ? initialRows!.audio : sampled.audio.asType(.float32).asArray(Float.self)
+      backendReport = state.unloadAndReport()
       return (video, audio)
     }
     controlCondition = nil
@@ -270,11 +305,14 @@ public enum H3T2VARunner {
     let result = try H3AVOutputDecoder.decode(videoRows: rawRows.0,
       audioRows: rawRows.1, geometry: geometry, videoVAE: request.videoVAE,
       audioVAE: request.audioVAE, videoDecodeMemoryMode: request.videoDecodeMemoryMode,
+      videoDecodePrecision: request.videoDecodePrecision,
       publicationAudio: publicationAudio,
+      backendReport: backendReport,
       onFrame: onFrame, onAudio: onAudio,
       progress: progress)
     return Result(videoFrames: result.videoFrames,
       audioSamplesPerChannel: result.audioSamplesPerChannel,
-      audioSampleRate: result.audioSampleRate)
+      audioSampleRate: result.audioSampleRate, backendReport: result.backendReport,
+      videoDecodePrecision: result.videoDecodePrecision)
   }
 }

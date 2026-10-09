@@ -89,7 +89,7 @@ public final class MLXMediaPipeline {
         : request.ingredientsSampling == .ancestralCFGPP
         ? MLXSingleStageRipple.cfgppReserveBytes(geometry:geometry) :
         (index == 0 && request.guidedSampling != nil ? MLXGuidedSampling.reserveBytes(
-          videoTokens:ordinary?.videoTokens ?? (geometry.videoTokens+(request.referenceImages.count == 2 ? geometry.latentHeight*geometry.latentWidth : 0)),
+          videoTokens:request.ingredientsSheet != nil ? geometry.videoTokens*2 : ordinary?.videoTokens ?? (geometry.videoTokens+(request.referenceImages.count == 2 ? geometry.latentHeight*geometry.latentWidth : 0)),
           audioTokens:geometry.audioFrames) : 0)
       guard reserve < transformerActivationBytes else {
         throw LTXError.invalid("CFG++ exceeds the configured activation budget before model loading.")
@@ -154,7 +154,7 @@ public final class MLXMediaPipeline {
         height:geometry.height,maximumOwnedBufferBytes:videoActivationBytes)
     }
     if request.ingredientsSheet != nil {
-      _ = try MLXVideoEncodeTilePlan(frames:1,
+      _ = try MLXVideoEncodeTilePlan(frames:request.guidedSampling?.singleStage == true ? recipe.high.frames : 1,
         width:recipe.high.width,height:recipe.high.height,
         maximumOwnedBufferBytes:videoActivationBytes)
     }
@@ -227,6 +227,7 @@ public final class MLXMediaPipeline {
         transformerRoot:URL(fileURLWithPath:request.transformerRoot),
         adapters:[LoRAAdapter(path:sheet.adapterPath,strength:sheet.adapterStrength)],
         task:.ingredients,ingredientsSampling:request.ingredientsSampling,
+        guidedSampling:request.guidedSampling,
         maximumActivationBytes:transformerActivationBytes)
     } else if let msr=request.msr {
       singleStageSampler=nil
@@ -385,7 +386,8 @@ public final class MLXMediaPipeline {
     try fm.createDirectory(at:imageDirectory,withIntermediateDirectories:false)
     let preparationStart=Date(),recipe=try request.recipe()
     let ingredientsGuide=try request.ingredientsSheet.map {
-      try MLXIngredientsGuide.prepare($0,geometry:recipe.high,ffmpeg:ffmpeg,directory:imageDirectory)
+      try MLXIngredientsGuide.prepare($0,geometry:recipe.high,ffmpeg:ffmpeg,directory:imageDirectory,
+        repeatedFrames:request.guidedSampling?.singleStage == true)
     }
     let msrResolved=try MLXMSRReferencePlan.resolve(request,target:recipe.high)
     let msrGuides:[URL]=try msrResolved.map { resolved in
@@ -531,6 +533,16 @@ public final class MLXMediaPipeline {
           return ([],nil,encoded)
         }
         if let ingredientsGuide {
+          if request.guidedSampling?.singleStage == true {
+            let tile=try MLXVideoEncodeTilePlan(frames:recipe.high.frames,width:recipe.high.width,
+              height:recipe.high.height,maximumOwnedBufferBytes:videoActivationBytes)
+            let encoded=try MLXTiledVideoEncoder.encode(guide:ingredientsGuide,
+              checkpoint:URL(fileURLWithPath:request.videoCheckpoint),plan:tile) {
+              try report("ingredients_guide_encode",$0,$1)
+            }
+            if let sheet=request.ingredientsSheet { try NativeMediaSource(path:sheet.path,sha256:sheet.sourceSHA256).verify() }
+            return ([],encoded.reshaped([recipe.high.videoTokens,128]),[])
+          }
           let encoded=try MLXIngredientsGuide.encodeStatic(guide:ingredientsGuide,
             checkpoint:URL(fileURLWithPath:request.videoCheckpoint),geometry:recipe.high,
             maximumOwnedBufferBytes:videoActivationBytes) {
@@ -790,14 +802,13 @@ public final class MLXMediaPipeline {
       metadata["peak_memory_scope"]="automatic text and duration preparation through completed media"
     }
     if let guided=request.guidedSampling {
-      let branches=1+(guided.videoCFG != 1 || guided.audioCFG != 1 ? 1 : 0)+(guided.stg != 0 ? 1 : 0)+(guided.modality != 1 ? 1 : 0)
-      let evaluations=(guided.mode == .guided ? guided.steps : guided.steps*2+1)*branches
+      let evaluations=guided.transformerEvaluations
       metadata["scope"]="developer Swift MLX Dev guided audiovisual generation"
-      metadata["recipe"]="ltx25-dev-"+guided.mode.rawValue+"-two-stage-v1"
+      metadata["recipe"]=guided.singleStage ? "ltx25-dev-ingredients-single-stage-v1" : "ltx25-dev-"+guided.mode.rawValue+"-two-stage-v1"
       metadata["guided_sampling"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(guided))
       metadata["stage1_model_evaluations"]=evaluations
       metadata["stage1_updates"]=guided.steps+(guided.mode == .guided ? 0 : 1)
-      metadata["stage2_model_evaluations"]=3
+      metadata["stage2_model_evaluations"]=guided.singleStage ? 0 : 3
     }
     if let source=publicationSource {
       metadata["audio_samples"]=source.publicationSamples
@@ -829,13 +840,13 @@ public final class MLXMediaPipeline {
       metadata["union_adapter_scope"]="stage_one_only"
     } else if let sheet=request.ingredientsSheet {
       metadata["reference_count"]=1
-      metadata["reference_preparation"]="one frozen RGB24 still encoded once, with normalized latent repeated over the guide timeline"
-      metadata["reference_conditioning"]="full-resolution VAE-encoded static sheet guide in one distilled stage"
+      metadata["reference_preparation"]=request.guidedSampling == nil ? "one frozen RGB24 still encoded once, with normalized latent repeated over the guide timeline" : "frozen RGB24 sheet repeated as a full-length static video and causally VAE encoded"
+      metadata["reference_conditioning"]="full-resolution VAE-encoded static sheet guide in one "+(request.guidedSampling == nil ? "distilled" : "Dev guided")+" stage"
       metadata["ingredients_sheet_sha256"]=sheet.sourceSHA256
-      metadata["ingredients_guide_encoding"]="one_static_rgb_frame_then_latent_repeat_v1"
+      metadata["ingredients_guide_encoding"]=request.guidedSampling == nil ? "one_static_rgb_frame_then_latent_repeat_v1" : "repeated_rgb_video_causal_encode_v1"
       metadata["ingredients_adapter_scope"]="single_full_resolution_stage"
       metadata["ingredients_sampling"]=request.ingredientsSampling.rawValue
-      metadata["transformer_evaluations"]=request.ingredientsSampling.transformerEvaluations
+      metadata["transformer_evaluations"]=request.guidedSampling?.transformerEvaluations ?? request.ingredientsSampling.transformerEvaluations
       if request.ingredientsSampling == .ancestralCFGPP {
         metadata["sampler_state_precision"]="float32_sampler_bf16_model_v1"
         metadata["ancestral_noise_policy"]="mlx_threefry_bf16_step_modality_seed_plus_10000_v1"

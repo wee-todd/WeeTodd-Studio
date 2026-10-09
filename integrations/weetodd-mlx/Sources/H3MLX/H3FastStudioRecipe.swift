@@ -13,12 +13,15 @@ public enum H3FastStudioRecipe {
       root["vdn"] == nil,root["loras"] == nil else {
       throw H3CheckpointError.invalid("FastH3 needs an explicit dense-v1 or vsa-v1 T2VA recipe without combined controls.")
     }
+    guard try H3TransformerCachePlan.budget(config:root["config"] as? [String:Any] ?? [:]) == 0 else {
+      throw H3CheckpointError.invalid("Transformer weight cache is not admitted for FastH3 or VDN.")
+    }
     let base = try H3StudioRecipe.compile(data:JSONSerialization.data(withJSONObject:root))
     return try H3T2VARequest(prompt:base.prompt,width:base.geometry.width,height:base.geometry.height,
       durationSeconds:base.durationSeconds,seed:base.seed,requestedSteps:base.requestedSteps,
       transformer:base.transformer,qwenPages:base.qwenPages,tokenizer:base.tokenizer,
       videoVAE:base.videoVAE,audioVAE:base.audioVAE,turboLoRA:base.turboLoRA,
       additionalLoRAs:base.additionalLoRAs,loRAAdapters:base.loRAAdapters,funControl:base.funControl,
-      fastVariant:variant,videoDecodeMemoryMode:base.videoDecodeMemoryMode,samplingMethod:base.samplingMethod)
+      fastVariant:variant,videoDecodeMemoryMode:base.videoDecodeMemoryMode, videoDecodePrecision: base.videoDecodePrecision,samplingMethod:base.samplingMethod)
   }
 }

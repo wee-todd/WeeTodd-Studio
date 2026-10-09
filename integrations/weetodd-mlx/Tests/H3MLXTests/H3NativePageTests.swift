@@ -13,6 +13,34 @@ final class H3NativePageTests: XCTestCase {
       "unused": MLXArray.ones([4], dtype: .bfloat16)], url: url)
     return url
   }
+  func testDeferredNativeFactorsMaterializeTogetherAfterOwnerRetires() throws {
+    let url = try fixture(); defer { try? FileManager.default.removeItem(at: url) }
+    let file = try SafeTensorFile(url: url)
+    let source = H3NativePage(file: file, url: url)
+    let projection = try H3QwenQ8Projection(
+      packed: source.read("linear.weight", materialize: false),
+      scales: source.read("linear.scales", materialize: false),
+      biases: source.read("linear.biases", materialize: false),
+      columns: 64, materializeWeights: false)
+    // Dropping unread factors cannot drop the reader owned by the taken arrays.
+    source.clear()
+    eval(projection.parametersToMaterialize)
+    try file.checkUnchanged(at: url)
+    XCTAssertEqual(try projection.project(MLXArray.ones([1, 64], dtype: .bfloat16))
+      .asArray(Float.self), [32, 128])
+    XCTAssertThrowsError(try source.read("unused", materialize: false))
+  }
+
+  func testDeferredNativeFactorStillRejectsSourceMutation() throws {
+    let url = try fixture(); defer { try? FileManager.default.removeItem(at: url) }
+    let source = H3NativePage(file: try SafeTensorFile(url: url), url: url)
+    _ = try source.read("linear.weight", materialize: false)
+    let handle = try FileHandle(forWritingTo: url)
+    try handle.truncate(atOffset: 0); try handle.close()
+    XCTAssertThrowsError(try source.read("linear.scales", materialize: false))
+    XCTAssertThrowsError(try source.read("unused", materialize: false))
+  }
+
   func testNativeFactorsRetainPackedProjectionValues() throws {
     let url = try fixture(); defer { try? FileManager.default.removeItem(at: url) }
     let file = try SafeTensorFile(url: url)

@@ -15,7 +15,8 @@ def build_worker(root, *, swift="swift", env=None, build_arguments=("--build-sys
     package = Path(root) / "integrations/weetodd-mlx"
     subprocess.run([str(swift), "build", "--package-path", str(package), "-c", "release",
                     "--product", "WeeToddLTXWorker", "--jobs", "2",
-                    "--disable-automatic-resolution", *build_arguments], check=True, env=env)
+                    "--disable-automatic-resolution", *build_arguments, "-Xcxx", "-DNDEBUG"],
+                   check=True, env=env)
     binaries = package / ".build/release"
     subprocess.run([str(package / "scripts/build_mlx_metallib.sh"), str(binaries)],
                    check=True, env=env)
