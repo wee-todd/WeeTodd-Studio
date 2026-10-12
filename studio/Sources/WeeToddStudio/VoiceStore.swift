@@ -198,12 +198,12 @@ import StudioCore
       notice = asset.voiceGeneration!.truncated ? "Voice take saved with a token-limit warning. Audition before placing it." : "Voice take saved. Audition it, then add it to the selected clip."
     } catch { self.error = error.localizedDescription }
   }
-  func placeVoiceTake(_ asset: MediaAsset) {
+  func placeVoiceTake(_ asset: MediaAsset, trimToClip: Bool = true) {
     guard let clipID = selectedClipID else { error = "Select the destination video clip first."; return }
     do {
-      var updated = project; let region = try updated.placeVoice(asset, clipID: clipID)
+      var updated = project; let region = try updated.placeVoice(asset, clipID: clipID, trimToClip: trimToClip)
       change { $0 = updated }; selectedAudioID = region.id
-      notice = "Voice added on its own track. Music remains independently editable."
+      finishAudioPlacement(region)
     } catch { self.error = error.localizedDescription }
   }
   func saveVoicePreset() {

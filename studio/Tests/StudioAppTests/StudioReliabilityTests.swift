@@ -37,6 +37,26 @@ import XCTest
 }
 
 final class StudioReliabilityTests: XCTestCase {
+  @MainActor func testSwiftH3RefModAttachmentIsRejectedWithoutLegacyDispatch() async throws {
+    var calls = 0
+    let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false,
+      invocation: { _, _, _, _ in calls += 1; throw StudioError.invalid("Unexpected renderer invocation") })
+    store.runtime.pythonPath = "/unavailable/python"
+    store.runtime.nativeH3Enabled = true
+    store.addClip(.h3)
+    var mod = MediaAsset(name: "Saved appearance", kind: .refmod, path: "/tmp/visual.safetensors")
+    mod.refmodKind = "image"; mod.refmodTokenCount = 256
+    mod.refmodSHA256 = String(repeating: "a", count: 64)
+    store.change { $0.assets.append(mod) }
+    let action = try XCTUnwrap(store.selectedClip?.referenceActions(for: mod).first)
+    await store.useReference(mod, action: action)
+    XCTAssertTrue(store.selectedClip?.attachments.isEmpty == true)
+    XCTAssertTrue(store.error?.contains("RefMod") == true, store.error ?? "Missing limitation")
+    XCTAssertTrue(store.error?.contains("Swift H3") == true, store.error ?? "Missing runtime limitation")
+    XCTAssertEqual(calls, 0)
+    XCTAssertTrue(store.runtime.usesNativeH3)
+  }
+
   @MainActor func testExperimentalNativeH3PreflightGatesPreparedRecipeWithoutPython() async throws {
     let fake = SuspendedBridge("h3-native-preflight")
     let store = StudioStore(dataDirectory: try temporaryDirectory(), restoreSession: false,
@@ -821,6 +841,37 @@ final class StudioReliabilityTests: XCTestCase {
     XCTAssertTrue(fake.calls.contains { $0.0 == "ltx-native-prepare" })
     XCTAssertFalse(fake.calls.contains { $0.0 == "describe-generation" || $0.0 == "prepare" })
     XCTAssertFalse(fake.calls.contains { $0.0 == "render" || $0.0 == "ltx-native-render" })
+  }
+
+  @MainActor func testApprovedObjectRefModAttachesOnlyWhileApprovalIsCurrent() async throws {
+    let directory = try temporaryDirectory()
+    let file = directory.appendingPathComponent("object.safetensors")
+    try Data([1, 2, 3, 4]).write(to: file)
+    let store = StudioStore(dataDirectory: directory, restoreSession: false)
+    store.runtime.nativeH3Enabled = false
+    store.addClip()
+    store.editClip { $0.engine = .h3 }
+    var mod = MediaAsset(name: "Character embedding", kind: .refmod, path: file.path)
+    mod.refmodKind = "image"
+    mod.refmodTokenCount = 256
+    mod.refmodSHA256 = String(repeating: "a", count: 64)
+    var character = PlanningSubject(name: "Character", kind: .character)
+    character.details = "Reviewed appearance"
+    character.referenceAssetIDs = [mod.id]
+    var plan = ProjectPlanning(); plan.subjects = [character]
+    store.change { $0.assets.append(mod); $0.planning = plan }
+    await store.useApprovedObjectRefMod(character.id, assetID: mod.id)
+    XCTAssertTrue(store.selectedClip?.attachments.isEmpty == true)
+    try plan.approveSubject(character.id)
+    try plan.approveReferences(character.id, assets: store.project.assets)
+    store.change { $0.planning = plan }
+    await store.useApprovedObjectRefMod(character.id, assetID: mod.id)
+    XCTAssertEqual(store.selectedClip?.attachments.first?.assetID, mod.id)
+    XCTAssertEqual(store.selectedClip?.inferredTask, "ref2va")
+    store.editClip { $0.attachments.removeAll() }
+    store.changePlanning { $0.subjects[0].details = "Changed appearance" }
+    await store.useApprovedObjectRefMod(character.id, assetID: mod.id)
+    XCTAssertTrue(store.selectedClip?.attachments.isEmpty == true)
   }
 
   @MainActor func testPreparedReferenceAttachesAtomicallyAndUndoRestoresShot() async throws {

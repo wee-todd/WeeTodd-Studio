@@ -52,6 +52,12 @@ struct AssetBrowser: View {
               .system(size: 10, design: .monospaced)
             ).foregroundStyle(.secondary)
           }
+          if asset.kind == .refmod {
+            Text("\(asset.refmodKind == "video" ? "<Video 1>" : "<Picture 1>") · \(asset.refmodTokenCount ?? 0) H3 tokens")
+              .font(.system(size: 10, design: .monospaced))
+            Text("Saved visual latent for native H3 Ref2VA. The prompt uses this numbered reference; text conditioning remains text only.")
+              .font(.system(size: 10)).foregroundStyle(.secondary)
+          }
           HStack {
             Menu("Use in clip") { roleButtons(asset) }.disabled(store.selectedClip == nil)
             Button {
@@ -183,8 +189,9 @@ struct AssetBrowser: View {
   func remove(_ asset: MediaAsset) {
     if store.project.clips.contains(where: { $0.attachments.contains { $0.assetID == asset.id } })
       || store.project.audio.contains(where: { $0.assetID == asset.id })
+      || store.project.planning?.subjects.contains(where: { $0.referenceAssetIDs.contains(asset.id) }) == true
     {
-      store.error = "This asset is in use. Remove its clip attachment or audio region first."
+      store.error = "This asset is in use. Remove its clip, audio, or production-object link first."
       return
     }
     if asset.scope == .global {
@@ -238,6 +245,7 @@ struct AssetCard: View {
     case .sequence: return "square.stack.3d.up"
     case .text: return "text.alignleft"
     case .lora: return "slider.horizontal.3"
+    case .refmod: return "square.stack.3d.up"
     }
   }
   func thumbnail() async {

@@ -4,6 +4,18 @@ import StudioCore
 extension StudioStore {
   func useReference(_ source: MediaAsset, action: ReferenceAction) async {
     guard !operationBusy, let clip = selectedClip else { return }
+    if source.kind == .refmod && clip.engine == .h3 && runtime.usesNativeH3 {
+      error = "Swift H3 does not support visual RefMods. Remove this input or explicitly select the legacy H3 renderer in Runtime Settings."
+      return
+    }
+    let existingInputs = clip.attachments.filter { $0.role != .lora }
+    if source.kind == .refmod && !existingInputs.isEmpty
+      || source.kind != .refmod && existingInputs.contains(where: { attachment in
+        allAssets.contains { $0.id == attachment.assetID && $0.kind == .refmod }
+      }) {
+      error = "Use one visual H3 RefMod by itself on a clip. Remove other conditioning inputs first."
+      return
+    }
     let session = documentSessionID
     let projectID = project.id
     let key = generationRequestKey(for: clip)

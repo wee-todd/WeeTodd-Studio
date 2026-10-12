@@ -38,6 +38,7 @@ extension StudioProject {
     }
   }
   public func validateAudio() throws {
+    try audioPresentation?.validate()
     guard Set(audio.map(\.id)).count == audio.count,
       Set(audioTracks.map(\.id)).count == audioTracks.count else {
       throw StudioError.invalid("Audio region and track IDs must be unique.")
@@ -57,6 +58,11 @@ extension StudioProject {
       }
     }
     for region in audio {
+      guard (region.captions?.count ?? 0) <= 10000 else { throw StudioError.invalid("Too many caption cues") }
+      for cue in region.captions ?? [] {
+        guard cue.start.isFinite, cue.end.isFinite, cue.start >= 0, cue.end > cue.start, cue.end <= 3600,
+          cue.text.utf8.count <= 2000 else { throw StudioError.invalid("Caption cues need valid start/end times and text under 2,000 bytes") }
+      }
       let start = try resolvedAudioStart(region, in: self)
       guard [start, region.sourceIn, region.duration, region.volume, region.effectiveFadeIn,
         region.effectiveFadeOut].allSatisfy(\.isFinite), start >= 0, region.sourceIn >= 0,

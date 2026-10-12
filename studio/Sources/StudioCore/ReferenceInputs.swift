@@ -28,6 +28,11 @@ extension Clip {
         + (engine == .ltx23 ? " LTX 2.3 uses 768 × 448." : ""),
       role: engine == .ltx23 ? .reference : .control, controlType: "ingredients_reference_sheet")
     switch asset.kind {
+    case .refmod:
+      return engine == .h3 ? [ReferenceAction(id: "h3RefMod",
+        label: "Appearance · H3 reference embedding",
+        detail: "Uses saved visual latent tokens for Ref2VA. One RefMod per clip. The prompt identifies it as <Picture 1> or <Video 1>; Qwen sees text only.",
+        role: .reference)] : []
     case .image:
       if engine == .ltx23 { return [ingredients] }
       let appearance = ReferenceAction(id: "imageAppearance",
@@ -71,6 +76,10 @@ extension Clip {
   }
 
   public mutating func attachReference(_ asset: MediaAsset, action: ReferenceAction) throws {
+    if asset.kind == .refmod && attachments.contains(where: { $0.role != .lora }) {
+      throw StudioError.invalid(
+        "Use one visual H3 RefMod by itself on a clip. Remove other conditioning inputs first.")
+    }
     var source = asset
     if let preparation = action.preparation {
       guard asset.kind == (preparation == "sheet" ? .image : .video) else {

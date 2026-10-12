@@ -260,7 +260,7 @@ def render_h3(recipe, target):
                 unload_after=True,
                 prepare_stage=lambda: prepare("video_vae"),
             )
-        if components.task == "ref2va":
+        if components.task == "ref2va" and contract["inputs"]:
             if prepared is None:
                 from minimax_h3_mlx.packing import align_num_frames
                 from wee_todd_nodes.conditioning_inputs import H3ReferenceInput, H3ReferenceStack
@@ -333,7 +333,11 @@ def render_h3(recipe, target):
             if prepared is None and images is None
             else None,
         )
-        if prepared is not None:
+        if recipe.get("refmods"):
+            from wee_todd_mlx.h3_refmod import attach_visual_refmod
+
+            conditioning = attach_visual_refmod(conditioning, recipe["refmods"][0])
+        elif prepared is not None:
             rows = VIDEO_VAE_RUNTIME.encode_references(
                 H3VideoVAESpec.from_components(components),
                 prepared,

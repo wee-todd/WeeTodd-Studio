@@ -139,6 +139,11 @@ struct VoiceAutoTagView: View {
       ScrollView { Text(proposal ?? text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(10) }
         .frame(minHeight: 160, maxHeight: 300).background(Theme.raised)
       if let error { Text(error).foregroundStyle(.red) }
+      if let proposal {
+        Text(proposal == source ? "No additional tags suggested for this passage. Your wording is unchanged."
+          : "Review the suggested delivery tags. Your original words and existing tags are preserved.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
       HStack {
         if running { ProgressView().controlSize(.small); Text(store.bridge.message).font(.caption); Button("Cancel") { store.bridge.cancel() } }
         else { Button(proposal == nil ? "Suggest tags" : "Try again") { Task { await suggest() } }.disabled(modelPath.isEmpty || store.operationBusy || text.utf8.count > 12000) }
@@ -161,13 +166,14 @@ struct VoiceAutoTagView: View {
     do {
       snapshot = try VoiceTagContext(project: store.project, documentSessionID: store.documentSessionID,
         lineID: store.project.voiceDraft?.usesDialogue == true ? UUID(uuidString: contextID) : nil)
+      let request = try FishAutoTagRequest(text: original)
       let response = try await store.bridge.invoke("assist-prompt", runtime: store.runtime, payload: ["textRequest": [
-        "modelPath": modelPath, "systemPrompt": FishVoiceTags.systemPrompt,
-        "prompt": "Suggest delivery tag insertions for this script:\n" + original, "maxTokens": 1024, "images": []]])
+        "modelPath": modelPath, "systemPrompt": FishAutoTagRequest.systemPrompt,
+        "prompt": request.prompt, "maxTokens": 1024, "images": []]])
       guard response["truncated"] as? Bool != true, let output = response["text"] as? String else {
         throw StudioError.invalid("Auto Tag did not finish its suggestion. Your script is unchanged; try a shorter line.")
       }
-      proposal = try FishVoiceTags.applyingSuggestions(output, to: original)
+      proposal = try request.applying(output)
     } catch { self.error = error.localizedDescription }
   }
   private func apply() {

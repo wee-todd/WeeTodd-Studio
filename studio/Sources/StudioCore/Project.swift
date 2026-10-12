@@ -16,7 +16,7 @@ public enum Engine: String, Codable, CaseIterable, Identifiable {
 }
 public enum AssetScope: String, Codable, CaseIterable { case global, project, clip }
 public enum AssetKind: String, Codable, CaseIterable {
-  case video, image, audio, sequence, text, lora
+  case video, image, audio, sequence, text, lora, refmod
 }
 public enum MediaRole: String, Codable, CaseIterable, Identifiable {
   case reference, first, last, keyframe, audioDriver, control, lora
@@ -50,6 +50,9 @@ public struct MediaAsset: Codable, Identifiable, Equatable {
   public var loraProfile: String?
   public var loraLayout: String?
   public var loraAdalnInputGrid: String?
+  public var refmodKind: String?
+  public var refmodTokenCount: Int?
+  public var refmodSHA256: String?
   public var generation: ImageGeneration?
   public var musicGeneration: MusicGeneration?
   public var voiceGeneration: VoiceGeneration?
@@ -333,6 +336,8 @@ public struct AudioTrack: Codable, Identifiable, Equatable {
   }
 }
 public struct AudioRegion: Codable, Identifiable, Equatable {
+  public var captions: [AudioCaption]?
+  public var instrumental: Bool?
   public var id = UUID()
   public var assetID: UUID
   public var trackID: UUID?
@@ -355,6 +360,7 @@ public struct AudioRegion: Codable, Identifiable, Equatable {
   }
 }
 public struct StudioProject: Codable, Equatable {
+  public var audioPresentation: AudioPresentation?
   public var production: MusicVideoProduction?
   public var musicDraft: MusicDraft?
   public var voiceDraft: VoiceDraft?
@@ -476,6 +482,7 @@ public enum ProjectStorage {
     project.mapRipplePaths(transform)
     project.mapMusicSourcePaths(transform)
     project.mapVoicePaths(transform)
+    project.mapMusicReferencePaths(transform)
     for i in project.assets.indices {
       project.assets[i].path = transform(project.assets[i].path)
       if let artifacts = project.assets[i].musicGeneration?.artifacts {

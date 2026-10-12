@@ -125,14 +125,25 @@ public struct ProjectPlanning: Codable, Equatable {
   }
   private func referenceRevision(_ id: UUID, assets: [MediaAsset]) -> String? {
     guard let s = subjects.first(where: { $0.id == id }), isSubjectApproved(id), !s.referenceAssetIDs.isEmpty else { return nil }
+    let refmods = s.referenceAssetIDs.filter { aid in
+      assets.contains { $0.id == aid && $0.kind == .refmod }
+    }
+    guard refmods.count <= 1,
+      refmods.isEmpty || [.character, .prop, .environment].contains(s.kind) else { return nil }
     var keys = [subjectApprovalRevision(id) ?? s.revision]
     for aid in s.referenceAssetIDs {
-      guard let a = assets.first(where: { $0.id == aid }), a.kind == .image, !a.path.isEmpty,
+      guard let a = assets.first(where: { $0.id == aid }), [.image, .refmod].contains(a.kind), !a.path.isEmpty,
             let attributes = try? FileManager.default.attributesOfItem(atPath: a.path),
             let bytes = attributes[.size] as? NSNumber, bytes.intValue > 0,
             let modified = attributes[.modificationDate] as? Date,
             attributes[.type] as? FileAttributeType == .typeRegular else { return nil }
       keys += [aid.uuidString, a.path, a.generation?.requestFingerprint ?? "", bytes.stringValue, String(modified.timeIntervalSince1970)]
+      if a.kind == .refmod {
+        guard let digest = a.refmodSHA256, digest.count == 64,
+          let tokenCount = a.refmodTokenCount, tokenCount > 0,
+          let refKind = a.refmodKind, ["image", "video"].contains(refKind) else { return nil }
+        keys += ["refmod", digest, String(tokenCount), refKind]
+      }
     }
     return planningDigest(keys)
   }
@@ -142,7 +153,7 @@ public struct ProjectPlanning: Codable, Equatable {
   }
   public mutating func approveReferences(_ id: UUID, assets: [MediaAsset]) throws {
     guard let i = subjects.firstIndex(where: { $0.id == id }), let revision = referenceRevision(id, assets: assets) else {
-      throw StudioError.invalid("Approve the description and link at least one available image before approving references.")
+      throw StudioError.invalid("Approve the description and link available reference media before approving references.")
     }
     subjects[i].approvedReferenceRevision = revision
   }
@@ -184,7 +195,7 @@ public struct ProjectPlanning: Codable, Equatable {
     for subjectID in resolvedIDs {
       if let subject = subjects.first(where: { $0.id == subjectID }), !subject.referenceAssetIDs.isEmpty,
          !areReferencesApproved(subjectID, assets: assets) {
-        issues.append("Review the reference images for " + subject.name + " before approving this shot.")
+        issues.append("Review the reference media for " + subject.name + " before approving this shot.")
       }
     }
     if !["cut", "continue"].contains(s.continuity) { issues.append("Choose Cut or Continue.") }
@@ -538,13 +549,31 @@ func planningDigest<T: Encodable>(_ value: T) -> String {
 private extension String { var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) } }
 
 public extension StudioProject {
-  /// Create a project link to an existing image; never duplicate the media file.
+  /// Create a project link to an existing visual reference; never duplicate the media file.
   mutating func attachPlanningReference(_ asset: MediaAsset, subjectID: UUID) throws -> UUID {
-    guard asset.kind == .image, !asset.path.isEmpty,
+    guard [.image, .refmod].contains(asset.kind), !asset.path.isEmpty,
           let index = planning?.subjects.firstIndex(where: { $0.id == subjectID }) else {
-      throw StudioError.invalid("Select an image and an existing project subject.")
+      throw StudioError.invalid("Select visual reference media and an existing project object.")
     }
-    let existing = assets.first { $0.kind == .image && $0.scope == .project && ($0.id == asset.id || $0.path == asset.path) }
+    if asset.kind == .refmod {
+      guard let kind = planning?.subjects[index].kind,
+        [.character, .prop, .environment].contains(kind),
+        let digest = asset.refmodSHA256, digest.count == 64,
+        let tokens = asset.refmodTokenCount, tokens > 0,
+        let refKind = asset.refmodKind, ["image", "video"].contains(refKind) else {
+        throw StudioError.invalid("Choose an imported visual H3 RefMod for a character, prop, or environment.")
+      }
+    }
+    let existing = assets.first { $0.kind == asset.kind && $0.scope == .project && ($0.id == asset.id || $0.path == asset.path) }
+    if asset.kind == .refmod, let existing,
+      existing.refmodSHA256 != asset.refmodSHA256 || existing.refmodKind != asset.refmodKind
+        || existing.refmodTokenCount != asset.refmodTokenCount {
+      throw StudioError.invalid("This RefMod file changed. Remove its object and asset links, then reimport it.")
+    }
+    if asset.kind == .refmod, let ids = planning?.subjects[index].referenceAssetIDs,
+      ids.contains(where: { id in assets.contains { $0.id == id && $0.kind == .refmod && $0.id != existing?.id } }) {
+      throw StudioError.invalid("A production object can hold one visual H3 RefMod. Remove its current RefMod first.")
+    }
     var linked = existing ?? asset
     if existing == nil {
       linked.id = UUID(); linked.scope = .project; linked.owner = nil

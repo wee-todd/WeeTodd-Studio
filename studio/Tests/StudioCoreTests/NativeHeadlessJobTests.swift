@@ -4,6 +4,15 @@ import XCTest
 @testable import StudioCore
 
 final class NativeHeadlessJobTests: XCTestCase {
+  func testAudioPresentationCannotBeSilentlyOmittedFromNativeHeadlessExport() throws {
+    var value = project(.movie)
+    XCTAssertNoThrow(try NativeHeadlessJob.validateFinishing(value))
+    value.audioPresentation = AudioPresentation()
+    XCTAssertThrowsError(try NativeHeadlessJob.validateFinishing(value)) { error in
+      XCTAssertTrue(error.localizedDescription.contains("visual"), error.localizedDescription)
+    }
+  }
+
   private func directory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("NativeJob-\(UUID())")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

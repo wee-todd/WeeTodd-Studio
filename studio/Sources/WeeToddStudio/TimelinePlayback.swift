@@ -150,6 +150,9 @@ struct TimelinePlaybackBuilder {
         sourceMix.setVolume(muted ? 0 : Float(max(0, min(2, span.volume))), at: time(boundaries[index]))
       }
     }
+    if let end = plan.spans.last?.end, end < plan.duration {
+      instruction(start: end, duration: plan.duration - end)
+    }
     var parameters = [sourceMix]
     if let canonicalAudio {
       let mixed = AVURLAsset(url: URL(fileURLWithPath: canonicalAudio))
@@ -244,7 +247,7 @@ final class TimelineFallbackClock {
 }
 
 @MainActor extension StudioStore {
-  var effectivePreviewDuration: Double { max(0, project.duration) }
+  var effectivePreviewDuration: Double { max(0, project.playbackDuration) }
   var previewClip: Clip? {
     guard let span = (timelinePlaybackPlan ?? TimelinePlaybackPlan(project: project)).span(at: playhead) else { return nil }
     return project.clips.first(where: { $0.id == span.clipID })
@@ -292,15 +295,25 @@ final class TimelineFallbackClock {
             try await Task.sleep(nanoseconds: 50_000_000)
           }
           let mixed = try await self.audioMixBridge.invoke("audio-mix", runtime: self.runtime,
-            payload: ["project": try snapshot.object(), "purpose": "preview", "disposablePreview": true],
+            payload: ["project": try snapshot.object(), "purpose": "preview", "duration": plan.duration, "disposablePreview": true],
             output: self.dataDirectory.appendingPathComponent("AudioPreview"))
           try Task.checkCancellation()
           guard let path = mixed["path"] as? String else { throw StudioError.invalid("No audio mix was prepared.") }
           lease = try AudioMixLease(path: path)
           media = try await TimelinePlaybackBuilder.build(plan, canonicalAudio: path)
         }
+        var visualFeatures: AudioVisualFeatures?
+        if plan.visualSource != nil {
+          let visual = try await self.audioMixBridge.invoke("audio-features", runtime: self.runtime,
+            payload: ["project": try snapshot.object()], output: self.dataDirectory.appendingPathComponent("AudioVisuals"))
+          if let file = visual["path"] as? String {
+            visualFeatures = try await Task.detached { try JSONDecoder().decode(AudioVisualFeatures.self,
+              from: Data(contentsOf: URL(fileURLWithPath: file))) }.value
+          }
+        }
         guard !Task.isCancelled, self.timelineBuildID == request,
           self.documentSessionID == session, self.previewMode == "Timeline" else { return }
+        self.audioVisualFeatures = visualFeatures
         self.preparingTimelinePlayback = false
         self.timelinePlaybackIssues = media.unavailableClips
         self.timelinePlaybackWarning = media.warnings.first

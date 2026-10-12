@@ -1,5 +1,37 @@
 # WeeTodd Studio implementation status
 
+## October 12 audio-first editing and music extensions consolidation
+
+Studio preserves full voice and music takes on an empty timeline, with independent Voice and
+Music tracks. Playback covers audio and title extent while video scheduling retains its existing
+clip contract. Clip-attached voice placement offers full-take and explicit trim choices. Optional
+waveform/spectrum presentation fills empty video sections and audio tails; preview and export share
+one drawing implementation. English caption/lyric generation uses the existing local MLX acoustic
+recognizer, retains source-relative measured cues and supports manual correction. Audio export
+writes the complete mix as 24-bit WAV. Advanced mixing, music, speech and caption inference still
+use the optional Python runtime; they are outside the accepted H3/LTX Swift migration.
+
+Music models now register once in Runtime Settings and are selected by name. Legacy draft paths
+migrate to that registry; recorded takes keep their effective request for replay. Optional YuE2
+instrumental AR adapters preserve quantized base weights, support strength 0–2 and record content
+identity. Instrumental arrangements support automatic, ordered and timed section guidance.
+Independent native MLX SheetSage2 analysis converts a reviewed 1–300-second recording excerpt into
+an editable score; applying it to a song remains explicit and late results preserve changed drafts.
+YuE2, the instrumental adapter and SheetSage2 weights retain CC-BY-NC-4.0 terms. These are additional
+editing and inference contracts, not a new musical-quality or cross-device performance qualification.
+
+Visual H3 RefMods can be imported, linked to approved production objects and deliberately attached
+to one clip. Their content identity and prompt slot are validated. Rendering remains legacy Python
+H3-only; the default Swift H3 worker and Draw Things do not support them or switch routes silently.
+Fish Auto Tag now lets the assistant select supported tags by numbered segment while the host owns
+text and insertion offsets. Original wording and existing tags remain intact.
+
+Focused synthetic/numerical tests cover adapter application and artifact replay, reference analysis,
+model-location migration, stale results, full-take placement/undo, visualization and caption timing.
+Required combined project validation and isolated packaging are recorded by the consolidation run.
+This entry claims no new real-model SheetSage2, instrumental-LoRA, RefMod or caption qualification;
+existing dated native-video and music measurements below retain their original scopes.
+
 ## October 11 generation inspector organization
 
 Studio generation now starts with **Run with**, **Model / Model profile** and LoRAs, followed by

@@ -68,6 +68,8 @@ def validate_request(request: dict) -> dict:
         raise ValueError("YuE2 request must be a dictionary")
     defaults = dict(
         model_path=None,
+        ar_lora_path=None,
+        ar_lora_strength=1.0,
         vae_path=None,
         style="",
         lyrics="",
@@ -92,6 +94,12 @@ def validate_request(request: dict) -> dict:
         if not isinstance(value, (str, Path)) or not str(value).strip():
             raise ValueError(f"{key} must identify a local checkpoint directory")
         out[key] = str(Path(value).expanduser().resolve())
+    if out["ar_lora_path"] is not None:
+        value = out["ar_lora_path"]
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("ar_lora_path must identify a local safetensors file or be null")
+        out["ar_lora_path"] = str(Path(value).expanduser().resolve())
+    out["ar_lora_strength"] = number(out["ar_lora_strength"], "ar_lora_strength", 0, 2)
     for key in ("style", "lyrics"):
         if not isinstance(out[key], str):
             raise ValueError(f"{key} must be text")

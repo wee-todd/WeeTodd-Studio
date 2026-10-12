@@ -3,6 +3,10 @@ import Foundation
 import StudioCore
 
 let arguments = Array(CommandLine.arguments.dropFirst())
+if arguments.first == "--audio-presentation" {
+  do { try AudioPresentationExport.run(arguments: Array(arguments.dropFirst())); exit(0) }
+  catch { fputs(error.localizedDescription + "\n", stderr); exit(1) }
+}
 if arguments.isEmpty || arguments.contains("--help") {
   print(
     """

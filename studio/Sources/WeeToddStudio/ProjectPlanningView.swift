@@ -61,7 +61,9 @@ struct ProjectPlanningView: View {
       .sheet(isPresented: $generationSettingsOpen) { generationEditor }
       .sheet(item: $sheetContext) { context in
         let subject = plan.subjects.first { store.project.id.uuidString + ":" + $0.id.uuidString == context.subjectKey }
-        ReferenceSheetGenerator(context: context, referencePaths: (subject?.referenceAssetIDs ?? []).compactMap { id in store.allAssets.first { $0.id == id }?.path }) { asset in
+        ReferenceSheetGenerator(context: context, referencePaths: (subject?.referenceAssetIDs ?? []).compactMap { id in
+          store.allAssets.first { $0.id == id && $0.kind == .image }?.path
+        }) { asset in
           guard let subject, let current = store.planning.subjects.first(where: { $0.id == subject.id }),
             current.details == context.description, current.name == context.name,
             asset.generation?.referenceSheet?.subjectKey == context.subjectKey,
@@ -314,14 +316,32 @@ struct ProjectPlanningView: View {
         SubjectSourceText(title: "Evidence", entries: subject.evidence.isEmpty ? [] : [subject.evidence])
         SubjectSourceText(title: "Suggestions", entries: subject.suggestions.isEmpty ? [] : [subject.suggestions])
         Divider()
-        Text("Reference images").font(.headline)
-        Text("Reference approval is separate from the description. Imported files are referenced in place.").font(.caption).foregroundStyle(.secondary)
+        Text("Visual references").font(.headline)
+        Text("Approve images and an optional H3 RefMod separately from the description. Files remain linked in place.")
+          .font(.caption).foregroundStyle(.secondary)
         ForEach(Array(subject.referenceAssetIDs.enumerated()), id: \.element) { index, aid in
           HStack {
             if let asset = store.project.assets.first(where: { $0.id == aid }) {
-              PreviewableImage(path: asset.path, title: "\(asset.name) · Reference \(index + 1)").frame(width: 86, height: 64).clipped()
-              Text("\(asset.name) · Reference \(index + 1)").lineLimit(2)
-            } else { Label("Missing image", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+              if asset.kind == .image {
+                PreviewableImage(path: asset.path, title: "\(asset.name) · Reference \(index + 1)")
+                  .frame(width: 86, height: 64).clipped()
+              } else {
+                Image(systemName: "square.stack.3d.up").frame(width: 86, height: 64)
+              }
+              VStack(alignment: .leading) {
+                Text(asset.name).lineLimit(2)
+                if asset.kind == .refmod {
+                  Text("\(asset.refmodKind == "video" ? "<Video 1>" : "<Picture 1>") · \(asset.refmodTokenCount ?? 0) H3 tokens")
+                    .font(.caption2).foregroundStyle(.secondary)
+                } else { Text("Image reference \(index + 1)").font(.caption2).foregroundStyle(.secondary) }
+              }
+              if asset.kind == .refmod {
+                Button("Use in selected H3 clip") {
+                  Task { await store.useApprovedObjectRefMod(subject.id, assetID: asset.id) }
+                }.disabled(store.selectedClip?.engine != .h3 || store.operationBusy ||
+                  !plan.areReferencesApproved(subject.id, assets: store.project.assets))
+              }
+            } else { Label("Missing reference", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
             Spacer()
             Button { store.changePlanning { p in
               guard let i = p.subjects.firstIndex(where: { $0.id == subject.id }) else { return }
@@ -345,6 +365,19 @@ struct ProjectPlanningView: View {
               Button(asset.name) { store.linkPlanningReference(asset, subjectID: subject.id) }
             }
           }
+          if [.character, .prop, .environment].contains(subject.kind) {
+            Menu("Choose imported H3 RefMod") {
+              ForEach(store.allAssets.filter { $0.kind == .refmod && !subject.referenceAssetIDs.contains($0.id) }) { asset in
+                Button(asset.name) { store.linkPlanningReference(asset, subjectID: subject.id) }
+              }
+            }.disabled(subject.referenceAssetIDs.contains { id in
+              store.project.assets.contains { $0.id == id && $0.kind == .refmod }
+            })
+          }
+        }
+        if [.character, .prop, .environment].contains(subject.kind) {
+          Text("Import a visual RefMod in Media & Assets first, then choose it here. Each object can hold one.")
+            .font(.caption2).foregroundStyle(.secondary)
         }
         HStack {
           Text(plan.areReferencesApproved(subject.id, assets: store.project.assets) ? "References approved" : "References need review").font(.caption)

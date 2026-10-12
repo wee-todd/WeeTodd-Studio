@@ -2,6 +2,31 @@ import XCTest
 @testable import StudioCore
 
 final class ProductionLibraryTests: XCTestCase {
+  func testPublishedObjectCarriesRefModMetadataIntoAnotherMovie() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    var object = PlanningSubject(name: "Character", kind: .character)
+    object.details = "Reviewed identity"
+    var mod = MediaAsset(name: "Character embedding", kind: .refmod,
+      path: "/linked/character.safetensors")
+    mod.refmodKind = "image"
+    mod.refmodTokenCount = 512
+    mod.refmodSHA256 = String(repeating: "b", count: 64)
+    object.referenceAssetIDs = [mod.id]
+    var plan = ProjectPlanning(); plan.subjects = [object]
+    let library = try ProductionLibrary(url: folder.appendingPathComponent("library.sqlite"))
+    let package = try library.publish(rootID: object.id, planning: plan, assets: [mod])
+    XCTAssertEqual(package.assets.first, mod)
+    var movie = StudioProject()
+    try movie.importLibraryPackage(package)
+    XCTAssertEqual(movie.assets.first?.refmodSHA256, mod.refmodSHA256)
+    XCTAssertEqual(movie.planning?.subjects.first?.referenceAssetIDs, [mod.id])
+    var conflicting = package
+    conflicting.assets[0].refmodSHA256 = String(repeating: "c", count: 64)
+    let before = movie
+    XCTAssertThrowsError(try movie.importLibraryPackage(conflicting))
+    XCTAssertEqual(movie, before)
+  }
   func testPublishReopenSearchAndPinnedImportWithoutCopyingMedia() throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }

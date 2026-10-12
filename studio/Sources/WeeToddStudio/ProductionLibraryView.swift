@@ -49,7 +49,7 @@ struct ProductionLibraryView: View {
                 Button("Export package…") { export(selected) }
               }
               if !selected.missingMediaPaths.isEmpty {
-                Text("\(selected.missingMediaPaths.count) linked image files are unavailable. Relink them in the movie before generation.")
+                Text("\(selected.missingMediaPaths.count) linked reference files are unavailable. Relink them in the movie before generation.")
                   .foregroundStyle(.orange).font(.caption)
               }
               ForEach(PlanningSubjectKind.reviewOrder) { kind in
@@ -61,6 +61,12 @@ struct ProductionLibraryView: View {
                         Text(object.name).font(.headline)
                         Text(object.details).textSelection(.enabled)
                         Text((object.tags ?? []).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                        ForEach(object.referenceAssetIDs.compactMap { id in
+                          selected.assets.first { $0.id == id && $0.kind == .refmod }
+                        }) { mod in
+                          Text("H3 RefMod · \(mod.name) · \(mod.refmodTokenCount ?? 0) tokens")
+                            .font(.caption).foregroundStyle(.secondary)
+                        }
                         Text(packageApproved(object, in: selected) ? "Description approved" : "Draft · review in movie")
                           .font(.caption).foregroundStyle(.secondary)
                       }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
@@ -95,7 +101,7 @@ struct ProductionLibraryView: View {
     if panel.runModal() == .OK, let url = panel.url { perform {
       let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
       try encoder.encode(package).write(to: url, options: .atomic)
-      message = "Exported metadata and linked paths. Use Collect Media on the movie for portable image files."
+      message = "Exported metadata and linked paths. Use Collect Media on the movie for portable reference files."
     } }
   }
   private func importPackage() {

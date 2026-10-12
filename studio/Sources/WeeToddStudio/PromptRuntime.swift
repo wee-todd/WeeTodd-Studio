@@ -237,6 +237,8 @@ struct RuntimeView: View {
           Divider()
           RippleRuntimeSettings()
           Divider()
+          MusicModelSettingsView()
+          Divider()
           VoiceModelSettingsView()
           Divider()
           Text("Performance and acceleration").font(.headline)

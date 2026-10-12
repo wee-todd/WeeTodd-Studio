@@ -33,6 +33,18 @@ extension StudioStore {
       change { $0 = updated }
     } catch { self.error = error.localizedDescription }
   }
+  func useApprovedObjectRefMod(_ subjectID: UUID, assetID: UUID) async {
+    guard let subject = planning.subjects.first(where: { $0.id == subjectID }),
+      subject.referenceAssetIDs.contains(assetID),
+      planning.isSubjectApproved(subjectID),
+      planning.areReferencesApproved(subjectID, assets: project.assets),
+      let asset = project.assets.first(where: { $0.id == assetID && $0.kind == .refmod }),
+      let clip = selectedClip, let action = clip.referenceActions(for: asset).first else {
+      error = "Approve the object's current RefMod and select an H3 clip before using it."
+      return
+    }
+    await useReference(asset, action: action)
+  }
   func importPlanningReferences(subjectID: UUID) {
     let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]; panel.allowsMultipleSelection = true
     guard panel.runModal() == .OK else { return }

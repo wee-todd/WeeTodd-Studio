@@ -7,6 +7,25 @@ import XCTest
 @testable import StudioCore
 
 final class NativeH3PreparationTests: XCTestCase {
+  func testRestoredRefModAttachmentFailsWithExplicitSwiftLimitationBeforeProfileLookup() throws {
+    var project = StudioProject()
+    var clip = Clip(engine: .h3)
+    clip.prompt = "A quiet lake."
+    clip.generationSelection = GenerationSelection(task: "ref2va")
+    var mod = MediaAsset(name: "Saved appearance", kind: .refmod, path: "/tmp/visual.safetensors")
+    mod.refmodKind = "image"; mod.refmodTokenCount = 256
+    mod.refmodSHA256 = String(repeating: "a", count: 64)
+    clip.attachments = [Attachment(assetID: mod.id, role: .reference)]
+    project.clips = [clip]
+    let request: [String: Any] = ["project": try JSONSerialization.jsonObject(with: JSONEncoder().encode(project)),
+      "globalAssets": try JSONSerialization.jsonObject(with: JSONEncoder().encode([mod])),
+      "clipID": clip.id.uuidString, "runtime": [:]]
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request: request)) { error in
+      XCTAssertTrue(error.localizedDescription.contains("RefMod"), error.localizedDescription)
+      XCTAssertTrue(error.localizedDescription.contains("Swift H3"), error.localizedDescription)
+    }
+  }
+
   func testSolAttentionIsExplicitSavedAndOrdinaryTurboRefOnly() throws {
     let(root,original,runtime)=try fixture();var project=original
     let initial=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]

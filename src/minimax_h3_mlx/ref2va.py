@@ -60,6 +60,7 @@ class PreparedReference:
     temporal_activity_mean: float | None = None
     temporal_activity_p95: float | None = None
     temporal_density_reason: str | None = None
+    latent_only: bool = False
 
     @property
     def has_audio(self) -> bool:

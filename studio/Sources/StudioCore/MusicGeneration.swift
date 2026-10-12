@@ -44,7 +44,10 @@ public struct MusicRequest: Codable, Equatable {
   public var abcSampling: MusicSampling
   public var semanticSampling: MusicSampling
   public var memoryMode: String
+  public var arLoraPath: String? = nil
+  public var arLoraStrength: Double? = nil
   enum CodingKeys: String, CodingKey {
+    case arLoraPath = "ar_lora_path", arLoraStrength = "ar_lora_strength"
     case modelPath = "model_path", vaePath = "vae_path", style, lyrics, cot, abc, seed
     case cfgScale = "cfg_scale", steps, precision, abcSampling = "abc_sampling"
     case semanticSampling = "semantic_sampling", memoryMode = "memory_mode"
@@ -55,6 +58,11 @@ public struct MusicRequest: Codable, Equatable {
 public struct MusicDraft: Codable, Equatable, Identifiable {
   public var id = UUID()
   public var name = "New song"
+  public var modelID: UUID?
+  public var adapterID: UUID?
+  public var adapterStrength: Double?
+  public var arrangement: MusicArrangement?
+  public var reference: MusicReference?
   public var modelPath = ""
   public var vaePath = ""
   public var genre = "Indie pop"
@@ -107,7 +115,7 @@ public struct MusicDraft: Codable, Equatable, Identifiable {
       throw StudioError.invalid("A supplied score requires Melody or Full composition mode.")
     }
     return MusicRequest(modelPath: modelPath, vaePath: vaePath.isEmpty ? nil : vaePath,
-      style: style, lyrics: instrumental ? "[Instrumental]" : lyrics, cot: cot,
+      style: style, lyrics: instrumental ? try (arrangement ?? MusicArrangement()).prompt() : lyrics, cot: cot,
       abc: score.isEmpty ? nil : score, seed: seed, cfgScale: useDefaultGuidance ? nil : guidance,
       steps: steps, precision: precision, abcSampling: scoreSampling,
       semanticSampling: musicSampling, memoryMode: memoryMode)

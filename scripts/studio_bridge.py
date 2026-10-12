@@ -79,6 +79,13 @@ def inspect_media(value, settings, *, lora_model=None):
     if suffix in {".txt", ".md"}:
         return {"kind": "text", "text": source.read_text()[:100000], "path": str(source)}
     if suffix == ".safetensors":
+        from safetensors import safe_open
+
+        with safe_open(str(source), framework="np", device="cpu") as handle:
+            if "refmod_meta" in (handle.metadata() or {}):
+                from wee_todd_mlx.h3_refmod import inspect_visual_refmod
+
+                return inspect_visual_refmod(source)
         from studio_lora import inspect_lora
 
         return inspect_lora(source, model_hint=lora_model)
@@ -249,6 +256,7 @@ def describe_generation(request):
     dependencies = source_paths(recipe.get("components", {}))
     dependencies += source_paths(recipe.get("loras", {}))
     dependencies += source_paths(recipe.get("conditioning", {}).get("inputs", []))
+    dependencies += source_paths(recipe.get("refmods", []))
     dependencies += source_paths(continuity)
     for dependency in list(dependencies):
         for name in ("paged_manifest.json", "model_identity.json", "conversion_provenance.json"):
@@ -380,7 +388,7 @@ def compose_recipe(request):
     if engine == "h3" and clip.get("h3PagingCacheGB") is not None:
         config["paging_cache_gb"] = clip["h3PagingCacheGB"]
     assets = {a["id"]: a for a in project["assets"] + request.get("globalAssets", [])}
-    inputs, loras = [], []
+    inputs, loras, refmods = [], [], []
     fps = 24 if engine == "h3" else config.get("frame_rate", 24)
     preserve_editorial_duration = (
         engine in {"ltx23", "ltx25"}
@@ -408,6 +416,18 @@ def compose_recipe(request):
             if any(previous["path"] == item["path"] for previous in loras):
                 raise ValueError("Each LoRA file can be applied only once per clip.")
             loras.append(item)
+            continue
+        if asset["kind"] == "refmod":
+            if engine != "h3" or role != "reference" or attachment.get("strength", 1) != 1:
+                raise ValueError("Visual H3 RefMods require a native H3 reference at strength 1.")
+            digest = asset.get("refmodSHA256")
+            if not digest:
+                raise ValueError("Reimport the H3 RefMod to record its file identity.")
+            refmods.append({
+                "id": attachment["id"],
+                "path": str(Path(asset["path"]).expanduser().resolve()),
+                "sha256": digest,
+            })
             continue
         item = {
             "id": attachment["id"],
@@ -515,9 +535,20 @@ def compose_recipe(request):
         else:
             recipe.setdefault("loras", {}).setdefault("adapters", []).extend(loras)
     recipe["conditioning"] = contract
+    if refmods:
+        recipe["refmods"] = refmods
     prompt = clip["prompt"].strip()
     if not prompt:
         raise ValueError("Write a prompt before preparing the render.")
+    if refmods:
+        from wee_todd_mlx.h3_refmod import inspect_visual_refmod
+
+        reference_kind = inspect_visual_refmod(
+            refmods[0]["path"], expected_sha256=refmods[0]["sha256"]
+        )["referenceKind"]
+        label = "<Video 1>" if reference_kind == "video" else "<Picture 1>"
+        if label not in prompt:
+            raise ValueError(f"Name the visual H3 RefMod as {label} in the prompt.")
     if (
         engine == "h3"
         and not prompt.startswith("integrated_multimodal_description:")
@@ -1098,6 +1129,11 @@ def normalize_clip(clip, project, runtime, destination, work):
 
 
 def export_movie(request, destination, *, cache_directory=None):
+    from studio_presentation import export_presentation
+    return export_presentation(request, destination, cache_directory)
+
+
+def export_movie_base(request, destination, *, cache_directory=None):
     project, runtime = request["project"], request["runtime"]
     if not project["clips"]:
         raise ValueError("Add a movie or render a clip before exporting.")
@@ -1342,7 +1378,7 @@ def preview_movie(request, destination):
         quality=25,
     )
     for clip in project["clips"]:
-        if not clip.get("sourcePath"):
+        if not clip.get("sourcePath") and not project.get("audioPresentation"):
             raise ValueError(f"Generate {clip['name']} before building the movie preview.")
         clip.pop("settingsOverride", None)
     for title in project.get("titles", []):
@@ -1451,10 +1487,11 @@ def main():
             "ripple-inspect", "ripple-frame", "ripple-generate",
             "production-create", "production-run", "production-status", "production-verify",
             "voice-catalog", "voice-download", "voice-inspect", "voice-generate", "voice-dialogue",
-            "audio-mix", "audio-driver",
+            "audio-mix", "audio-driver", "audio-features", "audio-captions", "audio-export",
             "music-inspect", "music-generate", "music-excerpt", "music-download",
             "music-plan", "music-resynthesize", "music-decode",
             "music-analysis-setup", "music-analyze",
+            "music-reference-analyze", "music-extension-download", "music-extension-inspect",
             "assistant-model-catalog", "assistant-model-inspect",
             "assistant-model-download", "assistant-model-health",
             "assist-prompt", "character-analyze", "character-panel-prepare", "character-reassemble",
@@ -1524,6 +1561,17 @@ def main():
         signal.signal(signal.SIGINT, signal.default_int_handler)
         signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
         result = dispatch(args.command, request, args.output)
+    elif args.command in {"audio-features", "audio-captions", "audio-export"}:
+        from studio_presentation import captions, export_audio, features
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+        if args.output is None:
+            raise ValueError("Choose an output location")
+        emit(event="progress", message="Preparing audio presentation locally")
+        handler = {
+            "audio-features": features, "audio-captions": captions, "audio-export": export_audio
+        }
+        result = handler[args.command](request, args.output)
     elif args.command.startswith(("voice-", "audio-")):
         from studio_audio import dispatch as audio_dispatch
         from studio_voice import dispatch as voice_dispatch
@@ -1548,6 +1596,7 @@ def main():
         if args.command in {
             "music-generate", "music-plan", "music-resynthesize", "music-decode",
             "music-analyze", "music-analysis-setup",
+            "music-reference-analyze", "music-extension-download",
         }:
             for number in (signal.SIGINT, signal.SIGTERM):
                 signal.signal(number, stop_music)
@@ -1577,9 +1626,8 @@ def main():
 
         if args.output is None:
             raise ValueError("Panel preparation requires an output directory")
-        result = prepare_panel(
-            request["source"], request["rect"], args.output, scale=request.get("scale", 2)
-        )
+        result = prepare_panel(request["source"], request["rect"], args.output,
+                               scale=request.get("scale", 2))
     elif args.command == "character-reassemble":
         from wee_todd_mlx.character_panel_assembly import assemble_panels
 

@@ -195,7 +195,10 @@ Studio also generates sampled-reference speech with native **Fish S2 Pro** and *
 plus preset voices and emotion instructions with **Qwen3-TTS CustomVoice 1.7B**. Fish inline tags,
 local auto tagging and multi-character conversations are available in the Voice workspace.
 Keep voice and music on separate tracks, adjust volume, pan and fades, and add Room, Chamber, Hall
-or Plate reverb. Select Voice, Music or their mix to drive a native video clip. See [Voice and audio mixing](studio/README.md#native-voice-and-audio-mixing)
+or Plate reverb. Place full voice takes or imported songs on an empty timeline, preview waveform or
+spectrum visuals, and generate/edit local English captions or lyrics with independent visibility controls.
+Export the complete audio mix or a movie with visuals and captions. Select Voice, Music or their mix
+to drive a native video clip. See [Voice and audio mixing](studio/README.md#native-voice-and-audio-mixing)
 for supported checkpoints, reference preparation and the separate model licenses.
 
 ## Choose how to generate
@@ -216,11 +219,15 @@ backend never implies identical timing, output, task support or memory use.
 to guide a song with genre, mood, instruments, vocals and lyrics, audition takes, then place them
 on the stereo Music track or use a sample-accurate excerpt to drive a supported native video clip.
 Advanced controls include score composition, separate token samplers, acoustic steps, guidance,
-seeds and saved-stage reuse. No external YuE runtime or ComfyUI installation is required.
+seeds and saved-stage reuse. Instrumental LoRA support adds ordered/timed section plans and adjustable
+strength; local SheetSage2 analysis turns reference music into a reviewable score for new arrangements.
+Music models and adapters are configured in Runtime Settings and selected by name.
+No external YuE runtime or ComfyUI installation is required.
 See [music generation](studio/README.md#native-yue2-music) for checkpoint and license limits.
 
-**Experimental native H3 core:** H3 clips can explicitly select **Native NNC** under
-**Memory and execution → Transformer**. This Swift/Metal worker runs the 50 core blocks with
+**Experimental native H3 core:** with the optional legacy Python H3 renderer selected, H3 clips
+can explicitly select **Native NNC** under **Memory and execution → Transformer**. The default
+Swift H3 worker does not execute this backend. This Swift/Metal worker runs the 50 core blocks with
 one GPU block and one CPU prefetch; MLX keeps conditioning, sampling and VAE decoding. The
 initial supported combination is a Comfy INT8 Ref2VA checkpoint plus the BF16 four-step Turbo
 LoRA at strength 1. Existing recipes remain on MLX. See [requirements and limits](studio/README.md#native-h3-nnc-core).

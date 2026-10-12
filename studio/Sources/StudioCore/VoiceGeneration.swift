@@ -99,7 +99,7 @@ public struct VoiceGeneration: Codable, Equatable {
 }
 extension StudioProject {
   @discardableResult public mutating func placeVoice(_ asset: MediaAsset, clipID: UUID,
-                                                     offset: Double = 0) throws -> AudioRegion {
+                                                     offset: Double = 0, trimToClip: Bool = true) throws -> AudioRegion {
     guard let clip = clips.first(where: { $0.id == clipID }), asset.kind == .audio,
       !asset.path.isEmpty, asset.duration.isFinite, asset.duration > 0,
       offset.isFinite, offset >= 0, offset < clip.duration else {
@@ -109,7 +109,7 @@ extension StudioProject {
     if let found = audioTracks.first(where: { $0.role == .voice && !$0.replacesSource }) { track = found }
     else { track = AudioTrack(name: "Voice", role: .voice); audioTracks.append(track) }
     var region = AudioRegion(assetID: asset.id, path: asset.path)
-    region.trackID = track.id; region.duration = min(asset.duration, clip.duration - offset)
+    region.trackID = track.id; region.duration = trimToClip ? min(asset.duration, clip.duration - offset) : asset.duration
     region.volume = 1; region.fade = 0.01
     region.anchor = ClipAudioAnchor(clipID: clipID, offsetSeconds: offset)
     region.start = try resolvedAudioStart(region, in: self)

@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 
-/// Immutable, portable metadata snapshot. Image files remain external references.
+/// Immutable, portable metadata snapshot. Visual reference files remain external links.
 public struct ProductionLibraryPackage: Codable, Equatable, Identifiable {
   public var format = "weetodd-production-library-v1"
   public var rootID: UUID
@@ -149,7 +149,11 @@ public extension StudioProject {
     }
     for media in package.assets {
       if let old = next.assets.first(where: { $0.id == media.id }) {
-        guard old.path == media.path, old.kind == media.kind else { throw StudioError.invalid("A reference asset ID conflicts with this movie.") }
+        guard old.path == media.path, old.kind == media.kind,
+          old.kind != .refmod || (
+            old.refmodSHA256 == media.refmodSHA256 && old.refmodKind == media.refmodKind
+              && old.refmodTokenCount == media.refmodTokenCount
+          ) else { throw StudioError.invalid("A reference asset ID conflicts with this movie.") }
       } else {
         var linked = media; linked.scope = .project; linked.owner = nil
         next.assets.append(linked)

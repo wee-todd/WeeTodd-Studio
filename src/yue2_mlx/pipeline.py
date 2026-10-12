@@ -109,9 +109,7 @@ def _generate(request: dict, output: Path, progress=None, cancelled=None) -> dic
             last_update = now
 
     emit("Validating YuE2 model and decoder", 0, True)
-    inspection = inspect_checkpoint(
-        normalized["model_path"], normalized["vae_path"], normalized["precision"]
-    )
+    inspection = _inspect_request(normalized)
     from .tokenizer import Tokenizer
 
     tokenizer = Tokenizer(inspection["files"]["tokenizer"])
@@ -134,7 +132,7 @@ def _generate(request: dict, output: Path, progress=None, cancelled=None) -> dic
 
     checkpoint_start = time.perf_counter()
     emit("Loading native YuE2 transformer", 0.02, True)
-    _STATE["model"] = load_model(inspection)
+    _load_transformer(inspection, cancelled)
     timings["load_transformer"] = time.perf_counter() - checkpoint_start
     _cancel(cancelled)
     truncated = {"abc": False, "semantic": False}
@@ -250,7 +248,7 @@ def _generate(request: dict, output: Path, progress=None, cancelled=None) -> dic
         precision=inspection["precision"],
     )
     result["stage"] = "generate"
-    _finish(directory, result, "generate", started, cancelled)
+    _finish(directory, result, "generate", started, cancelled, inspection)
     emit("Stereo master ready", 1, True)
     return result
 
@@ -329,6 +327,29 @@ def generate(request: dict, output: Path, progress=None, cancelled=None) -> dict
     )
 
 
+def _inspect_request(request):
+    inspection = dict(
+        inspect_checkpoint(request["model_path"], request["vae_path"], request["precision"])
+    )
+    if request["ar_lora_path"] is not None:
+        from .lora import inspect_lora
+
+        inspection["ar_lora"] = inspect_lora(request["ar_lora_path"], inspection["config"])
+    return inspection
+
+
+def _load_transformer(inspection, cancelled):
+    _cancel(cancelled)
+    _STATE["model"] = load_model(inspection)
+    _cancel(cancelled)
+    if inspection.get("ar_lora") is not None:
+        from .lora import attach_lora
+
+        attach_lora(
+            _STATE["model"], inspection["ar_lora"], inspection["ar_lora_identity"], cancelled
+        )
+
+
 def _effective(request, inspection, timings, cancelled=None, *, models=None):
     from .artifacts import checkpoint_fingerprints, engine_identity
 
@@ -336,7 +357,14 @@ def _effective(request, inspection, timings, cancelled=None, *, models=None):
     fingerprints = checkpoint_fingerprints(inspection, cancelled) if models is None else models
     timings["checkpoint_hash"] = time.perf_counter() - start
     identity = engine_identity()
+    adapter = None
+    if inspection.get("ar_lora") is not None:
+        from .lora import fingerprint
+
+        adapter = fingerprint(inspection["ar_lora"], request["ar_lora_strength"], cancelled)
+        inspection["ar_lora_identity"] = adapter
     return dict(
+        ar_lora=adapter,
         engine="weetodd-native-mlx-yue2",
         protocol="yue2-native-v1",
         engine_revision=identity["source_sha256"],
@@ -357,9 +385,13 @@ def _effective(request, inspection, timings, cancelled=None, *, models=None):
     )
 
 
-def _finish(directory, result, stage, started, cancelled):
+def _finish(directory, result, stage, started, cancelled, inspection=None):
     from .artifacts import digest, seal
 
+    if inspection is not None and inspection.get("ar_lora") is not None:
+        from .lora import assert_unchanged
+
+        assert_unchanged(inspection["ar_lora"])
     _json(directory / "result.json", result)
     before = time.perf_counter()
     manifest = seal(directory, stage, cancelled)
@@ -392,9 +424,7 @@ def _plan(request, directory, progress, cancelled):
     timings = {}
     emit = _emitter(progress)
     emit("Validating score plan", 0, True)
-    inspection = inspect_checkpoint(
-        request["model_path"], request["vae_path"], request["precision"]
-    )
+    inspection = _inspect_request(request)
     tokenizer = Tokenizer(inspection["files"]["tokenizer"])
     score_ids = tokenizer.encode(request["abc"]) if request["abc"] is not None else None
     validate_context(request, tokenizer, score_ids, inspection["config"]["max_position_embeddings"])
@@ -408,7 +438,7 @@ def _plan(request, directory, progress, cancelled):
         _cancel(cancelled)
         mark = time.perf_counter()
         emit("Loading native score transformer", 0.05, True)
-        _STATE["model"] = load_model(inspection)
+        _load_transformer(inspection, cancelled)
         timings["load_transformer"] = time.perf_counter() - mark
         mark = time.perf_counter()
         score_ids, truncated["abc"] = generate_tokens(
@@ -444,7 +474,7 @@ def _plan(request, directory, progress, cancelled):
         truncated=truncated,
         precision=inspection["precision"],
     )
-    _finish(directory, result, "plan", started, cancelled)
+    _finish(directory, result, "plan", started, cancelled, inspection)
     emit("Score plan ready", 1, True)
     return result
 
@@ -518,7 +548,7 @@ def _replay(source, directory, progress, cancelled, *, steps=None, seed=None, de
     else:
         emit("Loading native acoustic transformer", 0.1, True)
         mark = time.perf_counter()
-        _STATE["model"] = load_model(inspection)
+        _load_transformer(inspection, cancelled)
         timings["load_transformer"] = time.perf_counter() - mark
         mark = time.perf_counter()
         latents = synthesize(
@@ -576,7 +606,7 @@ def _replay(source, directory, progress, cancelled, *, steps=None, seed=None, de
         precision=inspection["precision"],
         **metadata,
     )
-    _finish(directory, result, stage, started, cancelled)
+    _finish(directory, result, stage, started, cancelled, inspection)
     emit("Stereo master ready", 1, True)
     return result
 

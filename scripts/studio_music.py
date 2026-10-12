@@ -174,6 +174,21 @@ def driver_excerpt_request(request):
 
 
 def dispatch(command, request, output=None, progress=None, cancelled=None):
+    if command == "music-reference-analyze":
+        from studio_music_reference import analyze
+
+        return analyze(request, output, progress=progress, cancelled=cancelled)
+    if command in {"music-extension-download", "music-extension-inspect"}:
+        from wee_todd_mlx.music_extensions import download, inspect
+
+        if command.endswith("inspect"):
+            return inspect(
+                request.get("path", ""), request.get("kind"), request.get("decoder_path")
+            )
+        directory = request.get("directory")
+        if not isinstance(directory, str) or not directory.strip():
+            raise ValueError("Choose a music model library directory.")
+        return download(directory, request.get("kind"), progress=progress, cancelled=cancelled)
     if command == "music-analysis-setup":
         from wee_todd_mlx.audio_analysis.setup import download
 

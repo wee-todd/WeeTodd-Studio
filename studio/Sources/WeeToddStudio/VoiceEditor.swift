@@ -173,7 +173,11 @@ struct VoiceEditor: View {
                 }
                 Spacer()
                 Button("Play") { store.auditionMusic(asset) }
-                Button("Add to clip") { store.placeVoiceTake(asset) }.disabled(store.selectedClip == nil)
+                Button("Add to timeline") { store.placeAudioTake(asset, role: .voice) }
+                Menu("Attach to clip") {
+                  Button("Keep full take") { store.placeVoiceTake(asset, trimToClip: false) }
+                  Button("Trim to clip (\(min(asset.duration, store.selectedClip?.duration ?? 0), specifier: "%.2f") s)") { store.placeVoiceTake(asset, trimToClip: true) }
+                }.disabled(store.selectedClip == nil).help("Select a video clip to attach this take.")
               }.padding(8).background(Theme.raised, in: RoundedRectangle(cornerRadius: 6))
             }
           }

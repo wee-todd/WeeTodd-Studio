@@ -907,6 +907,24 @@ def test_transformer_sampler_accepts_audio_only_ref2va_conditioning(tmp_path: Pa
     assert kwargs["references"] == (reference,)
 
 
+def test_transformer_sampler_accepts_latent_only_visual_refmod(tmp_path: Path):
+    created = []
+
+    def factory(spec):
+        sampler = FakeSampler(spec)
+        created.append(sampler)
+        return sampler
+
+    spec = _spec(tmp_path, task="ref2va")
+    reference = SimpleNamespace(kind="image", latent_only=True)
+    conditioning = _conditioning(
+        spec, load_vision=False, task="ref2va",
+        condition_video_rows="saved-refmod-rows", references=(reference,),
+    )
+    H3TransformerCache(factory).sample(spec, conditioning, H3GenerationConfig(steps=3))
+    assert created[0].calls[0][2]["condition_video_rows"] == "saved-refmod-rows"
+
+
 def test_transformer_sampler_accepts_ref2va_trajectory_forecast(tmp_path: Path):
     created = []
 

@@ -18,6 +18,8 @@ struct PlaybackPreviewPane: View {
         Text(store.previewMode == "Movie" ? "Rendered movie" : "Timeline · cuts")
           .font(.system(size: 9)).foregroundStyle(.secondary)
         Spacer()
+        Button("Audio visuals & captions") { store.showAudioPresentation.toggle() }
+          .popover(isPresented: $store.showAudioPresentation) { AudioPresentationControls().environmentObject(store) }
         Text(store.previewClip?.name ?? "Timeline").font(.system(size: 10))
           .foregroundStyle(.secondary)
         Spacer()
@@ -27,7 +29,7 @@ struct PlaybackPreviewPane: View {
           } else {
             Task { await store.previewMovie() }
           }
-        }.disabled(store.bridge.busy || store.project.clips.isEmpty)
+        }.disabled(store.bridge.busy || store.project.playbackDuration <= 0)
       }.padding(.horizontal, 20).frame(height: 40)
       if store.preparingTimelinePlayback {
         HStack { ProgressView().controlSize(.small); Text("Loading timeline…").font(.caption); Spacer() }
@@ -56,7 +58,9 @@ struct PlaybackPreviewPane: View {
             } else {
               NativePlayer(player: store.player)
             }
-            titlePreview(clip)
+            if store.project.audioPresentation == nil { titlePreview(clip) }
+          } else if store.project.audioPresentation?.enabled == true && store.project.playbackDuration > 0 {
+            Color.black
           } else {
             VStack(spacing: 18) {
               Image(systemName: "viewfinder").font(.system(size: 43, weight: .ultraLight))
@@ -88,6 +92,7 @@ struct PlaybackPreviewPane: View {
               }.padding(.top, 4)
             }.padding(28).foregroundStyle(.white)
           }
+          if store.previewMode != "Movie", store.project.audioPresentation != nil { AudioPresentationOverlay(time:position.seconds) }
         }.clipShape(RoundedRectangle(cornerRadius: 5))
           .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.line))
           .frame(width: geo.size.width, height: geo.size.height)
@@ -170,7 +175,7 @@ struct TimelineView: View {
     VStack(spacing: 0) {
       HStack(spacing: 14) {
         SmallLabel(text: "Timeline")
-        Text("\(store.project.clips.count) clips · \(store.project.duration,specifier:"%.2f") s")
+        Text("\(store.project.clips.count) clips · \(store.project.playbackDuration,specifier:"%.2f") s")
           .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
         Spacer()
         Button {
@@ -178,6 +183,12 @@ struct TimelineView: View {
         } label: {
           Image(systemName: "scissors")
         }.help("Split at playhead · ⌘B").accessibilityLabel("Split at playhead")
+        Button("Add song…") { store.addSong() }.disabled(store.operationBusy)
+        Menu("Audio") {
+          Button("Generate music…") { store.openMusic() }
+          Button("Generate voice…") { store.openVoice() }
+          Button("Export audio…") { store.exportTimelineAudio() }.disabled(store.project.playbackDuration <= 0 || store.operationBusy)
+        }
         Button {
           store.addAudioTrack()
         } label: {
@@ -223,6 +234,7 @@ struct TimelineView: View {
             .horizontal, 12
           ).frame(width: 77, alignment: .leading)
           GeometryReader { geo in
+            ScrollViewReader { proxy in
             ScrollView(.horizontal) {
               let width = max(geo.size.width - 10, store.project.timelineContentDuration * store.zoom + 130)
               ZStack(alignment: .topLeading) {
@@ -283,12 +295,12 @@ struct TimelineView: View {
                           ).background(
                             Theme.mint.opacity(t.muted ? 0.05 : 0.2),
                             in: RoundedRectangle(cornerRadius: 4))
-                        }.buttonStyle(.plain).offset(x: a.start * store.zoom)
+                        }.buttonStyle(.plain).id(a.id).offset(x: a.start * store.zoom)
                       }
                     }.frame(height: 38)
                   }
                 }.frame(width: width, alignment: .leading)
-                if !store.project.clips.isEmpty {
+                if store.project.playbackDuration > 0 {
                   TimelinePlayhead(position: store.playbackPosition)
                 }
               }.frame(width: width, height: CGFloat(162 + store.project.audioTracks.count * 38))
@@ -302,6 +314,8 @@ struct TimelineView: View {
                   return true
                 }
             }.scrollIndicators(.visible)
+              .onChange(of: store.selectedAudioID) { _, id in if let id { proxy.scrollTo(id, anchor: .leading) } }
+            }
           }
         }.frame(height: CGFloat(162 + store.project.audioTracks.count * 38))
       }
@@ -325,7 +339,7 @@ struct TimelineView: View {
         .onEnded { _ in store.endTimelineScrub() })
       .accessibilityElement(children: .ignore)
       .accessibilityLabel("Timeline time ruler")
-      .accessibilityValue(String(format: "0 to %.2f seconds", store.project.duration))
+      .accessibilityValue(String(format: "0 to %.2f seconds", store.project.playbackDuration))
       .help("Click or drag above a clip to move the playhead")
   }
   func handleDrop(_ items: [String]) {

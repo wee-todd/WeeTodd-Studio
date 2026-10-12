@@ -217,6 +217,48 @@ final class ProjectPlanningTests: XCTestCase {
     XCTAssertThrowsError(try project.attachPlanningReference(global, subjectID: UUID()))
     XCTAssertEqual(project, before)
   }
+  func testVisualRefModCanBeApprovedOnProductionObjects() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".safetensors")
+    try Data([1, 2, 3, 4]).write(to: file)
+    defer { try? FileManager.default.removeItem(at: file) }
+    var project = StudioProject()
+    var plan = ProjectPlanning()
+    plan.subjects = ([PlanningSubjectKind.character, .prop, .environment]).map { kind in
+      var object = PlanningSubject(name: kind.label, kind: kind)
+      object.details = "Reviewed visual identity"
+      return object
+    }
+    project.planning = plan
+    var mod = MediaAsset(name: "Visual identity", kind: .refmod, path: file.path, scope: .global)
+    mod.refmodKind = "image"
+    mod.refmodTokenCount = 256
+    mod.refmodSHA256 = String(repeating: "a", count: 64)
+    for object in plan.subjects {
+      let linkedID = try project.attachPlanningReference(mod, subjectID: object.id)
+      XCTAssertEqual(project.planning?.subjects.first { $0.id == object.id }?.referenceAssetIDs, [linkedID])
+      try project.planning?.approveSubject(object.id)
+      try project.planning?.approveReferences(object.id, assets: project.assets)
+      XCTAssertTrue(project.planning?.areReferencesApproved(object.id, assets: project.assets) == true)
+      var other = mod
+      other.id = UUID()
+      other.path = file.path + "-other"
+      XCTAssertThrowsError(try project.attachPlanningReference(other, subjectID: object.id))
+    }
+    var changed = mod
+    changed.refmodSHA256 = String(repeating: "d", count: 64)
+    XCTAssertThrowsError(try project.attachPlanningReference(changed, subjectID: plan.subjects[0].id))
+    XCTAssertEqual(project.assets.count, 1)
+    let snapshot = try project.planning!.resolvedSnapshot([plan.subjects[0].id], assets: project.assets)
+    XCTAssertEqual(snapshot.assets.first?.refmodTokenCount, 256)
+    var invalid = project.planning!
+    var second = project.assets[0]
+    second.id = UUID()
+    invalid.subjects[0].referenceAssetIDs.append(second.id)
+    XCTAssertThrowsError(try invalid.approveReferences(plan.subjects[0].id,
+      assets: project.assets + [second]))
+    try FileManager.default.removeItem(at: file)
+    XCTAssertFalse(project.planning!.areReferencesApproved(plan.subjects[0].id, assets: project.assets))
+  }
   func testMergeRemapsShotsAndKeepsImportIdentity() throws {
     var plan = ProjectPlanning()
     var a = PlanningSubject(name: "Dog", kind: .character)

@@ -10,7 +10,7 @@ final class TimelineExtentTests: XCTestCase {
     project.audio = [song]
     XCTAssertEqual(project.timelineContentDuration, 445.3987)
     XCTAssertEqual(project.duration, 12.333)
-    XCTAssertEqual(TimelinePlaybackPlan(project: project).duration, 12.333)
+    XCTAssertEqual(TimelinePlaybackPlan(project: project).duration, 445.3987)
   }
   func testOffsetTitlesAndAudioDetermineTheVisibleExtent() {
     var project = StudioProject()

@@ -9,19 +9,12 @@ import UniformTypeIdentifiers
   var selectedMusicTake: MediaAsset? { musicTakes.first { $0.id == selectedMusicAssetID } }
 
   func openMusic() {
-    if project.musicDraft == nil { change { $0.musicDraft = MusicDraft() } }
-    showMusic = true
-  }
-  func chooseMusicFolder(decoder: Bool = false) {
-    let panel = NSOpenPanel()
-    panel.title = decoder ? "Choose YuE2 VAE folder" : "Choose YuE2 MLX model folder"
-    panel.canChooseDirectories = true; panel.canChooseFiles = false
-    guard panel.runModal() == .OK, let url = panel.url else { return }
-    change {
-      if decoder { $0.musicDraft?.vaePath = url.path }
-      else { $0.musicDraft?.modelPath = url.path }
+    if project.musicDraft == nil {
+      var draft = MusicDraft(); draft.modelID = selectedMusicModel?.id
+      change { $0.musicDraft = draft }
     }
-    musicModelStatus = nil
+    migrateMusicModelLocation()
+    showMusic = true
   }
   func loadMusicScore() {
     let panel = NSOpenPanel(); panel.title = "Import ABC score"
@@ -41,24 +34,19 @@ import UniformTypeIdentifiers
     Task { await downloadMusicModel(to: folder) }
   }
   func downloadMusicModel(to folder: URL) async {
-    guard !operationBusy, let draft = project.musicDraft else { return }
-    let session = documentSessionID, projectID = project.id
-      do {
-        let result = try await bridge.invoke("music-download", runtime: runtime, payload: ["directory": folder.path])
-        guard let path = result["model_path"] as? String else { throw StudioError.invalid("No music model was prepared.") }
-        guard documentSessionID == session, project.id == projectID,
-          project.musicDraft?.id == draft.id, project.musicDraft?.modelPath == draft.modelPath,
-          project.musicDraft?.precision == draft.precision else {
-          notice = "YuE2 model downloaded to \(path)."; return
-        }
-        change { $0.musicDraft?.modelPath = path; $0.musicDraft?.precision = "auto" }
-        musicModelStatus = "Verified 8-bit YuE2 model ready."
-      } catch { self.error = error.localizedDescription }
+    guard !operationBusy else { return }
+    do {
+      let result = try await bridge.invoke("music-download", runtime: runtime, payload: ["directory": folder.path])
+      guard let path = result["model_path"] as? String else { throw StudioError.invalid("No music model was prepared.") }
+      try registerMusicModel(["model": ["path": path, "kind": "generator", "name": "YuE2 3B · 8-bit"]])
+      musicModelStatus = "Verified 8-bit YuE2 model ready."
+      notice = "YuE2 model downloaded to \(path) and registered in Runtime Settings."
+    } catch { self.error = error.localizedDescription }
   }
   func inspectMusicModel() async {
     guard !operationBusy, let draft = project.musicDraft else { return }
     do {
-      let request = try draft.request()
+      let request = try resolvedMusicRequest(draft)
       let result = try await bridge.invoke("music-inspect", runtime: runtime,
         payload: ["music": try request.object()])
       guard project.musicDraft == draft else { return }
@@ -69,7 +57,7 @@ import UniformTypeIdentifiers
     guard !operationBusy, let draft = project.musicDraft else { return }
     let session = documentSessionID, projectID = project.id
     do {
-      var request = try draft.request(); request.abc = nil
+      var request = try resolvedMusicRequest(draft); request.abc = nil
       let job = dataDirectory.appendingPathComponent("Music/\(UUID().uuidString)")
       let result = try await bridge.invoke("music-plan", runtime: runtime,
         payload: ["music": try request.object()], output: job)
@@ -86,11 +74,13 @@ import UniformTypeIdentifiers
   func generateMusic(reusing take: MediaAsset? = nil, decodeOnly: Bool = false) async {
     guard !operationBusy, let currentDraft = project.musicDraft else { return }
     var draft = take?.musicGeneration?.draft ?? currentDraft
+    if take == nil && draft.modelID == nil && draft.modelPath.isEmpty { draft.modelID = selectedMusicModel?.id }
     if take != nil && !decodeOnly { draft.steps = currentDraft.steps; draft.seed = currentDraft.seed }
     let projectID = project.id, session = documentSessionID
     let job = dataDirectory.appendingPathComponent("Music/\(UUID().uuidString)")
     do {
-      let request = try draft.request()
+      var request = try take?.musicGeneration?.request ?? resolvedMusicRequest(draft)
+      if take != nil && !decodeOnly { request.steps = draft.steps; request.seed = draft.seed }
       let command = take == nil ? "music-generate" : (decodeOnly ? "music-decode" : "music-resynthesize")
       var body: [String: Any] = ["music": try request.object()]
       if let generation = take?.musicGeneration {
@@ -200,7 +190,7 @@ import UniformTypeIdentifiers
   func exportMusicRequest() {
     guard let draft = project.musicDraft else { return }
     do {
-      let request = try draft.request()
+      let request = try resolvedMusicRequest(draft)
       let panel = NSSavePanel(); panel.nameFieldStringValue = "music-job.json"
       panel.allowedContentTypes = [.json]
       guard panel.runModal() == .OK, let url = panel.url else { return }

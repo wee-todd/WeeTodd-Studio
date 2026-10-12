@@ -2,7 +2,7 @@ import Foundation
 
 extension StudioProject {
   /// Editing needs space for the full song and titles while video coverage is still being built.
-  /// Export and playback duration continue to follow the actual video timeline.
+  /// Video scheduling retains its own duration; playback covers all timeline content.
   public var timelineContentDuration: Double {
     let ends = [duration] + resolvedAudio.map { $0.start + $0.duration } + titles.map { $0.start + $0.duration }
     return max(0, ends.filter { $0.isFinite }.max() ?? 0)
@@ -27,6 +27,7 @@ public struct TimelinePlaybackSpan: Equatable {
 }
 
 public struct TimelinePlaybackPlan: Equatable {
+  public let visualSource: String?
   public let spans: [TimelinePlaybackSpan]
   public let duration: Double
   public let fps: Double
@@ -37,6 +38,7 @@ public struct TimelinePlaybackPlan: Equatable {
   public let audioTracks: [AudioTrack]
 
   public init(project: StudioProject) {
+    visualSource = project.audioPresentation?.enabled == true ? project.audioPresentation?.source : nil
     var starts: [Double] = []
     var cursor = 0.0
     for (index, clip) in project.clips.enumerated() {
@@ -46,7 +48,7 @@ public struct TimelinePlaybackPlan: Equatable {
       starts.append(start)
       cursor = start + length
     }
-    duration = cursor
+    duration = project.playbackDuration
     spans = project.clips.enumerated().map { index, clip in
       let end = index + 1 < starts.count ? starts[index + 1] : cursor
       return TimelinePlaybackSpan(clipID: clip.id, start: starts[index],
@@ -59,7 +61,7 @@ public struct TimelinePlaybackPlan: Equatable {
     width = max(2, Int(Double(project.settings.width) * scale) / 2 * 2)
     height = max(2, Int(Double(project.settings.height) * scale) / 2 * 2)
     fit = project.settings.fit
-    audio = project.resolvedAudio
+    audio = project.resolvedAudio.map { region in var value = region; value.captions = nil; value.instrumental = nil; return value }
     audioTracks = project.audioTracks
   }
 
@@ -73,7 +75,7 @@ public struct TimelinePlaybackPlan: Equatable {
   public func seekPosition(_ seconds: Double, clamped: Bool) -> Double? {
     guard seconds.isFinite, duration > 0 else { return nil }
     let target = clamped ? min(duration, max(0, seconds)) : seconds
-    return span(at: target) == nil ? nil : target
+    return target >= 0 && target <= duration ? target : nil
   }
 }
 

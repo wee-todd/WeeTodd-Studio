@@ -544,8 +544,8 @@ Write a complete H3 prompt, select the installed compatible Ref2VA profile, and 
 
 ## Inference and model storage
 
-Choose **Draw Things** in the **Generation** menu to submit to a configured Draw Things endpoint.
-Choose **WeeTodd (local)**, then **H3**, **LTX 2.3** or **LTX 2.5** in the **Model** menu for native
+Choose **Run with → Draw Things** to submit to a configured Draw Things endpoint.
+Choose **Run with → WeeTodd (local)**, then **H3**, **LTX 2.3** or **LTX 2.5** in **Model** for native
 execution. Compatible installed components are selected automatically, with no template step. These are
 explicit choices; Studio does not silently substitute one backend for another.
 
@@ -613,7 +613,9 @@ Qwen VoiceDesign remains a separate, unsupported checkpoint in this release.
 instructions at the cursor. Emotion, delivery, timing and reactions are grouped; **Custom delivery**
 accepts a short description. Tags remain editable in the script. **Auto Tag** uses the configured local
 Qwen3.5 assistant to suggest sparse insertions for the current script/line, with a preview before Apply.
-It preserves the original words, rejects invalid locations, and never analyzes the reference recording.
+The assistant chooses numbered script segments and supported tags; Studio owns insertion locations
+and preserves existing words, whitespace and tags. Invalid suggestions are rejected, and an empty
+suggestion is shown explicitly for review. Auto Tag never analyzes the reference recording.
 Assistant setup is shared with Prompt Assistant; no hosted Fish API is used.
 
 **Qwen emotion:** the supported Base checkpoints do not accept Fish tags or natural-language style
@@ -633,18 +635,41 @@ Qwen CustomVoice conversations instead assign a preset voice and delivery instru
 a line can override that instruction. Both families render each line with its assigned voice, then
 assemble one dialogue take; speaker names are never spoken. This is sequential orchestration, not simultaneous overlapping speech or a
 single native multi-speaker sampling pass. Up to 64 lines are supported. Individual line takes, seeds,
-references, and sample-exact timing remain in the take's artifacts. Use **Add to clip** to place the
-dialogue on the voice track alongside music. Switching modes preserves both scripts.
+references, and sample-exact timing remain in the take's artifacts. Use **Add to timeline** to place the
+full dialogue on the voice track alongside music. Switching modes preserves both scripts.
 
 Enter the new script, choose a seed and optional sampling controls, then generate. Each take retains
 its full native-rate master, generated codes, request, model/reference digests and completion receipt.
 Stages release weights before the next component loads; success, cancellation and failure release
 the active model. Completed takes never automatically replace or place earlier media. A token-budget
 ending is labelled; audition it before deciding to use it. Speaking length is model-selected, not
-an exact-duration promise. **Add to clip** creates a clip-anchored Voice region and trims its visible
-length to fit; the complete take remains available. Moving/splitting its clip moves/splits that region.
+an exact-duration promise. **Add to timeline** places the entire take at the playhead, including on an
+empty timeline. **Attach to clip** offers **Keep full take** or **Trim to clip** with an explicit duration;
+the complete take remains available. Moving/splitting its clip moves/splits an attached region.
 Music stays independently editable. Collect Media includes voice references and take artifacts;
 model weights remain in their shared library. Collected projects rebuild audio drivers from the new paths.
+
+**Start with audio:** choose **Add song…** beside the timeline to import a song, or use **Add to timeline**
+on a voice or music take. Voice and music keep their full length on separate tracks. The playhead and
+preview cover the full audio timeline while you build video coverage. **Audio → Export audio…** writes
+the complete mix as 24-bit WAV. Existing video scheduling and clip-attached timing remain independent.
+
+**Audio visuals & captions** above the preview offers waveform and spectrum bars, source selection
+(audible mix, voice, music, or voice + music), colors, size, position, sensitivity and smoothing.
+Visualization fills empty video sections and the audio tail; imported/generated video takes precedence.
+The movie exporter assembles visualizer canvases through normal clip transitions. Both live preview
+and exported frames use the same drawing component. Live timeline playback still uses cuts; use
+**Render movie preview** to review finished transitions.
+
+Select an audio region and use **Generate captions**, optionally supplying the spoken script or lyrics.
+Choose/download the shared local English caption model from **Audio visuals & captions**; the model
+location is a runtime setting. Native MLX recognition supplies acoustic timestamps; untimed words are
+not assigned invented timing. Review/edit cue text and source start/end times, especially for singing.
+Manual cues are also supported. Trimming, moving and splitting regions preserve source-relative timing.
+Separate **Voice captions** and **Song lyrics** switches affect preview and export; voice wins overlaps
+unless **Show voice and lyrics together** is enabled. Caption size, color and position are adjustable.
+Mark instrumental regions with **Instrumental — no lyric captions** to disable lyric generation/display.
+Automatic recognition can need correction on mixed music.
 
 Select an audio track to set its role, gain, pan/balance, mute or solo. Select a region for its source
 trim, length, volume and separate fade-in/out. Equal-power crossfades require overlapping regions
@@ -694,8 +719,10 @@ multilingual quality or lip-sync guarantee. See [implementation status](../STATU
 
 Open **Movie → Generate Music…**, or **Generate Music** in the asset/track inspector. YuE2 runs
 inside WeeTodd's native MLX engine; Studio does not install or invoke another YuE package.
-Choose an existing compatible merged MLX checkpoint folder, or **Download verified 8-bit model…**
-to install the pinned 4.53 GB model, tokenizer and stereo decoder into your model library.
+In **Runtime Settings → Music models**, add an existing compatible merged MLX folder or use
+**Download verified… → YuE2 3B · 8-bit** to install the pinned 4.53 GB model, text tokenizer and
+stereo decoder. The generation panel selects installed models by name; paths are configured once
+in Runtime Settings. Existing project model paths migrate into that shared library when Music opens.
 This initial integration supports the merged layout published by
 [npario](https://huggingface.co/npario/YuE2-3B-MLX). Split AR/NAR layouts, including the supplied
 vanch007 conversion, are rejected with a layout error. Precision selects compatible files; it does
@@ -704,7 +731,7 @@ separately from WeeTodd's source-code license.
 
 Use genre, mood, energy, instruments, vocal character, language and requested BPM to build a
 visible style prompt. Custom text is allowed in these categories. Enter lyrics with section markers,
-or select Instrumental and describe the arrangement. These are model guidance, not guaranteed musical
+or select **Instrumental** and choose an automatic, ordered or timed section plan. These are model guidance, not guaranteed musical
 constraints. **Quality** uses 32 acoustic midpoint steps; **Fast** uses 8. The length budget limits
 semantic tokens at 25 frames/second and may truncate a song; it is not an exact requested duration.
 Natural endings can arrive earlier, and truncated takes are labelled for review.
@@ -717,11 +744,33 @@ latents** reruns only its stereo decoder. Saved stage files and checkpoint ident
 before reuse. The default memory policy releases the transformer before loading the VAE; retaining
 components applies only within the current job. No background model cache remains after a job.
 
+**Instrumental LoRA.** Add or download the verified Mothersuperior instrumental adapter in Music
+models. The unfused BF16 and FP32 `ar_lora_inst_v3abc` safetensors layouts are supported; the ComfyUI
+fused adapter is not a native-engine input. Enabling Instrumental selects an installed adapter when
+available and recommends **Melody + chords** planning. Strength defaults to **1.0**, is adjustable
+from 0 to 2, and 0 bypasses the adapter. Choose **Base model only** to disable it. The adapter runs
+on the composition branch while retaining quantized base weights. Each take records its adapter
+hash and strength; resynthesis checks the saved identity.
+
+The section editor supports intro, verse, pre-chorus, chorus, bridge and outro. Timed sections use
+start/end seconds without overlaps. The trained model favors longer pieces: timing is guidance,
+not an exact endpoint. Trim the generated take and apply timeline fades for short clips.
+
+**Reference music.** Add or download **SheetSage2** in Runtime Settings, then expand
+**Reference audio → editable score** in Music. Choose audio, select a 1–300 second interval and
+**Analyze reference**. Analysis runs through Studio's native MLX encoder and score decoder using
+the merged `sheetsage2_bf16.safetensors` file; no upstream Python code is executed. Review/edit the
+extracted score, then **Use score**. Melody-only mode omits extracted chord annotations so YuE2 can
+reimagine the harmony; turning it off supplies melody and chords. This does not clone a recording's
+voice or production sound. Analysis is approximate and may need correction. Results arriving after
+the draft changes remain on disk without overwriting current work. The community real-audio
+tokenizer and its NAR LoRAs are not part of this integration.
+
 Every take saves a 48 kHz stereo PCM master plus its request, score, tokens, noise, latents, timings
-and integrity metadata. Audition it, then **Add to Music track** at the playhead. Default placement
-uses a track that mixes with source audio; an explicitly selected replacement track retains that
-track's chosen behavior. Trim, gain, fades, mute and solo use the existing timeline controls.
-**Collect Media** includes the stage artifacts while leaving shared model weights in place.
+and integrity metadata. Audition it, then **Add to timeline** at the playhead. Placement uses a Music
+track that mixes with source audio. Track replacement behavior remains an explicit timeline setting.
+Trim, gain, fades, mute and solo use the existing timeline controls.
+**Collect Media** includes stage artifacts, reference recordings and score-analysis artifacts while leaving shared model weights in place.
 
 For audio-driven video, select a supported native video clip, open Music, select a take and set
 its song in-point. **Use as audio driver** selects A2V. LTX 2.5 links the original song and its
@@ -742,7 +791,10 @@ python scripts/studio_bridge.py music-plan --request music-job.json --output /ne
 ```
 
 `music-resynthesize` accepts `source_artifacts` plus optional acoustic `steps` and `seed`;
-`music-decode` accepts `source_artifacts`. Both require a fresh output folder. `music-inspect`
+`music-decode` accepts `source_artifacts`. Both require a fresh output folder. `music-reference-analyze` accepts `audio_path`,
+`model_path` (SheetSage2), `source_in`, `duration`, and `melody_only`; it writes a reviewable score
+and analysis JSON to a fresh output directory. `music-extension-inspect` and
+`music-extension-download` manage the optional `instrumental` and `sheetsage` models. `music-inspect`
 validates the model layout without loading its tensors. Unsupported settings fail explicitly.
 Real generation qualification currently covers the pinned 8-bit checkpoint on M3 Ultra, including
 a 159.8-second song at 32 steps in 123.2 seconds. This is one run, not a cross-device performance
@@ -973,8 +1025,11 @@ or imply the same speed, memory use or output. This route remains experimental.
 
 ## Native H3 NNC core
 
-In an H3 clip, open **Memory and execution → Transformer → Native NNC (experimental)**.
-This is an explicit backend choice for an existing H3 model, not a separate model family.
+This optional transformer backend uses the legacy Python H3 renderer. In **Runtime Settings**, turn
+off **Use Swift MLX for H3 (default)** and configure the optional renderer, then open **Memory and
+execution → Transformer → Native NNC (experimental)** in an H3 clip. The default Swift H3 worker
+does not execute this backend or fall back to Python automatically. It is an explicit backend
+choice for an existing H3 model, not a separate model family.
 The first qualified configuration uses a supported Comfy INT8 Ref2VA transformer, one complete
 ComfyUI BF16 Ref2VA Turbo LoRA at strength 1 with contiguous QKV layout, **4 steps** in Studio
 (`steps: 5` schedule points in a recipe), Euler sampling and Drop AdaLN. Use checkpoint-default
@@ -1831,6 +1886,26 @@ cannot reinterpret those references as endpoints. Other video models retain thei
 endpoint capabilities. LTX IC-LoRAs and movie/audio references have no qualified mapping in
 the current helper. Software and transport tests do not establish real-model quality or memory fit.
 
+## H3 visual RefMods · legacy Python renderer
+
+Existing standalone H3 visual RefMods (`.safetensors`) can be imported into Global, Project or
+Clip Assets. Rendering them requires the legacy Python H3 renderer: in **Runtime Settings**, turn
+off **Use Swift MLX for H3 (default)** and configure the optional renderer. The default Swift H3
+worker and Draw Things do not accept RefMods; Studio does not switch execution routes automatically.
+
+Select an H3 clip, then **Use in clip → Appearance · H3 reference embedding**. Studio shows the
+saved `<Picture 1>` or `<Video 1>` label and visual token count. Include that label in the prompt.
+Attach one visual RefMod at strength 1 without other conditioning media. The Python shared renderer
+verifies its SHA-256 and uses its saved normalized latent rows for Ref2VA. It does not encode the
+reference through the video VAE or send its pixels to Qwen; target video and audio retain their
+usual decode stages. Audio RefMods and multi-item bundles are unsupported.
+
+A character, prop or environment in **Shot List → Production objects** can link one imported visual
+RefMod alongside image references. Approve the references, select an H3 clip and choose **Use in
+selected H3 clip** to attach it deliberately. Object links do not automatically bind RefMods during
+shot generation or replace existing clip inputs. These contracts have synthetic fixture coverage;
+this consolidation adds no real-model RefMod render or visual-quality qualification.
+
 ## H3 reference clips with paged Q8 models
 
 This walkthrough uses the legacy Python renderer and its older paged-transformer/audio layout.
@@ -1897,13 +1972,15 @@ A 36GB physical-device maximum is not yet established; the header-based estimate
 ### Timeline playback and scrubbing
 
 The viewport plays the entire timeline by default. Its timecode, frame-step controls and skip-to-end
-use movie time. Playback continues through each shot without selecting it in the inspector.
+cover the full clip, audio and title extent. Playback continues through each shot without selecting
+it in the inspector.
 Clicking a clip selects it and moves the playhead into that clip; **Split at playhead** splits the
 shot under the playhead. Keyframe attachment times remain relative to the selected shot and are
 available only while the playhead is inside it.
 
-Click or drag the **time ruler** above a clip to seek. Clicks in the blank area beyond the clips are
-ignored. Drag the playhead's triangle or vertical line to scrub; dragging beyond the timeline clamps
+Click or drag the **time ruler** to seek, including audio and title sections beyond the video clips.
+Clicks outside the complete timeline extent are ignored. Drag the playhead's triangle or vertical
+line to scrub; dragging beyond the timeline clamps
 to its start or end. Scrubbing pauses playback and resumes on release if it was already playing.
 The ruler and playhead share the scrolled, zoomed timeline coordinates.
 
@@ -1921,9 +1998,10 @@ these edits are never silently omitted to enable native playback.
 
 **Render movie preview** builds a reduced-resolution movie with the actual transitions, titles,
 audio crossfades and finishing mix. It is the more accurate check before export. Use **Timeline
-playback** to return to immediate editing. Rendered previews are rebuilt after edits and require
-all shots to have media. Interpolation/upscaling are applied in final export. Waveform editing is
-not yet available.
+playback** to return to immediate editing. Rendered previews are rebuilt after edits. Without audio
+presentation configured, all shots require media; with it configured, missing video sections use
+the audio canvas. Interpolation/upscaling are applied in final export. Audio visualization does not
+add waveform-based trim editing.
 
 ## LoRAs and groups
 
@@ -2294,8 +2372,10 @@ Current intermediate clips use H.264; ProRes and PNG output are not end-to-end l
 Finishing order is resize/upscale, then interpolate, then transitions/titles/audio assembly.
 The assembled video is conformed again to the movie frame rate so AAC packet padding and
 transition timestamps cannot leave gaps in its frame cadence. Final validation checks the
-exported streams and timing before reporting success. Set the finished length through clip trims
-and transition overlaps; model frame-count rounding can make generated clips longer than requested.
+exported streams and timing before reporting success. Clip trims and transition overlaps set video
+coverage; model frame-count rounding can make generated clips longer than requested. With audio
+presentation configured, movie export also covers longer audio regions and titles using a canvas
+after the video ends. **Audio → Export audio…** always exports the full timeline mix.
 RIFE supports integer 2×/3×/4× interpolation with its configured MLX executable and weights.
 MetalFX spatial upscaling uses the native helper. Neither method downloads models silently.
 
@@ -2320,8 +2400,8 @@ When every clip uses the selected native Swift H3/LTX route or an accepted movie
 recipes, preparation reports and input observations. Export and execution use the same native
 preparation and workers as Studio, with no Python prerequisite or inference fallback. This host
 supports cut movies with embedded source audio, trims, per-clip gain from 0–200%, fit/fill, output
-frame rate, and MP4, MOV or ProRes finishing through FFmpeg. It explicitly rejects titles, added
-audio, source pan, transitions, PNG sequences, upscaling/interpolation, differing per-clip finishing
+frame rate, and MP4, MOV or ProRes finishing through FFmpeg. It explicitly rejects audio presentation,
+titles, added audio, source pan, transitions, PNG sequences, upscaling/interpolation, differing per-clip finishing
 overrides and Motion Fidelity rather
 than omitting those settings. Native continuous-scene export retains the complete scene group and
 its prepared member ranges, including full and windowed publication; export the whole scene rather
@@ -3470,11 +3550,11 @@ than duplicated environments.
 - Use **Link object…** to reference another definition. Choose Contains, Wears, Holds, Uses,
   Located in or Part of, and add a placement/state note. Multiple placements can reference the same
   prop ID; their instance IDs remain separate. Clicking the linked name opens its definition.
-- **Publish from this movie** saves an immutable version with linked dependencies and image metadata.
+- **Publish from this movie** saves an immutable version with linked dependencies and visual reference metadata.
   Publishing an environment includes its sets; publishing one set includes its parent and required
   objects but excludes sibling sets. Unchanged publications reuse the current version.
 - Search global packages by name, kind or tag, then choose **Use in movie**. The movie stores pinned
-  definitions and image links. Existing conflicting IDs cause a clear error and leave the movie
+  definitions and visual reference links. Existing conflicting IDs cause a clear error and leave the movie
   unchanged; automatic version replacement/three-way merging is not implemented.
 - Edit an imported object locally to make a movie variation. Its library origin remains visible;
   publishing creates another package version and never silently updates other movies.
@@ -3482,6 +3562,14 @@ than duplicated environments.
   They do not rewrite the movie or global definition. **Add approved selection to timeline** includes
   these notes with the resolved object descriptions in each new clip's prompt; later edits do not
   rewrite already applied clips automatically.
+- Import a standalone visual H3 RefMod in **Media & Assets**, then select it under a character,
+  prop, or environment in **Production objects**. Each object can hold one RefMod alongside its
+  image references. Its token count and prompt slot are visible there. Reference approval covers
+  the linked file identity; a changed or missing file requires review. Select an H3 clip and use
+  **Use in selected H3 clip** on the approved object to attach the RefMod for legacy Python Ref2VA.
+  Turn off **Use Swift MLX for H3 (default)** before rendering it. The default Swift worker and Draw
+  Things do not accept this asset type. The clip supports one RefMod at a time, so object links do
+  not silently replace clip inputs. See [RefMod limits](#h3-visual-refmods--legacy-python-renderer).
 
 Approvals include transitive object-definition revisions. Changing a linked coat or prop makes
 its owners’ description/reference approvals and affected shot approvals stale. Cycles are traversed
@@ -3492,7 +3580,7 @@ until their uses are removed. Merges remap links transactionally or report a con
 **Export package…** writes `weetodd-production-library-v1` metadata for sharing/import into another
 movie. **Export shot list…** writes `weetodd-shot-list-v2`, including planning records, reference asset
 metadata, resolved dependency snapshots, shot appearance overrides and unresolved-link warnings.
-Neither export embeds image bytes. Use the movie’s **Collect Media** feature for portable files;
+Neither export embeds image or RefMod bytes. Use the movie’s **Collect Media** feature for portable files;
 missing paths must be relinked before generation. A catalog package is limited to 2,000 objects and
 2 MB of metadata; searches show at most 100 matching packages. SQLite revisions are whole dependency
 snapshots per published root, retaining stable object/placement IDs across versions.
@@ -3653,8 +3741,9 @@ and rejects changed intervals on applied audio-driven takes, which need new gene
 For a matching take already on the timeline, **Reuse selected timeline take** links it to an
 approved shot while retaining its footage, prompt and versions. Applying the remaining plan
 preserves an existing song region covering the same source interval instead of doubling the mix.
-The editing canvas shows the complete music and title extent even while video coverage is short;
-this does not extend the exported movie beyond its actual video clips.
+Playback and the editing canvas cover the complete music and title extent while video coverage is
+short. With audio presentation configured, movie export covers that extent using the visualizer or
+black canvas for missing video; an ordinary movie export follows its actual video clips.
 Assign first/last images, approve the shots and choose **Add approved selection to timeline**.
 The ordinary clip controls then prepare and render them. The original song is placed continuously
 on the Music track and generated clip sound is muted. Additional timed frame inputs remain in the

@@ -328,6 +328,8 @@ class H3TransformerCache:
         )
         expected_vision = (spec.task == "fl2va" and not continuation_text_only_fl2va) or (
             spec.task == "ref2va" and conditioning.condition_video_rows is not None
+            and any(not getattr(reference, "latent_only", False)
+                    for reference in conditioning.references)
         )
         if conditioning.task != spec.task:
             raise ValueError(

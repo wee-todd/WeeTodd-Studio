@@ -96,6 +96,21 @@ final class ProjectTests: XCTestCase {
     let restored = try ProjectStorage.read(file)
     XCTAssertEqual(p, restored)
   }
+  func testVisualRefModIdentitySurvivesProjectRoundTrip() throws {
+    var p = StudioProject()
+    var asset = MediaAsset(name: "Character", kind: .refmod, path: "/tmp/character.safetensors")
+    asset.refmodKind = "image"
+    asset.refmodTokenCount = 2816
+    asset.refmodSHA256 = String(repeating: "a", count: 64)
+    p.assets = [asset]
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appendingPathComponent("test.weetodd")
+    try ProjectStorage.write(p, to: file)
+    let restored = try ProjectStorage.read(file)
+    XCTAssertEqual(restored.assets.first, asset)
+  }
   func testReorderPreservesClips() {
     var p = StudioProject()
     let a = Clip(name: "A")

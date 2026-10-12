@@ -29,17 +29,39 @@ struct MusicEditor: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 14) {
             Text("Native music model").font(.headline)
-            HStack {
-              TextField("Local YuE2 MLX model folder", text: field(\.modelPath))
-              Button("Choose…") { store.chooseMusicFolder() }
+            Picker("Installed model", selection: Binding(get: { store.selectedMusicModel?.id }, set: { store.selectMusicModel($0) })) {
+              Text("Choose installed model").tag(Optional<UUID>.none)
+              ForEach(store.installedMusicModels.filter { $0.kind == .generator }) { Text($0.name).tag(Optional($0.id)) }
             }
-            Text("Choose a compatible merged MLX folder with its tokenizer and stereo decoder. Weights: CC BY-NC 4.0.")
-              .font(.caption).foregroundStyle(.secondary)
-            Link("YuE2 MLX weights", destination: URL(string: "https://huggingface.co/npario/YuE2-3B-MLX")!).font(.caption)
-            Button("Download verified 8-bit model…") { store.downloadMusicModel() }.disabled(store.operationBusy)
+            Button("Manage music models in Runtime Settings…") { store.showRuntime = true }
+            Text("YuE2 · local inference · CC BY-NC 4.0").font(.caption).foregroundStyle(.secondary)
             Divider()
             Text("Musical direction").font(.headline)
-            Toggle("Instrumental", isOn: field(\.instrumental))
+            Toggle("Instrumental", isOn: Binding(get: { draft.instrumental }, set: { value in
+              store.change {
+                $0.musicDraft?.instrumental = value
+                if !value { $0.musicDraft?.adapterID = nil }
+                else if $0.musicDraft?.adapterID == nil {
+                  $0.musicDraft?.adapterID = store.installedMusicModels.first { $0.kind == .instrumental }?.id
+                  $0.musicDraft?.cot = "full"
+                }
+              }
+            }))
+            if draft.instrumental {
+              Picker("Instrumental adapter", selection: Binding(get: { draft.adapterID }, set: { value in
+                store.change { $0.musicDraft?.adapterID = value; if value != nil { $0.musicDraft?.cot = "full" } }
+              })) {
+                Text("Base model only").tag(Optional<UUID>.none)
+                ForEach(store.installedMusicModels.filter { $0.kind == .instrumental }) { Text($0.name).tag(Optional($0.id)) }
+              }
+              if draft.adapterID != nil {
+                HStack { Text("LoRA strength"); Slider(value: Binding(get: { draft.adapterStrength ?? 1 }, set: { value in
+                  store.change { $0.musicDraft?.adapterStrength = value }
+                }), in: 0...2, step: 0.05); Text(String(format: "%.2f", draft.adapterStrength ?? 1)).monospacedDigit() }
+                Text("Recommended composition: Melody + chords. Strength 1 uses the trained adapter.").font(.caption).foregroundStyle(.secondary)
+              }
+            }
+            MusicReferenceView()
             choices("Genre", field(\.genre), ["Indie pop", "Pop", "Rock", "Electronic", "Hip hop", "Jazz", "Soul", "Folk", "Cinematic", "Ambient"])
             choices("Mood", field(\.mood), ["Hopeful", "Joyful", "Melancholic", "Dreamy", "Tense", "Romantic", "Playful", "Dark"])
             choices("Energy", field(\.energy), ["Low", "Medium", "High", "Building"])
@@ -75,15 +97,15 @@ struct MusicEditor: View {
             .frame(maxWidth: .infinity, alignment: .leading).background(Theme.raised, in: RoundedRectangle(cornerRadius: 8))
           HStack {
             Text(draft.instrumental ? "Instrumental arrangement" : "Lyrics").font(.headline); Spacer()
-            Menu("Add section") {
+            if !draft.instrumental { Menu("Add section") {
               ForEach(["Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Interlude", "Outro"], id: \.self) { section in
                 Button(section) { store.change { $0.musicDraft?.lyrics += "\n[\(section)]\n" } }
               }
-            }.disabled(draft.instrumental)
+            } }
           }
           if draft.instrumental {
-            Text("Describe arrangement and musical changes in Additional musical direction.").foregroundStyle(.secondary)
-            Spacer(minLength: 20)
+            MusicArrangementEditor()
+            Spacer(minLength: 10)
           } else {
             TextEditor(text: field(\.lyrics)).font(.body).scrollContentBackground(.hidden)
               .padding(10).background(Theme.raised, in: RoundedRectangle(cornerRadius: 8)).frame(minHeight: 150)
@@ -101,9 +123,10 @@ struct MusicEditor: View {
         Spacer()
         Button("Check model") { Task { await store.inspectMusicModel() } }.disabled(store.operationBusy)
         Button("Generate music") { Task { await store.generateMusic() } }.buttonStyle(.borderedProminent)
-          .disabled(store.operationBusy || draft.modelPath.isEmpty)
+          .disabled(store.operationBusy || store.selectedMusicModel == nil && draft.modelPath.isEmpty)
       }.padding(16)
     }.background(Theme.background)
+      .onAppear { store.migrateMusicModelLocation() }
       .onChange(of: draft.modelPath) { _ in store.musicModelStatus = nil }
       .onChange(of: draft.vaePath) { _ in store.musicModelStatus = nil }
       .onChange(of: draft.precision) { _ in store.musicModelStatus = nil }
@@ -128,10 +151,6 @@ struct MusicEditor: View {
         Text("From checkpoint").tag("auto"); Text("BF16").tag("bf16"); Text("8-bit").tag("8bit"); Text("4-bit").tag("4bit")
       }
       Text("Precision must match the files; this menu does not convert weights.").font(.caption).foregroundStyle(.secondary)
-      HStack {
-        TextField("Optional separate decoder folder", text: field(\.vaePath))
-        Button("Choose…") { store.chooseMusicFolder(decoder: true) }
-      }
       Toggle("Checkpoint guidance default", isOn: field(\.useDefaultGuidance))
       if !draft.useDefaultGuidance { HStack { Text("Guidance"); TextField("Guidance", value: field(\.guidance), format: .number) } }
       HStack { Text("Acoustic midpoint steps"); TextField("Steps", value: field(\.steps), format: .number) }
@@ -145,7 +164,7 @@ struct MusicEditor: View {
         TextEditor(text: field(\.abc)).font(.system(.caption, design: .monospaced)).frame(height: 110)
         Button("Import score…") { store.loadMusicScore() }
         Button("Compose score only") { Task { await store.planMusic() } }
-          .disabled(store.operationBusy || draft.modelPath.isEmpty)
+          .disabled(store.operationBusy || store.selectedMusicModel == nil && draft.modelPath.isEmpty)
       }
     }.padding(.top, 8)
   }
@@ -165,8 +184,8 @@ struct MusicEditor: View {
           Label("Token budget reached · check the ending", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
         }
         HStack {
-          Button("Add to Music track") { store.placeMusicTake(take) }
-          Button("Restore settings") { if let draft = take.musicGeneration?.draft { store.change { $0.musicDraft = draft } } }
+          Button("Add to timeline") { store.placeAudioTake(take, role: .music) }
+          Button("Restore settings") { if let draft = take.musicGeneration?.draft { store.change { $0.musicDraft = draft }; store.migrateMusicModelLocation() } }
           Button("Reveal files") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: take.path)]) }
         }
         if advanced {

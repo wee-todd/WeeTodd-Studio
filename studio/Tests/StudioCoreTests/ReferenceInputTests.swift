@@ -2,6 +2,22 @@ import XCTest
 @testable import StudioCore
 
 final class ReferenceInputTests: XCTestCase {
+  func testVisualRefModIsNativeH3ReferenceOnly() throws {
+    var clip = Clip(name: "Shot", engine: .h3)
+    let mod = MediaAsset(name: "Character", kind: .refmod)
+    let action = try XCTUnwrap(clip.referenceActions(for: mod).first)
+    XCTAssertEqual(action.role, .reference)
+    XCTAssertTrue(clip.canAssignMedia(mod, role: .reference))
+    try clip.attachReference(mod, action: action)
+    XCTAssertEqual(clip.inferredTask, "ref2va")
+    XCTAssertThrowsError(try clip.attachReference(mod, action: action))
+    var endpointClip = Clip(name: "Endpoint", engine: .h3)
+    endpointClip.attachments = [Attachment(assetID: UUID(), role: .first)]
+    XCTAssertThrowsError(try endpointClip.attachReference(mod, action: action))
+    for engine in [Engine.ltx23, .ltx25, .drawThings, .movie] {
+      XCTAssertTrue(Clip(name: "Other", engine: engine).referenceActions(for: mod).isEmpty)
+    }
+  }
   func testLocalReferenceChoicesDistinguishAppearanceMotionAndAudio() {
     for engine in [Engine.h3, .ltx23, .ltx25] {
       let clip = Clip(name: "Shot", engine: engine)

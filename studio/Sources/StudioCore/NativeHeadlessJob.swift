@@ -162,6 +162,9 @@ public struct NativeHeadlessJob: Codable {
     return String(cString:resolved)
   }
   public static func validateFinishing(_ project: StudioProject) throws {
+    guard project.audioPresentation == nil else {
+      throw StudioError.invalid("Native headless jobs cannot export audio visuals or captions. Render the takes in Studio, then use Export movie.")
+    }
     try project.settings.validate()
     guard project.settings.format == .proRes || (0...51).contains(project.settings.quality) else {
       throw StudioError.invalid("Native H.264 finishing quality must be from 0 to 51.")

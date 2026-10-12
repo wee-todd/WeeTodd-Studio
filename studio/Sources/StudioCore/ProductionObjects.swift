@@ -92,13 +92,13 @@ public extension ProjectPlanning {
       for object in objects {
         guard isSubjectApproved(object.id) else { throw StudioError.invalid("Approve \(object.name) before using it for generation.") }
         if !object.referenceAssetIDs.isEmpty && !areReferencesApproved(object.id, assets: assets) {
-          throw StudioError.invalid("Approve the reference images for \(object.name).")
+          throw StudioError.invalid("Approve the reference media for \(object.name).")
         }
       }
     }
     let ids = Set(objects.flatMap(\.referenceAssetIDs))
     let references = assets.filter { ids.contains($0.id) }.sorted { $0.id.uuidString < $1.id.uuidString }
-    guard Set(references.map(\.id)) == ids else { throw StudioError.invalid("Some object reference images are missing from the asset stores.") }
+    guard Set(references.map(\.id)) == ids else { throw StudioError.invalid("Some object reference assets are missing from the asset stores.") }
     return ResolvedObjectSnapshot(subjects: objects, assets: references,
       revision: planningDigest(objects.map { $0.id.uuidString + $0.revision } + references.map { planningDigest($0) }))
   }

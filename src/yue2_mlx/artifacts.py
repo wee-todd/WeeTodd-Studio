@@ -178,8 +178,10 @@ def verify(source, cancelled=None):
             or digest(filename, cancelled) != entry["sha256"]
         ):
             raise ValueError(f"Artifact integrity check failed: {name}")
-    request = _read(directory, "request.json")
-    if validate_request(request) != request:
+    saved_request = _read(directory, "request.json")
+    request = validate_request(saved_request)
+    # v1 bundles written before optional AR adapters omitted these two fields.
+    if request != {"ar_lora_path": None, "ar_lora_strength": 1.0, **saved_request}:
         raise ValueError("Saved request is not normalized")
     effective = _read(directory, "effective.json")
     if effective.get("protocol") != "yue2-native-v1":
@@ -199,11 +201,22 @@ def verify(source, cancelled=None):
     result = _read(directory, "result.json")
     if result.get("stage") != manifest["stage"]:
         raise ValueError("Result stage metadata conflicts with the manifest")
-    if result.get("request") != request:
+    if result.get("request") != saved_request:
         raise ValueError("Result request differs from the saved request")
-    inspection = inspect_checkpoint(
-        request["model_path"], request["vae_path"], request["precision"]
+    inspection = dict(
+        inspect_checkpoint(request["model_path"], request["vae_path"], request["precision"])
     )
+    if request["ar_lora_path"] is not None:
+        from .lora import fingerprint, inspect_lora
+
+        adapter = inspect_lora(request["ar_lora_path"], inspection["config"])
+        identity = fingerprint(adapter, request["ar_lora_strength"], cancelled)
+        if effective.get("ar_lora") != identity:
+            raise ValueError("AR LoRA content provenance or effective settings mismatch")
+        inspection["ar_lora"] = adapter
+        inspection["ar_lora_identity"] = identity
+    elif effective.get("ar_lora") is not None:
+        raise ValueError("AR LoRA metadata conflicts with the saved request")
     if (
         effective.get("precision") != inspection["precision"]
         or effective.get("layout") != inspection["layout"]

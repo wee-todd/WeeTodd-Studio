@@ -429,6 +429,10 @@ struct AttachmentRow: View {
       }
       if let clip = store.selectedClip,
         let asset = store.allAssets.first(where: { $0.id == attachment.assetID }) {
+        if asset.kind == .refmod {
+          Text("\(asset.refmodKind == "video" ? "<Video 1>" : "<Picture 1>") · \(asset.refmodTokenCount ?? 0) visual tokens")
+            .font(.caption2.monospaced()).foregroundStyle(Theme.mint)
+        }
         if let action = clip.referenceActions(for: asset).first(where: {
           $0.role == attachment.role && ($0.role != .control || $0.controlType == attachment.controlType)
         }) {
@@ -745,6 +749,8 @@ struct AudioInspector: View {
           } } }
         }
         Button("Crossfade with next region") { store.crossfadeAudio(a.id) }
+
+        AudioCaptionEditor(regionID:a.id).id(a.id)
 
         Button("Remove audio", role: .destructive) {
           store.change { $0.audio.removeAll { $0.id == a.id } }

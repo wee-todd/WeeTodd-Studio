@@ -14,6 +14,8 @@ struct RuntimeSettings: Codable {
   var rifePath = ""
   var rifeWeights = ""
   var metalPath = ""
+  var captionModelDirectory: String?
+  var presentationHelperPath: String?
   var drawThingsHelperPath: String?
   var ltx25WorkerPath: String?
   var nativeLTX25Enabled: Bool?
@@ -24,6 +26,7 @@ struct RuntimeSettings: Codable {
   var acceleration: AccelerationSettings?
   var loraFolders: [LoRAFolder]?
   var voiceModels: VoiceModelSettings?
+  var musicModels: MusicModelSettings?
   var rippleAdapterPath: String?
   var rippleProfileID: String?
   var nativeRippleEnabled: Bool?
@@ -35,6 +38,7 @@ struct RuntimeSettings: Codable {
     value.nativeLTX25Enabled = usesNativeLTX25
     value.loraFolders = nil
     value.voiceModels = nil
+    value.musicModels = nil
     value.rippleAdapterPath = nil
     value.rippleProfileID = nil
     return value
@@ -44,6 +48,7 @@ struct RuntimeSettings: Codable {
     var value = data.flatMap { try? JSONDecoder().decode(Self.self, from: $0) } ?? defaults
     if let bundled = defaults.ltx25WorkerPath { value.ltx25WorkerPath = bundled }
     if let bundled = defaults.h3WorkerPath { value.h3WorkerPath = bundled }
+    value.presentationHelperPath = defaults.presentationHelperPath
     let savedHelper = value.drawThingsHelperPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if !FileManager.default.isExecutableFile(atPath: savedHelper) {
       let bundledHelper = defaults.drawThingsHelperPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -62,6 +67,7 @@ struct RuntimeSettings: Codable {
       profilesDirectory: support.appendingPathComponent("Profiles").path)
     value.metalPath =
       Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/StudioMetal").path
+    value.presentationHelperPath = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddCLI").path
     let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddDrawThings").path
     if FileManager.default.isExecutableFile(atPath: helper) { value.drawThingsHelperPath = helper }
     let ltx = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddLTXWorker").path
@@ -438,6 +444,8 @@ extension Encodable {
   @Published var rippleInspection: [String: Any]?
   @Published var rippleInspectionKey: RippleDraft?
   @Published var rippleSelectedTakeID: UUID?
+  @Published var showAudioPresentation = false
+  @Published var audioVisualFeatures: AudioVisualFeatures?
   @Published var showVoice = false
   @Published var selectedVoiceAssetID: UUID?
   lazy var audioMixBridge = bridge.independent()
@@ -866,6 +874,11 @@ extension Encodable {
         asset.height = info["height"] as? Int ?? 0
         asset.fps = info["fps"] as? Double ?? 0
         asset.text = info["text"] as? String ?? ""
+        if kind == .refmod {
+          asset.refmodKind = info["referenceKind"] as? String
+          asset.refmodTokenCount = info["tokenCount"] as? Int
+          asset.refmodSHA256 = info["sha256"] as? String
+        }
         if kind == .lora {
           asset.loraModel =
             (info["loraModel"] as? String).flatMap(LoRAModel.init(rawValue:)) ?? loraModel
@@ -919,6 +932,12 @@ extension Encodable {
       applyLoRAMembers([LoRAMember(asset: asset)])
       return
     }
+    if selectedClip?.attachments.contains(where: { attachment in
+      attachment.role != .lora && allAssets.contains { $0.id == attachment.assetID && $0.kind == .refmod }
+    }) == true {
+      error = "Remove the visual H3 RefMod before adding another conditioning input."
+      return
+    }
     if let clip = selectedClip, !clip.canAssignMedia(asset, role: role) {
       error = "Choose a supported reference purpose from the asset menu. Movies may need a reference sheet or control guide; LTX audio uses Audio driver."
       return
@@ -946,12 +965,7 @@ extension Encodable {
   }
   func addAssetToTimeline(_ asset: MediaAsset) {
     if asset.kind == .audio {
-      var a = AudioRegion(assetID: asset.id, path: asset.path)
-      a.duration = max(0.1, asset.duration)
-      a.trackID = selectedTrackID ?? project.audioTracks.first?.id
-      change { $0.audio.append(a) }
-      selectedAudioID = a.id
-      selectedTitleID = nil
+      placeAudioTake(asset, role: asset.voiceGeneration != nil ? .voice : .music)
     } else if [.video, .image, .sequence].contains(asset.kind) {
       var c = Clip(name: asset.name, engine: .movie)
       c.sourcePath = asset.path
@@ -1013,6 +1027,7 @@ extension Encodable {
       for i in p.audio.indices where p.audio[i].path == old { p.audio[i].path = url.path }
       p.mapMusicSourcePaths { $0 == old ? url.path : $0 }
       p.mapVoicePaths { $0 == old ? url.path : $0 }
+      p.mapMusicReferencePaths { $0 == old ? url.path : $0 }
     }
     refreshPreview()
   }
@@ -1114,6 +1129,7 @@ extension Encodable {
       try p.mapRipplePaths(collect)
       try p.mapMusicSourcePaths(collect)
       try p.mapVoicePaths(collect)
+      try p.mapMusicReferencePaths(collect)
       // Collected media have new identities; rebuild drivers from these portable sources.
       for i in p.clips.indices where p.clips[i].audioDriverSelection != nil { p.clips[i].audioDriverMixKey = nil }
       let target = bundle.appendingPathComponent(snapshot.name + ".weetodd")

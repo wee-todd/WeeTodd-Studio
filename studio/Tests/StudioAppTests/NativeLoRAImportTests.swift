@@ -5,6 +5,24 @@ import StudioCore
 @testable import WeeToddStudio
 
 final class NativeLoRAImportTests: XCTestCase {
+  @MainActor func testNativeRefModImportRejectsBeforeBridgeOrLibraryMutation() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = try adapter(root, name: "visual-refmod", metadata: ["refmod_meta": "{}"])
+    var calls = 0
+    let store = StudioStore(dataDirectory: root, restoreSession: false,
+      invocation: { _, _, _, _ in calls += 1; throw StudioError.invalid("Unexpected Python bridge") })
+    store.runtime.pythonPath = "/unavailable/python"
+    store.runtime.nativeH3Enabled = true
+    await store.importURLs([url], scope: .global, loraModel: .h3)
+    XCTAssertTrue(store.globalAssets.isEmpty)
+    XCTAssertTrue(store.error?.contains("RefMod") == true, store.error ?? "Missing limitation")
+    XCTAssertTrue(store.error?.contains("Swift H3") == true, store.error ?? "Missing runtime limitation")
+    XCTAssertEqual(calls, 0)
+    XCTAssertTrue(store.runtime.usesNativeH3)
+  }
+
   private func adapter(_ root: URL, name: String, metadata: [String: String]) throws -> URL {
     let url = root.appendingPathComponent(name + ".safetensors")
     let header: [String: Any] = ["__metadata__": metadata,

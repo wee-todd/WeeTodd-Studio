@@ -353,6 +353,12 @@ public enum NativeH3Preparation {
     let project = try JSONDecoder().decode(StudioProject.self, from: data(projectValue))
     guard let clip = project.clips.first(where: { $0.id.uuidString.caseInsensitiveCompare(clipID) == .orderedSame }),
       clip.engine == .h3 else { throw StudioError.invalid("Select an H3 clip.") }
+    let globalAssets = try JSONDecoder().decode([MediaAsset].self,
+      from: data(request["globalAssets"] ?? []))
+    let refModIDs = Set((project.assets + globalAssets).filter { $0.kind == .refmod }.map(\.id))
+    guard !clip.attachments.contains(where: { $0.isEnabled && refModIDs.contains($0.assetID) }) else {
+      throw StudioError.invalid("Swift H3 does not support visual RefMods. Remove this input or explicitly select the legacy H3 renderer in Runtime Settings.")
+    }
     let task = clip.inferredTask
     if let policy = clip.generationSelection?.h3AttentionPolicy { try validateAttentionSelection(policy,clip:clip) }
     guard ["independent","motion"].contains(clip.continuityMode), !project.isContinuousSceneMember(clip),

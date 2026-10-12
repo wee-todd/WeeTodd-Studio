@@ -176,6 +176,9 @@ public enum NativeLoRAInspection {
     let source = url.standardizedFileURL.resolvingSymlinksInPath()
     guard source.pathExtension.lowercased() == "safetensors" else { throw invalid("Choose a SafeTensors LoRA file.") }
     let (metadata, tensors, identity) = try header(source)
+    guard metadata["refmod_meta"] == nil else {
+      throw invalid("Swift H3 does not support visual RefMods. Select the legacy H3 renderer explicitly in Runtime Settings before importing them.")
+    }
     var pairs: [String: Pair] = [:], alphas = Set<String>()
     for (name, tensor) in tensors {
       if let suffix = suffixes.first(where: { name.hasSuffix($0.0) }) {

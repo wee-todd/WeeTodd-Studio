@@ -242,7 +242,7 @@ struct StudioView: View {
       } label: {
         Label("Export movie", systemImage: "arrow.up.right")
       }.buttonStyle(.borderedProminent).foregroundStyle(.white).disabled(
-        store.bridge.busy || store.project.clips.isEmpty)
+        store.bridge.busy || store.project.playbackDuration <= 0)
     }.buttonStyle(.borderless).padding(.horizontal, 20).frame(height: 62)
   }
   var statusbar: some View {

@@ -111,6 +111,7 @@ def normalize_conditioning(recipe, *, check_files=True):
             "ffprobe",
             "conditioning",
             "reference_images",
+            "refmods",
             "attention",
             "fastvideo",
             "vdn",
@@ -417,6 +418,28 @@ def validate_conditioning(recipe, contract=None, *, check_files=True):
     """Validate task/transport compatibility independently of weighted model validation."""
     c = normalize_conditioning(recipe, check_files=check_files) if contract is None else contract
     engine, task, inputs = recipe["engine"], c["task"], c["inputs"]
+    refmods = recipe.get("refmods", [])
+    if not isinstance(refmods, list) or len(refmods) > 1:
+        raise ValueError("Studio currently supports one visual H3 RefMod per render")
+    if refmods and (engine != "h3" or task != "ref2va" or inputs):
+        raise ValueError("Visual H3 RefMods currently require Ref2VA without other media inputs")
+    refmod_tokens = 0
+    for mod in refmods:
+        _fields(mod, {"id", "path", "sha256"}, "RefMod")
+        if not isinstance(mod.get("id"), str) or not mod["id"].strip():
+            raise ValueError("H3 RefMod needs a nonempty id")
+        if not isinstance(mod.get("path"), str) or not mod["path"] or "://" in mod["path"]:
+            raise ValueError("H3 RefMod path must name a local file")
+        digest = mod.get("sha256")
+        if digest is not None and (not isinstance(digest, str) or len(digest) != 64
+                                   or any(c not in "0123456789abcdef" for c in digest)):
+            raise ValueError("H3 RefMod sha256 must be a lowercase 64-character digest")
+        if check_files:
+            from .h3_refmod import inspect_visual_refmod
+
+            refmod_tokens += inspect_visual_refmod(
+                mod["path"], expected_sha256=digest
+            )["tokenCount"]
     roles = {item["role"] for item in inputs}
     config = recipe["config"]
     allowed = {
@@ -427,7 +450,7 @@ def validate_conditioning(recipe, contract=None, *, check_files=True):
         "extension": {"reference"},
         "control": {"control", "keyframe"},
     }[task]
-    if roles - allowed or (task != "t2v" and not inputs):
+    if roles - allowed or (task != "t2v" and not inputs and not refmods):
         raise ValueError(f"{task}: missing required media or incompatible input roles")
     required = {"fflf": "keyframe", "a2v": "audio_driver", "control": "control"}.get(task)
     if required and required not in roles:
@@ -669,8 +692,10 @@ def validate_conditioning(recipe, contract=None, *, check_files=True):
         "contract": c,
         "transport": "implemented",
         "render_qualification": "not_evaluated",
-        "input_ids": [i["id"] for i in inputs],
+        "input_ids": [i["id"] for i in inputs] + [i["id"] for i in refmods],
     }
+    if refmods:
+        result["refmod_tokens"] = refmod_tokens
     if engine == "h3" and task == "a2v":
         result["audio_semantics"] = (
             "reference_audio_drives generated video and generated soundtrack; "
