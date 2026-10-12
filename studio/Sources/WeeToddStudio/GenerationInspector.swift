@@ -4,6 +4,7 @@ import SwiftUI
 struct GenerationInspector: View {
   @EnvironmentObject var store: StudioStore
   var clip: Clip
+  var detail: GenerationSettingsDetail = .all
   var isFastH3:Bool { descriptor?.fasth3 == true || store.profiles.first(where: { $0.id==clip.profileID })?.generation?.fasth3 == true }
   var isVDN:Bool { descriptor?.vdn == true || store.profiles.first(where: { $0.id==clip.profileID })?.generation?.vdn == true }
   var descriptor: GenerationDescriptor? {
@@ -78,35 +79,39 @@ struct GenerationInspector: View {
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Picker("Model", selection: Binding(get: { clip.engine }, set: { model in
-        store.editClip { $0.selectLocalModel(model) }
-      })) {
-        ForEach([Engine.h3, .ltx23, .ltx25]) {
-          Text($0.label).tag($0)
+      if detail.showsAdvanced {
+        DisclosureGroup("Execution details") {
+          if clip.reviewUsesSourceVideo || clip.inferredTask == "video_upscale" {
+            LabeledContent("Execution task", value: clip.displayTask)
+          } else {
+          Picker("Execution task", selection: Binding(get: { clip.inferredTask }, set: { task in
+            store.editClip { $0.selectGenerationTask(task) }
+          })) {
+            ForEach(tasks, id: \.self) { Text(GenerationSelection.taskLabel($0)).tag($0) }
+          }
+          }
+          Text("Input purposes select the generation method. This override retains saved and specialist recipes; incompatible inputs are reported before generation.")
+            .font(.caption2).foregroundStyle(.secondary)
         }
       }
-      if clip.reviewUsesSourceVideo || clip.inferredTask == "video_upscale" {
-        LabeledContent("Task", value: clip.displayTask)
-      } else {
-        Picker("Task", selection: Binding(get: { clip.inferredTask }, set: { task in
-          store.editClip { $0.selectGenerationTask(task) }
-        })) {
-          ForEach(tasks, id: \.self) { Text(GenerationSelection.taskLabel($0)).tag($0) }
-        }
-      }
-      if clip.generationSelection?.isModified == true {
+      if detail.showsBasic && clip.generationSelection?.isModified == true {
         HStack {
           Text("Modified").foregroundStyle(.secondary)
           Spacer()
           Button("Reset") { edit { $0.resetOverrides() } }
         }
       }
-      if let descriptor {
-        controls(descriptor.controls)
-      } else {
-        Text(store.validationErrors[clip.id] == nil ? "Loading model settings…" : "Choose a compatible model to view settings").font(.caption2).foregroundStyle(.secondary)
+      if detail.showsBasic {
+        if let descriptor {
+          controls(descriptor.controls)
+        } else {
+          Text(store.validationErrors[clip.id] == nil ? "Loading model settings…" : "Choose a compatible model to view settings").font(.caption2).foregroundStyle(.secondary)
+        }
+        if clip.engine == .ltx25, let selected = clip.generationSelection?.ltx25SingleStage {
+          LabeledContent("Sampler", value: selected.method.label)
+        }
       }
-      if clip.engine == .h3, store.runtime.usesNativeH3 {
+      if detail.showsBasic, clip.engine == .h3, store.runtime.usesNativeH3 {
         let vdn=isVDN || isFastH3
         Picker("Sampler", selection: Binding(get: {
           clip.generationSelection?.h3SamplingMethod?.rawValue
@@ -117,15 +122,18 @@ struct GenerationInspector: View {
         .disabled(vdn)
         if vdn {
           Text(isFastH3 ? "FastH3 · Four Euler evaluations. Independent text-to-audiovisual only." : "VDN · Fixed Euler schedule and released adapters at strength 1. Text-to-video only.").font(.caption2).foregroundStyle(.secondary)
-        } else { H3CreativeInspector(clip:clip) }
-        if !vdn && (["t2v","t2va"].contains(clip.inferredTask) || clip.generationSelection?.h3MotionFidelity != nil) {
-          H3MotionFidelityInspector(clip:clip)
         }
         if clip.generationSelection?.h3SamplingMethod == .resMultistep {
           Text("Experimental multistep sampling. Turbo adapters require Euler.").font(.caption2).foregroundStyle(.secondary)
         }
       }
-      if clip.engine == .h3, store.runtime.usesNativeH3 {
+      if detail.showsAdvanced, clip.engine == .h3, store.runtime.usesNativeH3 {
+        if !isVDN && !isFastH3 {
+          H3CreativeInspector(clip: clip)
+          if ["t2v", "t2va"].contains(clip.inferredTask) || clip.generationSelection?.h3MotionFidelity != nil {
+            H3MotionFidelityInspector(clip: clip)
+          }
+        }
         DisclosureGroup("Advanced attention") {
           Picker("Attention", selection:Binding(get: {
             clip.generationSelection?.h3AttentionPolicy?.rawValue ?? "recipe"
@@ -157,7 +165,7 @@ struct GenerationInspector: View {
             .font(.caption2).foregroundStyle(.secondary)
         }
       }
-      if clip.engine == .ltx25, store.runtime.usesNativeLTX25 {
+      if detail.showsAdvanced, clip.engine == .ltx25, store.runtime.usesNativeLTX25 {
         DiffusionVAEInspector(clip:clip)
         if clip.inferredTask == "video_upscale" { MovieUpscaleInspector(clip:clip) }
         else {
@@ -176,12 +184,14 @@ struct GenerationInspector: View {
       if let error = store.validationErrors[clip.id] {
         Text(error).font(.caption2).foregroundStyle(.red).textSelection(.enabled)
       }
-      Button("Set up or repair models…") { store.showRuntime = true }
+      if detail.showsAdvanced {
+        Button("Set up or repair models…") { store.showRuntime = true }
+      }
       if clip.engine == .ltx25 {
         Text(ltxRendererSummary)
           .font(.caption2).foregroundStyle(.secondary)
       }
-      if clip.engine == .h3 {
+      if detail.showsAdvanced, clip.engine == .h3 {
         if isVDN || isFastH3 {
           Text("This model uses the shared MLX worker with staged unloading and no retained page cache.").font(.caption2).foregroundStyle(.secondary)
           Button("Reset incompatible model overrides") {
@@ -283,7 +293,7 @@ struct GenerationInspector: View {
             }
             Text(ingredients ? "Ingredients CFG++ uses its fixed empty unconditional context on all eight steps. Clip negative prompts are unsupported." : "Uses the clip's negative prompt. CFG++ generates audio; it cannot freeze an A2V driver.").font(.caption2).foregroundStyle(.secondary)
           }
-          Text(ingredients ? "Eight updates at the output resolution with one described Ingredients sheet and no second stage. Ancestral uses eight evaluations; CFG++ uses sixteen. Experimental; real-model quality is not qualified." : "Eight updates at the output resolution, with no spatial upscale or second stage. Supports ordinary timed images and generated slots. Experimental; real-model quality is not qualified.").font(.caption2).foregroundStyle(.secondary)
+          Text(ingredients ? "Eight updates at the output resolution with one described Ingredients sheet and no second stage. Ancestral uses eight evaluations; CFG++ uses sixteen. The reviewed eight-evaluation ancestral configuration is approved; other adapters and configurations require their own quality review." : "Eight updates at the output resolution, with no spatial upscale or second stage. Supports ordinary timed images and generated slots. Experimental; real-model quality is not qualified.").font(.caption2).foregroundStyle(.secondary)
         }
       }
     }
@@ -320,7 +330,7 @@ struct GenerationInspector: View {
           .disabled(!controls.stepsEditable)
       }
     }
-    if let refinement = controls.refinementSteps {
+    if let refinement = controls.refinementSteps, refinement > 0 || detail.showsAdvanced {
       HStack {
         Text("Refinement · evaluations")
         TextField("Refinement steps", value: integer(\.refinementSteps, default: refinement), format: .number.grouping(.never))

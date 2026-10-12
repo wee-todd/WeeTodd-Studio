@@ -40,6 +40,11 @@ struct ClipInspector: View {
   var clip: Clip
   @FocusState private var seedFocused: Bool
   @State private var seedUndoGroup = UUID()
+  @State private var detail: GenerationSettingsDetail
+  init(clip: Clip, detail: GenerationSettingsDetail = .basic) {
+    self.clip = clip
+    _detail = State(initialValue: detail)
+  }
   func binding<T>(_ key: WritableKeyPath<Clip, T>) -> Binding<T> {
     Binding(
       get: { store.selectedClip?[keyPath: key] ?? clip[keyPath: key] },
@@ -78,47 +83,107 @@ struct ClipInspector: View {
     VStack(alignment: .leading, spacing: 14) {
       TextField("Clip name", text: binding(\.name)).font(.system(size: 16, weight: .semibold))
         .textFieldStyle(.plain)
-      HStack {
-        Circle().fill(Theme.engine(clip.engine)).frame(width: 6, height: 6)
-        Text(clip.displayTask).font(.system(size: 10)).foregroundStyle(.secondary)
+      if clip.engine == .movie || clip.engine == .drawThings {
+        Label(GenerationPresentation.methodLabel(for: clip), systemImage: "film")
+          .font(.caption).foregroundStyle(.secondary)
       }
-      if !clip.sourcePath.isEmpty {
-        RippleClipInspector(clip: clip)
-        Button("Create LTX 2× copy") { Task { await store.createLTXMovieUpscaleCopy() } }
-          .disabled(store.operationBusy)
+      if clip.engine == .movie {
+        Picker("Settings", selection: $detail) {
+          ForEach(GenerationSettingsDetail.allCases) { Text($0.label).tag($0) }
+        }.pickerStyle(.segmented)
       }
       if clip.engine != .movie {
-        field("GENERATION") {
-          Picker("Generation", selection: Binding(get: { clip.generationProvider }, set: { provider in
+        field("RUN WITH") {
+          Picker("Run with", selection: Binding(get: { clip.generationProvider }, set: { provider in
             store.editClip { $0.selectGenerationProvider(provider) }
           })) {
-            ForEach(GenerationProvider.allCases) {
-              Text($0.label).tag($0)
-            }
+            ForEach(GenerationProvider.allCases) { Text($0.label).tag($0) }
           }.labelsHidden()
         }
         if clip.engine == .drawThings {
-          DrawThingsClipInspector(clip: clip)
+          DrawThingsClipInspector(clip: clip, detail: detail, section: .model)
         } else {
-          GenerationInspector(clip: clip)
-          if clip.inferredTask != "video_upscale" { ContinuityInspector(clip: clip) }
+          GenerationModelInspector(clip: clip)
         }
-        geometryAndSeed
-        Button {
-          store.showPrompt = true
-        } label: {
+        promptSection
+        GenerationInputsInspector(clip: clip, showAdvanced: detail.showsAdvanced)
+        if clip.engine != .drawThings {
+          DisclosureGroup("Audio driver / timeline soundtrack") { AudioDriverInspector() }
+        }
+        Divider()
+        Picker("Settings", selection: $detail) {
+          ForEach(GenerationSettingsDetail.allCases) { Text($0.label).tag($0) }
+        }.pickerStyle(.segmented).accessibilityIdentifier("generation-settings-detail")
+        if detail.showsBasic {
+          geometryAndSeed
           HStack {
-            Image(systemName: "text.bubble")
-            Text(clip.prompt.isEmpty ? "Write your shot" : "Edit prompt")
-            Spacer()
-            Image(systemName: "arrow.up.left.and.arrow.down.right")
+            Text("Duration · seconds")
+            TextField("Duration", value: binding(\.duration), format: .number.precision(.fractionLength(2)))
+          }.textFieldStyle(.roundedBorder).font(.caption)
+          if clip.engine != .drawThings {
+            if clip.engine == .h3 {
+              LabeledContent("Generation FPS", value: "24 · H3 model grid").font(.caption)
+            } else {
+              HStack {
+                Text("Generation FPS")
+                TextField("Generation FPS", value: Binding(get: { clip.settings(in: store.project).fps }, set: { value in
+                  store.editClip { current in
+                    var settings = current.settings(in: store.project)
+                    settings.fps = value
+                    current.settingsOverride = settings
+                  }
+                }), format: .number)
+              }.textFieldStyle(.roundedBorder).font(.caption)
+            }
           }
         }
-        .buttonStyle(.bordered).controlSize(.large)
-        if !clip.prompt.isEmpty {
-          Text(clip.prompt).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(3)
+        if clip.engine == .drawThings {
+          DrawThingsClipInspector(clip: clip, detail: detail, section: .settings)
+        } else {
+          GenerationInspector(clip: clip, detail: detail)
+          if clip.inferredTask != "video_upscale" {
+            DisclosureGroup("Continuity") { ContinuityInspector(clip: clip) }
+          }
         }
       }
+      if clip.engine == .movie || detail.showsAdvanced {
+        DisclosureGroup("Timeline editing") { timelineSection }
+      }
+      if !clip.sourcePath.isEmpty {
+        DisclosureGroup("Clip actions") {
+          RippleClipInspector(clip: clip)
+          Button("Upscale movie · LTX 2× copy") { Task { await store.createLTXMovieUpscaleCopy() } }
+            .disabled(store.operationBusy)
+          HStack {
+            Button("Split") { store.split() }
+            Button("Duplicate") { store.duplicateClip() }
+            Menu("Extend video") {
+              Button("After") { store.extend("after") }
+              Button("Before · LTX 2.3") { store.extend("before") }.disabled(clip.engine != .ltx23)
+            }.disabled(clip.engine == .drawThings)
+          }.controlSize(.small)
+        }
+      }
+      if detail.showsAdvanced {
+        if clip.engine != .drawThings { MotionFidelityInspector(clip: clip) }
+        advancedSection
+      }
+      versionsSection
+    }.pickerStyle(.menu)
+  }
+  var promptSection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack {
+        SmallLabel(text: "Prompt")
+        Spacer()
+        Button("Open editor…") { store.showPrompt = true }.font(.caption)
+      }
+      TextField("Describe the action, camera and sound…", text: binding(\.prompt), axis: .vertical)
+        .lineLimit(3...6).textFieldStyle(.roundedBorder).font(.system(size: 12))
+    }
+  }
+  var timelineSection: some View {
+    VStack(alignment: .leading, spacing: 10) {
       HStack {
         field("DURATION · SEC") {
           TextField(
@@ -141,7 +206,6 @@ struct ClipInspector: View {
         Text("Source pan / balance").font(.caption)
         Slider(value: Binding(get: { clip.sourcePan ?? 0 }, set: { value in store.editClip { $0.sourcePan = value } }), in: -1...1)
       }
-      AudioDriverInspector()
       field("INCOMING TRANSITION") {
         Picker("Transition", selection: binding(\.transition)) {
           Text("Cut").tag("cut")
@@ -157,36 +221,10 @@ struct ClipInspector: View {
           }
         }
       }
-      Divider()
-      HStack {
-        SmallLabel(text: "Conditioning")
-        Spacer()
-        Text("\(clip.attachments.filter { $0.role != .lora }.count)").font(.caption.monospacedDigit()).foregroundStyle(
-          .secondary)
-      }
-      if !clip.attachments.contains(where: { $0.role != .lora }) {
-        Text(
-          clip.engine == .drawThings
-            ? "Select an image in Media & Assets, then Use in clip → First frame. H3 FL2VA also supports Last frame: it is sent as Draw Things’ first enabled mood-board image. Both images are center-cropped to the clip dimensions. LTX currently supports First frame only."
-            : clip.engine == .ltx25
-              ? "Add a first or last frame from Media & Assets. Reference and control tasks require their compatible model adapters, which can be installed in model setup."
-              : "Use an asset as a first frame, reference, audio driver or control. The selected model exposes compatible tasks and settings."
-        ).font(.system(size: 11)).foregroundStyle(.secondary)
-      }
-      ForEach(clip.attachments.filter { $0.role != .lora }) { a in AttachmentRow(attachment: a) }
-      if clip.engine != .movie && clip.engine != .drawThings { ClipLoRAInspector(clip: clip) }
-      if !clip.sourcePath.isEmpty {
-        HStack {
-          Button("Split") { store.split() }
-          Button("Duplicate") { store.duplicateClip() }
-          Menu("Extend") {
-            Button("After") { store.extend("after") }
-            Button("Before · LTX 2.3") { store.extend("before") }.disabled(clip.engine != .ltx23)
-          }.disabled(clip.engine == .drawThings)
-        }.controlSize(.small)
-      }
-      if clip.engine != .drawThings { MotionFidelityInspector(clip: clip) }
-      DisclosureGroup("Advanced generation") {
+    }
+  }
+  var advancedSection: some View {
+      DisclosureGroup("Finishing and execution") {
         VStack(alignment: .leading, spacing: 10) {
           if clip.engine != .movie {
             if clip.engine != .drawThings {
@@ -195,18 +233,7 @@ struct ClipInspector: View {
               })) {
                 ForEach(GenerationPreset.allCases) { Text($0.label).tag($0) }
               }
-              Picker("Custom recipe", selection: Binding(get: { clip.profileID }, set: { value in
-                store.editClip {
-                  $0.profileID = value
-                  $0.generationSelection = GenerationSelection(task: $0.inferredTask, preset: .custom)
-                }
-              })) {
-                Text("Automatic").tag("auto")
-                ForEach(store.profiles.filter { $0.engine == clip.engine.rawValue &&
-                  ($0.generation?.vdn != true || ["t2v","t2va"].contains(clip.inferredTask)) }) {
-                  Text($0.name).tag($0.id)
-                }
-              }
+
             }
             if clip.engine == .h3 {
               if store.profiles.first(where: { $0.id==clip.profileID })?.generation?.vdn == true {
@@ -251,6 +278,9 @@ struct ClipInspector: View {
           }
         }.font(.system(size: 11)).padding(.top, 8)
       }.font(.system(size: 11))
+  }
+  var versionsSection: some View {
+    VStack(alignment: .leading, spacing: 10) {
       if !clip.versions.isEmpty {
         if let selectedVersion = clip.versions.last(where: { $0.path == clip.sourcePath }) {
           RenderStatsView(stats: selectedVersion.stats)
@@ -276,7 +306,7 @@ struct ClipInspector: View {
           }
         }.font(.system(size: 11))
       }
-    }.pickerStyle(.menu)
+    }
   }
   func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: 6) {

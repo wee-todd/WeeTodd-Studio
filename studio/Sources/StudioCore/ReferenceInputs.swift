@@ -23,10 +23,9 @@ extension Clip {
         id: "imageAppearance", label: "Image reference · H3", detail: "H3 Ref2VA uses up to nine still images. Movie and audio references require WeeTodd (local).",
         role: .reference)] : []
     }
-    let ingredients = ReferenceAction(id: "ingredients", label: engine == .ltx25
-      ? "Appearance · Ingredients sheet · Experimental" : "Appearance · Ingredients sheet",
+    let ingredients = ReferenceAction(id: "ingredients", label: "Reference sheet · Ingredients",
       detail: "Requires an Ingredients IC-LoRA. Describe the subjects in one sheet. Minimum 5 seconds at 24 fps."
-        + (engine == .ltx23 ? " LTX 2.3 uses 768 × 448." : " Scene and identity quality are not yet qualified; results may reproduce the sheet layout."),
+        + (engine == .ltx23 ? " LTX 2.3 uses 768 × 448." : ""),
       role: engine == .ltx23 ? .reference : .control, controlType: "ingredients_reference_sheet")
     switch asset.kind {
     case .image:

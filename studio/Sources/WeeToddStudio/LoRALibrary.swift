@@ -446,7 +446,7 @@ struct ClipLoRAInspector: View {
                 }
               }),range:clip.engine == .h3 ? -10...10 : 0...2)
           if clip.engine == .h3,store.runtime.usesNativeH3 {
-            H3LoRAInspector(attachment:attachment)
+            DisclosureGroup("LoRA details") { H3LoRAInspector(attachment:attachment) }
           }
         }.padding(9).background(Theme.raised, in: RoundedRectangle(cornerRadius: 7))
       }

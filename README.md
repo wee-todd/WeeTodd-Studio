@@ -43,10 +43,11 @@ or download models. In **Studio Settings**, use **Set Up Managed Renderer** or c
 compatible runtime. FFmpeg/FFprobe and optional finishing tools still require configuration.
 See the [build and runtime guide](studio/README.md#build-and-open).
 
-In the clip inspector, choose **WeeTodd (local)** or **Draw Things**, then select a model.
-Local H3, LTX 2.3 and LTX 2.5 expose their available tasks, sampling controls and LoRA groups
-directly. Component recipes are selected automatically; optional recipe and execution overrides
-remain under **Advanced generation**. Existing clips retain their saved settings.
+In the clip inspector, choose **Run with → WeeTodd (local) / Draw Things**, then select a model.
+Native **Model profile** selects automatic components or an installed recipe; LoRAs and groups
+appear beside the model controls. Write the **Prompt**, add named **Inputs**, and use **Settings →
+Basic / Advanced / All** to choose the controls shown. Existing clips retain their saved recipe
+and settings when changing the view.
 
 For supported H3 Ref2VA and FL2VA image/keyframe jobs, **Advanced attention → Sol** offers an explicit experimental
 attention optimization. Dense remains the default, including older saved jobs. Sol can change
@@ -77,7 +78,7 @@ python3 scripts/build_studio_app.py --configuration release \
 ```
 
 Quit Studio before replacing its app bundle. Then open **Movie → Draw Things Connections**, add
-and test your connection, and select **Draw Things → Task → Connection → Model** in a clip or open
+and test your connection, and select **Run with → Draw Things → Connection → Model** in a clip or open
 the image workspace. A local Draw Things gRPC server must stay running with cloud offload disabled;
 using local model files alone does not start that server. Direct Cloud API jobs use a separate route.
 The present integration enforces its documented free-only allowance policy; DT+ App Bridge
@@ -129,9 +130,12 @@ with exact retained audio. Published video differs; the user approved that compl
 on October 8. This is a representative quality pass, not all-task qualification. See
 [current policies, limits and measurements](studio/README.md#swift-h3-performance-follow-up).
 
-Native clips expose **Model**, **Task**, sampling controls, render size and seed directly in the
-inspector, without a required template step. Execution presets and custom recipes remain under
-**Advanced generation**.
+Native clips start with **Model**, **Model profile** and LoRAs, followed by **Prompt** and **Inputs**.
+Use **Add input** for first/last frames, appearance references, reference sheets, audio drivers or
+motion guides. **Basic** shows ordinary sampling, size, duration, FPS and seed controls; **Advanced**
+shows specialist controls and **Execution details → Execution task**; **All** shows both sets.
+**Use model defaults** explicitly restores the selected recipe's settings while preserving the shot
+and media. Execution presets remain under **Finishing and execution**.
 LoRA stacks support enable/disable with preserved strengths, reusable groups, and explicit Add or
 Replace actions across native and Draw Things generation. **Runtime Settings → LoRA model folders**
 manages multiple linked libraries, with optional subfolders and a default app-managed location.
@@ -201,7 +205,7 @@ Studio is the interface in each case. The engine choice determines where inferen
 | Route | Best starting point | What to know |
 | --- | --- | --- |
 | **Draw Things inference** | Fast image/video generation with models and tasks supported by your connection. | Studio sends jobs through its Draw Things adapter to a self-hosted gRPC server or supported Cloud API route. Model availability and controls come from that endpoint and the installed helper. |
-| **Native MLX video inference** | LTX 2.5, advanced conditioning and other native video features beyond the Draw Things integration. | Choose **WeeTodd (local)**, then H3, LTX 2.3 or LTX 2.5 and its task. Compatible components are selected automatically and load in stages. Custom recipes remain available under Advanced generation. |
+| **Native MLX video inference** | LTX 2.5, advanced conditioning and other native video features beyond the Draw Things integration. | Choose **Run with → WeeTodd (local)**, then H3, LTX 2.3 or LTX 2.5 and add its supported inputs. Compatible components are selected automatically and load in stages. Installed recipes remain available through Model profile. |
 | **Native MLX image inference** | Qwen-Image-2.1 generation and editing with up to ten ordered image inputs. | In **Generate Image…**, choose **Local MLX** and prepare the 8-bit model. Studio runs inference, reports progress and live previews, and unloads model stages. Experimental; the checkpoint has a noncommercial research license. |
 | **Native inference with compatible Draw Things weights** | Use an existing supported model installation without another large checkpoint copy. | Selected H3 components can be read directly from Draw Things files. This runs WeeTodd's native sampler, not Draw Things inference, and has its own task and performance limits. |
 

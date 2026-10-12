@@ -1,9 +1,13 @@
 import StudioCore
 import SwiftUI
 
+enum DrawThingsInspectorSection { case model, settings }
+
 struct DrawThingsClipInspector: View {
   @EnvironmentObject var store: StudioStore
   var clip: Clip
+  var detail: GenerationSettingsDetail = .all
+  var section: DrawThingsInspectorSection = .model
   var isH3: Bool { clip.drawThings?.modelFamily.lowercased() == "minimaxh3" }
   var hasCatalog: Bool { store.drawThingsCatalogs[clip.drawThings?.profileID ?? ""] != nil }
   func selection<T>(_ key: WritableKeyPath<DrawThingsSelection, T>, fallback: T) -> Binding<T> {
@@ -47,32 +51,15 @@ struct DrawThingsClipInspector: View {
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      SmallLabel(text: "Draw Things")
-      Picker("Task", selection: Binding(get: {
-        clip.inferredTask
-      }, set: { task in store.editClip {
-        $0.generationSelection = GenerationSelection(task: task, preset: .custom)
-        if let selected = $0.drawThings,
-          store.drawThingsCatalogs[selected.profileID] != nil,
-          !store.drawThingsModels(selected.profileID, operation: "video", task: task)
-            .contains(where: { $0.id == selected.modelID }) {
-          $0.drawThings?.modelID = ""
-          $0.drawThings?.modelFamily = ""
-          $0.drawThings?.modelModifier = nil
-        }
-      } })) {
-        Text("Text to video").tag("t2v")
-        Text("Image to video").tag("i2v")
-        Text("First and last frames").tag("fflf")
-        Text("Image references · H3").tag("ref2va")
-      }
+      if section == .model {
+      SmallLabel(text: "Model · Draw Things")
       Text(clip.drawThings?.modelID.isEmpty != false
-        ? "Choose your task and add frame images first, then select a connection and model. First and last frames requires H3 FL2VA."
+        ? "Choose a connection and video model, then add the named inputs below. First and last frames requires H3 FL2VA."
         : clip.inferredTask == "fflf" && !isH3
           ? "Select an H3 FL2VA model for this task. Your frame images are preserved."
           : "Custom server settings · connection capability is validated before generation.")
         .font(.caption2).foregroundStyle(.secondary)
-      let connections = store.drawThingsConnections(for: clip.inferredTask)
+      let connections = store.drawThingsConnections
       Picker("Connection", selection: selection(\.profileID, fallback: "")) {
         Text("Choose a connection").tag("")
         if let saved = store.drawThingsConnections.first(where: { $0.id == clip.drawThings?.profileID }),
@@ -93,7 +80,7 @@ struct DrawThingsClipInspector: View {
           }
         }.disabled(store.bridge.busy)
       }.font(.caption)
-      let models = store.drawThingsModels(clip.drawThings?.profileID ?? "", operation: "video", task: clip.inferredTask)
+      let models = store.drawThingsModels(clip.drawThings?.profileID ?? "", operation: "video")
       Picker("Model", selection: selection(\.modelID, fallback: "")) {
         Text("Choose a video model").tag("")
         if let savedModelID = clip.drawThings?.modelID, !savedModelID.isEmpty,
@@ -105,17 +92,57 @@ struct DrawThingsClipInspector: View {
         }
       }
       if hasCatalog && models.isEmpty {
-        Text("This connection advertises no models for the selected task. Choose another connection or Refresh after installing a compatible model.")
+        Text("This connection advertises no video models. Choose another connection or Refresh after installing a compatible model.")
           .font(.caption2).foregroundStyle(.orange)
       }
+      loraControls
+      }
+      if section == .settings {
+      if detail.showsAdvanced {
+        DisclosureGroup("Execution details") {
+      Picker("Execution task", selection: Binding(get: {
+        clip.inferredTask
+      }, set: { task in store.editClip {
+        $0.generationSelection = GenerationSelection(task: task, preset: .custom)
+        if let selected = $0.drawThings,
+          store.drawThingsCatalogs[selected.profileID] != nil,
+          !store.drawThingsModels(selected.profileID, operation: "video", task: task)
+            .contains(where: { $0.id == selected.modelID }) {
+          $0.drawThings?.modelID = ""
+          $0.drawThings?.modelFamily = ""
+          $0.drawThings?.modelModifier = nil
+        }
+      } })) {
+        Text("Text to video").tag("t2v")
+        Text("Image to video").tag("i2v")
+        Text("First and last frames").tag("fflf")
+        Text("Image references · H3").tag("ref2va")
+      }
+      }
+        }
+
+      if detail.showsBasic {
       HStack {
         Text("Steps")
         TextField("Steps", value: number("steps", fallback: isH3 ? 50 : 8), format: .number.grouping(.never))
       }
+      Picker("Sampler", selection: Binding<Int?>(get: {
+        if case .integer(let value) = clip.drawThings?.configuration["sampler"] { return value }
+        return nil
+      }, set: { value in
+        store.editClip { $0.drawThings?.configuration["sampler"] = value.map { .integer($0) } }
+      })) {
+        Text("Model default").tag(Optional<Int>.none)
+        ForEach(Array(ImageGenerationEditor.samplers.enumerated()), id: \.offset) { index, name in
+          Text(name).tag(Optional(index))
+        }
+      }
       HStack {
-        Text("CFG")
+        Text("Text guidance")
         TextField("CFG", value: decimal("guidanceScale", fallback: 1), format: .number)
       }
+      }
+      if detail.showsAdvanced {
       Toggle("Override Shift", isOn: Binding(get: { clip.drawThings?.configuration["shift"] != nil },
         set: { enabled in store.editClip { $0.drawThings?.configuration["shift"] = enabled ? .number(isH3 ? 12 : 1) : nil } }))
       if clip.drawThings?.configuration["shift"] != nil {
@@ -132,6 +159,8 @@ struct DrawThingsClipInspector: View {
         Text("H3 defaults: DDIM Trailing, Shift 12, Audio Shift 3. Generation uses 24 FPS.")
           .font(.caption2).foregroundStyle(.secondary)
       }
+      }
+      if detail.showsBasic {
       HStack {
         Text("Generation FPS")
         TextField("Generation FPS", value: number("fps", fallback: isH3 ? 24 : Int(clip.settings(in: store.project).fps)),
@@ -143,9 +172,9 @@ struct DrawThingsClipInspector: View {
         Text("After generation, the clip adopts the rounded duration to preserve its last frame.")
           .font(.caption2).foregroundStyle(.secondary)
       }
-      Divider()
-      loraControls
+      }
       DrawThingsCUStatus(clip: clip)
+      }
     }.font(.caption).textFieldStyle(.roundedBorder)
   }
   var loraControls: some View {

@@ -1,5 +1,20 @@
 # WeeTodd Studio implementation status
 
+## October 11 generation inspector organization
+
+Studio generation now starts with **Run with**, **Model / Model profile** and LoRAs, followed by
+an inline **Prompt** and named **Inputs** with previews and replace/remove controls. **Settings →
+Basic / Advanced / All** controls the displayed detail. Raw execution-task overrides, specialist
+sampling, attention/decoding, memory and finishing controls remain accessible in Advanced/All;
+timeline editing, clip actions and version history retain their existing contracts. Model-profile
+selection preserves authored overrides, media and seeds. **Use model defaults** explicitly restores
+recipe inheritance. Draw Things lists advertised video models before collecting compatible inputs.
+
+Saved project, recipe, native export and workflow schemas remain unchanged. This is a presentation
+change; it introduces no sampler changes or new inference qualification. Test fixtures host the
+actual SwiftUI inspector in unshown AppKit windows and optionally publish local PNG captures;
+model and server execution are stubbed.
+
 ## October 9 H3 and LTX 2.5 Swift migration acceptance
 
 The owner approved the restored ancestral Ingredients clip on October 9. The fixed migration

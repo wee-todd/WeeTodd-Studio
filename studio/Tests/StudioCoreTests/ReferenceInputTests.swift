@@ -39,12 +39,15 @@ final class ReferenceInputTests: XCTestCase {
     }
   }
 
-  func testLTX25IngredientsShowsItsSceneQualityLimitBeforeAttachment() throws {
+  func testIngredientsShowsItsAdapterTimingAndLegacyResolutionBeforeAttachment() throws {
     let image = MediaAsset(name: "Cast sheet", kind: .image)
     let action = try XCTUnwrap(Clip(name: "Shot", engine: .ltx25)
       .referenceActions(for: image).first { $0.id == "ingredients" })
-    XCTAssertTrue(action.label.contains("Experimental"))
-    XCTAssertTrue(action.detail.contains("results may reproduce the sheet layout"))
+    XCTAssertFalse(action.label.contains("Experimental"))
+    XCTAssertTrue(action.detail.contains("Ingredients IC-LoRA"))
+    XCTAssertTrue(action.detail.contains("Minimum 5 seconds at 24 fps"))
+    XCTAssertFalse(action.detail.contains("not yet qualified"))
+    XCTAssertFalse(action.detail.contains("sheet layout"))
     XCTAssertEqual(action.role, .control)
     XCTAssertEqual(action.controlType, "ingredients_reference_sheet")
     let legacy = try XCTUnwrap(Clip(name: "Legacy", engine: .ltx23)

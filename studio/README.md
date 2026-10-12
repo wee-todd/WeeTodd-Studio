@@ -278,10 +278,10 @@ presets. Select installed components in **Studio Settings → Model setup**; the
 recognizes the Pixel-Spatial detailing adapter and temporal latent upscaler from their
 headers, and the worker preflights the linked profile without Python. Such a profile
 supports T2V, I2V and FFLF. Ordinary LoRAs, A2V, extension and continuous scenes
-are not supported with this route. Open **Generation → DFR spatial and temporal refinement**
+are not supported with this route. Open **Settings → Advanced → DFR spatial and temporal refinement**
 to inherit the profile, disable DFR, or select spatial refinement with zero, one or two temporal
 rounds. The detailing-strength field and temporal selection persist with the clip. Select
-**Use Automatic components** when changing to a mode the current profile cannot supply.
+**Use automatic model components** when changing to a mode the current profile cannot supply.
 Each temporal round doubles frame rate while preserving duration; output is limited to 120 fps.
 Spatial and two-round temporal profiles passed actual packaged Studio
 rendering, previews, acceptance and reopening with Python unavailable, joining the earlier
@@ -518,8 +518,9 @@ Other formats, text and adapters outside that native path still use the existing
 Importing a linked
 asset does not establish that its codec or duration is valid for a specific generation task;
 the selected worker checks that during preparation.
-To try the experimental Ref2VA route, choose **MiniMax H3 → Reference video**, import up to nine
-images, three movies and three audio files into the clip asset store, then choose
+To try the experimental Ref2VA route, choose **Run with → WeeTodd (local) → Model → MiniMax H3**
+and its installed Ref2VA **Model profile**. Import up to nine images, three movies and three audio
+files into the clip asset store, then choose
 **Use in clip → Appearance** for images/movies and **Audio · reference sound / voice** for
 audio. Without explicit movie preparation overrides, movie references use their first 7.3 seconds and include any soundtrack in that interval;
 audio references use at most 15 seconds and need an image/movie alongside them or explicit temporal placement.
@@ -532,7 +533,7 @@ Write a complete H3 prompt, select the installed compatible Ref2VA profile, and 
 | Generate through a local Draw Things server or Cloud API | [Draw Things setup](#draw-things--experimental) |
 | Reuse supported installed Draw Things weights with native H3 | [Local H3 model reuse](#reuse-local-draw-things-h3-models) |
 | Set up native LTX 2.5, LTX 2.3 or H3 | [Guided model setup](#guided-model-setup) |
-| Choose engine, task and sampling controls | [Clip generation](#clip-generation-controls) |
+| Choose model/profile, inputs and sampling controls | [Clip generation](#clip-generation-controls) |
 | Continue motion across clips or render an LTX 2.5 scene | [Clip continuity](#clip-continuity-in-studio) |
 | Generate image assets or import Draw Things settings | [Image workspace](#images-clips-and-loras) |
 | Generate sampled-reference speech and mix voice/music | [Voice and audio mixing](#native-voice-and-audio-mixing) |
@@ -825,8 +826,8 @@ The bootstrap uses a pinned, checksum-verified uv release from Astral.
 
 Advanced users can connect an existing compatible WeeTodd repository and Python environment.
 Use guided model setup below, or import existing `weetodd-headless-v2` recipes to identify model
-component sets. New clips select **WeeTodd (local)** or **Draw Things**, then a model and task;
-automatic component selection inspects
+component sets. New clips select **Run with → WeeTodd (local) / Draw Things**, then a model,
+LoRAs, prompt and named inputs; automatic component selection inspects
 compatible recipe contents. FFmpeg/FFprobe and
 optional RIFE remain separately configured tools; a retail installer must package these tools
 with their licenses and complete clean-Mac qualification.
@@ -1048,9 +1049,9 @@ configure the native MLX engines.
    For a Swift text-to-video preset, the selected worker runs preflight before the profile is kept;
    for a Swift image/reference preset, attach media and prepare a clip for worker preflight.
    Existing recipes and model files are preserved. Automatic selection can use the new compatible
-   components; a specific recipe can be pinned under **Advanced generation**. **Set Up Models…**
+   components; a specific recipe can be pinned through **Model profile**. **Set Up Models…**
    is also available from missing-model actions. VDN and FastH3 are always explicit: use the
-   setup result for a T2V clip or pin its recipe under **Advanced generation**. Released Euler
+   setup result for a T2V clip or pin its recipe through **Model profile**. Released Euler
    evaluations are fixed at 8 or 50 for VDN and 4 for FastH3; unsupported controls are hidden.
    **Reset incompatible model overrides** repairs inherited sampler/backend/cache settings
    while preserving prompt and media. Remove incompatible attachments and continuity settings explicitly before preparing.
@@ -1168,16 +1169,25 @@ For a complete CLI walkthrough, see [download and create an LTX 2.5 recipe](../e
 
 ## Clip generation controls
 
-Choose **Generation → WeeTodd (local) / Draw Things → Model** in the clip inspector. Local models
-include MiniMax H3, LTX 2.3 and LTX 2.5. Available tasks and controls appear directly, without a
-required template or preset step. Tasks come from the installed compatible
-model recipes. Image to video requires a first image; First + last frame requires both endpoints.
-Changing tasks preserves attachments and names any conflicting or missing input. A reference-only
-H3 recipe cannot make a text-only clip appear ready. Model, render size and seed are available in
-the ordinary generation flow. Switching providers restores the last local model and its saved
-settings. Choosing a task retains the selected model; incompatible
-combinations explain what needs changing. Missing prompts or frame inputs do not hide valid sampling
-controls. Complete media and model preflight still runs before generation.
+Choose **Run with → WeeTodd (local) / Draw Things → Model** in the clip inspector. Local models
+include MiniMax H3, LTX 2.3 and LTX 2.5. **Model profile** lists automatic components and installed
+recipes, including specialist profiles; selecting one preserves authored overrides and inputs.
+LoRAs/groups appear with the model controls. Write the inline **Prompt**, or choose **Open editor…**
+for the full prompt editor, then use **Inputs → Add input** to add first/last frames, appearance
+references, a reference sheet, an audio driver or a motion/scene guide. Input cards show their purpose,
+preview, description and replace/remove controls. **Input details** retains timing, strength, role
+and specialist reference controls. Missing files and incompatible inputs remain visible.
+
+**Settings → Basic / Advanced / All** changes which controls are displayed. **Basic** shows render
+size, duration, generation FPS, seed and ordinary sampling controls. **Advanced** exposes specialist
+sampling, memory, attention, decoding and execution controls; **All** shows both sets. The raw
+**Execution task** selector remains in **Execution details** for explicit and saved workflows.
+Input purposes choose the ordinary method without a required task/template step. Image to video
+requires a first image; first/last generation requires both endpoints. Changing the execution task
+preserves attachments and reports conflicts. A reference-only H3 recipe cannot make a prompt-only
+clip appear ready. Switching providers restores the last local model and its saved settings.
+Missing prompts or frame inputs do not hide valid sampling controls. Complete media and model
+preflight still runs before generation.
 An older clip with a missing or task-incompatible pinned recipe offers **Use automatic model
 components**, preserving its media and explicit parameter edits.
 
@@ -1196,11 +1206,16 @@ CFG or Shift fields. Supported native
 LTX CFG and Draw Things configuration values remain editable. Unsupported submitted overrides fail
 validation instead of being ignored.
 
-Edited controls show **Modified**; **Reset** removes those overrides. Optional execution presets and
-custom recipes live in **Advanced generation**. Existing clips preserve their imported recipe
-settings. Choosing an advanced preset opts into the new explicit
-selection. **Generate** prepares and validates the clip automatically. The separate preparation and
-prompt/settings review remain available. Clip/movie headless export uses the same resolved recipe.
+Edited controls show **Modified**; **Reset** removes generation overrides. **Use model defaults**
+explicitly clears sampling, guidance and execution overrides to inherit the selected profile, while
+preserving the prompt, inputs, seed, canvas and duration. Changing **Model profile** or the detail
+view preserves authored settings. Optional execution presets, movie overrides and MetalFX guides
+live in **Finishing and execution** under **Advanced / All**. **Timeline editing** retains source
+trim, audio/pan and transitions; **Clip actions** retains Ripple, **Upscale movie · LTX 2× copy**,
+split/duplicate and **Extend video**. Version history remains available. Choosing an execution preset
+is an explicit replacement of generation overrides. **Generate** prepares and validates the clip
+automatically. Separate preparation and prompt/settings review remain available. Clip/movie headless
+export uses the same resolved recipe.
 
 ### Acceleration settings
 
@@ -1588,7 +1603,7 @@ includes encoding, model loading, sampling and latent upscaling; H3 reports tran
 The following retained-page settings describe legacy Python generation and composable ComfyUI
 graphs. Swift jobs require Off; a saved nonzero budget fails preflight without fallback.
 
-For legacy H3, **Advanced generation → H3 page cache** offers Recipe default, Off, or 4/8/12/16 GB.
+For legacy H3, **Settings → Advanced → Finishing and execution → H3 page cache** offers Recipe default, Off, or 4/8/12/16 GB.
 The recipe setting is `config.paging_cache_gb` (0–16 decimal GB; default 0). This is extra retained
 transformer weight memory, not a limit on total generation memory or a promise of fit.
 Start with Off versus 4 GB using identical prompt, seed, dimensions, schedule and storage. Compare
@@ -1699,7 +1714,7 @@ matching its Studio media, reopening the accepted project and resuming without n
   121 output frames, and describe the sheet and intended scene in the prompt.
 - **MSR:** attach one to five images as **Appearance · MSR image**, describe each, and
   choose subject/object/clothing/background, priority, reference frames, sizing and attention
-  strength in Conditioning. Only one background is allowed. Recipe default preserves matching-image
+  strength under **Inputs → Input details**. Only one background is allowed. Recipe default preserves matching-image
   options from an imported recipe; removed attachments never leave hidden recipe media active.
 
 These routes reuse shared renderer validation and remain subject to adapter and memory constraints.
@@ -1809,8 +1824,9 @@ Both require resident loading without generic LoRAs. LTX 2.5 has dedicated Ingre
 and control setup choices. Automatic selects compatible installed components. IC-LoRAs stay
 outside style LoRA groups because they change reference encoding and stage behavior.
 
-For Draw Things, select **Image references · H3**, refresh the connection, select an H3 **Ref2VA**
-model, and attach 1–9 still images. This requires the updated transport helper. FL2VA models
+For Draw Things, choose **Run with → Draw Things**, refresh the connection, select an H3 **Ref2VA**
+model, and add 1–9 still images through **Inputs → Add input → Appearance references**. This requires
+the updated transport helper. FL2VA models
 cannot reinterpret those references as endpoints. Other video models retain their discovered
 endpoint capabilities. LTX IC-LoRAs and movie/audio references have no qualified mapping in
 the current helper. Software and transport tests do not establish real-model quality or memory fit.
@@ -1823,9 +1839,10 @@ To run this legacy recipe in Studio, open **Runtime Settings** and turn off
 **Use Swift MLX for H3 (default)** explicitly. Configure the repository and Python environment
 there. Swift does not fall back to this renderer when an imported recipe is incompatible.
 
-Import a recipe produced by `scripts/prepare_h3_reference_recipe.py`, choose **WeeTodd (local) → H3**
-and the reference task, and attach images with the **Reference** role. Compatible components are
-selected automatically; pin the imported recipe under **Advanced generation** if needed.
+Import a recipe produced by `scripts/prepare_h3_reference_recipe.py`, choose **Run with → WeeTodd
+(local) → Model → MiniMax H3**, and add images through **Inputs → Add input → Appearance references**.
+Compatible components are
+selected automatically; pin the imported recipe through **Model profile** if needed.
 The shared renderer uses genuine
 Ref2VA Q8 transformer pages and vision-capable Qwen v2 pages. Start with one image, five seconds,
 640×384 and the recipe's 19 dense evaluations; add a second reference only after checking memory.
@@ -3039,19 +3056,23 @@ one new authorization.
 
 Use the timeline **+ → Draw Things** to create a video clip. Refresh models, select an exact server
 model, write its prompt, and prepare it. Native MLX recipe files are not needed for this provider.
-Setup follows **Generation → Draw Things → Task → Connection → Model → LoRAs / Groups**. Tasks narrow verified
-connections and models using their advertised input combinations. Unverified connections remain
-available with **refresh to verify** until Studio has their catalog. Changing the task clears a
-verified incompatible model selection; changing the connection clears the model selection.
-Frame images and saved settings are retained. LoRAs and groups are filtered by the selected model.
+Setup follows **Run with → Draw Things → Connection → Model → LoRAs / Groups**, then **Prompt**
+and named **Inputs**. Model selection lists the connection's advertised video models so a compatible
+model can be chosen before adding media. Unverified connections remain available with **refresh to
+verify** until Studio has their catalog. Supported input purposes depend on the selected model;
+generation validates its exact advertised input combinations. **Advanced / All** retains the
+explicit **Execution task** override; changing it clears a verified incompatible model selection.
+Changing the connection clears the model selection. Frame images and saved settings are retained.
+LoRAs and groups are filtered by the selected model.
 Dimensions use a 64-pixel grid. Generation FPS must be an integer; LTX frame counts round upward to
 `8n+1` to cover the requested duration. Movie finishing applies the project/clip output settings.
 Generation adds an audiovisual movie to version history and Clip Assets. A changed clip is not
 marked current by an older render finishing later.
 
-**H3 first and last frames:** select **First and last frames** and drop images onto the timeline's
-**FF** and **LF** slots, even before selecting a connection or model. Then choose a discovered
-**MiniMax H3 FL2VA** model. You can also use **Use in clip → First frame** and **Use in clip → Last frame**
+**H3 first and last frames:** choose a discovered **MiniMax H3 FL2VA** model and add **First frame**
+and **Last frame** through **Inputs → Add input**, or drop images onto the timeline's **FF** and
+**LF** slots. Draft clips may collect endpoint images before selecting a connection or model.
+You can also use **Use in clip → First frame** and **Use in clip → Last frame**
 in Media & Assets. Selecting an incompatible model preserves your images and reports the mismatch;
 Prepare Clip requires a compatible model before generation.
 Studio sends the first image as Draw Things' canvas input and the last image as its first enabled
@@ -3067,17 +3088,18 @@ and 32 kHz stereo audio stay together. Only models actually advertised by the se
 offered; a model installed in the local app is not necessarily available through the cloud API.
 LTX still supports first-frame input only through this adapter. Last-only and arbitrary middle
 keyframes are not enabled. H3 Ref2VA supports 1–9 still-image references through its separate
-**Image references · H3** task. A conflicting attachment/task is
+**Appearance references** input purpose. The explicit **Image references · H3** execution task
+remains available under **Advanced / All**. A conflicting attachment/task is
 reported before generation rather than discarded. Headless exports use the same image contracts.
-Clip Assets are storage; only items listed under **Conditioning** are generation inputs.
+Clip Assets are storage; only items listed under **Inputs** are generation inputs.
 Keep previous rendered movies in Clip Assets without attaching them as a Reference to a Draw Things clip.
 Prepare Clip names unsupported attachments, and existing unsupported inputs show an inline warning.
 Remove the attachment with **×** to retain its media in the asset store. Draw Things input menus
-offer the selected task's supported endpoints or H3 image references; attachment strength is fixed
+offer the selected model's supported endpoints or H3 image references; attachment strength is fixed
 at 1 (LoRA strength remains editable).
 
 **H3 Turbo:** import a compatible Turbo LoRA into Draw Things, then click **Refresh** in Studio.
-Enable it under **Server LoRAs**, set its strength, and edit **Steps**. A local FL2VA test used
+Enable it under **LoRAs · Draw Things**, set its strength, and edit **Steps**. A local FL2VA test used
 `minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16` at **0.6 strength**, **4 steps**, DDIM Trailing,
 CFG 1, Shift 12, and Audio Shift 3. It completed at 768×448 with 124 frames and 32 kHz stereo audio
 in 226.8 seconds on an M3 Ultra. First/last images closely matched the supplied endpoints with

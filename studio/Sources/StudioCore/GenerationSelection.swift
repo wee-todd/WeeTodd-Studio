@@ -283,6 +283,7 @@ public struct GenerationDescriptor: Codable, Equatable {
   public var supportedTasks: [String]
   public var controls: GenerationControls
   public var presets: [Preset]
+  public var referenceFamily: String? = nil
   public var pipelineMode: String? = nil
   public var samplingMethod: String? = nil
   public var videoDecodePrecision: String? = nil

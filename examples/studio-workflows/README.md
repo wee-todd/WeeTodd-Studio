@@ -48,6 +48,9 @@ Movie/clip export uses `weetodd-studio-native-job-v1` when all clips select nati
 or accepted movie sources. It freezes the edit and existing prepared `weetodd-headless-v2`
 recipes for WeeToddCLI, without Python or a second sampler. This format is an execution job,
 separate from planning definitions, native image v4 jobs and the legacy Python-hosted movie formats.
+The clip inspector starts with **Run with**, **Model / Model profile** and LoRAs, then **Prompt**
+and named **Inputs**. **Settings → Basic / Advanced / All** changes the displayed controls while
+preserving the saved recipe and overrides; **Advanced** retains explicit execution-task controls.
 Prepared Ingredients recipes retain their sampler choice across project reopen and native export.
 Studio's **Full-resolution single-stage sampling** override offers explicit **Euler ancestral**:
 `config.single_stage_sampler: "euler_ancestral"`, eight conditional evaluations and zero refinement
