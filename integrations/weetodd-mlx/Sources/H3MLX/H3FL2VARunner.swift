@@ -187,6 +187,17 @@ public enum H3FL2VARunner {
     onAudio: ([Float], Int) throws -> Void,
     onLatents: (([Float], [Float]) throws -> Void)? = nil,
     progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
+    let sampled = try sample(request, initialRows: initialRows, refinement: refinement, progress: progress)
+    try onLatents?(sampled.rows.video, sampled.rows.audio)
+    return try H3AVOutputDecoder.decode(videoRows: sampled.rows.video, audioRows: sampled.rows.audio,
+      geometry: request.base.geometry, videoVAE: request.base.videoVAE, audioVAE: request.base.audioVAE,
+      videoDecodeMemoryMode: request.base.videoDecodeMemoryMode, videoDecodePrecision: request.base.videoDecodePrecision,
+      backendReport: sampled.backendReport, onFrame: onFrame, onAudio: onAudio, progress: progress)
+  }
+
+  public static func sample(_ request: H3FL2VARequest,
+    initialRows: H3JointLatentArtifact.Rows? = nil, refinement: H3JointRefinement? = nil,
+    progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> H3SampledLatents {
     guard (initialRows == nil) == (refinement == nil) else {
       throw H3CheckpointError.invalid("H3 refinement requires joint initial rows and controls.")
     }
@@ -257,13 +268,7 @@ public enum H3FL2VARunner {
     Memory.clearCache()
     progress("transformer_weights_released", 1, 1)
     try Task.checkCancellation()
-    try onLatents?(rawRows.0, rawRows.1)
-    return try H3AVOutputDecoder.decode(videoRows: rawRows.0,
-      audioRows: rawRows.1, geometry: geometry,
-      videoVAE: base.videoVAE, audioVAE: base.audioVAE,
-      videoDecodeMemoryMode: base.videoDecodeMemoryMode,
-      videoDecodePrecision: base.videoDecodePrecision,
-      backendReport: backendReport,
-      onFrame: onFrame, onAudio: onAudio, progress: progress)
+    return H3SampledLatents(video: rawRows.0, audio: rawRows.1, backendReport: backendReport)
+
   }
 }

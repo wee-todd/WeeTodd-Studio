@@ -38,7 +38,7 @@ public enum H3AttentionPolicy: String, Sendable, Equatable {
         (config["transformer_backend"] as? String ?? "mlx") == "mlx",
         components["fun_controlnet"] == nil,
         ["fasth3", "vdn", "motion_fidelity", "joint_refinement", "joint_latents",
-          "refinement", "continuation"].allSatisfy({ root[$0] == nil }) else {
+          "refinement", "continuation", "two_stage"].allSatisfy({ root[$0] == nil }) else {
         throw H3CheckpointError.invalid("Sol experimental attention supports only ordinary MLX Ref2VA or FL2VA without continuation, refinement or controls.")
       }
     }

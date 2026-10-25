@@ -163,7 +163,7 @@ public enum NativeH3Preparation {
     }
     if n.intValue == 0 { return }
     guard recipe["fasth3"] == nil,recipe["vdn"] == nil,recipe["joint_refinement"] == nil,
-      recipe["refinement"] == nil,recipe["joint_latents"] == nil,recipe["continuation"] == nil,recipe["motion_fidelity"] == nil,
+      recipe["two_stage"] == nil,recipe["refinement"] == nil,recipe["joint_latents"] == nil,recipe["continuation"] == nil,recipe["motion_fidelity"] == nil,
       (recipe["components"] as? [String:Any])?["fun_controlnet"] == nil,
       (config["transformer_backend"] as? String ?? "mlx") == "mlx" else {
       throw unsupported("Transformer weight cache requires ordinary Swift MLX generation")
@@ -183,7 +183,7 @@ public enum NativeH3Preparation {
       || (modelTask == "fl2va" && conditioningTask == "fflf"),
       (config["transformer_backend"] as? String ?? "mlx") == "mlx",
       recipe["fasth3"] == nil, recipe["vdn"] == nil, components["fun_controlnet"] == nil,
-      recipe["continuation"] == nil, recipe["refinement"] == nil, recipe["joint_refinement"] == nil,
+      recipe["continuation"] == nil, recipe["two_stage"] == nil, recipe["refinement"] == nil, recipe["joint_refinement"] == nil,
       recipe["joint_latents"] == nil, recipe["motion_fidelity"] == nil,
       (recipe["block_residency"] as? String ?? "checkpoint_default") == "checkpoint_default" else {
       throw unsupported("Experimental Sol requires independent ordinary MLX Ref2VA or FL2VA without continuation, refinement or controls")
@@ -592,6 +592,12 @@ public enum NativeH3Preparation {
       throw unsupported("duration, dimensions or seed are outside the H3 contract")
     }
     var config = recipe["config"] as! [String: Any]
+    let twoStage=clip.generationSelection?.h3Joint?.twoStage
+    if let twoStage,twoStage.useTurboDraft,twoStage.draftTurboPath != nil {
+      guard twoStage.draftTurboTask==H3TwoStageSettings.turboTask(for:clip.inferredTask) else {
+        throw StudioError.invalid("The linked two-stage Turbo belongs to a different or unknown task. Link the matching FL2VA or Ref2VA Turbo component for this clip.")
+      }
+    }
     var steps: Int
     if let evaluations = clip.generationSelection?.steps {
       guard (1...99).contains(evaluations) else {
@@ -601,11 +607,12 @@ public enum NativeH3Preparation {
     } else {
       steps = config["steps"] as? Int ?? 20
     }
+    if twoStage?.useTurboDraft == true {steps=5;config["sampling_method"]="euler"}
     guard (2...100).contains(steps) else { throw unsupported("sigma grid points must be between 2 and 100") }
     config["width"] = clip.generationWidth; config["height"] = clip.generationHeight
     config["duration_seconds"] = motion?.duration ?? clip.duration; config["seed"] = clip.seed
     config["steps"] = steps
-    if let method = clip.generationSelection?.h3SamplingMethod { config["sampling_method"] = method.rawValue }
+    if twoStage?.useTurboDraft != true, let method = clip.generationSelection?.h3SamplingMethod { config["sampling_method"] = method.rawValue }
     if let precision = clip.generationSelection?.h3VideoDecodePrecision {
       config["video_decode_precision"] = precision.rawValue
     }
@@ -766,7 +773,8 @@ public enum NativeH3Preparation {
     }
     let adapterStack=try NativeH3LoRAComposition.compose(componentPairs:profileLoRAs,rootStack:profileStack,
       attachments:clip.attachments,assets:availableAssets,schedulePoints:steps,
-      explicitEvaluations:clip.generationSelection?.steps,samplingMethod:config["sampling_method"] as? String ?? "euler")
+      explicitEvaluations:twoStage?.useTurboDraft == true ? 4:clip.generationSelection?.steps,samplingMethod:config["sampling_method"] as? String ?? "euler",
+      requireTurbo:twoStage?.useTurboDraft == true,defaultTurboPath:twoStage?.draftTurboPath)
     if !adapterStack.pairs.isEmpty {
       if let descriptors=adapterStack.descriptors {
         components.removeValue(forKey:"loras");recipe["loras"]=descriptors
@@ -866,6 +874,7 @@ public enum NativeH3Preparation {
     sources += inputs.compactMap { $0["soundtrack_path"] as? String }
     if let motion=content["motion_fidelity"] as? [String:Any] {sources += [motion["source_video"],motion["ffprobe"]].compactMap {$0 as? String}}
     if let model=(content["refinement"] as? [String:Any])?["learned_upscaler_path"] as? String {sources.append(model)}
+    if let model=(content["two_stage"] as? [String:Any])?["learned_upscaler_path"] as? String {sources.append(model)}
     if let source=(content["refinement"] as? [String:Any])?["source_manifest"] as? String {
       sources += [source,URL(fileURLWithPath:source).deletingLastPathComponent().appendingPathComponent("joint-latents.f32").path]
     }

@@ -31,7 +31,8 @@ enum NativeH3LoRAComposition {
     return true
   }
   static func compose(componentPairs:[[Any]],rootStack:Any?,attachments:[Attachment],assets:[MediaAsset],
-    schedulePoints:Int,explicitEvaluations:Int?,samplingMethod:String) throws -> Result {
+    schedulePoints:Int,explicitEvaluations:Int?,samplingMethod:String,
+    requireTurbo:Bool=false,defaultTurboPath:String?=nil) throws -> Result {
     var items:[Item]=[]
     for pair in componentPairs {
       guard pair.count==2,let path=pair[0] as? String else { throw StudioError.invalid("Invalid H3 profile LoRA pair.") }
@@ -73,12 +74,34 @@ enum NativeH3LoRAComposition {
     }
     guard items.count<=8,Set(items.map(\.path)).count==items.count else { throw StudioError.invalid("Choose at most eight distinct H3 LoRAs, including profile adapters.") }
     var hasTurbo=false
+    var turboItems:[Item]=[]
     for item in items {
       let metadata=try NativeLoRAInspection.inspect(URL(fileURLWithPath:item.path),modelHint:.h3,
         selectedH3Profile:item.settings.profile == .auto ? nil : item.settings.profile.rawValue)
-      hasTurbo=hasTurbo || item.settings.profile == .turbo || metadata["loraProfile"] as? String == "turbo"
+      if item.settings.profile == .turbo || metadata["loraProfile"] as? String == "turbo" {
+        if requireTurbo,item.settings.qkvLayout == .nativeInterleaved || metadata["loraLayout"] as? String == "native_interleaved" {
+          throw StudioError.invalid("The default two-stage component requires a contiguous-QKV Turbo adapter. Choose Current settings for a custom layout.")
+        }
+        hasTurbo=true;turboItems.append(item)
+      }
     }
-    let points=hasTurbo && explicitEvaluations==nil ? 5 : schedulePoints
+    if requireTurbo {
+      let selected=try defaultTurboPath.map(canonical)
+      if turboItems.isEmpty {
+        guard let selected else {throw StudioError.invalid("Link a compatible four-step H3 Turbo adapter for the two-stage draft.")}
+        let info=try NativeLoRAInspection.validateH3Sampling(path:selected,selectedProfile:"turbo",schedulePoints:5)
+        guard info["loraLayout"] as? String != "native_interleaved" else {throw StudioError.invalid("The default two-stage component requires a contiguous-QKV Turbo adapter.")}
+        guard !items.contains(where:{$0.path==selected}) else {throw StudioError.invalid("The two-stage Turbo adapter is already present with a different profile.")}
+        items.append(Item(path:selected,strength:1,settings:.init(profile:.turbo,qkvLayout:.contiguousQKV),explicit:true));hasTurbo=true
+      } else {
+        guard turboItems.count==1,let turbo=turboItems.first,turbo.strength==1,
+          turbo.settings.startAfterEvaluations==0,selected==nil || turbo.path==selected else {
+          throw StudioError.invalid("The default two-stage draft requires one strength-1 Turbo adapter matching its linked component. Choose Current settings for a custom stack.")
+        }
+      }
+      guard items.count<=8 else {throw StudioError.invalid("The two-stage Turbo component and creative stack must fit eight H3 adapters.")}
+    }
+    let points=requireTurbo || (hasTurbo && explicitEvaluations==nil) ? 5 : schedulePoints
     guard !hasTurbo || (points==5 && samplingMethod=="euler") else { throw StudioError.invalid("H3 Turbo requires Euler and 4 evaluations (5 schedule points).") }
     for item in items {
       try item.settings.validate(strength:item.strength,evaluations:points-1,samplingMethod:samplingMethod)
@@ -87,7 +110,7 @@ enum NativeH3LoRAComposition {
       guard metadata["loraModel"] as? String=="h3",metadata["loraRequiresAdalnGrid"] as? Bool != true else { throw StudioError.invalid("H3 LoRA model or AdaLN grid is incompatible.") }
       if metadata["loraProfile"] as? String == "turbo",item.settings.startAfterEvaluations != 0 { throw StudioError.invalid("Header-declared H3 Turbo requires immediate activation.") }
     }
-    let explicit=items.contains(where:{$0.explicit})
+    let explicit=requireTurbo || items.contains(where:{$0.explicit})
     return Result(pairs:items.map {[$0.path,$0.strength]},descriptors:explicit ? ["version":1,"adapters":items.map {$0.settings.wire(path:$0.path,strength:$0.strength)}] : nil,schedulePoints:points)
   }
 }

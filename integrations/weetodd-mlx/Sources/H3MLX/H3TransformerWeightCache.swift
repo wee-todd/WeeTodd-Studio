@@ -105,7 +105,7 @@ public enum H3TransformerWeightCachePolicy {
     let budget=try H3TransformerCachePlan.budget(config:config)
     if budget == 0 { return budget }
     guard root["fasth3"] == nil,root["vdn"] == nil,root["continuation"] == nil,
-      root["refinement"] == nil,root["joint_refinement"] == nil,root["joint_latents"] == nil,root["motion_fidelity"] == nil,
+      root["two_stage"] == nil,root["refinement"] == nil,root["joint_refinement"] == nil,root["joint_latents"] == nil,root["motion_fidelity"] == nil,
       (root["components"] as? [String:Any])?["fun_controlnet"] == nil,
       (config["transformer_backend"] as? String ?? "mlx") == "mlx" else {
       throw H3CheckpointError.invalid("Transformer weight cache requires ordinary MLX generation without continuation, refinement, FastH3, VDN or controls.")

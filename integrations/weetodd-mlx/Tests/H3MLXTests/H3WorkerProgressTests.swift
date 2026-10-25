@@ -11,6 +11,12 @@ final class H3WorkerProgressTests: XCTestCase {
     XCTAssertNil(H3WorkerProgress.fraction(stage:"learned_spatial_upscale",completed:1,total:40,evaluations:3))
   }
 
+  func testTwoStageBoundariesKeepBothSamplingPassesOutOfDecodeTiming() {
+    XCTAssertEqual(H3WorkerStageBoundary.name(stage:"draft_transformer_weights_released",completed:1,total:1),"draftSampling")
+    XCTAssertEqual(H3WorkerStageBoundary.name(stage:"refine_text_weights_released",completed:1,total:1),"refineQwen")
+    XCTAssertEqual(H3WorkerStageBoundary.name(stage:"upscaler_weights_released",completed:1,total:1),"latentUpscale")
+    XCTAssertNil(H3WorkerStageBoundary.name(stage:"draft_transformer_prepare",completed:49,total:50))
+  }
   func testAudioDrivenGenerationRecordsActualReleasedStages() {
     XCTAssertTrue(H3WorkerStageBoundary.tracks(task: "a2v"))
     XCTAssertEqual(H3WorkerStageBoundary.name(stage: "reference_audio_weights_released",completed: 1,total: 1), "referenceAudioEncode")

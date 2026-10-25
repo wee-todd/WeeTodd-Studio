@@ -81,7 +81,8 @@ public enum H3JointResizeMethod:String,Codable,CaseIterable {
 public struct H3JointSettings:Codable,Equatable {
   public var saveFullLatents:Bool
   public var refinement:H3JointRefinementSettings?
-  public init(saveFullLatents:Bool=false,refinement:H3JointRefinementSettings?=nil) { self.saveFullLatents=saveFullLatents;self.refinement=refinement }
+  public var twoStage:H3TwoStageSettings?
+  public init(saveFullLatents:Bool=false,refinement:H3JointRefinementSettings?=nil,twoStage:H3TwoStageSettings?=nil) { self.saveFullLatents=saveFullLatents;self.refinement=refinement;self.twoStage=twoStage }
 }
 public struct H3JointRefinementSettings:Codable,Equatable {
   public var mode:H3JointRefinementMode

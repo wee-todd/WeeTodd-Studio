@@ -35,7 +35,14 @@ public enum H3WorkerStageBoundary {
   public static func name(stage: String, completed: Int,
     total: Int) -> String? {
     guard total > 0, completed == total else { return nil }
+    for prefix in ["draft_", "refine_"] where stage.hasPrefix(prefix) {
+      if let boundary = name(stage: String(stage.dropFirst(prefix.count)), completed: completed, total: total) {
+        return String(prefix.dropLast()) + boundary.prefix(1).uppercased() + boundary.dropFirst()
+      }
+      return nil
+    }
     switch stage {
+    case "upscaler_weights_released": return "latentUpscale"
     case "motion_analysis_weights_released": return "motionAnalysis"
     case "motion_video_weights_released": return "motionVideoEncode"
     case "motion_audio_weights_released": return "motionAudioEncode"

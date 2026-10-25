@@ -237,6 +237,56 @@ remains `off`, and retained page cache remains `0`. A future port requires expli
 its own quality, speed and peak-memory qualification. Existing activation reuse and bounded
 metadata caches remain part of the exact Swift implementation.
 Timed audio-only Ref2VA is distinct from A2V; H3 generates a new soundtrack in either case.
+**Two-stage upscale** automatically generates a smaller native H3 draft, enlarges its video
+latent and refines it before final decode. Set the output width and height to any valid final
+canvas; resolution presets are shortcuts. The draft scale changes the calculated first pass,
+while the requested final dimensions remain exact. The inspector shows both canvases. For example,
+1536×864 with nominal 2× uses a 768×448 draft. Final axes must be multiples of 32 and at least 64;
+longest edge ≤1920, shortest edge ≤1088, with complete duration/reference rows within 64,000.
+The base must also fit ordinary H3 admission. Invalid settings fail before inference.
+
+New two-stage selections default to four Turbo draft evaluations at adapter strength 1, learned
+latent upscaling, and three standard refinement evaluations at strength 0.35. **Draft sampling**
+can explicitly use the current sampler/LoRA stack instead. The basic Steps/Sampler controls show
+fixed 4/Euler while the default Turbo policy is selected; custom overrides remain saved for reuse.
+Link the FL Turbo for text/keyframe jobs, the Ref Turbo for reference jobs, and the learned H3
+upscaler once. Studio reuses those local component links for new selections and freezes them in
+each clip. A task change reselects its matching linked Turbo or requires relinking. Missing or
+incompatible components fail before inference. Existing saved two-stage recipes keep their
+custom draft/interpolation settings; enabling a new selection uses the new default.
+**Second-pass strength** appears directly in Generation settings whenever two-stage is enabled,
+including the basic view. Type an exact value or use the slider. The default is 0.35; valid values
+are greater than 0 through 1. Lower values retain more draft structure, while higher values allow
+larger visual changes. The value is saved with the clip and passed unchanged into its exported
+recipe. Refinement evaluation count remains independently adjustable. Final width/height stay user-selected.
+Strength selects a fraction of H3's common sampling clock; the receipt records actual video/audio
+start sigmas. The original draft audio is retained exactly at the latent level for the single
+final audio decode. Interpolation remains an explicit custom choice. Compatible learned H3 weights are read in place.
+Identified Turbo adapters apply only to the draft; standard creative LoRAs keep their strengths
+in both passes. An adapter without sampling metadata needs an explicit standard/Turbo profile.
+Continuation, Motion repair, Fun, FastH3, VDN, experimental attention and transformer weight cache
+are unavailable in this mode. Full-latent saving publishes the final AV latent. Existing saved-source
+refinement remains a separate choice. An October 24 M3 Ultra BF16 T2VA comparison used a 672×384
+draft with 20 evaluations and 1344×768 final output with three refinement evaluations at strength
+0.35. Learned upscale finished in 20m09s versus 60m54s direct, with coherent sampled walking/waving
+frames. Bilinear finished in 20m37s but produced severe ghosting and fails that visual check. Select
+compatible learned weights for this tested recipe; the tested bilinear recipe is not quality approved.
+Both automatic results preserved the draft's audio latents, decoded WAV and decoded MP4 audio
+exactly. This is one seed and non-dialogue clip; broader audiovisual approval and performance remain
+separate qualification. See [the status ledger](../STATUS.md#october-24-automatic-h3-two-stage-upscale).
+A follow-up with four FL Turbo draft evaluations at adapter strength 1, the same learned upscale
+and three standard refinement evaluations took 14m02s, saving another 30.4% against standard
+two-stage. The worker omitted Turbo from refinement; an independent Turbo draft control confirmed
+bit-identical audio latents, decoded WAV and decoded MP4 audio. Sampled walking/waving frames
+were coherent, with a changed composition/design. This single trial does not establish full
+temporal/acoustic approval or repeat-run performance.
+Studio-composed 4+3 learned-upscale FFLF and one-image Ref2VA jobs subsequently finished in
+15m33s and 14m46s. FFLF endpoint frames closely matched the source anchors; Ref2VA retained
+recognizable robot/workshop features with some design variation. Audio latents, decoded WAV and
+decoded MP4 matched their independent small draft controls exactly. No direct controls were run.
+Ref2VA source audio already had 15 full-scale samples, preserved unchanged; acoustic acceptance
+and broad identity/temporal quality remain open. Ref2VA used Singularity INT8 and its matching Turbo.
+
 **Full latent refinement · experimental** uses accepted complete-latent artifacts, not a movie
 as a latent substitute. It rejects saved-tail continuation, Fun and Motion Fidelity mixtures.
 **Motion repair · experimental** uses its own source and controls; the older **Motion Fidelity**

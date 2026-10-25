@@ -239,10 +239,12 @@ import UniformTypeIdentifiers
       environment: ProcessInfo.processInfo.environment)
     guard let untouchedRecipe = try JSONSerialization.jsonObject(with:recipeData) as? [String:Any] else { throw invalid("Invalid H3 recipe.") }
     _ = try H3TransformerWeightCachePolicy.admitRecipe(untouchedRecipe)
-    let motionRecipe = try H3MotionFidelityRecipe.prepare(data: recipeData)
-    let jointRefinement = try H3JointRefinementRecipe.prepare(data: motionRecipe?.ordinaryRecipe ?? recipeData)
-    let canvasAdmission = jointRefinement?.targetGeometry.canvasAdmission ?? H3CanvasAdmission.ordinary
-    let baseRecipeData = jointRefinement?.ordinaryRecipe ?? motionRecipe?.ordinaryRecipe ?? recipeData
+    let twoStageRecipe = try H3TwoStageRecipe.prepare(data: recipeData)
+    let executionRecipeData = twoStageRecipe?.ordinaryRecipe ?? recipeData
+    let motionRecipe = try H3MotionFidelityRecipe.prepare(data: executionRecipeData)
+    let jointRefinement = try H3JointRefinementRecipe.prepare(data: motionRecipe?.ordinaryRecipe ?? executionRecipeData)
+    let canvasAdmission = twoStageRecipe?.plan.target.canvasAdmission ?? jointRefinement?.targetGeometry.canvasAdmission ?? H3CanvasAdmission.ordinary
+    let baseRecipeData = jointRefinement?.ordinaryRecipe ?? motionRecipe?.ordinaryRecipe ?? executionRecipeData
     var recipe = try JSONSerialization.jsonObject(with: baseRecipeData) as! [String: Any]
     let hasVDN = recipe["vdn"] != nil
     let hasFastH3 = recipe["fasth3"] != nil
@@ -475,9 +477,10 @@ import UniformTypeIdentifiers
       let inputItems = ((recipe["conditioning"] as? [String: Any])?["inputs"]
         as? [[String: Any]]) ?? []
       endpointRequest = try H3StudioRecipe.compileFL2VA(data: flContinuation?.sampledRecipe ?? baseRecipeData, canvasAdmission: canvasAdmission) {
-        path, first, width, height in
+        path, first, geometry in
         let loaded = try H3FL2VAMedia.load(path: path,
-          width: width, height: height, first: first)
+          width: geometry.width, height: geometry.height, first: first,
+          canvasAdmission: geometry.canvasAdmission)
         sourceImages.append(["path": path, "sha256": loaded.sourceSHA256,
           "width": loaded.sourceWidth, "height": loaded.sourceHeight,
           "anchor": inputItems[sourceImages.count]["frame_index"] ?? "unknown"])
@@ -497,6 +500,33 @@ import UniformTypeIdentifiers
       stillRequest = nil
       endpointRequest = nil
     }
+    let automaticRunner: H3TwoStageRunner?
+    if let prepared = twoStageRecipe {
+      let task: H3TwoStageTask
+      var draftImages: [H3StillReference]?
+      if let textRequest { task = .text(textRequest) }
+      else if let endpointRequest {
+        task = .keyframes(endpointRequest)
+        let inputs = ((recipe["conditioning"] as? [String: Any])?["inputs"] as? [[String: Any]]) ?? []
+        draftImages = try inputs.enumerated().map { index, input in
+          guard let path = input["path"] as? String, let expected = input["sha256"] as? String else {
+            throw invalid("Automatic H3 keyframes need frozen source paths and digests.")
+          }
+          let loaded = try H3FL2VAMedia.load(path: path, width: prepared.plan.base.width,
+            height: prepared.plan.base.height, first: index == 0)
+          guard loaded.sourceSHA256 == expected else { throw invalid("An H3 draft keyframe changed after preparation.") }
+          return loaded.image
+        }
+      } else if let stillRequest { task = .references(stillRequest) }
+      else { throw invalid("Automatic H3 upscale has no admitted task.") }
+      automaticRunner = try H3TwoStageRunner(task: task, plan: prepared.plan,
+        resizeMethod: prepared.resizeMethod, learnedUpscaler: prepared.learnedUpscaler,
+        learnedUpscalerHeaderSHA256: prepared.learnedUpscalerHeaderSHA256, draftKeyframes: draftImages)
+    } else { automaticRunner = nil }
+    let automaticAdmission = try automaticRunner?.preflight()
+    let automaticMetadata: [String: Any]?
+    if let runner = automaticRunner, let checked = automaticAdmission { automaticMetadata = try runner.metadata(checked) }
+    else { automaticMetadata = nil }
     let motionSource: H3MotionFidelityMedia.Source?
     let motionAdmission: H3T2VARunner.Admission?
     if let motionRecipe {
@@ -553,7 +583,7 @@ import UniformTypeIdentifiers
     var jointBaseRequest: H3T2VARequest?, jointVision: URL?
     var fullInitialRows: H3JointLatentArtifact.Rows?
     var jointSourceManifest: H3JointLatentArtifact.Manifest?
-    if jointRefinement != nil {
+    if jointRefinement != nil || automaticRunner != nil {
       let base: H3T2VARequest
       let vision: URL?
       if let textRequest { base = textRequest; vision = nil }
@@ -571,7 +601,7 @@ import UniformTypeIdentifiers
       jointBaseRequest = base; jointVision = vision
       let identity = try H3JointLatentArtifact.componentIdentity(base: base, task: jointTask, vision: vision)
       jointIdentity = identity
-      if let source = jointRefinement!.sourceManifest, let digest = jointRefinement!.sourceSHA256 {
+      if let source = jointRefinement?.sourceManifest, let digest = jointRefinement?.sourceSHA256 {
         let loaded = try H3JointLatentArtifact.load(manifestURL: source, expectedSHA256: digest,
           expectedTask: jointTask, expectedComponentIdentity: identity)
         try H3JointRefinementRecipe.validateSource(loaded.0, prepared: jointRefinement!)
@@ -579,7 +609,9 @@ import UniformTypeIdentifiers
         fullInitialRows = loaded.1
       }
     } else { jointIdentity = nil }
-    if let motionAdmission {
+    if let checked = automaticAdmission {
+      admission = (twoStageRecipe!.plan.target, checked.finalPackedRows, checked.evaluations)
+    } else if let motionAdmission {
       admission = (motionAdmission.geometry, motionAdmission.packedRows, motionAdmission.evaluations)
     } else if let stillRequest {
       let checked = try H3Ref2VAStillRunner.preflight(stillRequest,
@@ -622,7 +654,7 @@ import UniformTypeIdentifiers
         "overlapFrames": continuation?.overlapFrames ?? 0,
         "packedRows": admission.packedRows,
         "evaluations": admission.evaluations,
-        "referenceImages": sourceImages,
+        "referenceImages": sourceImages, "twoStage": automaticMetadata as Any? ?? NSNull(),
         "productionQualified": false, "videoDecode": videoDecodeDiagnostics]])
       return
     }
@@ -802,7 +834,7 @@ import UniformTypeIdentifiers
             expectedTask: jointTask, expectedComponentIdentity: identity)
         }
       }
-      if jointRefinement?.saveFullLatents == true, let identity = jointIdentity {
+      if jointRefinement?.saveFullLatents == true || twoStageRecipe?.saveFullLatents == true, let identity = jointIdentity {
         let saved = try H3JointLatentArtifact.save(rows: .init(video: video, audio: audio),
           geometry: admission.geometry, task: jointTask, componentIdentity: identity,
           directory: staging.appendingPathComponent("joint-latents"))
@@ -819,7 +851,12 @@ import UniformTypeIdentifiers
       savedContextSHA256 = saved.sha256;savedPayloadSHA256=saved.payloadSHA256
     }
     var actualMotionPlan: H3MotionFidelityPlan?
-    if let motionRecipe, let source = motionSource, let textRequest {
+    if let runner = automaticRunner {
+      let rendered = try runner.run(onFrame: onFrame, onAudio: onAudio, onLatents: onLatents, progress: onProgress)
+      result = (rendered.videoFrames, rendered.audioSamplesPerChannel, rendered.audioSampleRate)
+      backendReport = rendered.backendReport
+      appliedVideoPrecision = rendered.videoDecodePrecision
+    } else if let motionRecipe, let source = motionSource, let textRequest {
       let prepared = try H3MotionFidelityRunner.prepare(base: textRequest, source: source,
         settings: motionRecipe.settings, ffmpeg: URL(fileURLWithPath: configuredFFmpeg),
         scratch: staging.appendingPathComponent("motion-audio-scratch"), progress: onProgress)
@@ -954,6 +991,7 @@ import UniformTypeIdentifiers
         "sourceManifest": prepared.sourceManifest!.path, "sourceManifestSHA256": prepared.sourceSHA256!]
     }
 
+    if let automaticMetadata { completeMetadata["twoStage"] = automaticMetadata }
     if let learnedReport { completeMetadata["learnedSpatialUpscaler"] = learnedReport }
 
     if let savedContextSHA256,let savedPayloadSHA256 {

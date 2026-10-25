@@ -292,6 +292,18 @@ public enum H3Ref2VAStillRunner {
     onAudio: ([Float], Int) throws -> Void,
     onLatents: (([Float], [Float]) throws -> Void)? = nil,
     progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
+    let sampled = try sample(request, contextFrames: contextFrames, context: context, initialRows: initialRows, refinement: refinement, progress: progress)
+    try onLatents?(sampled.rows.video, sampled.rows.audio)
+    return try H3AVOutputDecoder.decode(videoRows: sampled.rows.video, audioRows: sampled.rows.audio,
+      geometry: request.geometry, videoVAE: request.videoVAE, audioVAE: request.audioVAE,
+      videoDecodeMemoryMode: request.videoDecodeMemoryMode, videoDecodePrecision: request.videoDecodePrecision,
+      backendReport: sampled.backendReport, onFrame: onFrame, onAudio: onAudio, progress: progress)
+  }
+
+  public static func sample(_ request: H3Ref2VAStillRequest,
+    contextFrames: Int = 0, context: H3Continuation.Rows? = nil,
+    initialRows: H3JointLatentArtifact.Rows? = nil, refinement: H3JointRefinement? = nil,
+    progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> H3SampledLatents {
     guard (initialRows == nil) == (refinement == nil), context == nil || refinement == nil else {
       throw H3CheckpointError.invalid("H3 refinement requires full initial rows and cannot combine tail context.")
     }
@@ -411,13 +423,7 @@ public enum H3Ref2VAStillRunner {
     Memory.clearCache()
     progress("transformer_weights_released", 1, 1)
     try Task.checkCancellation()
-    try onLatents?(rawRows.0, rawRows.1)
-    return try H3AVOutputDecoder.decode(videoRows: rawRows.0,
-      audioRows: rawRows.1, geometry: geometry, videoVAE: request.videoVAE,
-      audioVAE: request.audioVAE, videoDecodeMemoryMode: request.videoDecodeMemoryMode,
-      videoDecodePrecision: request.videoDecodePrecision,
-      backendReport: backendReport,
-      onFrame: onFrame, onAudio: onAudio,
-      progress: progress)
+    return H3SampledLatents(video: rawRows.0, audio: rawRows.1, backendReport: backendReport)
+
   }
 }

@@ -502,6 +502,38 @@ sampled first/middle/last frames. On October 5, the user approved this retained 
 initialized refinement, Motion Fidelity and the nineteen-evaluation Canny Fun boxing clip
 for audiovisual quality. These approvals do not qualify the older interpolation failure,
 unrestricted 2 MP/15-second generation or clean performance.
+Studio also offers opt-in automatic **Two-stage upscale** for independent native H3 jobs.
+New selections default to four strength-1 Turbo draft evaluations, the learned H3 latent upscaler,
+and three standard refinement evaluations at strength 0.35. **Second-pass strength** is directly editable
+in Generation settings whenever two-stage is enabled; 0.35 remains the default. Studio remembers separate FL/Ref
+Turbo components and a shared learned upscaler in local preferences; each clip freezes its links.
+Missing components require linking before generation. Saved custom/interpolation recipes retain
+their existing settings, and **Current sampler and LoRA settings** remains an explicit draft choice.
+Enter the exact final width and height; the worker calculates a smaller draft, upscales only
+its video latent, runs a separately budgeted partial refinement and decodes once with draft audio.
+The nominal 2× draft setting starts at strength 0.35 and three actual refinement evaluations.
+Custom final canvases use a 32-pixel grid, longest edge at most 1920, shortest edge at most 1088,
+and the existing 64,000 complete-row spatial budget. Duration and references can make a canvas
+unavailable. Only draft dimensions are rounded: final 1536×864 resolves to a 768×448 draft at
+nominal 2× and remains exactly 1536×864. Interpolation and a separately selected compatible learned
+H3 upscaler are explicit choices. Identified Turbo adapters apply to the draft; standard creative
+LoRAs retain their strengths in both passes. Unlabelled adapters require an explicit profile.
+Automatic generation rejects continuation, motion repair, Fun, FastH3/VDN and weight-cache mixtures.
+Model-free contract checks cover ordering, geometry, exact evaluation counts and audio-row retention;
+an October 24 matched BF16 T2VA trial on an M3 Ultra measured 20m09s with the learned upscaler
+against 60m54s for direct 1344×768 generation, saving 66.9% end to end. The draft was 672×384
+with 20 evaluations, followed by three final evaluations at strength 0.35. Learned output had
+coherent sampled walking/waving frames; bilinear output had severe doubled edges and ghosting
+despite taking 20m37s. Both retained bit-identical draft audio latents, decoded WAV and decoded
+MP4 audio. This is one seed and non-dialogue clip, not broad audiovisual approval or a universal
+speed guarantee; the tested bilinear recipe is not a quality-approved preset.
+A follow-up with four strength-1 FL Turbo draft evaluations and the same learned upscale/three
+standard refinement evaluations finished in 14m02s, 30.4% less time than standard two-stage,
+with coherent sampled frames and exact Turbo-draft audio preservation. See [the measured scope](STATUS.md#october-24-automatic-h3-two-stage-upscale).
+Studio-composed first/last-frame and one-image Ref2VA 4+3 learned-upscale jobs also completed in
+15m33s/14m46s, with coherent inspected frames and exact draft-audio preservation. No direct controls
+were run for those tasks; full temporal/acoustic review remains separate.
+
 Ordinary H3 retains its existing 1 MP/40,000-row admission. Density reduction is a
 fidelity/compute trade, not a guarantee of preserved motion or likeness.
 

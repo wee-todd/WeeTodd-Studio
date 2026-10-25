@@ -6,6 +6,7 @@ struct GenerationInspector: View {
   var clip: Clip
   var detail: GenerationSettingsDetail = .all
   var isFastH3:Bool { descriptor?.fasth3 == true || store.profiles.first(where: { $0.id==clip.profileID })?.generation?.fasth3 == true }
+  var isH3TwoStageTurbo:Bool {clip.engine == .h3 && store.runtime.usesNativeH3 && clip.generationSelection?.h3Joint?.twoStage?.useTurboDraft == true}
   var isVDN:Bool { descriptor?.vdn == true || store.profiles.first(where: { $0.id==clip.profileID })?.generation?.vdn == true }
   var descriptor: GenerationDescriptor? {
     guard let result = store.generationDescriptions[clip.id],
@@ -114,18 +115,26 @@ struct GenerationInspector: View {
       if detail.showsBasic, clip.engine == .h3, store.runtime.usesNativeH3 {
         let vdn=isVDN || isFastH3
         Picker("Sampler", selection: Binding(get: {
-          clip.generationSelection?.h3SamplingMethod?.rawValue
+          if isH3TwoStageTurbo {return "euler"}
+          return clip.generationSelection?.h3SamplingMethod?.rawValue
             ?? (store.generationDescriptions[clip.id]?["generation"] as? [String: Any])?["samplingMethod"] as? String ?? "euler"
         }, set: { value in edit { $0.h3SamplingMethod = NativeH3SamplingMethod(rawValue: value) } })) {
           ForEach(NativeH3SamplingMethod.allCases) { Text($0.label).tag($0.rawValue) }
         }
-        .disabled(vdn)
+        .disabled(vdn || isH3TwoStageTurbo)
+        if isH3TwoStageTurbo {Text("Two-stage draft · Four Euler evaluations with strength-1 Turbo. Refinement uses its separate standard schedule.").font(.caption2).foregroundStyle(.secondary)}
         if vdn {
           Text(isFastH3 ? "FastH3 · Four Euler evaluations. Independent text-to-audiovisual only." : "VDN · Fixed Euler schedule and released adapters at strength 1. Text-to-video only.").font(.caption2).foregroundStyle(.secondary)
         }
         if clip.generationSelection?.h3SamplingMethod == .resMultistep {
           Text("Experimental multistep sampling. Turbo adapters require Euler.").font(.caption2).foregroundStyle(.secondary)
         }
+      }
+      if clip.engine == .h3, store.runtime.usesNativeH3, !isVDN, !isFastH3,
+        let stage = clip.generationSelection?.h3Joint?.twoStage {
+        H3SecondPassStrengthControl(strength: Binding(get: { stage.strength }, set: { value in
+          edit { $0.h3Joint?.twoStage?.strength = value }
+        }))
       }
       if detail.showsAdvanced, clip.engine == .h3, store.runtime.usesNativeH3 {
         if !isVDN && !isFastH3 {
@@ -326,8 +335,8 @@ struct GenerationInspector: View {
       HStack {
         Text(clip.engine == .ltx25 && controls.refinementSteps == 0
           ? "Evaluations" : controls.refinementSteps == nil ? "Steps" : "Stage one steps")
-        TextField("Steps", value: controls.stepsEditable ? integer(\.steps, default: steps) : .constant(steps), format: .number.grouping(.never))
-          .disabled(!controls.stepsEditable)
+        TextField("Steps", value: isH3TwoStageTurbo ? .constant(4) : controls.stepsEditable ? integer(\.steps, default: steps) : .constant(steps), format: .number.grouping(.never))
+          .disabled(!controls.stepsEditable || isH3TwoStageTurbo)
       }
     }
     if let refinement = controls.refinementSteps, refinement > 0 || detail.showsAdvanced {

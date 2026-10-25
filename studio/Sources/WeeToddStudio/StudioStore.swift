@@ -416,6 +416,7 @@ extension Encodable {
   @Published var project = StudioProject()
   @Published var globalAssets: [MediaAsset] = []
   @Published var loraGroups: [LoRAGroup] = []
+  @Published var h3TwoStageModels = H3TwoStageModelLinks()
   @Published var scannedLoRAEntries: [LoRAFolderEntry] = []
   @Published var loraFolderWarnings: [String] = []
   @Published var loraFolderScanBusy = false
@@ -585,6 +586,7 @@ extension Encodable {
       globalAssets = value
     }
     loadLoRAGroups()
+    loadH3TwoStageModels()
     loadDrawThingsConnections()
     loadDrawThingsLoRAGroups()
     let args = CommandLine.arguments

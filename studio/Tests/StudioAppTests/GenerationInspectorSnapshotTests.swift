@@ -20,6 +20,16 @@ final class GenerationInspectorSnapshotTests: XCTestCase {
                 name: "h3-first-last-basic", height: 1600)
   }
 
+  @MainActor func testH3TwoStageStrengthIsEditableInBasicGenerationSettings() throws {
+    var fixture = try h3Fixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+    fixture.clip.generationSelection?.h3Joint = .init(twoStage:H3TwoStageSettings())
+    fixture.store.project.clips = [fixture.clip]
+    try capture(ClipInspector(clip:fixture.clip,detail:.basic),fixture:fixture,
+      name:"h3-two-stage-strength-basic",height:1900,
+      requiredFields:["Second-pass strength":0.35])
+  }
+
   @MainActor func testIngredientsAllHostsWithoutReplacingItsExplicitSettings() throws {
     let fixture = try ingredientsFixture()
     defer { try? FileManager.default.removeItem(at: fixture.directory) }
@@ -63,7 +73,7 @@ final class GenerationInspectorSnapshotTests: XCTestCase {
   }
 
   @MainActor private func capture<Content: View>(_ content: Content, fixture: Fixture,
-                                                name: String, height: CGFloat) throws {
+                                                name: String, height: CGFloat, requiredFields:[String:Double] = [:]) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = .sortedKeys
     let before = try encoder.encode(fixture.clip)
@@ -88,6 +98,13 @@ final class GenerationInspectorSnapshotTests: XCTestCase {
     RunLoop.main.run(until: Date().addingTimeInterval(0.08))
     host.layoutSubtreeIfNeeded()
     host.displayIfNeeded()
+    var fields:[String:NSTextField]=[:]
+    func inspect(_ view:NSView) {
+      if let field=view as? NSTextField,let label=field.placeholderString,
+        requiredFields[label] != nil {fields[label]=field}
+      for child in view.subviews {inspect(child)}
+    }
+    if !requiredFields.isEmpty {inspect(host)}
     XCTAssertFalse(window.isVisible, "Snapshot hosting must never show a desktop window")
     let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
     host.cacheDisplay(in: host.bounds, to: bitmap)
@@ -116,6 +133,11 @@ final class GenerationInspectorSnapshotTests: XCTestCase {
       let directory = URL(fileURLWithPath: destination, isDirectory: true)
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
       try png.write(to: directory.appendingPathComponent(name + ".png"), options: .atomic)
+    }
+    for (label,value) in requiredFields {
+      let field=try XCTUnwrap(fields[label],"Missing editable field in basic inspector: \(label)")
+      XCTAssertTrue(field.isEditable);XCTAssertTrue(field.isEnabled)
+      XCTAssertEqual(field.doubleValue,value,accuracy:0.000001)
     }
   }
 

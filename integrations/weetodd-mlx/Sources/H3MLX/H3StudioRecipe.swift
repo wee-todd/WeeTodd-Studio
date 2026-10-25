@@ -79,6 +79,14 @@ public enum H3StudioRecipe {
   /// The text recipe validator still owns every shared execution control.
   public static func compileFL2VA(data: Data, canvasAdmission: H3CanvasAdmission = .ordinary,
     resolveImage: (String, Bool, Int, Int) throws -> H3StillReference) throws -> H3FL2VARequest {
+    try compileFL2VA(data: data, canvasAdmission: canvasAdmission) { path, first, geometry in
+      try resolveImage(path, first, geometry.width, geometry.height)
+    }
+  }
+
+  /// Carries the admitted canvas to media loaders, including expanded refinement.
+  public static func compileFL2VA(data: Data, canvasAdmission: H3CanvasAdmission = .ordinary,
+    resolveImage: (String, Bool, H3Geometry) throws -> H3StillReference) throws -> H3FL2VARequest {
     guard data.count <= 1024 * 1024,
       var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
       var components = root["components"] as? [String: Any],
@@ -153,7 +161,7 @@ public enum H3StudioRecipe {
       priorFrame = frame
     }
     let images = try paths.enumerated().map { index, path in
-      try resolveImage(path, index == 0, base.geometry.width, base.geometry.height)
+      try resolveImage(path, index == 0, base.geometry)
     }
     return try H3FL2VARequest(base: base, vision: URL(fileURLWithPath: vision),
       images: images, anchors: anchors, referenceNoise: noise, attentionPolicy: attentionPolicy)

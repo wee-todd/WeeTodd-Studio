@@ -614,6 +614,51 @@ func testReferenceDensitySidecarAndAudioCapMatchWorkerAdmission() throws {
     return steps
   }
 
+  func testTwoStageDefaultRejectsTurboWithoutFrozenTaskFamily() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    var stage=H3TwoStageSettings();stage.resizeMethod = .bilinear
+    stage.draftTurboPath=try loraFile(root,metadata:["adapter_profile":"turbo"]).path
+    project.clips[0].generationSelection?.h3Joint = .init(twoStage:stage)
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+  }
+  func testTwoStageDefaultRejectsNativeInterleavedComponent() throws {
+    let(root,_,_)=try fixture();let turbo=try loraFile(root,metadata:["adapter_profile":"turbo","qkv_layout":"native_interleaved"])
+    XCTAssertThrowsError(try NativeH3LoRAComposition.compose(componentPairs:[],rootStack:nil,attachments:[],assets:[],schedulePoints:5,explicitEvaluations:4,samplingMethod:"euler",requireTurbo:true,defaultTurboPath:turbo.path))
+  }
+  func testTwoStageTurboPolicyPinsDraftWithoutChangingFinalCanvasOrCreativeStrength() throws {
+    let(root,original,runtime)=try fixture();var project=original
+    let turbo=try loraFile(root,name:"default-turbo",metadata:["adapter_profile":"turbo"])
+    let creative=try loraFile(root,name:"creative",metadata:["adapter_profile":"standard"])
+    attachLoRA(creative,profile:"standard",to:&project);project.clips[0].attachments[0].strength=0.6
+    project.clips[0].generationWidth=1536;project.clips[0].generationHeight=864;project.clips[0].duration=3
+    project.clips[0].generationSelection?.steps=19;project.clips[0].generationSelection?.h3SamplingMethod = .resMultistep
+    var stage=H3TwoStageSettings();stage.draftTurboPath=turbo.path;stage.draftTurboTask="fl2va";stage.resizeMethod = .bilinear
+    project.clips[0].generationSelection?.h3Joint = .init(twoStage:stage)
+    let encoder=JSONEncoder();encoder.outputFormatting = .sortedKeys
+    let before=try encoder.encode(project)
+    let result=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    let config=result["config"] as! [String:Any]
+    XCTAssertEqual(config["steps"] as? Int,5);XCTAssertEqual(config["sampling_method"] as? String,"euler")
+    XCTAssertEqual(config["width"] as? Int,1536);XCTAssertEqual(config["height"] as? Int,864)
+    let adapters=(result["loras"] as! [String:Any])["adapters"] as! [[String:Any]]
+    XCTAssertEqual(adapters.count,2)
+    XCTAssertEqual(adapters.first {$0["path"] as? String==turbo.path}?["strength"] as? Double,1)
+    XCTAssertEqual(adapters.first {$0["path"] as? String==creative.path}?["strength"] as? Double,0.6)
+    XCTAssertEqual((result["two_stage"] as? [String:Any])?["evaluations"] as? Int,3)
+    XCTAssertEqual(try encoder.encode(project),before)
+  }
+  func testTwoStageTurboComponentRejectsConflictingAndMissingStacks() throws {
+    let(root,_,_)=try fixture();let turbo=try loraFile(root,name:"turbo",metadata:["adapter_profile":"turbo"])
+    func compose(_ pairs:[[Any]],_ selected:String?) throws -> NativeH3LoRAComposition.Result {
+      try NativeH3LoRAComposition.compose(componentPairs:pairs,rootStack:nil,attachments:[],assets:[],schedulePoints:20,explicitEvaluations:nil,samplingMethod:"euler",requireTurbo:true,defaultTurboPath:selected)
+    }
+    XCTAssertThrowsError(try compose([],nil))
+    let added=try compose([],turbo.path);XCTAssertEqual(added.pairs.count,1);XCTAssertEqual(added.schedulePoints,5)
+    let reused=try compose([[turbo.path,1.0]],turbo.path);XCTAssertEqual(reused.pairs.count,1)
+    XCTAssertThrowsError(try compose([[turbo.path,0.6]],turbo.path))
+    XCTAssertThrowsError(try compose([[turbo.path,1.0]],root.appendingPathComponent("different.safetensors").path))
+  }
+
   func testStandardLoRAAttachmentPreservesUserEvaluationsAndEditor() throws {
     let (root, original, runtime) = try fixture()
     let url = try loraFile(root, metadata: ["adapter_profile": "standard", "inference_steps": "19"])

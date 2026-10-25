@@ -1,5 +1,97 @@
 # WeeTodd Studio implementation status
 
+## October 25 H3 second-pass strength control
+
+Enabled native H3 two-stage jobs expose **Second-pass strength** directly in the Generation
+inspector, including its basic view. Users can type an exact value or use the slider, with 0.35
+retained as the default. Inline guidance explains the effect and reports out-of-range values.
+The clip's existing persisted strength flows into the saved job without changing the independent
+refinement evaluation count or final canvas. The advanced panel uses the same setting rather than
+maintaining a second strength control.
+Focused native-field hosting and save/export checks pass. Final core, Studio and workflow
+validation passed: 3,545 Python tests passed with seven optional skips; Swift inference, MLX and
+Studio suites executed 208/1,036/1,091 tests with 10/177/50 optional skips and zero failures.
+Installed-checkpoint and hardware opt-in tests retain their skips. The isolated release bundle
+passes deep/strict signature verification.
+
+## October 24 automatic H3 two-stage upscale
+
+New Studio two-stage selections use the tested Turbo4 draft + learned upscaler + standard3
+refinement preset at strength 0.35. Final dimensions remain user-selected and authoritative.
+Separate reusable FL/Ref Turbo links and one learned-upscaler link live in local preferences;
+clips freeze their selected components. The fixed draft policy shows 4/Euler in basic controls,
+while explicit Current settings mode retains custom sampler/LoRA choices. Saved older settings
+preserve their custom draft/interpolation behavior. Task-family selection routes audio-to-video
+through the Ref2VA Turbo link without changing the FL link. Task-family validation, contiguous-QKV
+admission and document/session/task guards prevent incompatible or stale component selections.
+Missing components reject before inference, with no interpolation fallback.
+
+Independent native H3 T2V, keyframe/I2V and Ref2VA jobs have an explicit automatic draft → video-latent
+upscale → partial refinement path. Studio keeps arbitrary valid final dimensions authoritative,
+rounds only the calculated draft and persists a separate refinement strength/evaluation budget.
+Both passes and the optional learned upscaler are admitted before draft inference. Existing task
+samplers now also return complete latents without decoding; automatic jobs decode only the final
+video and preserved draft audio. Typed/header-identified Turbo adapters are confined to the draft,
+while standard creative adapters retain their selected strengths. Legacy single-pass and saved
+full-latent refinement contracts remain available.
+
+Focused model-free tests cover custom landscape/portrait/square dimensions, duration-dependent row
+limits, exact per-modality refinement schedules, adapter routing, ordered stages, cancellation and
+base-audio retention. A real BF16 T2VA comparison on an M3 Ultra with 256 GiB unified memory used
+one robot-workshop prompt, seed 0, no LoRAs and 124 frames at 24 FPS. The draft was 672×384 with
+20 Euler evaluations; automatic output was 1344×768 with three refinement evaluations at strength
+0.35. Separate worker processes ran serially, with file cache primed by the draft control.
+
+| Actual path | End-to-end time | Time saved against direct |
+| --- | --- | --- |
+| Direct 1344×768, 20 evaluations | 60m53.596s | — |
+| Automatic bilinear, 20+3 evaluations | 20m36.721s | 66.15% |
+| Automatic learned, 20+3 evaluations | 20m09.266s | 66.90% |
+
+The learned output retained coherent walking/waving frames at 0/24/48/72/96/123 without the
+severe doubled edges and wavy ghosting observed in bilinear output. Bilinear fails this visual
+check; this bilinear recipe is not a quality-approved preset. In both automatic runs, saved audio
+latent bytes, decoded WAV samples and audio decoded from the final MP4 matched the draft control
+exactly. Video duration was 5.166667 seconds and stereo 32 kHz audio was 5.175 seconds. All weighted
+stages released. This measures actual product paths: ordinary sampling uses eligible verified MPP
+projections; initialized refinement remains MLX-only. One ordered trial does not establish a learned
+versus bilinear speed difference, general speedup, full temporal/audio quality, dialogue quality or
+other task/checkpoint qualification. Full audiovisual acceptance remains a separate review.
+
+A follow-up reused the same prompt, seed, geometry, components and signed worker, adding the
+installed FL2V four-step v1.0 BF16 Turbo adapter at strength 1 only to the draft. Four Turbo draft
+evaluations plus the same learned upscaler and three standard refinement evaluations at strength
+0.35 completed in 14m01.951s: 30.38% less total time than standard learned two-stage and 76.96%
+less than the direct control. The receipt confirms Turbo omission from refinement. Draft sampling
+took 100.320 seconds, learned upscale 11.527 seconds, refinement sampling 582.450 seconds and
+video decode 126.848 seconds. A separately rendered Turbo draft control took 2m21.934s; its audio
+latents, decoded WAV and decoded final MP4 audio matched the automatic result exactly, with zero
+maximum sample difference and no WAV clipping. Sampled frames at 0/24/48/72/96/123 retained a
+readable walk, turn and wave without the severe bilinear ghosting; full-resolution walking/waving
+frames were also inspected. Turbo changes the robot design and composition, so this is not pixel
+parity with standard generation. This is one additional ordered non-dialogue trial, with previous
+controls measured earlier; full temporal/acoustic acceptance and repeat-run timing remain separate.
+
+The new Studio default also completed first/last-frame and one-image Ref2VA qualification recipes
+at 1344×768, 124 frames/24 FPS, seed 0 and 4+3 evaluations with learned upscale/strength 0.35.
+FFLF used the BF16 FL transformer and FL Turbo, retaining anchors at frames 0 and 119; its
+whole-job time was 933.049 seconds (15m33s). Ref2VA used the installed Singularity v1.3 INT8
+transformer and matching Ref Turbo; it took 885.721 seconds (14m46s). These exact saved worker
+recipes were composed by the updated StudioCore default path. Separate small four-step draft
+controls took 172.881/174.472 seconds; no direct full-resolution controls were run. Both automatic
+outputs matched their own draft control's audio latents, decoded WAV and decoded MP4 samples
+bit for bit, with zero maximum sample difference. FFLF had no full-scale WAV samples; Ref2VA had
+15 of 331,200 samples at full scale in both draft and final, so preservation does not certify the
+source soundtrack's acoustic quality. Video/audio durations remained 5.166667/5.175 seconds.
+Sampled FFLF endpoints closely matched their source images, with coherent inspected intermediate
+frames. Ref2VA retained recognizable red-robot/blue-eye/chest-plate/workshop features while limb
+and hand detail varied. No severe bilinear-like ghosting was observed in the inspected frames.
+The user accepted the quality of these retained FFLF and Ref2VA takes on October 25. This is
+one non-dialogue recipe per task, not general identity, speech, or speedup approval. The unchanged
+renderer binary used for these jobs was retained from the earlier tests; the updated Studio release
+bundle independently passed packaging/signature verification. Final integration validation is
+recorded in the October 25 entry above. Broader real hardware and speech qualification remain open.
+
 ## October 12 audio-first editing and music extensions consolidation
 
 Studio preserves full voice and music takes on an empty timeline, with independent Voice and

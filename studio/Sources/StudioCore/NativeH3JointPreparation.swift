@@ -5,7 +5,7 @@ import CoreFoundation
 public enum NativeH3JointPreparation {
   public static func apply(_ settings:H3JointSettings?,to ordinary:[String:Any],continuityMode:String) throws -> [String:Any] {
     guard let settings else { return ordinary }
-    guard settings.saveFullLatents || settings.refinement != nil else { throw StudioError.invalid("Remove inactive H3 full-latent controls or enable Save full latents.") }
+    guard settings.saveFullLatents || settings.refinement != nil || settings.twoStage != nil else { throw StudioError.invalid("Remove inactive H3 full-latent controls or enable Save full latents.") }
     guard continuityMode=="independent",ordinary["continuation"]==nil,ordinary["motion_fidelity"]==nil,
       ordinary["joint_latents"]==nil,ordinary["refinement"]==nil,
       let config=ordinary["config"] as? [String:Any],let components=ordinary["components"] as? [String:Any],
@@ -13,6 +13,10 @@ public enum NativeH3JointPreparation {
       ["t2va","fl2va","ref2va"].contains(task) else { throw StudioError.invalid("H3 full-latent refinement cannot combine continuation, motion fidelity or Fun control.") }
     var recipe=ordinary
     if settings.saveFullLatents { recipe["joint_latents"]=["version":1,"save_full":true] }
+    if let stage=settings.twoStage {
+      guard settings.refinement==nil else {throw StudioError.invalid("Choose automatic two-stage generation or a saved refinement source.")}
+      return try NativeH3TwoStagePreparation.apply(stage,to:recipe)
+    }
     if let selected=settings.refinement {
       guard selected.strength.isFinite,selected.strength>0,selected.strength<=1,
         selected.startVideoSigma==nil || (selected.startVideoSigma!.isFinite && selected.startVideoSigma!>0 && selected.startVideoSigma!<=1),

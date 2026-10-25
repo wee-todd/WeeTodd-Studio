@@ -309,6 +309,24 @@ final class H3LoRAFile: H3LoRAApplying {
   /// Sampling declarations belong to the adapter header, not its filename or
   /// the historical `turboLoRA` argument name. Request steps count grid points;
   /// adapter inference-step declarations count actual transformer evaluations.
+  static func isTurboForTwoStage(_ adapter: H3LoRAAdapter, requestedSteps: Int,
+    samplingMethod: H3SamplingMethod) throws -> Bool {
+    let file = try SafeTensorFile(url: adapter.url)
+    let turbo = try validateSampling(metadata: file.metadata, requestedSteps: requestedSteps,
+      samplingMethod: samplingMethod, profile: adapter.profile, startAfterEvaluations: adapter.startAfterEvaluations)
+    if turbo { return true }
+    func normalized(_ key: String) -> String {
+      file.metadata[key]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    }
+    let declaredStandard = ["adapter_profile", "profile", "distillation_profile"].contains {
+      ["standard", "base", "quality"].contains(normalized($0))
+    } || ["standard", "style", "character"].contains(normalized("adapter_role"))
+    guard adapter.profile == .standard || declaredStandard else {
+      throw H3CheckpointError.invalid("Automatic H3 upscale needs an explicit standard or Turbo profile when the LoRA header has no unambiguous sampling declaration.")
+    }
+    return false
+  }
+
   private static func validateSampling(metadata: [String: String],
     requestedSteps: Int?, samplingMethod: H3SamplingMethod, profile: H3LoRAProfile, startAfterEvaluations: Int) throws -> Bool {
     func normalized(_ key: String) -> String? {

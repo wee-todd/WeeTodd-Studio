@@ -139,6 +139,29 @@ Keep manifests and support files with their weights. Downloads preserve original
 hash-verify reused files. The FL2VA transformer cannot replace genuine Ref2VA weights. Optional
 Turbo LoRAs and control adapters are not part of these base component downloads.
 
+## Native H3 two-stage exports
+
+Enable **Two-stage upscale** in Studio before exporting a native clip or movie job. New selections
+use four strength-1 Turbo draft evaluations, the learned H3 latent upscaler, and three standard
+refinement evaluations. Link compatible task-specific Turbo and learned weights in Studio; base
+component downloads do not include them. Set the exact final width/height and adjust **Second-pass
+strength** in **Settings → Basic** as needed; its default is 0.35. The exported job freezes these
+choices, resolves the smaller draft, and preserves its audio for the single final decode.
+
+Run the exported native job with the bundled CLI:
+
+```bash
+/path/to/WeeTodd.app/Contents/MacOS/WeeToddCLI \
+  --job /path/to/H3.weetodd-job.json \
+  --output-directory /path/to/new-preflight --preflight-only
+```
+
+Omit `--preflight-only` and select a new output directory to render. This is the native Studio/job
+contract; the Python `--recipe` commands below retain their existing recipe support. A Turbo draft
+uses five schedule points for four evaluations; the independently recorded refinement budget is
+three actual evaluations. Custom final dimensions remain subject to H3's grid, edge and complete-row
+limits. See the [Studio controls and qualification](../../studio/README.md#current-swift-controls-and-qualification).
+
 ## Shared recipe format
 
 - `format`: `weetodd-headless-v2`.

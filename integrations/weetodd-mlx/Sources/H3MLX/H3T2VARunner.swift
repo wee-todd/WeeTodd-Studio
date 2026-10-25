@@ -215,9 +215,6 @@ public enum H3T2VARunner {
     // The default does not read a clock or add any GPU completion.
     onPreparationMeasurement: ((String, Double, Bool) -> Void)? = nil,
     progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> Result {
-    guard (initialRows == nil) == (refinement == nil) else {
-      throw H3CheckpointError.invalid("H3 refinement requires both joint initial rows and explicit controls.")
-    }
     if let publicationAudio {
       guard refinement?.preserveAudio == true, initialRows != nil,
         publicationAudio.frames > 0, publicationAudio.frames <= 480_000,
@@ -225,6 +222,24 @@ public enum H3T2VARunner {
         publicationAudio.samples.allSatisfy(\.isFinite) else {
         throw H3CheckpointError.invalid("Original audio publication requires explicit initialized AV preservation.")
       }
+    }
+    let sampled = try sample(request, initialRows: initialRows, refinement: refinement, onPreparationMeasurement: onPreparationMeasurement, progress: progress)
+    try onLatents?(sampled.rows.video, sampled.rows.audio)
+    let result = try H3AVOutputDecoder.decode(videoRows: sampled.rows.video, audioRows: sampled.rows.audio,
+      geometry: request.geometry, videoVAE: request.videoVAE, audioVAE: request.audioVAE,
+      videoDecodeMemoryMode: request.videoDecodeMemoryMode, videoDecodePrecision: request.videoDecodePrecision,
+      publicationAudio: publicationAudio,
+      backendReport: sampled.backendReport, onFrame: onFrame, onAudio: onAudio, progress: progress)
+    return Result(videoFrames: result.videoFrames, audioSamplesPerChannel: result.audioSamplesPerChannel,
+      audioSampleRate: result.audioSampleRate, backendReport: result.backendReport, videoDecodePrecision: result.videoDecodePrecision)
+  }
+
+  public static func sample(_ request: H3T2VARequest,
+    initialRows: H3JointLatentArtifact.Rows? = nil, refinement: H3JointRefinement? = nil,
+    onPreparationMeasurement: ((String, Double, Bool) -> Void)? = nil,
+    progress: (String, Int, Int) -> Void = { _, _, _ in }) throws -> H3SampledLatents {
+    guard (initialRows == nil) == (refinement == nil) else {
+      throw H3CheckpointError.invalid("H3 refinement requires both joint initial rows and explicit controls.")
     }
     try initialRows?.validate(geometry: request.geometry)
     let admission = try preflight(request, refinement: refinement)
@@ -300,19 +315,8 @@ public enum H3T2VARunner {
     Memory.clearCache()
     progress("transformer_weights_released", 1, 1)
     try Task.checkCancellation()
-    try onLatents?(rawRows.0, rawRows.1)
 
-    let result = try H3AVOutputDecoder.decode(videoRows: rawRows.0,
-      audioRows: rawRows.1, geometry: geometry, videoVAE: request.videoVAE,
-      audioVAE: request.audioVAE, videoDecodeMemoryMode: request.videoDecodeMemoryMode,
-      videoDecodePrecision: request.videoDecodePrecision,
-      publicationAudio: publicationAudio,
-      backendReport: backendReport,
-      onFrame: onFrame, onAudio: onAudio,
-      progress: progress)
-    return Result(videoFrames: result.videoFrames,
-      audioSamplesPerChannel: result.audioSamplesPerChannel,
-      audioSampleRate: result.audioSampleRate, backendReport: result.backendReport,
-      videoDecodePrecision: result.videoDecodePrecision)
+    return H3SampledLatents(video: rawRows.0, audio: rawRows.1, backendReport: backendReport)
+
   }
 }

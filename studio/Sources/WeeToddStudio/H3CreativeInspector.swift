@@ -22,15 +22,17 @@ struct H3CreativeInspector:View {
       }
     }
     if clip.continuityMode == "independent",["t2v","t2va","i2v","fflf","ref2va","a2v"].contains(clip.inferredTask) {
+      H3TwoStageInspector(clip:clip)
       DisclosureGroup("Full latent refinement · experimental") {
         Toggle("Save complete audio/video latents",isOn:Binding(get:{clip.generationSelection?.h3Joint?.saveFullLatents ?? false},set:{ value in
           edit { s in var joint=s.h3Joint ?? H3JointSettings();joint.saveFullLatents=value
-            s.h3Joint = !joint.saveFullLatents && joint.refinement == nil ? nil : joint }
+            s.h3Joint = !joint.saveFullLatents && joint.refinement == nil && joint.twoStage == nil ? nil : joint }
         }))
         Picker("Refinement source",selection:Binding(get:{clip.generationSelection?.h3Joint?.refinement?.source.manifest ?? ""},set:{ path in
           edit { s in var joint=s.h3Joint ?? H3JointSettings()
             joint.refinement=sources.first(where:{$0.manifest==path}).map { H3JointRefinementSettings(mode:.initialized,source:$0) }
-            s.h3Joint = !joint.saveFullLatents && joint.refinement == nil ? nil : joint }
+            if joint.refinement != nil {joint.twoStage=nil}
+            s.h3Joint = !joint.saveFullLatents && joint.refinement == nil && joint.twoStage == nil ? nil : joint }
         })) {
           Text("No refinement").tag("")
           ForEach(sources,id: \.manifest) { source in
