@@ -139,6 +139,13 @@ Keep manifests and support files with their weights. Downloads preserve original
 hash-verify reused files. The FL2VA transformer cannot replace genuine Ref2VA weights. Optional
 Turbo LoRAs and control adapters are not part of these base component downloads.
 
+Singularity V2 INT8 can be linked as the transformer in the existing Ref2VA setup preset, using
+its matching support components. The base downloads above do not include this separate finetune.
+See [H3 INT8 finetunes](../../studio/README.md#h3-int8-finetunes) for the exact checkpoint and
+[V2 qualification](../../STATUS.md#october-25-singularity-v2-two-stage-qualification) for the tested
+Turbo4 + learned upscale + standard3 recipe. Run preflight with your resolved component paths
+before rendering an exported job.
+
 ## Native H3 two-stage exports
 
 Enable **Two-stage upscale** in Studio before exporting a native clip or movie job. New selections

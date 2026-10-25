@@ -14,6 +14,36 @@ Studio suites executed 208/1,036/1,091 tests with 10/177/50 optional skips and z
 Installed-checkpoint and hardware opt-in tests retain their skips. The isolated release bundle
 passes deep/strict signature verification.
 
+## October 25 Singularity V2 two-stage qualification
+
+The original `Minimax-h3_Singularity_ref2va_v2_int8.safetensors` checkpoint from
+[WarmBloodAban/Minimax-h3_Singularity](https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity/blob/1259cf16cd0b655ba691a32fb46a409142762972/Minimax-h3_Singularity_ref2va_v2_int8.safetensors)
+passed download checksum verification and native worker preflight. Its SHA-256 is
+`db3ec568863db6f5ec1840210d41653afef73d4df7b0cb489c52ad458b6f8a7f`.
+Existing support components and the original checkpoint were reused in place; no renderer change
+or checkpoint conversion was required. Both runs used the signed shared worker from `e272856`.
+
+An M3 Ultra with 256 GiB unified memory rendered the same robot-workshop reference/prompt and
+seed 0 used for the V1.3 Ref2VA test. The automatic recipe used a 672×384 draft with four Euler
+Turbo evaluations at adapter strength 1, learned H3 latent upscale, and three standard refinement
+evaluations at strength 0.35 for an exact 1344×768 final canvas. The Ref2VA four-step v0.1 Turbo
+adapter was omitted from refinement, with no intermediate decode. All weighted stages released.
+The five-second request produced 124 frames at 24 FPS (5.166667 seconds) and 5.175 seconds of
+stereo 32 kHz audio.
+
+The independent small draft control took 175.299 seconds (2m55s); the whole two-stage job took
+842.770 seconds (14m03s). Its saved audio latent, decoded WAV and decoded MP4 audio matched the
+draft control bit for bit, with zero maximum sample difference. WAV samples were finite, with
+no full-scale samples. The earlier V1.3 job took 885.721 seconds (14m46s), but used an earlier
+binary/build and uncontrolled file-cache conditions; these single trials do not establish an
+isolated model-version speedup. No direct full-resolution V2 control was run.
+
+Inspected frames retained recognizable robot/workshop features and readable walking, turning and
+waving poses without severe bilinear-style ghosting. Head, hand and limb details vary from the
+source and V1.3 take. On October 25, the user approved the visual quality of this retained V2 take.
+This acceptance covers one non-dialogue Ref2VA recipe; speech, other task families, broader
+identity/temporal quality and repeat-run performance remain separate qualification.
+
 ## October 24 automatic H3 two-stage upscale
 
 New Studio two-stage selections use the tested Turbo4 draft + learned upscaler + standard3

@@ -533,6 +533,10 @@ with coherent sampled frames and exact Turbo-draft audio preservation. See [the 
 Studio-composed first/last-frame and one-image Ref2VA 4+3 learned-upscale jobs also completed in
 15m33s/14m46s, with coherent inspected frames and exact draft-audio preservation. No direct controls
 were run for those tasks; full temporal/acoustic review remains separate.
+The Singularity V2 INT8 Ref2VA take also completed the default 4+3 learned-upscale path in 14m03s
+at 1344×768, preserving draft audio exactly. The user approved the retained take's visual quality
+on October 25. See [the V2 qualification](STATUS.md#october-25-singularity-v2-two-stage-qualification)
+for its checkpoint, recipe and measurement scope.
 
 Ordinary H3 retains its existing 1 MP/40,000-row admission. Density reduction is a
 fidelity/compute trade, not a guarantee of preserved motion or likeness.

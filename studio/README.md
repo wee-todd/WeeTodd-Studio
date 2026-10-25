@@ -285,7 +285,7 @@ Studio-composed 4+3 learned-upscale FFLF and one-image Ref2VA jobs subsequently 
 recognizable robot/workshop features with some design variation. Audio latents, decoded WAV and
 decoded MP4 matched their independent small draft controls exactly. No direct controls were run.
 Ref2VA source audio already had 15 full-scale samples, preserved unchanged; acoustic acceptance
-and broad identity/temporal quality remain open. Ref2VA used Singularity INT8 and its matching Turbo.
+and broad identity/temporal quality remain open. Ref2VA used Singularity v1.3 INT8 and its matching Turbo.
 
 **Full latent refinement · experimental** uses accepted complete-latent artifacts, not a movie
 as a latent substitute. It rejects saved-tail continuation, Fun and Motion Fidelity mixtures.
@@ -1058,12 +1058,21 @@ The model files stay in the DT model store. The tokenizer download retains its p
 
 ## H3 INT8 finetunes
 
-Supported Comfy H3 `int8_tensorwise` safetensors files, including Singularity Ref2VA v1.3 INT8,
-can be selected as the transformer in the existing H3 setup presets. Keep the matching H3 task
+Supported Comfy H3 `int8_tensorwise` safetensors files, including Singularity Ref2VA v1.3 and V2
+INT8, can be selected as the transformer in the existing H3 setup presets. Keep the matching H3 task
 manifest, Qwen3-VL encoder, processor/tokenizer and video/audio VAEs; those components are shared
 in place. A finetune remains an ordinary H3 recipe in Studio, with the same conditioning and
 generation controls. Tensor architecture validation does not establish a finetune's training-task
 support: use the task recommended by its publisher.
+
+For [Singularity V2 INT8](https://huggingface.co/WarmBloodAban/Minimax-h3_Singularity/blob/1259cf16cd0b655ba691a32fb46a409142762972/Minimax-h3_Singularity_ref2va_v2_int8.safetensors),
+select `Minimax-h3_Singularity_ref2va_v2_int8.safetensors` as the Ref2VA transformer and reuse the
+matching support components. For default two-stage generation, link the Ref2VA four-step Turbo
+adapter and learned H3 latent upscaler. The selected transformer serves both passes; Turbo applies
+only to the draft. Final dimensions and second-pass strength remain user-selectable.
+The October 25 4+3/0.35 take completed at 1344×768 in 14m03s with exact draft-audio preservation;
+the user approved its visual quality. This is one retained non-dialogue recipe. See the
+[V2 qualification](../STATUS.md#october-25-singularity-v2-two-stage-qualification).
 
 The loader validates the complete file and quantization metadata, reverses supported ConvRot
 encoding, and adapts attention layouts in memory. It reads the original file without creating a
