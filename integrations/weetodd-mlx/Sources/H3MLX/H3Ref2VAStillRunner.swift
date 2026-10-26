@@ -40,7 +40,8 @@ public struct H3Ref2VAStillRequest: Sendable {
     referenceNoise: H3ReferenceNoiseControls? = nil,
     canvasAdmission: H3CanvasAdmission = .ordinary,
     transformerBackend: H3TransformerBackend = .mlx,
-    attentionPolicy: H3AttentionPolicy = .dense, transformerWeightCacheGB:Int = 0) throws {
+    attentionPolicy: H3AttentionPolicy = .dense, transformerWeightCacheGB:Int = 0,
+    stillImageMode: H3StillImageMode? = nil) throws {
     try self.init(prompt: prompt, mediaReferences: references.map { .image($0) },
       width: width, height: height, durationSeconds: durationSeconds,
       seed: seed, requestedSteps: requestedSteps, transformer: transformer,
@@ -50,7 +51,8 @@ public struct H3Ref2VAStillRequest: Sendable {
       additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters,
       videoDecodeMemoryMode: videoDecodeMemoryMode, videoDecodePrecision: videoDecodePrecision, samplingMethod: samplingMethod,
       referenceNoise: referenceNoise, canvasAdmission: canvasAdmission,
-      transformerBackend: transformerBackend, attentionPolicy: attentionPolicy, transformerWeightCacheGB:transformerWeightCacheGB)
+      transformerBackend: transformerBackend, attentionPolicy: attentionPolicy, transformerWeightCacheGB:transformerWeightCacheGB,
+      stillImageMode: stillImageMode)
   }
 
   public init(prompt: String, mediaReferences: [H3Ref2VAReference], width: Int,
@@ -66,7 +68,8 @@ public struct H3Ref2VAStillRequest: Sendable {
     referenceNoise: H3ReferenceNoiseControls? = nil,
     canvasAdmission: H3CanvasAdmission = .ordinary,
     transformerBackend: H3TransformerBackend = .mlx,
-    attentionPolicy: H3AttentionPolicy = .dense, transformerWeightCacheGB:Int = 0) throws {
+    attentionPolicy: H3AttentionPolicy = .dense, transformerWeightCacheGB:Int = 0,
+    stillImageMode: H3StillImageMode? = nil) throws {
     if attentionPolicy == .solExperimental {
       try H3SolTaskPolicy.validateTask(task: "ref2va", contextFrames: 0,
         isRefinement: false, ordinaryCanvas: canvasAdmission == .ordinary,
@@ -88,8 +91,17 @@ public struct H3Ref2VAStillRequest: Sendable {
       throw H3CheckpointError.invalid("Invalid H3 visual-reference request.")
     }
     try H3VideoReferencePreparation.validate(mediaReferences)
-    let geometry = try H3Geometry(width: width, height: height,
-      durationSeconds: durationSeconds, canvasAdmission: canvasAdmission)
+    let geometry: H3Geometry
+    if let stillImageMode {
+      guard canvasAdmission == .ordinary, transformerBackend == .mlx, attentionPolicy == .dense,
+        mediaReferences.allSatisfy({ if case .image = $0 { return true }; return false }) else {
+        throw H3CheckpointError.invalid("H3 still editing accepts only ordinary MLX image references.")
+      }
+      geometry = try H3Geometry(width: width, height: height, stillImageMode: stillImageMode)
+    } else {
+      geometry = try H3Geometry(width: width, height: height,
+        durationSeconds: durationSeconds, canvasAdmission: canvasAdmission)
+    }
     let conditionRows = mediaReferences.reduce(0) { rows, reference in
       switch reference {
       case .image(let image), .timedImage(let image, _):
@@ -111,12 +123,15 @@ public struct H3Ref2VAStillRequest: Sendable {
       }
       return rows
     }
-    guard width * height <= geometry.canvasAdmission.maximumPixels,
+    guard width * height <= geometry.maximumPixels,
       try geometry.packedRows(textRows: 1,
         conditionVideoRows: conditionRows,
         conditionAudioRows: conditionAudioRows) <= geometry.maximumPackedRows else {
       throw H3CheckpointError.invalid("H3 reference canvas exceeds packed-row admission.")
     }
+    try H3Noise.validate(videoLatentFrames: geometry.videoLatentFrames,
+      latentHeight: height / 16, latentWidth: width / 16,
+      audioLatentFrames: geometry.audioLatentFrames, stillImageMode: stillImageMode)
     if geometry.canvasAdmission == .spatialRefinement {
       try geometry.canvasAdmission.validate(width: width, height: height)
       _ = try H3VideoVAEDecoder.preflightSpatial(geometry: geometry)
@@ -185,6 +200,9 @@ public enum H3Ref2VAStillRunner {
 
   public static func preflight(_ request: H3Ref2VAStillRequest,
     contextFrames: Int = 0, refinement: H3JointRefinement? = nil) throws -> Admission {
+    guard request.geometry.stillImageMode == nil || (contextFrames == 0 && refinement == nil) else {
+      throw H3CheckpointError.invalid("H3 stills cannot combine video continuation or refinement.")
+    }
     guard request.geometry.canvasAdmission == .ordinary || refinement != nil else {
       throw H3CheckpointError.invalid("Expanded H3 canvas requires explicit initialized spatial refinement.")
     }
@@ -266,8 +284,8 @@ public enum H3Ref2VAStillRunner {
     guard try H3CheckpointLayout(url:request.transformer).fastVariant == nil else {
       throw H3CheckpointError.invalid("FastH3 Preview v1 does not support reference-conditioned generation.")
     }
-    _ = try H3VideoVAELayout(url: request.videoVAE)
-    _ = try H3AudioVAELayout(url: request.audioVAE)
+    try H3VideoVAELayout(url: request.videoVAE).validateVideoUse()
+    if request.geometry.stillImageMode == nil { _ = try H3AudioVAELayout(url: request.audioVAE) }
     if !prepared.layout.conditionAudioIndices.isEmpty {
       try H3AudioVAEEncoder.inspect(checkpointURL: request.audioVAE)
     }
@@ -386,7 +404,7 @@ public enum H3Ref2VAStillRunner {
         videoLatentFrames: geometry.videoLatentFrames,
         latentHeight: geometry.height / 16, latentWidth: geometry.width / 16,
         audioLatentFrames: geometry.audioLatentFrames,
-        referenceNoise: request.referenceNoise)
+        referenceNoise: request.referenceNoise, stillImageMode: geometry.stillImageMode)
       let refinedVideo = try initialRows.map {
         try H3JointRefinement.targetRows(initial.video, source: $0.video,
           prefix: admission.referenceLayout.conditionVideoIndices.count, schedule: admission.videoSchedule, canvasAdmission: geometry.canvasAdmission)

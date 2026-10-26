@@ -104,6 +104,7 @@ public struct DrawThingsLoRA: Codable, Equatable, Identifiable {
   public var weight: Double
   public var enabled: Bool?
   public var isEnabled: Bool { enabled ?? true }
+  public var promptMetadata: LoRAPromptMetadata?
   public var id: String { modelID }
   public init(modelID: String, weight: Double = 1, enabled: Bool? = nil) {
     self.modelID = modelID; self.weight = weight; self.enabled = enabled

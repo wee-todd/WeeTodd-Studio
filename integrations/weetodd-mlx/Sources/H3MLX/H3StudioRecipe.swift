@@ -199,6 +199,7 @@ public enum H3StudioRecipe {
   }
 
   public static func compileMediaReferences(data: Data, canvasAdmission: H3CanvasAdmission = .ordinary,
+    stillImageMode: H3StillImageMode? = nil,
     resolveReference: (String, String, String, H3Geometry, H3ReferencePreparationControls?) throws -> H3Ref2VAReference) throws
     -> H3Ref2VAStillRequest {
     guard data.count <= 1024 * 1024,
@@ -280,7 +281,7 @@ public enum H3StudioRecipe {
     root["components"] = components
     root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [],
       "audio_policy": "generated"]
-    let base = try compile(data: JSONSerialization.data(withJSONObject: root), canvasAdmission: canvasAdmission)
+    let base = try compile(data: JSONSerialization.data(withJSONObject: root), canvasAdmission: canvasAdmission, stillImageMode: stillImageMode)
     if attentionPolicy == .solExperimental {
       try H3SolTaskPolicy.validateSettings(steps: base.requestedSteps,
         samplingMethod: base.samplingMethod, adapters: base.loRAAdapters,
@@ -335,7 +336,7 @@ public enum H3StudioRecipe {
       additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
       videoDecodeMemoryMode: base.videoDecodeMemoryMode, videoDecodePrecision: base.videoDecodePrecision,
       samplingMethod: base.samplingMethod, referenceNoise: noise, canvasAdmission: canvasAdmission,
-      transformerBackend: backend, attentionPolicy: attentionPolicy, transformerWeightCacheGB:base.transformerWeightCacheGB)
+      transformerBackend: backend, attentionPolicy: attentionPolicy, transformerWeightCacheGB:base.transformerWeightCacheGB, stillImageMode: stillImageMode)
   }
 
   /// An A2V driver is placed at frame zero of the target packed timeline.
@@ -530,7 +531,8 @@ public enum H3StudioRecipe {
     root["config"] = config
   }
 
-  public static func compile(data: Data, canvasAdmission: H3CanvasAdmission = .ordinary) throws -> H3T2VARequest {
+  public static func compile(data: Data, canvasAdmission: H3CanvasAdmission = .ordinary,
+    stillImageMode: H3StillImageMode? = nil) throws -> H3T2VARequest {
     func emptyArray(_ object: [String: Any], _ key: String) -> Bool {
       guard let value = object[key] else { return true }
       guard let values = value as? [Any] else { return false }
@@ -686,6 +688,6 @@ public enum H3StudioRecipe {
         config["memory_mode"] as? String ?? "normal"),
       videoDecodePrecision: decodePrecision,
       samplingMethod: samplingMethod, canvasAdmission: canvasAdmission,
-      transformerWeightCacheGB:try H3TransformerCachePlan.budget(config:config))
+      transformerWeightCacheGB:try H3TransformerCachePlan.budget(config:config), stillImageMode: stillImageMode)
   }
 }

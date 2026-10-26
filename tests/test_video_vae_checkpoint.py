@@ -365,3 +365,36 @@ def test_compact_loader_does_not_transpose_native_weights(tmp_path: Path, monkey
     model = load_compact_video_vae(path)
 
     np.testing.assert_array_equal(np.asarray(model.weight), np.asarray(native))
+
+
+def test_image_only_decoder_purpose_survives_native_conversion(tmp_path):
+    source = tmp_path / "image.safetensors"
+    output = tmp_path / "native.safetensors"
+    mx.save_safetensors(str(source), {"post_quant_conv.weight": mx.zeros((24, 24, 1, 1, 1))},
+        metadata={VIDEO_VAE_METADATA_KEY: json.dumps(_wrapper()),
+            "h3_t1_direct": "true", "h3_t1_output_slice": "3",
+            "h3_t1_format": "full_decoder_v1"})
+    convert_video_vae_checkpoint(source, output)
+    saved = json.loads(safetensor_metadata(output)[VIDEO_VAE_METADATA_KEY])
+    assert saved.get("image_only") is True
+    assert saved.get("image_output_slice") == 3
+
+
+def test_invalid_image_decoder_slice_fails_before_conversion(tmp_path):
+    source = tmp_path / "image.safetensors"
+    output = tmp_path / "native.safetensors"
+    mx.save_safetensors(str(source), {"post_quant_conv.weight": mx.zeros((24, 24, 1, 1, 1))},
+        metadata={VIDEO_VAE_METADATA_KEY: json.dumps(_wrapper()),
+            "h3_t1_direct": "true", "h3_t1_output_slice": "0",
+            "h3_t1_format": "full_decoder_v1"})
+    with pytest.raises(ValueError, match="image"):
+        convert_video_vae_checkpoint(source, output)
+    assert not output.exists()
+
+
+def test_video_loader_rejects_image_only_decoder_before_model_construction(tmp_path):
+    source = tmp_path / "image.safetensors"
+    _write_compact(source, {"placeholder": mx.zeros((1,))}, _loadable_wrapper(
+        image_only=True, image_output_slice=3))
+    with pytest.raises(ValueError, match="image-only"):
+        load_compact_video_vae(source)

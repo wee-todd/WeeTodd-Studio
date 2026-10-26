@@ -46,3 +46,21 @@ final class H3NoiseTests: XCTestCase {
     XCTAssertLessThan(max(abs(result.audio - audio)).item(Float.self), 1e-7)
   }
 }
+
+extension H3NoiseTests {
+  func testStillNoiseRequiresTheExplicitMatchingImageGrid() throws {
+    let single=try H3Noise.make(seed:42,videoLatentFrames:1,latentHeight:2,latentWidth:2,
+      audioLatentFrames:2,stillImageMode:.singleLatent)
+    XCTAssertEqual(single.video.shape,[1,1,96]);XCTAssertEqual(single.audio.shape,[1,4,32])
+    let quality=try H3Noise.make(seed:42,videoLatentFrames:2,latentHeight:2,latentWidth:2,
+      audioLatentFrames:8,stillImageMode:.qualityFiveFrames)
+    XCTAssertEqual(quality.video.shape,[1,2,96]);XCTAssertEqual(quality.audio.shape,[1,16,32])
+    XCTAssertThrowsError(try H3Noise.make(seed:42,videoLatentFrames:1,latentHeight:2,latentWidth:2,audioLatentFrames:2))
+    XCTAssertThrowsError(try H3Noise.make(seed:42,videoLatentFrames:2,latentHeight:2,latentWidth:2,
+      audioLatentFrames:2,stillImageMode:.qualityFiveFrames))
+    let reference=try H3Noise.makeReference(seed:42,conditionVideo:[Float](repeating:0,count:96),
+      conditionAudio:[],videoLatentFrames:1,latentHeight:2,latentWidth:2,
+      audioLatentFrames:2,stillImageMode:.singleLatent)
+    XCTAssertEqual(reference.video.shape,[1,2,96]);XCTAssertEqual(reference.audio.shape,[1,4,32])
+  }
+}

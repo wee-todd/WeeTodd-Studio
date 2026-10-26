@@ -30,6 +30,20 @@ extension StudioStore {
       configureCharacterSheetAdapter(&draft)
       return draft
     }
+    if imageWorkspaceLibrary.referenceProvider == .nativeH3 {
+      draft.selectProvider(.nativeH3)
+      draft.h3Image = imageWorkspaceLibrary.referenceH3Image ?? H3ImageSettings()
+      draft.h3Image?.loras = []
+      draft.modelID = imageWorkspaceLibrary.referenceH3ModelID ?? ""
+      draft.steps = imageWorkspaceLibrary.referenceH3Steps ?? 20
+      return draft
+    }
+    if imageWorkspaceLibrary.referenceProvider == nil, previousDraft?.executionProvider == .nativeH3 {
+      draft.selectProvider(.nativeH3); draft.h3Image = previousDraft?.h3Image
+      draft.h3Image?.loras = []
+      draft.modelID = previousDraft?.modelID ?? ""; draft.steps = previousDraft?.steps ?? 20
+      return draft
+    }
     if imageWorkspaceLibrary.referenceProvider == .nativeMLX {
       draft.selectProvider(.nativeMLX); draft.nativeImage = imageWorkspaceLibrary.referenceNativeImage ?? NativeImageSettings()
       return draft
@@ -81,6 +95,11 @@ extension StudioStore {
       if draft.referenceSheet != nil || draft.rippleReference != nil {
         imageWorkspaceLibrary.referenceProvider = draft.executionProvider
         if draft.executionProvider == .nativeMLX { imageWorkspaceLibrary.referenceNativeImage = draft.nativeImage }
+        if draft.executionProvider == .nativeH3 {
+          imageWorkspaceLibrary.referenceH3Image = draft.h3Image
+          imageWorkspaceLibrary.referenceH3ModelID = draft.modelID
+          imageWorkspaceLibrary.referenceH3Steps = draft.steps
+        }
       }
     }
     else { imageWorkspaceLibrary.activeKey = nil }

@@ -4,6 +4,7 @@ import StudioCore
 @MainActor extension StudioStore {
   func exportDrawThingsImageJob() {
     guard let draft = imageDraft else { return }
+    guard draft.executionProvider != .nativeH3 else { error = "H3 image job export is not available yet. Generate from the image workspace."; return }
     let connection = drawThingsConnections.first(where: { $0.id == draft.profileID })
     let panel = NSSavePanel()
     panel.title = "Export Image Headless Job"

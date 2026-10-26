@@ -479,3 +479,16 @@ def test_explicit_drawthings_image_task_keeps_remote_controls(tmp_path):
     assert len(result["inputs"]) == 1
     assert result["configuration"]["steps"] == 12
     assert result["configuration"]["shift"] == 2.0
+
+
+def test_lora_prompt_notes_stay_in_project_and_out_of_execution_request():
+    value = project()
+    value["clips"][0]["drawThings"]["loras"] = [{
+        "modelID": "style-a", "weight": 0.7,
+        "promptMetadata": {"triggers": ["style"], "notes": "Private prompt guidance"},
+    }]
+    result = compose_drawthings_request(value, "clip-uuid", [], request_id="x")
+    assert result["loras"] == [{"modelID": "style-a", "weight": 0.7}]
+    assert "Private prompt guidance" not in str(result)
+    saved_metadata = value["clips"][0]["drawThings"]["loras"][0]["promptMetadata"]
+    assert saved_metadata["notes"] == "Private prompt guidance"

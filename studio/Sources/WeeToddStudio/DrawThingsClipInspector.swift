@@ -209,11 +209,7 @@ struct DrawThingsClipInspector: View {
         Toggle(name, isOn: Binding(get: {
           store.selectedClip?.drawThings?.loras.first { $0.modelID == modelID }?.isEnabled ?? false
         }, set: { enabled in
-          store.editClip { selected in
-            if let index = selected.drawThings?.loras.firstIndex(where: { $0.modelID == modelID }) {
-              selected.drawThings?.loras[index].enabled = enabled
-            } else if enabled { selected.drawThings?.loras.append(DrawThingsLoRA(modelID: modelID)) }
-          }
+          store.setDrawThingsLoRAEnabled(modelID, enabled: enabled)
         }))
         if assignment != nil {
           Button { removeLoRA(modelID) } label: { Image(systemName: "xmark") }.help("Remove LoRA")

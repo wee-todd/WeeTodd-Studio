@@ -1,5 +1,137 @@
 # WeeTodd Studio implementation status
 
+## October 26 H3 image integration validation
+
+The H3 image and LoRA prompt-guidance changes passed combined core, Studio, remote-adapter
+and workflow validation against an isolated commit snapshot. Python passed 3,853 tests with
+seven optional skips. Swift inference, native MLX, Studio and Draw Things transport executed
+208/1,064/1,122/60 tests with 10/182/52/4 optional skips and zero failures. Portable workflow
+and documentation checks passed; runtime model availability remains a separate qualification.
+
+Image-only VAEs are rejected during continuation and shared reference-encoder admission,
+before prompt encoding, sampling or encoder weight reads. Three ordinary regression tests use
+a complete sparse decoder directory to verify these early failures without installed weights
+or GPU execution. Original video/reference VAEs and explicit single-image output retain their
+separate contracts. The dated real-image qualifications below retain their measured scopes.
+
+## October 25 full-resolution H3 reference contexts
+
+Full 1024×1024 image references now fit alongside their prompts. Native Qwen admission has
+separate 1,024-visual-pad and 1,024-text/label/marker budgets, with a 2,048-row combined ceiling.
+Request construction, M-RoPE, language layers and H3's downstream text refiner use the same
+combined bound. Text-only and aggregate visual limits remain 1,024; media counts, pixel
+preparation, checkpoint loading, attention/rotary arithmetic and packed-row admission retain
+their contracts. Malformed language shapes/positions fail before checkpoint reads.
+
+The exact previously rejected recipe retained its full 1024×1024 source for both Qwen and the
+original reference VAE: 4,096 raw vision patches, 1,024 visual pads, 1,108 combined conditioner
+rows and 1,024 VAE condition rows, within 4,196 total packed rows. The real Singularity V2
+quality-mode edit completed in 75.415 s on the M3 Ultra at 1024×1024, with Ref2VA Turbo v0.1
+strength 1, four Euler evaluations, CFG 1 and seed 745693. It retained the robot/workshop
+composition and replaced the cup with a red teapot. Output PNG dimensions and input hash were
+verified; audio decoding was skipped. This is a functional trial with existing OS caches.
+The updated isolated app passed deep/strict signature verification; its bundled worker repeated
+the full-resolution edit in 77.639 s and produced a byte-identical PNG to the 75.415 s trial.
+
+Core/Studio validation passed with 3,049 Python tests, 208 Swift inference tests and 1,159 Studio
+tests; optional skips remain. After the final refiner adjustment, the full native suite executed
+1,056 tests with 182 optional skips and zero failures. Eight focused tests also passed with
+installed weights and the saved full-resolution recipe. They cover exact context boundaries,
+preserved source/vision/VAE geometry, malformed admission, a finite 1,108-row two-block refiner
+and a 1,056-row Qwen layer's causal prefix within BF16 tolerance (maximum error 0.03125).
+These checks do not establish full-checkpoint numerical parity or qualify larger aggregate
+visual budgets. No weights, dependencies or ordinary generation defaults changed.
+
+## October 25 native H3 still images
+
+Studio's image workspace now offers **Local H3** with installed model-profile selection,
+text-to-image and up to nine ordered Ref2VA image references. The default uses the original
+VAE with five-frame sampling and a user-selected first/middle/last still. An optional experimental
+single-latent image VAE has pinned, checksum-verified download/Q8 preparation and a separate
+decoder link. Image-only decoder metadata survives conversion and ordinary video paths reject it.
+Reference encoding continues to use the original VAE. Shared native sampling stays explicit:
+ordinary video minimum-duration guards remain unchanged, and image geometry is admitted only
+through the still contract. Audio remains part of packed denoising but is not decoded or muxed.
+
+Image drafts persist provider/decoder settings, actual-evaluation steps, native LoRAs/groups and
+visible trigger insertion. Valid final dimensions remain user-selected: still canvases use
+32-pixel multiples, sides at most 1920 and a 2,088,960-pixel budget. Ordinary video keeps its
+existing canvas and duration limits. A frozen seed, input hashes, component identity and runtime fingerprint bind
+preflight to completion; late results cannot attach to a replaced movie. H3 still jobs save a
+normal PNG asset with normalized request provenance. Headless export and latent previews are
+not exposed for this image provider. Existing video and Qwen/Draw Things image routes retain
+their contracts.
+
+On an M3 Ultra with 256 GiB unified memory, Singularity V2 plus Ref2VA Turbo v0.1 rendered
+512×512 with four Euler evaluations, CFG 1 and seed 745693. Quality text-to-image took 44.645 s,
+single-latent text-to-image 37.638 s, and a quality-mode image-reference edit 49.093 s. All three
+published complete PNGs and reported no audio decoding. Inspected stills showed the requested
+copper/turquoise robot; the edit replaced its cup with a red enamel teapot while retaining the
+scene. Different temporal noise geometry makes the modes a practical comparison, not isolated
+decoder parity. These are single functional trials with existing OS caches. Other canvases,
+nine-reference visual quality, fine text and broader identity/editing quality remain unqualified.
+The image VAE's author documents softness/detail limitations. Model weights, recipes, research
+and output media remain outside version control.
+
+Final core and Studio validation passed: 3,049 Python tests passed with seven optional skips;
+the Swift inference, MLX and Studio suites executed 208/1,048/1,159 tests with 10/179/54 optional
+skips and zero failures. Independent review found one text-only profile-admission issue, fixed
+with a failing-then-passing regression. Existing video option/geometry admission tests also
+retain their behavior. Installed-checkpoint tests use separate opt-in qualification above.
+The isolated release app passed deep/strict signature verification. Its bundled H3 worker
+repeated the quality render in 52.330 seconds and produced a byte-identical PNG to the first
+quality trial, with audio decoding skipped.
+
+Follow-up direct 1024×1024 tests used the same signed worker, model, Turbo strength 1,
+four Euler evaluations, CFG 1 and seed 745693. Quality text-to-image took 58.389 s;
+single-latent text-to-image took 43.201 s. A quality-mode edit from the earlier 512×512
+reference produced a 1024×1024 PNG in 61.851 s and retained the robot/scene while replacing
+the cup with a red teapot. All three PNGs decoded at the requested dimensions with no audio
+decoding. Small generated lettering remained unreadable. These timings retain uncontrolled OS
+cache differences and do not isolate decoder speed.
+
+A 1024×1024 reference at this output size was rejected during preflight: its visual pads fill
+the shared Qwen runner's 1,024-row window before prompt tokens. The successful edit explicitly
+used the existing 512-pixel reference; the output stayed 1024 pixels. This token budget applies
+in addition to the nine-image count limit. No source code or encoder limit changed for those
+initial tests. The context repair above now admits a full 1024-pixel reference alongside its
+prompt. Multiple references still share the aggregate visual budget.
+
+Direct landscape still qualification used the FL2VA pruned BF16 base and the installed
+LarryVRH `larryvrh_4step_pruned` conversion at strength 1, Euler, CFG 1 and seed 745693.
+Four/six/eight actual evaluations took 61.354/81.832/101.718 seconds, including sampling of
+41.111/60.972/80.992 seconds. Each job sampled the quality five-frame window, selected the
+middle still, saved a native 1920×1088 PNG and skipped audio decoding. The reviewed delivery
+PNGs were center-cropped to 1920×1080 without scaling. All jobs used the same prompt and
+4,173 packed rows; no upscale or refinement pass was used. Six and eight evaluations showed
+cleaner mechanical detail in this one scene; fine generated lettering remained unreadable.
+These are single functional trials with existing OS caches and concurrent app compilation.
+
+This qualification repaired the former one-megapixel still guard in Studio and the native
+worker, with regressions retaining ordinary video admission. It also added strictly recognized
+unit-scale pruned LoRA metadata: the native `B @ A` update and interleaved QKV remain intact,
+and conflicting scaling/layout declarations fail preflight. Core/Studio validation passed;
+the final native MLX suite executed 1,061 tests with 182 optional skips and zero failures.
+
+## October 25 LoRA triggers and prompt notes
+
+Studio's native and Draw Things LoRA library rows expose editable trigger phrases and prompt
+notes. Application inserts only missing triggers into the visible prompt, including H3 visual
+sections, and preserves notes as metadata. Applied clip/group snapshots retain their guidance;
+clip application and prompt insertion are undoable together. Disabled entries add no text until
+explicitly enabled. Removing or disabling an entry leaves authored prompt text intact. Managed
+Character Director prompts reject incompatible trigger insertion without changing their drafts.
+
+Draw Things discovery includes each admitted LoRA's saved prefix; local overrides can replace or
+clear it. Persisted prompt metadata is excluded from remote execution settings. Existing project
+and group documents without the optional fields retain their loading behavior and prompts.
+Focused fixtures cover persistence, insertion boundaries, H3 sections, snapshots, undo and request
+composition. A separate installed-library check read all thirteen H3 headers and matched their
+local metadata records without inference. The user's library was populated from the preceding
+file-hash-matched research; optional/alternative tokens remain notes by default. User metadata,
+model files and research remain outside version control. This is no new LoRA render-quality,
+remote-account or performance qualification.
+
 ## October 25 H3 second-pass strength control
 
 Enabled native H3 two-stage jobs expose **Second-pass strength** directly in the Generation

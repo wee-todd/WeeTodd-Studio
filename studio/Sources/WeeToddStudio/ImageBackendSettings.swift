@@ -4,7 +4,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension ImageGenerationEditor {
-  var isNative: Bool { draft?.executionProvider == .nativeMLX }
+  var isNative: Bool { draft?.executionProvider.isNative == true }
+  var isH3Image: Bool { draft?.executionProvider == .nativeH3 }
   func nativeBinding<T>(_ key: WritableKeyPath<NativeImageSettings, T>, fallback: T) -> Binding<T> {
     Binding(get: { draft?.nativeImage?[keyPath: key] ?? fallback }, set: { value in
       if store.imageDraft?.nativeImage == nil { store.imageDraft?.nativeImage = NativeImageSettings() }
@@ -15,7 +16,7 @@ extension ImageGenerationEditor {
   var backendPicker: some View {
     Section("Backend") {
       Picker("Run with", selection: Binding(get: { draft?.executionProvider ?? .drawThings }, set: {
-        store.imageDraft?.selectProvider($0); store.imageEstimate = nil
+        store.selectImageProvider($0)
       })) {
         ForEach(ImageExecutionProvider.allCases) { Text($0.label).tag($0) }
       }.disabled(store.bridge.busy)
@@ -52,6 +53,6 @@ extension ImageGenerationEditor {
   }
   func referenceLabel(_ item: ImageWorkspaceInput) -> String {
     guard let slot = draft?.activeImageInputs.first(where: { $0.input.id == item.id }) else { return "Inactive reference" }
-    return isNative ? "image\(slot.index)" : "Reference \(slot.index)"
+    return isH3Image ? "<Picture \(slot.index)>" : isNative ? "image\(slot.index)" : "Reference \(slot.index)"
   }
 }

@@ -103,6 +103,8 @@ extension StudioProject {
         "The selection repeats a LoRA file or overlaps the current stack. Remove duplicates or choose Replace current stack."
       )
     }
+    let guidance = members.filter(\.isEnabled).compactMap { $0.asset.loraPrompt }
+    clips[index].prompt = LoRAPromptInsertion.applying(guidance, to: clip.prompt)
     let applicationID = groupName == nil ? nil : UUID()
     if mode == .replace { clips[index].attachments.removeAll { $0.role == .lora } }
     for member in members {

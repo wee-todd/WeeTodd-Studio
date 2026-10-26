@@ -4,6 +4,64 @@ import XCTest
 @testable import H3MLX
 
 final class H3LoRATests: XCTestCase {
+  private func makeUnitScaleAdapter(qkv: Bool = false,
+    metadataChanges: [String:String] = [:]) throws -> URL {
+    let target = "diffusion_model.blocks.0." + (qkv ? "attn.qkv_proj" : "mlp.fc2")
+    let columns = qkv ? 5376 : 14336, rows = qkv ? 21504 : 5376
+    var down = [UInt16](repeating: 0, count: 2 * columns)
+    var up = [UInt16](repeating: 0, count: rows * 2)
+    down[0] = 0x3f80; up[(qkv ? 128 : 0) * 2] = 0x3f80
+    let a = down.withUnsafeBytes { Data($0) }, b = up.withUnsafeBytes { Data($0) }
+    let metadata = ["converted_for":"ComfyUI", "base_model":"MiniMax-H3",
+      "conversion_type":"prefix_conversion_with_adaln_pairs_removed",
+      "target_model":"MiniMax-H3-pruned-curve", "partial_conversion":"true",
+      "source_adaln_input_dimension":"2688", "target_adaln_input_dimension":"8",
+      "application":"W_eff = W + lora_B @ lora_A"].merging(metadataChanges) { _,new in new }
+    let header:[String:Any] = ["__metadata__":metadata,
+      target + ".lora_A.weight":["dtype":"BF16","shape":[2,columns],"data_offsets":[0,a.count]],
+      target + ".lora_B.weight":["dtype":"BF16","shape":[rows,2],"data_offsets":[a.count,a.count+b.count]]]
+    let bytes = try JSONSerialization.data(withJSONObject: header)
+    var length = UInt64(bytes.count).littleEndian
+    var data = withUnsafeBytes(of: &length) { Data($0) }; data.append(bytes); data.append(a); data.append(b)
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".safetensors")
+    try data.write(to: url); return url
+  }
+
+  func testNativeUnitScalePrunedAdapterPreservesRankTwoUpdateAtAllRequestedSteps() throws {
+    let url = try makeUnitScaleAdapter()
+    defer { try? FileManager.default.removeItem(at: url) }
+    for points in [5,7,9] {
+      let adapter = try H3LoRAFile(url: url, strength: 1, requestedSteps: points)
+      var source = [Float](repeating: 0, count: 14336); source[0] = 2
+      let result = try adapter.apply(base: MLXArray.ones([1,1,5376]),
+        input: MLXArray(source,[1,1,14336]), target:"diffusion_model.blocks.0.mlp.fc2")
+      XCTAssertEqual(result[0,0,0].item(Float.self), 3)
+      XCTAssertEqual(result[0,0,1].item(Float.self), 1)
+    }
+  }
+
+  func testNativeUnitScalePrunedAdapterRetainsInterleavedQKV() throws {
+    let url = try makeUnitScaleAdapter(qkv: true)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let adapter = try H3LoRAFile(url: url, strength: 1)
+    var source = [Float](repeating: 0, count: 5376); source[0] = 2
+    let result = try adapter.apply(base: MLXArray.zeros([1,1,21504]),
+      input: MLXArray(source,[1,1,5376]), target:"diffusion_model.blocks.0.attn.qkv_proj", reorderQKV:true)
+    XCTAssertEqual(result[0,0,128].item(Float.self), 2)
+    XCTAssertEqual(result[0,0,384].item(Float.self), 0)
+  }
+
+  func testNativeUnitScalePrunedAdapterRejectsUnknownScalingAndConflictingLayout() throws {
+    for changes in [["application":"W_eff = W + 0.5 * lora_B @ lora_A"], ["base_model":"Other"],
+      ["qkv_layout":"contiguous_qkv"], ["target_format":"ComfyUI generic LoRA","qkv_fusion":"block diagonal B"]] {
+      let url = try makeUnitScaleAdapter(metadataChanges: changes)
+      defer { try? FileManager.default.removeItem(at: url) }
+      XCTAssertThrowsError(try H3LoRAFile(url: url, strength: 1))
+    }
+    let url = try makeUnitScaleAdapter()
+    defer { try? FileManager.default.removeItem(at: url) }
+    XCTAssertThrowsError(try H3LoRAFile(url: url, strength: 1, qkvLayout: .contiguousQKV))
+  }
   private func makeSparseAdapter() throws -> URL {
     let target = "diffusion_model.blocks.0.mlp.fc2"
     var down = [UInt16](repeating: 0, count: 14336)

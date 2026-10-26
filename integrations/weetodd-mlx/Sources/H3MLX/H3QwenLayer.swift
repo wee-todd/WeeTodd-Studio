@@ -135,10 +135,7 @@ public struct H3QwenLayer {
 
   func callAsFunction(_ input: MLXArray, positions: [[Int32]]?,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
-    guard input.ndim == 2, (1...1024).contains(input.shape[0]),
-      input.shape[1] == 5120, input.dtype == .bfloat16 else {
-      throw H3CheckpointError.invalid("H3 Qwen layer expects 1–1024 BF16 rows of width 5120.")
-    }
+    try Self.validateInput(input,positions:positions)
     try Task.checkCancellation()
     let n = input.shape[0]
     let normalized = MLXFast.rmsNorm(input, weight: inputNorm, eps: 1e-6)
@@ -172,10 +169,6 @@ public struct H3QwenLayer {
     ]
     let frequencies = frequencyBits.map(Float.init(bitPattern:))
     if let positions {
-      guard positions.count == 3,
-        positions.allSatisfy({ $0.count == n && $0.allSatisfy({ (0...16_384).contains($0) }) }) else {
-        throw H3CheckpointError.invalid("H3 Qwen M-RoPE positions differ from the token rows.")
-      }
       let positionIDs = MLXArray(positions.flatMap { $0 }, [3, n])
       let selectorValues: [Int32] = (0..<64).map { slot in
         slot < 60 && slot % 3 != 0 ? Int32(slot % 3) : 0
@@ -219,6 +212,19 @@ public struct H3QwenLayer {
     return result
   }
 
+  private static func validateInput(_ input: MLXArray, positions: [[Int32]]?) throws {
+    guard input.ndim == 2, (1...H3QwenRequest.maximumTokenRows).contains(input.shape[0]),
+      input.shape[1] == 5120, input.dtype == .bfloat16 else {
+      throw H3CheckpointError.invalid("H3 Qwen layer expects 1–\(H3QwenRequest.maximumTokenRows) BF16 rows of width 5120.")
+    }
+    if let positions {
+      guard positions.count == 3,
+        positions.allSatisfy({ $0.count == input.shape[0] && $0.allSatisfy({ (0...16_384).contains($0) }) }) else {
+        throw H3CheckpointError.invalid("H3 Qwen M-RoPE positions differ from the token rows.")
+      }
+    }
+  }
+
   public static func evaluate(checkpointURL: URL, index: Int,
     input: MLXArray) throws -> MLXArray {
     try evaluate(checkpointURL: checkpointURL, index: index, input: input,
@@ -241,6 +247,7 @@ public struct H3QwenLayer {
     positions: [[Int32]]?,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     try Task.checkCancellation()
+    try validateInput(input,positions:positions)
     let file = try SafeTensorFile(url: checkpointURL)
     try file.checkUnchanged(at: checkpointURL)
     let page = H3NativePage(file: file, url: checkpointURL)

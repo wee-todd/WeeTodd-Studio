@@ -10,6 +10,8 @@ public struct H3Geometry: Sendable {
   /// Include the released 1 MP, 16:9 canvas on H3's 32-pixel grid.
   /// Packed-row admission separately bounds duration and conditioning.
   public static let maximumCanvasPixels = 1376 * 768
+  /// Short still windows admit a bounded two-megapixel image without expanding video.
+  public static let maximumStillCanvasPixels = 1920 * 1088
 
   public let canvasAdmission: H3CanvasAdmission
   public var maximumPackedRows: Int { canvasAdmission.maximumPackedRows }
@@ -18,6 +20,10 @@ public struct H3Geometry: Sendable {
   public let frames: Int
   public let videoLatentFrames: Int
   public let audioLatentFrames: Int
+  public let stillImageMode: H3StillImageMode?
+  public var maximumPixels: Int {
+    stillImageMode == nil ? canvasAdmission.maximumPixels : Self.maximumStillCanvasPixels
+  }
 
   public var videoRows: Int { videoLatentFrames * (height / 32) * (width / 32) }
   public var audioRows: Int { audioLatentFrames * 2 }
@@ -37,6 +43,7 @@ public struct H3Geometry: Sendable {
       try canvasAdmission.validate(width: width, height: height)
     }
     self.canvasAdmission = canvasAdmission
+    self.stillImageMode = nil
     self.width = width
     self.height = height
     var aligned = Int((durationSeconds * 24).rounded(.toNearestOrEven))
@@ -44,6 +51,20 @@ public struct H3Geometry: Sendable {
     frames = aligned
     videoLatentFrames = ((aligned - 5) / 17) * 5 + 2
     audioLatentFrames = Int((Double(aligned) / 24 * 40).rounded(.toNearestOrEven))
+  }
+
+  public init(width: Int, height: Int, stillImageMode: H3StillImageMode) throws {
+    guard (32...1920).contains(width), (32...1920).contains(height),
+      width.isMultiple(of: 32), height.isMultiple(of: 32),
+      width * height <= Self.maximumStillCanvasPixels else {
+      throw H3GeometryError.invalid("H3 stills require 32-pixel multiples, sides at most 1920 and a 1920 × 1088 pixel budget.")
+    }
+    self.canvasAdmission = .ordinary
+    self.stillImageMode = stillImageMode
+    self.width = width; self.height = height
+    frames = stillImageMode.frames
+    videoLatentFrames = stillImageMode.latentFrames
+    audioLatentFrames = stillImageMode.audioLatentFrames
   }
 
   public func packedRows(textRows: Int, conditionVideoRows: Int,

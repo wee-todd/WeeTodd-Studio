@@ -6,6 +6,10 @@ from wee_todd_mlx.image_service import generate_image, prepare_image
 def dispatch(
     command, request, output=None, *, progress=lambda event: None, cancelled=lambda: False
 ):
+    if command == "image-h3-vae-prepare":
+        from wee_todd_mlx.h3_image_vae_setup import prepare
+
+        return prepare(request["directory"], cancel=cancelled, progress=progress)
     if command == "image-model-prepare":
         return prepare_model(request["directory"], cancelled=cancelled, progress=progress)
     if command == "image-preflight":

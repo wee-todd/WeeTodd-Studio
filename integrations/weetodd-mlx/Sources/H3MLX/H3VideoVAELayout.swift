@@ -9,6 +9,7 @@ public struct H3VideoVAELayout: Sendable {
     let standardDeviation: [Float]
     let clipLength: Int
     let tokenDrop: Int
+    let imageOnly: Bool
   }
 
   public let blockCount = 36
@@ -16,6 +17,13 @@ public struct H3VideoVAELayout: Sendable {
   public let latentsStandardDeviation: [Float]
   public let clipLength: Int
   public let tokenDrop: Int
+  public let imageOnly: Bool
+
+  public func validateVideoUse() throws {
+    guard !imageOnly else {
+      throw H3CheckpointError.invalid("This H3 VAE is for single images only. Select the original VAE for video.")
+    }
+  }
 
   static func validateMetadata(_ object: [String: Any]) throws -> Metadata {
     guard object["format"] as? String == "minimax-h3-mlx-video-vae",
@@ -40,8 +48,21 @@ public struct H3VideoVAELayout: Sendable {
       standardDeviation.allSatisfy({ $0.isFinite && $0 > 0 }) else {
       throw H3CheckpointError.invalid("Invalid H3 video VAE latent normalization.")
     }
+    let imageOnly: Bool
+    if let flag = object["image_only"] {
+      guard let number = flag as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID(),
+        number.boolValue, object["image_output_slice"] as? Int == 3 else {
+        throw H3CheckpointError.invalid("Invalid H3 image-only VAE metadata.")
+      }
+      imageOnly = true
+    } else {
+      guard object["image_output_slice"] == nil else {
+        throw H3CheckpointError.invalid("Image output slice requires image-only VAE metadata.")
+      }
+      imageOnly = false
+    }
     return Metadata(mean: mean, standardDeviation: standardDeviation,
-      clipLength: 17, tokenDrop: 3)
+      clipLength: 17, tokenDrop: 3, imageOnly: imageOnly)
   }
 
   public init(url: URL) throws {
@@ -95,5 +116,6 @@ public struct H3VideoVAELayout: Sendable {
     latentsStandardDeviation = metadata.standardDeviation
     clipLength = metadata.clipLength
     tokenDrop = metadata.tokenDrop
+    imageOnly = metadata.imageOnly
   }
 }

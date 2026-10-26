@@ -47,7 +47,8 @@ struct ImageGenerationEditor: View {
         }.disabled(store.bridge.busy || draft?.hasManagedCharacterPrompt == true)
         Button("Import Config…") { store.configImportClipID = nil; configOpen = true }.disabled(isNative)
         Link("Draw Things presets", destination: DrawThingsConfigImport.presetsURL)
-        Button("Export Headless Job…") { store.exportDrawThingsImageJob() }.disabled(store.bridge.busy || store.preparingImageRequest || draft?.modelID.isEmpty != false)
+        Button("Export Headless Job…") { store.exportDrawThingsImageJob() }.disabled(isH3Image || store.bridge.busy || store.preparingImageRequest || draft?.modelID.isEmpty != false)
+          .help(isH3Image ? "H3 image job export is not available yet. Generate from this workspace." : "Export a standalone image job")
         }
       }.padding(16)
       Divider()
@@ -179,7 +180,7 @@ struct ImageGenerationEditor: View {
   var settings: some View {
     Form {
       backendPicker
-      if isNative { nativeSettings } else {
+      if isH3Image { H3ImageModelSettings() } else if isNative { nativeSettings } else {
       Section("Draw Things") {
         Picker("Connection", selection: Binding(get: { draft?.profileID ?? "" }, set: { id in
           store.selectImageConnection(id)
@@ -234,7 +235,7 @@ struct ImageGenerationEditor: View {
       Section("Generation") {
         TextField("Width", value: binding(\.width, fallback: 512), format: .number.grouping(.never))
         TextField("Height", value: binding(\.height, fallback: 512), format: .number.grouping(.never))
-        Text(isNative ? "Dimensions: multiples of 32" : "Dimensions: multiples of 64").font(.caption2).foregroundStyle(.secondary)
+        Text(isH3Image ? "Multiples of 32 · sides up to 1920 · at most 2,088,960 pixels" : isNative ? "Dimensions: multiples of 32" : "Dimensions: multiples of 64").font(.caption2).foregroundStyle(.secondary)
         TextField("Steps", value: binding(\.steps, fallback: 4), format: .number.grouping(.never))
         TextField("CFG", value: binding(\.guidance, fallback: 1), format: .number).disabled(isNative)
         if !isNative, draft?.canvas?.enabled == true {
@@ -253,7 +254,9 @@ struct ImageGenerationEditor: View {
           Text("The same seed and settings reproduce the same image. Enter −1 or choose Random each generation for variations.").font(.caption2).foregroundStyle(.secondary)
           Button("New fixed seed") { store.imageDraft?.seed = Int.random(in: 0...Int(UInt32.max)); store.imageEstimate = nil }
         }
-        if isNative { Text("Euler · automatic shift").font(.caption) } else {
+        if isH3Image {
+          Text("H3 profile sampler · steps are actual evaluations. CFG 1; no negative prompt.").font(.caption)
+        } else if isNative { Text("Euler · automatic shift").font(.caption) } else {
         Picker("Sampler", selection: binding(\.sampler, fallback: nil)) {
           Text("Server default").tag(nil as Int?)
           ForEach(Array(Self.samplers.enumerated()), id: \.offset) { index, name in Text(name).tag(Optional(index)) }
@@ -264,6 +267,7 @@ struct ImageGenerationEditor: View {
         }
       }
       if !isNative { Section("LoRAs & Groups") { loraControls } }
+      if isH3Image { Section("LoRAs & Groups") { H3ImageLoRAControls() } }
       Section("Preflight") {
         if let estimate = store.imageEstimate {
           if !isNative { Text("Estimated CU: \(number(estimate["estimateCU"]))")
@@ -278,9 +282,10 @@ struct ImageGenerationEditor: View {
     VStack(alignment: .leading, spacing: 12) {
       HStack { Text("MOOD BOARD").font(.caption.bold()); Spacer(); Button { store.chooseImageInputs(canvas: false) } label: { Image(systemName: "plus") } }
       assetsMenu(canvas: false)
-      Text(isNative ? "\(draft?.activeImageInputs.count ?? 0) / 10 active images including canvas" : "Ordered references · up to 8 active").font(.caption2).foregroundStyle(.secondary)
+      Text(isH3Image ? "\(draft?.activeImageInputs.count ?? 0) / 9 active images including canvas" : isNative ? "\(draft?.activeImageInputs.count ?? 0) / 10 active images including canvas" : "Ordered references · up to 8 active").font(.caption2).foregroundStyle(.secondary)
       if let issue = draft?.imageInputIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
-      if isNative { Text("Order defines <image1> through <image10>. Review numbered prompts after changing inputs.").font(.caption2) }
+      if isH3Image { Text("Order defines <Picture 1> through <Picture 9>. H3 references use full strength.").font(.caption2) }
+      else if isNative { Text("Order defines <image1> through <image10>. Review numbered prompts after changing inputs.").font(.caption2) }
       ScrollView {
         LazyVStack(spacing: 14) {
           ForEach(Array((draft?.moodboard ?? []).enumerated()), id: \.element.id) { index, item in
@@ -377,10 +382,7 @@ struct ImageGenerationEditor: View {
   }
   func loraEnabled(_ modelID: String) -> Binding<Bool> {
     Binding(get: { draft?.loras.first { $0.modelID == modelID }?.isEnabled ?? false }, set: { enabled in
-      if let index = store.imageDraft?.loras.firstIndex(where: { $0.modelID == modelID }) {
-        store.imageDraft?.loras[index].enabled = enabled
-      } else if enabled { store.imageDraft?.loras.append(DrawThingsLoRA(modelID: modelID)) }
-      store.imageEstimate = nil
+      store.setDrawThingsLoRAEnabled(modelID, enabled: enabled, imageWorkspace: true)
     })
   }
   func number(_ value: Any?) -> String { (value as? NSNumber).map { $0.stringValue } ?? "Unknown" }

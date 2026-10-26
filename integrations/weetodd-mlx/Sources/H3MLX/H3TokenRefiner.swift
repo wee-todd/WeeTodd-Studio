@@ -49,7 +49,7 @@ public enum H3TokenRefiner {
     input: MLXArray, lora: (any H3LoRAApplying)? = nil,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard (0..<2).contains(index), input.ndim == 3,
-      input.shape[0] == 1, (1...1024).contains(input.shape[1]),
+      input.shape[0] == 1, (1...H3QwenRequest.maximumTokenRows).contains(input.shape[1]),
       input.shape[2] == 5376, input.dtype == .bfloat16 else {
       throw H3CheckpointError.invalid("Invalid H3 text refiner block or input.")
     }

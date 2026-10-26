@@ -16,7 +16,7 @@ public enum H3VideoVAEEncoder {
   /// Validate all spatial-encoder tensors from the safetensors directory
   /// before any weighted Qwen, VAE or transformer stage begins.
   public static func preflight(checkpointURL: URL) throws {
-    _ = try H3VideoVAELayout(url: checkpointURL)
+    try H3VideoVAELayout(url: checkpointURL).validateVideoUse()
     let file = try SafeTensorFile(url: checkpointURL)
     try validateEncoderHeader(file)
     try file.checkUnchanged(at: checkpointURL)
@@ -102,7 +102,7 @@ public enum H3VideoVAEEncoder {
       rgb8.count == frameCount * width * height * 3 else {
       throw H3CheckpointError.invalid("H3 video encoder requires bounded 16-pixel RGB geometry.")
     }
-    _ = try H3VideoVAELayout(url: checkpointURL)
+    try H3VideoVAELayout(url: checkpointURL).validateVideoUse()
     let file = try SafeTensorFile(url: checkpointURL)
     try validateEncoderHeader(file)
     try Task.checkCancellation()

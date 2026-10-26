@@ -50,6 +50,7 @@ public struct MediaAsset: Codable, Identifiable, Equatable {
   public var loraProfile: String?
   public var loraLayout: String?
   public var loraAdalnInputGrid: String?
+  public var loraPrompt: LoRAPromptMetadata?
   public var refmodKind: String?
   public var refmodTokenCount: Int?
   public var refmodSHA256: String?

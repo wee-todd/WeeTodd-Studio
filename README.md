@@ -49,6 +49,12 @@ appear beside the model controls. Write the **Prompt**, add named **Inputs**, an
 Basic / Advanced / All** to choose the controls shown. Existing clips retain their saved recipe
 and settings when changing the view.
 
+LoRA library entries offer **Edit triggers and notes…**. Applying or enabling a LoRA inserts
+missing trigger text into the visible prompt; prompt notes remain reference material. Native and
+Draw Things groups retain metadata snapshots, and structured H3 prompts receive triggers in their
+visual description. Draw Things can supply its saved prefix, with editable local overrides.
+See [LoRAs and groups](studio/README.md#loras-and-groups) for persistence and application behavior.
+
 For supported H3 Ref2VA and FL2VA image/keyframe jobs, **Advanced attention → Sol** offers an explicit experimental
 attention optimization. Dense remains the default, including older saved jobs. Sol can change
 video and audio, and its saved policy has strict model, adapter and sampling limits. See the
@@ -209,7 +215,7 @@ Studio is the interface in each case. The engine choice determines where inferen
 | --- | --- | --- |
 | **Draw Things inference** | Fast image/video generation with models and tasks supported by your connection. | Studio sends jobs through its Draw Things adapter to a self-hosted gRPC server or supported Cloud API route. Model availability and controls come from that endpoint and the installed helper. |
 | **Native MLX video inference** | LTX 2.5, advanced conditioning and other native video features beyond the Draw Things integration. | Choose **Run with → WeeTodd (local)**, then H3, LTX 2.3 or LTX 2.5 and add its supported inputs. Compatible components are selected automatically and load in stages. Installed recipes remain available through Model profile. |
-| **Native MLX image inference** | Qwen-Image-2.1 generation and editing with up to ten ordered image inputs. | In **Generate Image…**, choose **Local MLX** and prepare the 8-bit model. Studio runs inference, reports progress and live previews, and unloads model stages. Experimental; the checkpoint has a noncommercial research license. |
+| **Native MLX image inference** | H3 still images with native LoRAs and up to nine references, or Qwen-Image-2.1 with up to ten ordered inputs. | In **Generate Image…**, choose **Local H3** or **Local MLX · Qwen**. H3 defaults to the original VAE with five-frame sampling and a selected still; an experimental image-only VAE is optional. Qwen has live previews and a noncommercial research license. |
 | **Native inference with compatible Draw Things weights** | Use an existing supported model installation without another large checkpoint copy. | Selected H3 components can be read directly from Draw Things files. This runs WeeTodd's native sampler, not Draw Things inference, and has its own task and performance limits. |
 
 ComfyUI and headless jobs use these same shared adapters where supported. Selecting a different
@@ -233,12 +239,21 @@ initial supported combination is a Comfy INT8 Ref2VA checkpoint plus the BF16 fo
 LoRA at strength 1. Existing recipes remain on MLX. See [requirements and limits](studio/README.md#native-h3-nnc-core).
 
 **Native Qwen-Image-2.1** adds local image generation and editing to the existing image workspace.
-Choose **Local MLX**, prepare the 8-bit model, and use up to ten ordered image inputs (including
+Choose **Local MLX · Qwen**, prepare the 8-bit model, and use up to ten ordered image inputs (including
 the canvas), with live previews and stage/step progress. Studio owns inference and staged model
 unloading. **Lower memory** trades speed for reduced attention memory, and reference resolution
 can be reduced explicitly. Native LoRAs and masks are not yet supported. This experimental
 checkpoint uses a noncommercial research license; see
 [setup, controls and qualification](studio/README.md#native-qwen-image-21--experimental).
+
+**Native H3 images** reuse installed H3 model profiles, including compatible Singularity models,
+in the image workspace. Choose **Local H3** for text-to-image or ordered Ref2VA image editing.
+Full 1024×1024 reference images are supported within the shared text/vision budgets.
+The quality default samples five frames with the original VAE and saves the chosen first, middle
+or last still as one PNG. The optional single-latent image VAE has separate setup and never
+replaces the video/reference encoder. Native H3 LoRAs, groups, visible trigger insertion, steps,
+seed and valid final dimensions remain editable. Still canvases use 32-pixel multiples with sides
+up to 1920 and a 1920×1088 pixel budget. See [H3 image controls and limits](studio/README.md#native-h3-images).
 
 ### Use image, movie and audio references
 
@@ -490,8 +505,8 @@ quality, an isolated performance benchmark or completion of every new host route
 
 H3 adds explicit image pixel budgets, movie size/density policies, timed reference placement,
 replacement movie soundtracks, signed ordered LoRA strengths and deferred standard-adapter
-activation. Euler remains the default; `res_multistep` is explicit. Turbo requires four Euler
-evaluations and immediate activation. Supported paged Q8 and legacy continuation imports are
+activation. Euler remains the default; `res_multistep` is explicit. Explicit four-step Turbo
+profiles require four Euler evaluations and immediate activation. Supported paged Q8 and legacy continuation imports are
 validated per task. Full audio/video latent saving, initialized/spatial latent refinement and
 native Motion Fidelity repair have experimental controls and strict source/timing checks;
 eight integrated creative packets completed native execution. Their static sampled review includes
@@ -538,7 +553,7 @@ at 1344×768, preserving draft audio exactly. The user approved the retained tak
 on October 25. See [the V2 qualification](STATUS.md#october-25-singularity-v2-two-stage-qualification)
 for its checkpoint, recipe and measurement scope.
 
-Ordinary H3 retains its existing 1 MP/40,000-row admission. Density reduction is a
+Ordinary H3 video retains its existing 1 MP/40,000-row admission. Density reduction is a
 fidelity/compute trade, not a guarantee of preserved motion or likeness.
 
 The native migration's historical route/lifecycle acceptance does not certify every new feature.
@@ -785,8 +800,8 @@ numerical parity test, while full audio-reference and soundtrack output quality 
 Independent A2V uses a Ref2VA checkpoint with one 2.5–15-second source-audio interval
 covering the requested clip and optionally up to eight timed images. Its soundtrack is newly generated;
 the source audio is not copied to the movie. Audio-only A2V needs no visual reference.
-Reference count is further limited by the
-1,024-token Qwen request window and the 40,000-row H3 admission budget. One mixed image/movie
+Reference count is further limited by aggregate Qwen budgets of 1,024 visual pads and
+1,024 text/label/marker rows (2,048 combined), plus the 40,000-row H3 admission budget. One mixed image/movie
 768 × 448, 73-frame test completed with audio in 739.99 seconds at an 8.10 GB peak Swift
 process footprint (FFmpeg excluded). Its appearance was coherent, while the source head turn
 did not transfer reliably; video motion quality is still experimental. A separate image plus
@@ -861,7 +876,7 @@ prompt, so audible AV quality is unqualified. This is one experimental visual re
 FL2VA quality or performance parity. The Swift recipe and Studio preparation now admit
 one to eight images at distinct ascending frame positions. A three-image installed-checkpoint
 preflight passed; its full-canvas VAE conditions are retained while Qwen visual copies are
-bounded when needed to fit the 1,024-token window. A separate three-keyframe, 768 × 448,
+bounded when needed to fit the shared 1,024-visual-pad budget. A separate three-keyframe, 768 × 448,
 73-frame, four-evaluation run took 399.77 seconds and peaked at 3.98 GB Swift process
 footprint, excluding FFmpeg. Front, interior and final outputs measured 0.9902, 0.9976
 and 0.9956 correlation with their corresponding images. This requested 2.5 seconds but

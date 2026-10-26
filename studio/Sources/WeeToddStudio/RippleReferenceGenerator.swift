@@ -43,7 +43,7 @@ struct RippleReferenceGenerator: View {
       WorkspaceImage(path: context.originalPath, fill: false).frame(width: 90, height: 60)
       VStack(alignment: .leading, spacing: 4) {
         Text("Reference frame \(context.frame) · \(Double(context.frame) / context.frameRate, specifier: "%.3f") s").font(.headline)
-        Text("Restyle the captured frame with Draw Things, then choose Use as reference.")
+        Text("Restyle the captured frame, then choose Use as reference.")
           .font(.caption).foregroundStyle(.secondary)
       }
       Spacer()
@@ -120,6 +120,15 @@ struct RippleReferenceGenerator: View {
       // user's description or image-model choices for this same source frame.
       draft.rippleReference = context
       if prior != context { draft.canvas = ImageWorkspaceInput(path: context.originalPath) }
+      return alignedRippleImageDraft(draft)
+    }
+    if imageWorkspaceLibrary.referenceProvider == .nativeH3 {
+      draft.selectProvider(.nativeH3)
+      draft.h3Image = imageWorkspaceLibrary.referenceH3Image ?? H3ImageSettings()
+      draft.h3Image?.loras = []
+      draft.modelID = imageWorkspaceLibrary.referenceH3ModelID ?? ""
+      draft.steps = imageWorkspaceLibrary.referenceH3Steps ?? 20
+      draft.width = width; draft.height = height
       return alignedRippleImageDraft(draft)
     }
     if imageWorkspaceLibrary.referenceProvider == .nativeMLX {

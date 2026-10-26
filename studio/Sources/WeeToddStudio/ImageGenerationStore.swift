@@ -43,6 +43,7 @@ import StudioCore
     return ["connection": try connection.object(), "drawThingsRequest": try JSONSerialization.jsonObject(with: data)]
   }
   func prepareImageGeneration() async {
+    if imageDraft?.executionProvider == .nativeH3 { await prepareH3ImageGeneration(); return }
     guard let draft = imageDraft, !operationBusy, !preparingImageRequest else { return }
     preparingImageRequest = true
     defer { preparingImageRequest = false }
@@ -59,6 +60,7 @@ import StudioCore
     } catch { recordImageFailure(error.localizedDescription, referenceKey: referenceKey) }
   }
   func generateImageAsset() async {
+    if imageDraft?.executionProvider == .nativeH3 { await generateH3ImageAsset(); return }
     guard let draft = imageDraft, !operationBusy, !preparingImageRequest else { return }
     preparingImageRequest = true
     defer { preparingImageRequest = false }

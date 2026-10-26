@@ -204,6 +204,7 @@ final class H3LoRAFile: H3LoRAApplying {
   private enum ScaleLayout {
     case perTargetAlpha
     case bakedIntoB
+    case nativeUnitScale
   }
   let url: URL
   let strength: Float
@@ -235,10 +236,23 @@ final class H3LoRAFile: H3LoRAApplying {
       && conversion.contains("mlp.fc1 swiglu halves swapped")
       && (conversion.contains("qkv fused contiguous q|k|v (block-diagonal")
         || conversion.contains("qkv block-diag fused (per-projection ranks)"))
-    guard explicitAlpha != bakedScale else {
+    let nativeUnitScale = file.metadata["converted_for"] == "ComfyUI"
+      && file.metadata["base_model"] == "MiniMax-H3"
+      && file.metadata["conversion_type"] == "prefix_conversion_with_adaln_pairs_removed"
+      && file.metadata["target_model"] == "MiniMax-H3-pruned-curve"
+      && file.metadata["partial_conversion"] == "true"
+      && file.metadata["source_adaln_input_dimension"] == "2688"
+      && file.metadata["target_adaln_input_dimension"] == "8"
+      && file.metadata["application"] == "W_eff = W + lora_B @ lora_A"
+    guard [explicitAlpha, bakedScale, nativeUnitScale].filter({ $0 }).count == 1 else {
       throw H3CheckpointError.invalid("H3 LoRA metadata or QKV layout is unsupported.")
     }
-    let layout: ScaleLayout = explicitAlpha ? .perTargetAlpha : .bakedIntoB
+    guard !nativeUnitScale || (qkvLayout != .contiguousQKV
+      && file.metadata["qkv_fusion"] == nil
+      && (file.metadata["qkv_layout"] == nil || file.metadata["qkv_layout"] == "native_interleaved")) else {
+      throw H3CheckpointError.invalid("Prefix-only H3 unit-scale conversion retains native interleaved QKV.")
+    }
+    let layout: ScaleLayout = explicitAlpha ? .perTargetAlpha : nativeUnitScale ? .nativeUnitScale : .bakedIntoB
     var supported: [String: (rows: Int, columns: Int)] = [:]
     for group in 0..<52 {
       let prefix = group < 50
@@ -280,12 +294,12 @@ final class H3LoRAFile: H3LoRAApplying {
             maximumBufferedBytes: 4 * 1024 * 1024) {
             $0.loadUnaligned(as: Float.self)
           }
-        case .bakedIntoB:
+        case .bakedIntoB, .nativeUnitScale:
           guard file.tensors[alphaName] == nil else {
-            throw H3CheckpointError.invalid("Baked-scale H3 LoRA must not add a second alpha: \(target)")
+            throw H3CheckpointError.invalid("Unit/baked-scale H3 LoRA must not add a second alpha: \(target)")
           }
-          // The installed conversion already multiplied B by its training
-          // scale. alpha == rank makes activation-space application exactly B@A.
+          // Both formats declare B@A as the complete update. alpha == rank
+          // preserves that update without introducing another rank divisor.
           alpha = Float(rank)
         }
         guard alpha.isFinite, alpha >= 0 else {
@@ -300,7 +314,7 @@ final class H3LoRAFile: H3LoRAApplying {
     self.url = url
     self.strength = strength
     self.targetCount = targets.count
-    self.qkvLayout = qkvLayout
+    self.qkvLayout = nativeUnitScale ? .nativeInterleaved : qkvLayout
     self.file = file
     self.targets = targets
     try file.checkUnchanged(at: url)

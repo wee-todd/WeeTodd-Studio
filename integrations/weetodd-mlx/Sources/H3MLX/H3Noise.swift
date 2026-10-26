@@ -16,6 +16,20 @@ public enum H3Noise {
     public let audio: MLXArray
   }
 
+  static func validate(videoLatentFrames: Int, latentHeight: Int, latentWidth: Int,
+    audioLatentFrames: Int, stillImageMode: H3StillImageMode? = nil) throws {
+    let validTime: Bool
+    if let stillImageMode {
+      validTime = videoLatentFrames == stillImageMode.latentFrames
+        && audioLatentFrames == stillImageMode.audioLatentFrames
+    } else { validTime = (7...128).contains(videoLatentFrames) && (1...601).contains(audioLatentFrames) }
+    guard validTime, (2...256).contains(latentHeight), latentHeight.isMultiple(of: 2),
+      (2...256).contains(latentWidth), latentWidth.isMultiple(of: 2),
+      videoLatentFrames * latentHeight * latentWidth <= 1_000_000 else {
+      throw H3CheckpointError.invalid("H3 seeded AV noise exceeds the explicitly selected video or image grid.")
+    }
+  }
+
   /// FL2VA draws anchor noise before target video and audio noise from the
   /// request seed. The fixed 0.999 condition strength is the released model's
   /// clean-frame augmentation, independent of the VAE posterior seed 42.
@@ -56,7 +70,8 @@ public enum H3Noise {
   static func makeReference(seed: UInt64, conditionVideo: [Float],
     conditionAudio: [Float], videoLatentFrames: Int, latentHeight: Int,
     latentWidth: Int, audioLatentFrames: Int,
-    referenceNoise: H3ReferenceNoiseControls? = nil) throws -> Rows {
+    referenceNoise: H3ReferenceNoiseControls? = nil,
+    stillImageMode: H3StillImageMode? = nil) throws -> Rows {
     guard conditionVideo.count.isMultiple(of: 96),
       conditionAudio.count.isMultiple(of: 32),
       conditionVideo.count / 96 + conditionAudio.count / 32 <= 40_000,
@@ -64,13 +79,8 @@ public enum H3Noise {
       conditionAudio.allSatisfy(\.isFinite) else {
       throw H3CheckpointError.invalid("Invalid Ref2VA encoded condition rows.")
     }
-    guard (7...128).contains(videoLatentFrames),
-      (2...256).contains(latentHeight), latentHeight.isMultiple(of: 2),
-      (2...256).contains(latentWidth), latentWidth.isMultiple(of: 2),
-      (1...601).contains(audioLatentFrames),
-      videoLatentFrames * latentHeight * latentWidth <= 1_000_000 else {
-      throw H3CheckpointError.invalid("H3 Ref2VA seeded AV noise exceeds admitted geometry.")
-    }
+    try validate(videoLatentFrames: videoLatentFrames, latentHeight: latentHeight,
+      latentWidth: latentWidth, audioLatentFrames: audioLatentFrames, stillImageMode: stillImageMode)
     let noise: Rows
     let video: MLXArray
     if conditionVideo.isEmpty {
@@ -78,7 +88,7 @@ public enum H3Noise {
       // ordinary target-only seed stream, with clean reference audio.
       noise = try make(seed: seed, videoLatentFrames: videoLatentFrames,
         latentHeight: latentHeight, latentWidth: latentWidth,
-        audioLatentFrames: audioLatentFrames)
+        audioLatentFrames: audioLatentFrames, stillImageMode: stillImageMode)
       video = noise.video
     } else {
       // Preserve the owned Python MLX request stream: one packed visual
@@ -113,14 +123,9 @@ public enum H3Noise {
 
   public static func make(seed: UInt64, videoLatentFrames: Int,
     latentHeight: Int, latentWidth: Int,
-    audioLatentFrames: Int) throws -> Rows {
-    guard (7...128).contains(videoLatentFrames),
-      (2...256).contains(latentHeight), latentHeight.isMultiple(of: 2),
-      (2...256).contains(latentWidth), latentWidth.isMultiple(of: 2),
-      (1...601).contains(audioLatentFrames),
-      videoLatentFrames * latentHeight * latentWidth <= 1_000_000 else {
-      throw H3CheckpointError.invalid("H3 seeded AV noise exceeds admitted geometry.")
-    }
+    audioLatentFrames: Int, stillImageMode: H3StillImageMode? = nil) throws -> Rows {
+    try validate(videoLatentFrames: videoLatentFrames, latentHeight: latentHeight,
+      latentWidth: latentWidth, audioLatentFrames: audioLatentFrames, stillImageMode: stillImageMode)
     MLXRandom.seed(seed)
     let video = MLXRandom.normal([1, 24, videoLatentFrames,
       latentHeight, latentWidth]).asType(.float32)

@@ -233,6 +233,12 @@ import UniformTypeIdentifiers
       expectedOutputDirectory: arguments[4])
     let recipeData = try readRequest(envelope.recipePath)
     try envelope.validateRecipe(recipeData)
+    if let root = try JSONSerialization.jsonObject(with: recipeData) as? [String: Any], root["still_image"] != nil {
+      let result = try H3ImageWorker.execute(envelope: envelope, recipeData: recipeData,
+        render: arguments[0] == "render", emitProgress: { try? emit($0) })
+      try emit(["status": "success", "result": result])
+      return
+    }
     // Inspect the untouched saved selection before wrappers/media/weights.
     // Diagnostic environment may agree with a recipe, never replace it.
     _ = try H3SolDiagnostic.validateSavedRecipe(data: recipeData,

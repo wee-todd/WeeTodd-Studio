@@ -31,13 +31,7 @@ struct DrawThingsLoRAGroupLibrary: View {
                 Menu("Apply group") {
                   ForEach(LoRAGroupApplicationMode.allCases) { mode in
                     Button(mode.label) {
-                      guard var selected = selection else { return }
-                      do {
-                        try selected.apply(group, mode: mode)
-                        if imageWorkspace {
-                          store.imageDraft?.loras = selected.loras; store.imageEstimate = nil
-                        } else { store.editClip { $0.drawThings = selected } }
-                      } catch { store.error = error.localizedDescription }
+                      store.applyDrawThingsLoRAGroup(group, mode: mode, imageWorkspace: imageWorkspace)
                     }
                   }
                 }
@@ -66,7 +60,11 @@ struct DrawThingsLoRAGroupLibrary: View {
       $0.intersection(Set($1.compatibleModelIDs))
     }
     let group = DrawThingsLoRAGroup(name: name, profileID: selection.profileID,
-      family: selection.modelFamily, compatibleModelIDs: Array(compatible).sorted(), members: selection.loras)
+      family: selection.modelFamily, compatibleModelIDs: Array(compatible).sorted(), members: selection.loras.map { member in
+        var value = member
+        if value.promptMetadata == nil { value.promptMetadata = drawThingsPromptMetadata(profileID: selection.profileID, modelID: value.modelID) }
+        return value
+      })
     do {
       try group.validate(profileID: selection.profileID, family: selection.modelFamily, modelID: selection.modelID)
       try persistDrawThingsLoRAGroups(drawThingsLoRAGroups + [group])

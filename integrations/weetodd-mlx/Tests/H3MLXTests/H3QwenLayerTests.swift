@@ -4,6 +4,52 @@ import XCTest
 @testable import H3MLX
 
 final class H3QwenLayerTests: XCTestCase {
+  func testBadContextShapeAndPositionsFailBeforeCheckpointReads() throws {
+    try Device.withDefaultDevice(.cpu) {
+      let missing = URL(fileURLWithPath:"/missing/weetodd-qwen-context.safetensors")
+      for rows in [0,2049] {
+        XCTAssertThrowsError(try H3QwenLayer.evaluate(checkpointURL:missing,index:0,
+          input:MLXArray.zeros([rows,5120],dtype:.bfloat16))) {
+          XCTAssertTrue(String(describing:$0).contains("rows"),String(describing:$0))
+        }
+      }
+      let input = MLXArray.zeros([1056,5120],dtype:.bfloat16)
+      for positions in [[[Int32]](repeating:[0],count:3),
+                        [[Int32]](repeating:[Int32](repeating:-1,count:1056),count:3)] {
+        XCTAssertThrowsError(try H3QwenLayer.evaluate(checkpointURL:missing,index:0,
+          input:input,positions:positions)) {
+          XCTAssertTrue(String(describing:$0).contains("positions"),String(describing:$0))
+        }
+      }
+    }
+  }
+
+  func testInstalledLongMixedContextRetainsCausalPrefix() throws {
+    guard let root = ProcessInfo.processInfo.environment["WEETODD_H3_QWEN_PAGED"] else {
+      throw XCTSkip("Set installed Qwen pages for the >1024-row language-layer check.")
+    }
+    let rows = 1056, prefix = 32
+    let token = MLXArray((0..<rows).map(Float.init),[rows,1])
+    let feature = MLXArray((0..<5120).map(Float.init),[1,5120])
+    let input = sin(token * Float(0.007) + feature * Float(0.011)).asType(.bfloat16)
+    let positions: [[Int32]] = (0..<3).map { axis in
+      (0..<rows).map { row in
+        if row >= 1024 { return Int32(row-1024+33) }
+        return Int32(axis == 0 ? 1 : axis == 1 ? row/32+1 : row%32+1)
+      }
+    }
+    let checkpoint = URL(fileURLWithPath:root).appendingPathComponent("pages/layer-000.safetensors")
+    let short = try H3QwenLayer.evaluate(checkpointURL:checkpoint,index:0,
+      input:input[0..<prefix,0..<5120],positions:positions.map { Array($0.prefix(prefix)) })
+    let long = try H3QwenLayer.evaluate(checkpointURL:checkpoint,index:0,input:input,positions:positions)
+    XCTAssertEqual(long.shape,[rows,5120])
+    XCTAssertEqual(long.dtype,.bfloat16)
+    XCTAssertTrue(all(isFinite(long)).item(Bool.self))
+    let difference = max(abs(long[0..<prefix,0..<5120].asType(.float32) - short.asType(.float32))).item(Float.self)
+    print("Long mixed Qwen causal prefix maxabs=\(difference)")
+    XCTAssertLessThanOrEqual(difference,0.03125)
+  }
+
   func testInstalledMixedVisionLayerMatchesReferenceBeforeDeepstack() throws {
     guard let paged = ProcessInfo.processInfo.environment["WEETODD_H3_QWEN_PAGED"],
       let fixture = ProcessInfo.processInfo.environment["WEETODD_H3_QWEN_MIXED"] else {

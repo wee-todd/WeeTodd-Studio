@@ -1496,7 +1496,7 @@ def main():
             "assistant-model-download", "assistant-model-health",
             "assist-prompt", "character-analyze", "character-panel-prepare", "character-reassemble",
             "workflow-catalog", "workflow-validate", "workflow-run", "workflow-review",
-            "image-preflight", "image-generate", "image-model-prepare",
+            "image-preflight", "image-generate", "image-model-prepare", "image-h3-vae-prepare",
             "dt-discover", "dt-estimate", "dt-generate-image",
             "dt-prepare-clip", "dt-generate-clip",
             "setup-catalog",

@@ -17,14 +17,15 @@ struct LoRALibrary: View {
   @State private var showFolders = false
   @State private var showConnections = false
   @State private var compatibleOnly = true
-  var engine: Engine { imageWorkspace ? .drawThings : store.selectedClip?.engine ?? browsingEngine }
+  var isH3Image: Bool { imageWorkspace && store.imageDraft?.executionProvider == .nativeH3 }
+  var engine: Engine { imageWorkspace ? (isH3Image ? .h3 : .drawThings) : store.selectedClip?.engine ?? browsingEngine }
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack {
         VStack(alignment: .leading) {
           Text("LoRAs & Groups").font(.title2.bold())
           Text(
-            imageWorkspace ? "For \(store.imageDraft?.name ?? "Image") · Draw Things"
+            imageWorkspace ? "For \(store.imageDraft?.name ?? "Image") · \(engine.label)"
               : store.selectedClip.map { "For \($0.name) · \($0.engine.label)" } ?? "Reusable library"
           )
           .foregroundStyle(.secondary)
@@ -75,7 +76,7 @@ struct LoRALibrary: View {
     }.padding(24).frame(width: 920, height: 660)
       .onAppear {
         importModel = LoRAModel(rawValue: engine.rawValue) ?? .ltx25
-        if imageWorkspace { source = "drawThings" }
+        if imageWorkspace { source = isH3Image ? "local" : "drawThings" }
       }
       .task(id: store.loraFolderConfigurationKey) { await store.refreshLoRAFolders() }
       .sheet(isPresented: $showFolders) {
@@ -99,7 +100,7 @@ struct LoRALibrary: View {
       Picker("Source", selection: $source) {
         Text("All").tag("all")
         Text("Local folders").tag("local")
-        Text("Draw Things").tag("drawThings")
+        if !isH3Image { Text("Draw Things").tag("drawThings") }
       }.pickerStyle(.segmented)
       Toggle("Compatible with selected model", isOn: $compatibleOnly)
         .disabled(store.selectedClip == nil && !imageWorkspace).font(.caption)
@@ -143,7 +144,7 @@ struct LoRALibrary: View {
               }.font(.caption)
             }
           }
-          if source != "local" {
+          if source != "local" && !isH3Image {
             DrawThingsLoRABrowser(search: search, compatibleOnly: compatibleOnly, imageWorkspace: imageWorkspace)
           }
         }
@@ -202,15 +203,19 @@ struct LoRALibrary: View {
     }
   }
   func localRow(_ asset: MediaAsset) -> some View {
-    let compatible = !imageWorkspace && (store.selectedClip.map { asset.loraModel?.supports($0.engine) == true } ?? false)
+    let compatible = isH3Image ? asset.loraModel == .h3 : !imageWorkspace && (store.selectedClip.map { asset.loraModel?.supports($0.engine) == true } ?? false)
     let folderEntry = store.folderLoRAEntries.first { $0.path == asset.path }
-    let alreadyUsed = store.selectedClip?.attachments.contains { attachment in
+    let alreadyUsed = isH3Image ? store.imageDraft?.h3Image?.loras.contains { $0.fileKey == LoRAMember(asset:asset).fileKey } == true : store.selectedClip?.attachments.contains { attachment in
       attachment.role == .lora && store.allAssets.first { $0.id == attachment.assetID }?.path == asset.path
     } == true
     return VStack(alignment: .leading, spacing: 6) {
       Text(asset.name).font(.subheadline.bold()).lineLimit(2)
       Text("WeeTodd local · " + (asset.loraModel?.label ?? "Training model needed"))
         .font(.caption).foregroundStyle(.secondary)
+      LoRAPromptMetadataControl(key: LoRAPromptKey.native(asset.path), name: asset.name, fallback: asset.loraPrompt)
+      if isH3Image, asset.loraProfile == "turbo" {
+        Text("Turbo requires 4 Euler evaluations and a matching FL2VA / Ref2VA model.").font(.caption2).foregroundStyle(.secondary)
+      }
       if let folderEntry {
         Text(URL(fileURLWithPath: folderEntry.sourceFolder).lastPathComponent)
           .font(.caption2).foregroundStyle(.secondary).help(folderEntry.sourceFolder)
@@ -231,7 +236,7 @@ struct LoRALibrary: View {
           }
         } else {
           Button(alreadyUsed ? "In current stack" : "Add to current stack") {
-            store.applyLoRAMembers([LoRAMember(asset: asset)])
+            store.applyLoRAMembers([LoRAMember(asset: asset)],imageWorkspace:imageWorkspace)
           }.disabled(!compatible || alreadyUsed)
         }
         if let draft {
@@ -264,8 +269,8 @@ struct LoRALibrary: View {
         Button("New group") { draft = LoRAGroup(name: "New group", engine: engine) }.disabled(
           draft != nil)
       }
-      Button("Save current stack as group") { draft = store.currentLoRAGroup() }
-        .disabled(draft != nil || store.selectedClip?.attachments.contains { $0.role == .lora } != true)
+      Button("Save current stack as group") { draft = store.currentLoRAGroup(imageWorkspace:imageWorkspace) }
+        .disabled(draft != nil || (isH3Image ? store.imageDraft?.h3Image?.loras.isEmpty != false : store.selectedClip?.attachments.contains { $0.role == .lora } != true))
       if let value = draft {
         TextField(
           "Group name", text: Binding(get: { draft?.name ?? "" }, set: { draft?.name = $0 })
@@ -331,9 +336,9 @@ struct LoRALibrary: View {
                 HStack {
                   Menu("Apply group") {
                     ForEach(LoRAGroupApplicationMode.allCases) { mode in
-                      Button(mode.label) { store.applyLoRAGroup(group, mode: mode) }
+                      Button(mode.label) { store.applyLoRAGroup(group, mode: mode,imageWorkspace:imageWorkspace) }
                     }
-                  }.disabled(store.selectedClip == nil)
+                  }.disabled(!isH3Image && store.selectedClip == nil)
                   Button("Edit") { draft = group }
                   Spacer()
                   Button {
@@ -399,11 +404,7 @@ struct ClipLoRAInspector: View {
             Toggle(asset?.name ?? "Missing LoRA", isOn: Binding(get: {
               store.selectedClip?.attachments.first { $0.id == attachment.id }?.isEnabled ?? attachment.isEnabled
             }, set: { enabled in
-              store.editClip { selected in
-                if let index = selected.attachments.firstIndex(where: { $0.id == attachment.id }) {
-                  selected.attachments[index].enabled = enabled
-                }
-              }
+              store.setNativeLoRAEnabled(attachment.id, enabled: enabled)
             })).font(.caption.bold()).lineLimit(2)
             Spacer()
             Button {

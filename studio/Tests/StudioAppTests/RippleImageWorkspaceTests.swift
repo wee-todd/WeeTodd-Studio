@@ -57,6 +57,24 @@ final class RippleImageWorkspaceTests: XCTestCase {
     XCTAssertThrowsError(try store.adoptRippleImage(path, context: context))
   }
 
+  @MainActor func testH3ReferencePreferenceRestoresModelAndDecoderForANewFrame() throws {
+    let (store, context, path) = try fixture()
+    store.imageWorkspaceLibrary.referenceProvider = .nativeH3
+    store.imageWorkspaceLibrary.referenceH3Image = H3ImageSettings()
+    store.imageWorkspaceLibrary.referenceH3Image?.decoderMode = .singleLatent
+    store.imageWorkspaceLibrary.referenceH3Image?.imageVAEPath = "/models/image-vae.safetensors"
+    store.imageWorkspaceLibrary.referenceH3ModelID = "/models/ref2va.json"
+    store.imageWorkspaceLibrary.referenceH3Steps = 4
+    let draft = store.makeRippleImageDraft(context, width: 770, height: 514, previousDraft: nil)
+    XCTAssertEqual(draft.executionProvider, .nativeH3)
+    XCTAssertEqual(draft.modelID, "/models/ref2va.json")
+    XCTAssertEqual(draft.h3Image?.decoderMode, .singleLatent)
+    XCTAssertEqual(draft.steps, 4)
+    XCTAssertEqual(draft.width, 768); XCTAssertEqual(draft.height, 512)
+    XCTAssertEqual(draft.canvas?.path, path)
+    XCTAssertTrue(draft.prompt.isEmpty)
+  }
+
   @MainActor func testReferenceConnectionPreferenceAndErrorsAreScoped() throws {
     let (store, context, _) = try fixture()
     store.drawThingsConnections = [DrawThingsConnection(id: "cloud")]

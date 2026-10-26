@@ -21,6 +21,7 @@ public enum H3ContinuationRunner {
     guard request.funControl == nil, request.vdn == nil else {
       throw H3CheckpointError.invalid("H3 continuation cannot combine Fun control or experimental VDN.")
     }
+    try H3VideoVAELayout(url: request.videoVAE).validateVideoUse()
     let tokenizer = try H3QwenTokenizer(url: request.tokenizer)
     let qwen = try H3QwenRequest.text(request.prompt, tokenizer: tokenizer)
     let contextAudioFrames = Int((Double(contextFrames) / 24 * 40)
@@ -43,7 +44,6 @@ public enum H3ContinuationRunner {
       audioConditionStrength: 1)
     _ = try H3QwenCheckpointLayout.inspect(root: request.qwenPages)
     _ = try H3CheckpointLayout(url: request.transformer)
-    _ = try H3VideoVAELayout(url: request.videoVAE)
     _ = try H3AudioVAELayout(url: request.audioVAE)
     for adapter in request.loRAAdapters {
       _ = try H3LoRAFile(url: adapter.url, strength: adapter.strength,

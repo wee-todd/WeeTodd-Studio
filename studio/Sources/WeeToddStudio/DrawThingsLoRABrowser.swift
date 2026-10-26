@@ -29,6 +29,8 @@ struct DrawThingsLoRABrowser: View {
           VStack(alignment: .leading, spacing: 6) {
             Text(entry.name).font(.subheadline.bold()).lineLimit(2)
             Text("Draw Things · \(entry.family)").font(.caption).foregroundStyle(.secondary)
+            LoRAPromptMetadataControl(key: LoRAPromptKey.drawThings(profileID: connection.id, modelID: entry.id), name: entry.name,
+              fallback: store.drawThingsPromptMetadata(profileID: connection.id, modelID: entry.id))
             if !compatible {
               Text("Requires a compatible model on this Draw Things connection")
                 .font(.caption2).foregroundStyle(.secondary)

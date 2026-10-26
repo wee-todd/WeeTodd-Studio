@@ -39,7 +39,8 @@ public struct H3T2VARequest: Sendable {
     videoDecodeMemoryMode: H3VideoDecodeMemoryMode? = nil,
     videoDecodePrecision: H3VideoDecodePrecision = .float32,
     samplingMethod: H3SamplingMethod = .euler,
-    canvasAdmission: H3CanvasAdmission = .ordinary, transformerWeightCacheGB:Int = 0) throws {
+    canvasAdmission: H3CanvasAdmission = .ordinary, transformerWeightCacheGB:Int = 0,
+    stillImageMode: H3StillImageMode? = nil) throws {
     try videoDecodePrecision.validate(memoryMode: videoDecodeMemoryMode)
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       prompt.utf8.count <= 65_536, (2...101).contains(requestedSteps),
@@ -54,15 +55,26 @@ public struct H3T2VARequest: Sendable {
         (turboLoRA == nil ? 0 : 1) + additionalLoRAs.count else {
       throw H3CheckpointError.invalid("Invalid H3 text-to-audiovisual request.")
     }
-    let geometry = try H3Geometry(width: width, height: height,
-      durationSeconds: durationSeconds, canvasAdmission: canvasAdmission)
-    guard width * height <= geometry.canvasAdmission.maximumPixels else {
-      throw H3CheckpointError.invalid("H3 video area exceeds the current Swift canvas budget (1376 × 768 pixels).")
+    let geometry: H3Geometry
+    if let stillImageMode {
+      guard canvasAdmission == .ordinary, funControl == nil, vdn == nil, fastVariant == nil else {
+        throw H3CheckpointError.invalid("H3 stills require ordinary sampling without video-only controls.")
+      }
+      geometry = try H3Geometry(width: width, height: height, stillImageMode: stillImageMode)
+    } else {
+      geometry = try H3Geometry(width: width, height: height,
+        durationSeconds: durationSeconds, canvasAdmission: canvasAdmission)
+    }
+    guard width * height <= geometry.maximumPixels else {
+      throw H3CheckpointError.invalid("H3 canvas exceeds the selected task's pixel budget.")
     }
     guard try geometry.packedRows(textRows: 1,
       conditionVideoRows: 0, conditionAudioRows: 0) <= geometry.maximumPackedRows else {
       throw H3CheckpointError.invalid("H3 packed rows exceed the current Swift engine limit.")
     }
+    try H3Noise.validate(videoLatentFrames: geometry.videoLatentFrames,
+      latentHeight: height / 16, latentWidth: width / 16,
+      audioLatentFrames: geometry.audioLatentFrames, stillImageMode: stillImageMode)
     if let funControl {
       try funControl.validate(geometry: geometry)
     }
@@ -74,7 +86,7 @@ public struct H3T2VARequest: Sendable {
     }
     self.prompt = prompt
     self.geometry = geometry
-    self.durationSeconds = durationSeconds
+    self.durationSeconds = stillImageMode == nil ? durationSeconds : Double(geometry.frames) / 24
     self.seed = seed
     self.requestedSteps = requestedSteps
     self.samplingMethod = samplingMethod
@@ -153,6 +165,9 @@ public enum H3T2VARunner {
   /// Inspect every installed component and all task geometry before the first
   /// weighted stage. A missing VAE cannot fail after a long transformer run.
   public static func preflight(_ request: H3T2VARequest, refinement: H3JointRefinement? = nil) throws -> Admission {
+    guard request.geometry.stillImageMode == nil || refinement == nil else {
+      throw H3CheckpointError.invalid("H3 stills cannot combine video latent refinement.")
+    }
     guard request.geometry.canvasAdmission == .ordinary || refinement != nil else {
       throw H3CheckpointError.invalid("Expanded H3 canvas requires explicit initialized spatial refinement.")
     }
@@ -187,8 +202,8 @@ public enum H3T2VARunner {
       try control.validate(geometry: request.geometry)
       _ = try H3FunControlLayout(url: control.checkpoint, base: transformer)
     }
-    _ = try H3VideoVAELayout(url: request.videoVAE)
-    _ = try H3AudioVAELayout(url: request.audioVAE)
+    try H3VideoVAELayout(url: request.videoVAE).validateVideoUse()
+    if request.geometry.stillImageMode == nil { _ = try H3AudioVAELayout(url: request.audioVAE) }
     for adapter in request.loRAAdapters {
       try adapter.validate(requestedSteps: video.timesteps.count + 1, samplingMethod: request.samplingMethod)
       _ = try H3LoRAFile(url: adapter.url,
@@ -288,7 +303,7 @@ public enum H3T2VARunner {
         videoLatentFrames: geometry.videoLatentFrames,
         latentHeight: geometry.height / 16,
         latentWidth: geometry.width / 16,
-        audioLatentFrames: geometry.audioLatentFrames)
+        audioLatentFrames: geometry.audioLatentFrames, stillImageMode: geometry.stillImageMode)
       let initializedVideo = try initialRows.map {
         try H3JointRefinement.targetRows(noise.video, source: $0.video, prefix: 0, schedule: admission.videoSchedule, canvasAdmission: geometry.canvasAdmission)
       } ?? noise.video

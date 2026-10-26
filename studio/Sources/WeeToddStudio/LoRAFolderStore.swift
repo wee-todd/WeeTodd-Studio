@@ -92,11 +92,20 @@ import StudioCore
     else { error = "Select a compatible Draw Things model and refresh its connection first."; return }
     guard !selection.loras.contains(where: { $0.modelID == modelID }) else { return }
     guard selection.loras.count < 16 else { error = "Use up to 16 Draw Things LoRAs per stack."; return }
-    if imageWorkspace {
-      imageDraft?.loras.append(DrawThingsLoRA(modelID: modelID))
-      imageEstimate = nil
-    } else {
-      editClip { $0.drawThings?.loras.append(DrawThingsLoRA(modelID: modelID)) }
+    var member = DrawThingsLoRA(modelID: modelID)
+    let metadata = drawThingsPromptMetadata(profileID: profileID, modelID: modelID)
+    member.promptMetadata = metadata
+    if var draft = imageWorkspace ? imageDraft : nil {
+      draft.loras.append(member)
+      do {
+        try insertLoRAPromptGuidance([metadata], into: &draft)
+        imageDraft = draft; imageEstimate = nil
+      } catch { self.error = error.localizedDescription }
+    } else if !imageWorkspace {
+      editClip { clip in
+        clip.drawThings?.loras.append(member)
+        clip.prompt = LoRAPromptInsertion.applying([metadata], to: clip.prompt)
+      }
     }
   }
 }

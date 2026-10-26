@@ -14,6 +14,10 @@ import StudioCore
       $0.kind == .lora
         && ($0.scope != .clip || $0.owner == selectedClipID)
         && seen.insert(LoRAMember(asset: $0).fileKey).inserted
+    }.map { asset in
+      var value = asset
+      if let metadata = loraPromptLibrary[LoRAPromptKey.native(asset.path)] { value.loraPrompt = metadata }
+      return value
     }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
   }
   func loadLoRAGroups() {
@@ -45,7 +49,15 @@ import StudioCore
       to: dataDirectory.appendingPathComponent("lora-groups.json"), options: .atomic)
     loraGroups = groups
   }
-  func applyLoRAGroup(_ group: LoRAGroup, mode: LoRAGroupApplicationMode = .add) {
+  func applyLoRAGroup(_ group: LoRAGroup, mode: LoRAGroupApplicationMode = .add, imageWorkspace: Bool = false) {
+    if imageWorkspace, imageDraft?.executionProvider == .nativeH3 {
+      do {
+        try group.validate()
+        guard group.engine == .h3 else { throw StudioError.invalid("Choose an H3 LoRA group.") }
+        applyH3ImageLoRAMembers(group.members, preservingSnapshots: true, mode: mode)
+      } catch { self.error = error.localizedDescription }
+      return
+    }
     do {
       try group.validate()
       guard let clip = selectedClip, group.supports(clip.engine) else {
@@ -55,8 +67,13 @@ import StudioCore
     } catch { self.error = error.localizedDescription }
   }
   func applyLoRAMembers(
-    _ members: [LoRAMember], groupName: String? = nil, mode: LoRAGroupApplicationMode = .add
+    _ members: [LoRAMember], groupName: String? = nil, mode: LoRAGroupApplicationMode = .add,
+    imageWorkspace: Bool = false
   ) {
+    if imageWorkspace, imageDraft?.executionProvider == .nativeH3 {
+      applyH3ImageLoRAMembers(members, preservingSnapshots: groupName != nil, mode: mode)
+      return
+    }
     guard let clip = selectedClip else {
       error = "Select a clip first."
       return
@@ -72,15 +89,21 @@ import StudioCore
         )
       }
       var updated = project
-      try updated.applyLoRAs(members, to: clip.id, groupName: groupName, mode: mode)
+      try updated.applyLoRAs(resolvedLoRAMembers(members, preservingSnapshots: groupName != nil), to: clip.id, groupName: groupName, mode: mode)
       change { $0 = updated }
       notice = "Applied \(groupName ?? members.first?.asset.name ?? "LoRAs") to \(clip.name)."
     } catch { self.error = error.localizedDescription }
   }
-  func currentLoRAGroup() -> LoRAGroup? {
+  func currentLoRAGroup(imageWorkspace: Bool = false) -> LoRAGroup? {
+    if imageWorkspace, let draft = imageDraft, draft.executionProvider == .nativeH3 {
+      let members = resolvedLoRAMembers(draft.h3Image?.loras ?? [], preservingSnapshots: true)
+      return members.isEmpty ? nil : LoRAGroup(name: draft.name + " LoRAs", engine: .h3, members: members)
+    }
     guard let clip = selectedClip else { return nil }
     do {
-      return try project.loraGroupSnapshot(for: clip.id, name: clip.name + " LoRAs", additionalAssets: globalAssets)
+      var group = try project.loraGroupSnapshot(for: clip.id, name: clip.name + " LoRAs", additionalAssets: globalAssets)
+      group.members = resolvedLoRAMembers(group.members, preservingSnapshots: true)
+      return group
     } catch { self.error = error.localizedDescription; return nil }
   }
   func setLoRAModel(_ model: LoRAModel, for asset: MediaAsset) {

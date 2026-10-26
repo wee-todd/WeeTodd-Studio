@@ -144,7 +144,7 @@ public enum H3VideoReferencePreparation {
       case .audio, .timedAudio: break
       }
     }
-    guard visualPads <= 1024, rgbBytes <= 1024 * 1024 * 1024 else {
+    guard visualPads <= H3QwenRequest.maximumVisualPads, rgbBytes <= 1024 * 1024 * 1024 else {
       throw H3CheckpointError.invalid("H3 reference preparation exceeds aggregate Qwen or RGB admission.")
     }
   }

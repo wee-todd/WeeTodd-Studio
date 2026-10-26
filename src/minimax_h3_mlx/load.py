@@ -259,7 +259,9 @@ def load_video_vae(model_dir: str | Path, strict: bool = True):
     return model
 
 
-def load_compact_video_vae(path: str | Path, strict: bool = True):
+def load_compact_video_vae(
+    path: str | Path, strict: bool = True, *, allow_image_only: bool = False
+):
     """Load a self-describing single-file video VAE export."""
     from .video_vae import VideoVAE, VideoVAEConfig
     from .video_vae_checkpoint import (
@@ -270,7 +272,12 @@ def load_compact_video_vae(path: str | Path, strict: bool = True):
     )
 
     path = Path(path)
-    wrapper = _metadata_json(safetensor_metadata(path), "minimax_h3_video_vae")
+    metadata = safetensor_metadata(path)
+    wrapper = _metadata_json(metadata, "minimax_h3_video_vae")
+    if not allow_image_only and (
+        wrapper.get("image_only") is True or any(key.startswith("h3_t1_") for key in metadata)
+    ):
+        raise ValueError("This H3 VAE is image-only; choose the original VAE for video")
     stored_layout = validate_video_vae_wrapper(wrapper)
     quantization = validate_video_vae_quantization(wrapper)
     source = wrapper["source_config"]

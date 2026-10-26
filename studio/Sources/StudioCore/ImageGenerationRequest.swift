@@ -1,9 +1,12 @@
 import Foundation
 
 public enum ImageExecutionProvider: String, Codable, CaseIterable, Identifiable {
-  case drawThings, nativeMLX
+  case drawThings, nativeMLX, nativeH3
   public var id: String { rawValue }
-  public var label: String { self == .nativeMLX ? "Local MLX" : "Draw Things" }
+  public var isNative: Bool { self != .drawThings }
+  public var label: String {
+    switch self { case .drawThings: return "Draw Things"; case .nativeMLX: return "Local MLX · Qwen"; case .nativeH3: return "Local H3" }
+  }
 }
 
 public struct NativeImageSettings: Codable, Equatable {
@@ -44,6 +47,9 @@ extension DrawThingsImageDraft {
   }
   public var imageInputIssue: String? {
     let inputs = activeImageInputs
+    if executionProvider == .nativeH3 {
+      return inputs.count > 9 ? "H3 accepts nine active image references including the canvas." : nil
+    }
     if executionProvider == .nativeMLX {
       return inputs.count > 10 ? "Qwen supports 10 active images including the canvas. Disable an input to continue." : nil
     }
@@ -63,12 +69,13 @@ extension DrawThingsImageDraft {
       loras = settings.loras
     } else {
       modelID = value == .nativeMLX ? "Qwen/Qwen-Image-2.1" : ""
-      width = value == .nativeMLX ? 1024 : 512; height = width
-      steps = value == .nativeMLX ? 40 : 4; guidance = 1; strength = 1
+      width = value == .nativeMLX ? 1024 : value == .nativeH3 ? 768 : 512; height = width
+      steps = value == .nativeMLX ? 40 : value == .nativeH3 ? 20 : 4; guidance = 1; strength = 1
       sampler = nil; shift = nil; negativePrompt = ""; loras = []
     }
     providerSettings = saved; provider = value
     if value == .nativeMLX, nativeImage == nil { nativeImage = NativeImageSettings() }
+    if value == .nativeH3, h3Image == nil { h3Image = H3ImageSettings() }
   }
   /// File hashing belongs on a background worker operating on a captured value-type draft.
   public func nativeRequest(id: String) throws -> [String: Any] {

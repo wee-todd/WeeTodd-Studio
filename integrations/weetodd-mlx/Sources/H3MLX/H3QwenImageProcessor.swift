@@ -23,7 +23,7 @@ public enum H3QwenImageProcessor {
     let gridHeight = height / patch
     let gridWidth = width / patch
     let patches = gridHeight * gridWidth
-    guard patches / 4 <= 1024 else {
+    guard patches / 4 <= H3QwenRequest.maximumVisualPads else {
       throw H3CheckpointError.invalid("Qwen still reference exceeds its visual token window.")
     }
     let mean: [Float] = [0.5, 0.5, 0.5]

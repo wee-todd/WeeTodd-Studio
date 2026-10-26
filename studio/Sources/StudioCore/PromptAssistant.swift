@@ -70,7 +70,7 @@ public struct PromptAssistantContext: Identifiable {
     var references = [PromptAssistantImage]()
     for reference in image.activeImageInputs {
       references.append(PromptAssistantImage(path: reference.input.path,
-        label: image.executionProvider == .nativeMLX ? "<image\(reference.index)>" : "\(reference.role) · \(reference.index)"))
+        label: image.executionProvider == .nativeH3 ? "<Picture \(reference.index)>" : image.executionProvider == .nativeMLX ? "<image\(reference.index)>" : "\(reference.role) · \(reference.index)"))
     }
     images = references
   }

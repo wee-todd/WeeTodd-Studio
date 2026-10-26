@@ -4,6 +4,23 @@ import Foundation
 /// later; the vision start/end rows retain learned token embeddings. The tags
 /// are H3 modality tags, not Qwen tokenizer type IDs.
 public struct H3QwenRequest: Sendable {
+  /// Visual pads and text/labels/vision markers have separate bounded budgets.
+  /// A full 1024-square reference consumes all visual pads, but still needs
+  /// room for its labels, markers and authored prompt in the language tower.
+  public static let maximumTextRows = 1024
+  public static let maximumVisualPads = 1024
+  public static let maximumTokenRows = maximumTextRows + maximumVisualPads
+
+  private static func validateBudget(tokenRows: Int, visualPads: Int) throws {
+    guard (0...maximumVisualPads).contains(visualPads), tokenRows >= visualPads,
+      tokenRows <= maximumTokenRows else {
+      throw H3CheckpointError.invalid("H3 Qwen context exceeds \(maximumVisualPads) visual pads or \(maximumTokenRows) combined rows.")
+    }
+    guard (1...maximumTextRows).contains(tokenRows - visualPads) else {
+      throw H3CheckpointError.invalid("H3 Qwen prompt, labels and markers exceed \(maximumTextRows) valid token rows.")
+    }
+  }
+
   public struct Grid: Sendable {
     public let temporal: Int
     public let height: Int
@@ -68,7 +85,7 @@ public struct H3QwenRequest: Sendable {
       }
       let pads = grid.temporal * (grid.height / 2) * (grid.width / 2)
       visualPads += pads
-      guard pads > 0, visualPads <= 1024 else {
+      guard pads > 0, visualPads <= Self.maximumVisualPads else {
         throw H3CheckpointError.invalid("Ref2VA Qwen visual pads exceed the token window.")
       }
       let start = try tokenizer.encode("<|vision_start|>")
@@ -122,9 +139,10 @@ public struct H3QwenRequest: Sendable {
       throw H3CheckpointError.invalid("Ref2VA Qwen reference counts exceed model limits.")
     }
     try appendText(prompt)
-    guard (1...1024).contains(ids.count), ids.count == tags.count,
+    try Self.validateBudget(tokenRows:ids.count,visualPads:visualPads)
+    guard ids.count == tags.count,
       ids.allSatisfy({ (0..<151936).contains($0) }) else {
-      throw H3CheckpointError.invalid("H3 Qwen reference request exceeds 1024 valid token rows.")
+      throw H3CheckpointError.invalid("H3 Qwen reference request contains invalid token rows.")
     }
     return Self(tokenIDs: ids, tags: tags, visualRanges: ranges)
   }
@@ -136,6 +154,7 @@ public struct H3QwenRequest: Sendable {
     var ids: [Int32] = []
     var tags: [Int32] = []
     var ranges: [Range<Int>] = []
+    var visualPads = 0
     func appendText(_ text: String) throws {
       let encoded = try tokenizer.encode(text)
       ids.append(contentsOf: encoded)
@@ -148,7 +167,8 @@ public struct H3QwenRequest: Sendable {
         throw H3CheckpointError.invalid("H3 Qwen visual grid must have positive bounded temporal and even spatial dimensions.")
       }
       let pads = grid.temporal * (grid.height / 2) * (grid.width / 2)
-      guard pads > 0, pads <= 1024 else {
+      visualPads += pads
+      guard pads > 0, visualPads <= Self.maximumVisualPads else {
         throw H3CheckpointError.invalid("H3 Qwen visual grid exceeds its token window.")
       }
       try appendText("<Picture \(index + 1)>: ")
@@ -166,9 +186,10 @@ public struct H3QwenRequest: Sendable {
       ranges.append(lower..<ids.count)
     }
     try appendText(prompt)
-    guard (1...1024).contains(ids.count), ids.count == tags.count,
+    try Self.validateBudget(tokenRows:ids.count,visualPads:visualPads)
+    guard ids.count == tags.count,
       ids.allSatisfy({ (0..<151936).contains($0) }) else {
-      throw H3CheckpointError.invalid("H3 Qwen request exceeds 1024 valid token rows.")
+      throw H3CheckpointError.invalid("H3 Qwen request contains invalid token rows.")
     }
     return Self(tokenIDs: ids, tags: tags, visualRanges: ranges)
   }

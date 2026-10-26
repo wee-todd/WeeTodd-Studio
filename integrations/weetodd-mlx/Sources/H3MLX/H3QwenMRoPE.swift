@@ -8,7 +8,7 @@ public enum H3QwenMRoPE {
     grids: [H3QwenRequest.Grid]) throws -> [[Int32]] {
     guard request.visualRanges.count == grids.count,
       request.tokenIDs.count == request.tags.count,
-      (1...1024).contains(request.tokenIDs.count) else {
+      (1...H3QwenRequest.maximumTokenRows).contains(request.tokenIDs.count) else {
       throw H3CheckpointError.invalid("H3 Qwen visual ranges and grids differ.")
     }
     let count = request.tokenIDs.count

@@ -50,6 +50,7 @@ public enum Discovery {
             && $0.isConsistencyModel != true && $0.isLoHa != true && $0.alternativeDecoder == nil
         }.map { lora -> [String: Any] in
           ["id": lora.file, "name": lora.name, "family": String(describing: lora.version),
+           "promptPrefix": lora.prefix,
            "compatibleModelIDs": resources.files.filter {
              Capabilities.rules(for: $0) != nil && ModelZoo.versionForModel($0) == lora.version
            }]

@@ -25,7 +25,7 @@ public enum H3QwenVideoProcessor {
     let gridWidth = width / patch
     let patchCount = temporal * gridHeight * gridWidth
     guard frames.count == frameCount * frameBytes,
-      patchCount > 0, patchCount / 4 <= 1024,
+      patchCount > 0, patchCount / 4 <= H3QwenRequest.maximumVisualPads,
       gridHeight <= 128, gridWidth <= 128 else {
       throw H3CheckpointError.invalid("Qwen RGB frame payload or visual token count is invalid.")
     }

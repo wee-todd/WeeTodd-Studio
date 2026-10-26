@@ -146,7 +146,20 @@ def _source_description(source: Path) -> tuple[Path, dict[str, Any]]:
         value = metadata.get(VIDEO_VAE_METADATA_KEY)
         if value is None:
             raise ValueError(f"Single-file video VAE has no {VIDEO_VAE_METADATA_KEY!r} metadata.")
-        return source, json.loads(value)
+        wrapper = json.loads(value)
+        image_keys = {"h3_t1_direct", "h3_t1_output_slice", "h3_t1_format"}
+        if image_keys.intersection(metadata):
+            if any(metadata.get(key) != expected for key, expected in {
+                "h3_t1_direct": "true", "h3_t1_output_slice": "3",
+                "h3_t1_format": "full_decoder_v1",
+            }.items()):
+                raise ValueError("Unsupported H3 single-image decoder metadata")
+            wrapper = dict(wrapper, image_only=True, image_output_slice=3)
+        if "image_only" in wrapper and (
+            wrapper["image_only"] is not True or wrapper.get("image_output_slice") != 3
+        ):
+            raise ValueError("Unsupported H3 image-only VAE purpose")
+        return source, wrapper
 
     wrapper_path = source / "config.json"
     source_config_path = source / "source" / "config.json"
@@ -274,7 +287,11 @@ def quantize_video_vae_checkpoint(
     output.parent.mkdir(parents=True, exist_ok=True)
     model = None
     try:
-        model = load_compact_video_vae(source) if source.is_file() else load_video_vae(source)
+        if source.is_file():
+            model = (load_compact_video_vae(source, allow_image_only=True)
+                     if wrapper.get("image_only") is True else load_compact_video_vae(source))
+        else:
+            model = load_video_vae(source)
         before_bytes = sum(value.nbytes for _, value in tree_flatten(model.parameters()))
         recipe = {
             "format": VIDEO_VAE_QUANTIZATION_FORMAT,

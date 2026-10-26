@@ -4,6 +4,38 @@ import XCTest
 @testable import H3MLX
 
 final class H3TokenRefinerTests: XCTestCase {
+  func testCombinedContextReachesCheckpointAdmissionAndOverflowFailsBeforeReads() throws {
+    try Device.withDefaultDevice(.cpu) {
+      let missing = URL(fileURLWithPath:"/missing/weetodd-refiner-context.safetensors")
+      for rows in [1056,2048] {
+        XCTAssertThrowsError(try H3TokenRefiner.evaluateBlock(checkpointURL:missing,index:0,
+          input:MLXArray.zeros([1,rows,5376],dtype:.bfloat16))) {
+          XCTAssertEqual($0 as? H3CheckpointError,.invalid("H3 checkpoint is not a local regular file."))
+        }
+      }
+      for rows in [0,2049] {
+        XCTAssertThrowsError(try H3TokenRefiner.evaluateBlock(checkpointURL:missing,index:0,
+          input:MLXArray.zeros([1,rows,5376],dtype:.bfloat16))) {
+          XCTAssertTrue(String(describing:$0).contains("Invalid H3 text refiner"),String(describing:$0))
+        }
+      }
+    }
+  }
+
+  func testInstalledRefinerAcceptsCompleteFullImageContext() throws {
+    guard let checkpoint = ProcessInfo.processInfo.environment["WEETODD_H3_TEST_CHECKPOINT"] else {
+      throw XCTSkip("Set the installed H3 transformer for the full mixed-context refiner check.")
+    }
+    let rows = 1108
+    let token = MLXArray((0..<rows).map(Float.init),[1,rows,1])
+    let feature = MLXArray((0..<5376).map(Float.init),[1,1,5376])
+    let input = sin(token * Float(0.007) + feature * Float(0.011)).asType(.bfloat16)
+    let result = try H3TokenRefiner.evaluate(checkpointURL:URL(fileURLWithPath:checkpoint),input:input)
+    XCTAssertEqual(result.shape,[1,rows,5376])
+    XCTAssertEqual(result.dtype,.bfloat16)
+    XCTAssertTrue(all(isFinite(result)).item(Bool.self))
+  }
+
   func testInstalledTwoBlockRefinerMatchesReference() throws {
     guard let checkpoint = ProcessInfo.processInfo.environment["WEETODD_H3_TEST_CHECKPOINT"],
       let inputFixture = ProcessInfo.processInfo.environment["WEETODD_H3_PATCH_ORACLE"],

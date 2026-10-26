@@ -416,7 +416,10 @@ extension Encodable {
   @Published var project = StudioProject()
   @Published var globalAssets: [MediaAsset] = []
   @Published var loraGroups: [LoRAGroup] = []
+  @Published var loraPromptLibrary: [String: LoRAPromptMetadata] = [:]
   @Published var h3TwoStageModels = H3TwoStageModelLinks()
+  @Published var h3ImageVAEPath = ""
+  var preparedH3Image: PreparedH3Image?
   @Published var scannedLoRAEntries: [LoRAFolderEntry] = []
   @Published var loraFolderWarnings: [String] = []
   @Published var loraFolderScanBusy = false
@@ -586,6 +589,8 @@ extension Encodable {
       globalAssets = value
     }
     loadLoRAGroups()
+    loadLoRAPromptMetadata()
+    loadH3ImageModels()
     loadH3TwoStageModels()
     loadDrawThingsConnections()
     loadDrawThingsLoRAGroups()

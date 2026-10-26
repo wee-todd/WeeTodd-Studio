@@ -28,13 +28,15 @@ def _active_studio_loras(loras: Any) -> list[dict[str, Any]]:
         raise ValueError("Draw Things loras must be an array")
     active = []
     for item in loras:
-        if not isinstance(item, dict) or set(item) - {"modelID", "weight", "enabled"}:
+        allowed = {"modelID", "weight", "enabled", "promptMetadata"}
+        if not isinstance(item, dict) or set(item) - allowed:
             raise ValueError("Invalid saved Draw Things LoRA fields")
         enabled = item.get("enabled")
         if enabled is not None and type(enabled) is not bool:
             raise ValueError("LoRA enabled must be a boolean")
         if enabled is not False:
-            active.append({key: value for key, value in item.items() if key != "enabled"})
+            active.append({key: value for key, value in item.items()
+                           if key not in {"enabled", "promptMetadata"}})
     return canonical_loras(active)
 
 

@@ -17,6 +17,10 @@ private final class EchoFixture: ImageGenerationServiceProvider {
       if includeH3 {
         $0.files.append("fixture-h3.ckpt")
         $0.files.append("fixture-h3-reference.ckpt")
+        $0.files.append("fixture-style.ckpt")
+        $0.override.loras = Data("""
+        [{"name":"Fixture Style","file":"fixture-style.ckpt","prefix":"cinematic glow","version":"minimax_h3"}]
+        """.utf8)
         $0.override.models = Data("""
         [{"name":"Fixture H3","file":"fixture-h3.ckpt","prefix":"",
           "version":"minimax_h3","modifier":"fl2va","upcast_attention":false,"default_scale":8},
@@ -57,6 +61,21 @@ private final class EchoFixture: ImageGenerationServiceProvider {
 }
 
 final class DiscoveryTests: XCTestCase {
+  func testLoRADiscoveryIncludesItsSavedPromptPrefix() throws {
+    let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    defer { try? group.syncShutdownGracefully() }
+    let fixture = EchoFixture(); fixture.includeH3 = true
+    let server = try Server.insecure(group: group).withServiceProviders([fixture])
+      .bind(host: "127.0.0.1", port: 0).wait()
+    defer { try? server.close().wait() }
+    let result = try Discovery.fetch(["profile": ["route": "grpc", "host": "127.0.0.1",
+      "port": try XCTUnwrap(server.channel.localAddress?.port), "useTLS": false],
+      "credentials": ["sharedSecret": "fixture-pass"]])
+    let loras = try XCTUnwrap(result["loras"] as? [[String: Any]])
+    let style = try XCTUnwrap(loras.first { $0["id"] as? String == "fixture-style.ckpt" })
+    XCTAssertEqual(style["promptPrefix"] as? String, "cinematic glow")
+    XCTAssertTrue((style["compatibleModelIDs"] as? [String] ?? []).contains("fixture-h3.ckpt"))
+  }
   func testEndpointH3MetadataEnablesFirstLastAndItsComputeEstimate() throws {
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     defer { try? group.syncShutdownGracefully() }

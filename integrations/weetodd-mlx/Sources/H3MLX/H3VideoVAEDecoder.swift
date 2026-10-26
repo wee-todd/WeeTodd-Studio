@@ -157,6 +157,32 @@ public enum H3VideoVAEDecoder {
     return concatenated(chunks, axis: 1)
   }
 
+  /// A complete still window uses one or two temporal latents, with no video
+  /// chunk padding or audio decoder. Spatial tiles use the same decoder core.
+  public static func decodeStill(checkpointURL: URL, latent: MLXArray,
+    mode: H3StillImageMode, selection: H3ImageFrameSelection = .middle,
+    memoryMode: H3VideoDecodeMemoryMode? = nil,
+    precision: H3VideoDecodePrecision = .float32) throws -> MLXArray {
+    let layout = try H3VideoVAELayout(url: checkpointURL)
+    try mode.validateDecoder(imageOnly: layout.imageOnly)
+    guard latent.ndim == 5, latent.shape[0] == 1,
+      latent.shape[1] == mode.latentFrames, latent.shape[4] == 24,
+      (2...256).contains(latent.shape[2]), (2...256).contains(latent.shape[3]),
+      latent.dtype == .float32 else {
+      throw H3CheckpointError.invalid("Invalid H3 still-image latent geometry.")
+    }
+    try precision.validate(memoryMode: memoryMode)
+    return try H3VideoVAEDecodeSession.withSession(checkpointURL: checkpointURL,
+      memoryMode: memoryMode, precision: precision) { session in
+      let decoded = try decodeClip(checkpointURL: checkpointURL, latent: latent,
+        session: session, spatialBatchSize: H3VideoDecodeMemoryMode.spatialBatchSize(for: memoryMode),
+        precision: precision)
+      let selected = try mode.select(decoded: decoded, selection: selection)
+      eval(selected)
+      return selected
+    }
+  }
+
   public static func decodeChunks(checkpointURL: URL, latent: MLXArray,
     memoryMode: H3VideoDecodeMemoryMode? = nil,
     precision: H3VideoDecodePrecision = .float32,
@@ -196,6 +222,7 @@ public enum H3VideoVAEDecoder {
       throw H3CheckpointError.invalid("Invalid H3 video VAE temporal decode geometry.")
     }
     try precision.validateHalfCastInput(latent)
+    try H3VideoVAELayout(url: checkpointURL).validateVideoUse()
     if retainWeights {
       try H3VideoVAEDecodeSession.withSession(checkpointURL: checkpointURL,
         memoryMode: memoryMode, precision:precision, allocationCacheLimitBytes: allocationCacheLimitBytes,

@@ -17,6 +17,9 @@ public struct ImageWorkspaceLibrary: Codable {
   public var activeKey: String?
   public var referenceProvider: ImageExecutionProvider?
   public var referenceNativeImage: NativeImageSettings?
+  public var referenceH3Image: H3ImageSettings?
+  public var referenceH3ModelID: String?
+  public var referenceH3Steps: Int?
   public var referenceConnectionID: String?
   public init() {}
   public mutating func record(_ draft: DrawThingsImageDraft, preview: String?) {

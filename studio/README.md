@@ -358,7 +358,7 @@ assets can be prepared, rendered and accepted directly. Standard LoRA headers ar
 without loading weights; compatible LTX 2.3 adapters retain their order and strength.
 Native H3/LTX LoRA import and folder scanning use bounded SafeTensors headers without
 Python or weight copies. H3 standard adapters retain the selected sampling count;
-Turbo requires four evaluations (five sigma points). Applying Turbo supplies that default
+Explicit four-step Turbo profiles require four evaluations (five sigma points). Applying one supplies that default
 when no explicit Steps override exists; incompatible overrides fail before model loading.
 Preserving Match previous frame when connecting LTX 2.5 shots freezes the accepted source's
 last visible frame through Swift media APIs, retaining its source trim, timestamp and hashes.
@@ -1697,7 +1697,7 @@ are separate from MLX allocations and process-tree sums. GB is decimal. The impl
 different residency policies; matched creative settings do not mean identical execution.
 Final progress/preview/release, cancellation/recovery, inherited media/context, installed-app,
 validation and commit checks require current-worker evidence. Full performance closure remains
-open because two current speed gates failed. These fixed-workload measurements establish neither Draw Things runtime parity nor
+open at the historical v12 checkpoint because two speed gates failed; later closure is recorded above. These fixed-workload measurements establish neither Draw Things runtime parity nor
 all-hardware performance; LTX is unchanged.
 
 ## Progress, measurements, and H3 page retention
@@ -2070,6 +2070,28 @@ image workspace. The library has one search and **All / Local folders / Draw Thi
 starts enabled; turn it off to review other models and files needing classification. Source and
 model labels explain where each adapter can run. Only applied LoRAs appear in the inspectors.
 Image-workspace changes apply to the image draft without changing the underlying movie clip.
+
+Each native or Draw Things library entry offers **Edit triggers and notes…**. Enter one trigger
+word or phrase per line; a complete instruction can occupy one line. Prompt notes hold optional
+keywords, recommended prompt structure and other guidance. Only trigger text is inserted into the
+prompt. Saving library metadata does not edit the selected clip or an existing group.
+
+Adding an enabled LoRA or applying a group inserts missing triggers into the visible prompt,
+with case/whitespace-aware phrase deduplication. Enabling a saved disabled member uses its frozen
+triggers; older entries without metadata resolve and save the current library guidance when
+explicitly enabled. Clip attachment and prompt changes share one undo action. Structured H3 prompts
+insert text in the visual description, preserving reference definitions and audio fields; ordinary
+prompts receive a prefix. Disabling or removing a LoRA retains authored prompt text for manual
+editing. Character Director's managed prompts require rebuilding from character fields if a new
+trigger would change their approved text; that application is rejected without partial changes.
+
+The local `lora-prompt-metadata.json` library lives beside Global assets. Native records follow
+canonical file paths; Draw Things records belong to one connection and model ID. A refreshed
+Draw Things catalog can provide its saved prompt prefix. Local edits, including an explicitly
+empty trigger list, take precedence. Metadata is copied into applied clip assets and saved group
+members, so later library edits affect new selections rather than retained takes. Legacy groups
+without metadata resolve it on a new application. Notes are excluded from execution requests.
+Optional or alternative keywords can remain in notes while the automatic trigger list stays empty.
 
 In **Runtime Settings → LoRA model folders** (also **Folders…** in the library):
 
@@ -3033,9 +3055,100 @@ in 1.07 seconds. The endpoint comparison recognized the dragon appearing but inf
 incorrect pose/setting details; review the proposed text before applying it. Broad text quality,
 small-detail/OCR accuracy and the 9B vision path remain unqualified.
 
+### Native H3 images
+
+Open **Generate Image…** and choose **Run with → Local H3**. Select an installed H3 model
+profile, write a visual prompt, check settings and generate. Ordinary T2VA, FL2VA and Ref2VA
+profiles can generate a still without references; the selected transformer is retained.
+Use a **Ref2VA** profile for canvas or mood-board editing. Compatible Singularity profiles and
+native H3 LoRAs use the same shared Swift/MLX worker as video. No ComfyUI or Draw Things
+connection is required. Existing H3 components are reused in place.
+
+**Quality is the default:** sample five frames with the original H3 VAE and select **First**,
+**Middle** (default) or **Last** as the saved still. The worker saves one exact-canvas RGB PNG.
+H3 still samples retain joint audio/video denoising, but skip audio-VAE decoding and media muxing.
+There is no audio file or intermediate video. Weighted stages unload in order.
+
+The optional **Single-latent** decoder uses the experimental
+[Mamad8 image VAE](https://huggingface.co/Mamad8/MiniMax-H3-Image-VAE). Choose **Download & prepare
+image VAE…** and an AI model-library folder, or link its prepared native Q8 checkpoint. Setup
+verifies the pinned source checksum, preserves its image-only purpose and reuses matching
+prepared files. Source plus prepared weights occupy about 7.6 GiB; allow about 9 GiB for setup.
+The author reports softness and reduced fine text, hair and detail. This decoder is restricted
+to single-latent still output; the original VAE remains the reference encoder and video decoder.
+Use remains subject to the applicable MiniMax H3 license and terms.
+The [community one-frame workflow](https://github.com/cicalooo/ComfyUI-MM-1Frame) informed the
+two explicit modes. H3 remains an audiovisual model; this is an experimental still-image route.
+
+**References:** up to nine enabled inputs total, canvas first and enabled mood-board images in
+display order. Refer to them as `<Picture 1>` through `<Picture 9>`. Disabled and zero-strength
+inputs stay saved but are omitted. Active H3 references require 100% strength; an explicit button
+can normalize existing cards. Input order and file hashes are captured for the job. These are
+reference-conditioned edits, rather than pixel-preserving canvas compositing or masked editing.
+The shared Qwen runner admits **1,024 visual pads plus 1,024 text/label/marker rows**, with
+**2,048 combined rows**. A 1024-pixel square reference can therefore retain its full resolution
+alongside the prompt. The visual budget is shared across all references, so the nine-image
+count limit does not guarantee that every combination fits. Preflight reports an excess rather
+than removing references or truncating the prompt. Text-only prompts retain their 1,024-row limit.
+
+**Controls:** width and height are user-selected multiples of 32, from 32–1920 each, within a
+2,088,960-pixel still-image budget (1920×1088 in landscape, or its portrait equivalent).
+The worker saves the requested native canvas; an exact 1920×1080 delivery needs a four-pixel
+crop from the top and bottom. **Steps** means actual transformer evaluations; a four-step
+Turbo profile uses four evaluations. CFG is fixed at 1 and the installed profile supplies its
+supported sampler. For a fixed four-step Turbo profile, use a matching adapter at strength 1
+with four Euler evaluations.
+The H3 image LoRA stack supports signed strengths, enable/disable, groups, editable trigger words
+and prompt notes. Applying or enabling a LoRA inserts its missing default triggers into the
+visible prompt; optional guidance stays in notes. Profile adapters and the image stack share
+the native eight-adapter admission limit. Video upscaling/refinement, FastH3, VDN and alternative
+attention profiles are not accepted for still generation. Negative prompts, masks, fractional
+reference strengths and arbitrary sampler/CFG overrides are not supported.
+
+Settings checks freeze the actual seed, ordered inputs, model file identity, decoder and runtime
+fingerprint. Generate rechecks admission before inference. Completed image assets retain the
+normalized request and actual seed; a draft seed of −1 remains random for subsequent takes.
+Saved image sessions and reference-workspace preferences retain the H3 provider and decoder.
+Switching providers preserves authored prompts and inputs and restores each provider's settings.
+Stage and sampling progress are available; H3 latent previews and **Export Headless Job** are
+not yet exposed for this provider. Local Qwen and Draw Things exports retain their existing paths.
+
+The header-declared LarryVRH pruned prefix conversion is supported with its original unit-scale
+`B @ A` update and native interleaved QKV layout. Keep its adapter profile/layout on **Auto**;
+its header does not impose a fixed four-evaluation schedule. Explicit four-step Turbo profiles
+still require four Euler evaluations. Mixed scaling declarations, an incompatible layout,
+extra tensors or incomplete projection pairs are rejected before sampling.
+
+Real M3 Ultra qualification used Singularity V2, its Ref2VA Turbo v0.1 adapter, 512×512,
+four Euler evaluations, CFG 1 and seed 745693. Quality text-to-image took 44.65 seconds;
+single-latent text-to-image took 37.64 seconds; a quality-mode reference edit took 49.09 seconds.
+The signed release app's bundled worker repeated the quality render in 52.33 seconds with an
+identical PNG.
+Follow-up direct 1024×1024 output took 58.39 seconds in quality mode and 43.20 seconds in
+single-latent mode, with the same model, adapter, evaluations, CFG and seed. A quality edit
+from the earlier 512-pixel reference took 61.85 seconds and produced the requested 1024-pixel
+cup-to-teapot edit. That initial full-size 1024-pixel reference attempt hit the former combined
+Qwen token limit before inference; the context repair now separates visual and text budgets.
+All three completed outputs were verified as exact-canvas PNGs with no audio decoding.
+After the context repair, the exact full-1024-reference recipe completed in 75.42 seconds with
+the original VAE and the same four-step Turbo settings. Both reference encoding paths retained
+the 1024×1024 image; the 1,108-row conditioner and 1,024 VAE condition rows stayed within
+admission. The inspected output retained the robot and camera composition while replacing the
+cup with the requested red teapot.
+The updated signed app repeated that full-reference edit in 77.64 seconds with a byte-identical PNG.
+Separate direct landscape tests used the FL2VA pruned BF16 base with the LarryVRH pruned
+unit-scale adapter at strength 1, Euler, CFG 1 and seed 745693. Four/six/eight actual evaluations
+took 61.35/81.83/101.72 seconds, including 41.11/60.97/80.99 seconds of sampling. Each quality
+job saved a native 1920×1088 middle-frame PNG with no audio decoding; review copies were
+cropped to 1920×1080 without scaling. The shared prompt and 4,173-row layout stayed fixed.
+These are single functional trials with existing OS caches, not cold/warm benchmarks. Different
+temporal noise geometry prevents a decoder-only quality comparison. The robot stills and the
+requested cup-to-teapot edit were inspected. Other canvases, nine-reference quality, fine text
+and broad identity preservation remain separate qualification.
+
 ### Native Qwen-Image-2.1 — experimental
 
-Open **Generate Image…** from an asset store and set **Run with → Local MLX**. The same image
+Open **Generate Image…** from an asset store and set **Run with → Local MLX · Qwen**. The same image
 workspace supplies prompt, canvas, mood board, dimensions, steps, seed, result reuse and export.
 Use **Download & prepare 8-bit model…** to select a model-library folder, or **Choose prepared
 model…** to open an existing manifest. Setup pins and verifies the official
@@ -3095,8 +3208,9 @@ for measured cases and remaining qualification.
 
 Use the **+ → Generate Image…** action on Global, Project, or Clip Assets. The whole-window prompt
 editor provides a central canvas, a separate ordered mood board (eight active Draw Things cards
-or ten total native Qwen inputs), left-side settings, preparation, result preview, and headless
-image-job export. Import files, drop image assets, or choose **From Assets**.
+or nine total H3 / ten total Qwen inputs), left-side settings, preparation and result preview.
+Headless image-job export supports Draw Things and Qwen. Import files, drop image assets, or
+choose **From Assets**.
 
 For **Draw Things**, canvas images support fit/fill placement and **Generation strength**
 from 0–100%. Mood-board thumbnails have independent enable and strength controls; zero strength
