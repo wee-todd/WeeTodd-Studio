@@ -17,7 +17,7 @@ public enum H3MotionFidelityRecipe {
       throw H3CheckpointError.invalid("H3 motion recipe must be a JSON object.")
     }
     guard let fields = root.removeValue(forKey: "motion_fidelity") else { return nil }
-    guard root["engine"] as? String == "h3",
+    guard root["engine"] as? String == "h3", root["fasth3_omni"] == nil,
       root["joint_latents"] == nil, root["refinement"] == nil, root["continuation"] == nil,
       let components = root["components"] as? [String: Any],
       (components["task"] as? String ?? "t2va") == "t2va", components["fun_controlnet"] == nil,

@@ -6,6 +6,20 @@ public struct H3ReferenceRowSchedule: Sendable {
   public let table: [Float]
   public let indicesByStep: [[Int32]]
 
+  init(layout: H3ReferenceLayout, omni: H3PDDPlan) throws {
+    let video = omni.timesteps(for: .video), audio = omni.timesteps(for: .audio)
+    let values = Set(video + audio + [Float(0.999), Float(1)]).sorted()
+    let lookup = Dictionary(uniqueKeysWithValues: values.enumerated().map { ($0.element, Int32($0.offset)) })
+    table = values
+    indicesByStep = (0..<omni.evaluationCount).map { step in
+      var rows = [Int32](repeating: lookup[video[step]]!, count: layout.tags.count)
+      for row in layout.conditionVideoIndices { rows[row] = lookup[0.999]! }
+      for row in layout.conditionAudioIndices { rows[row] = lookup[1]! }
+      for row in layout.targetAudioIndices { rows[row] = lookup[audio[step]]! }
+      return rows
+    }
+  }
+
   public init(layout: H3ReferenceLayout, video: H3Schedule, audio: H3Schedule,
     visualConditionStrength: Float = 0.999,
     audioConditionStrength: Float = 1, cleanVideoPrefixRows: Int = 0,

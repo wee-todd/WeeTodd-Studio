@@ -294,6 +294,7 @@ public struct GenerationDescriptor: Codable, Equatable {
   public var transformerWeightCacheEditable:Bool? = nil
   public var vdn: Bool? = nil
   public var fasth3: Bool? = nil
+  public var fasth3Omni: Bool? = nil
   public var dfrEnabled: Bool? = nil
   public var dfrTemporalAvailable: Bool? = nil
   public var dfrTemporalRounds: Int? = nil

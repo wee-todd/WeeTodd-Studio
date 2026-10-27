@@ -51,7 +51,7 @@ public enum NativeModelSetup {
         continue
       }
       let kind = directory.boolValue ? "directory" : "file"
-      if kind == "directory" || url.pathExtension == "safetensors" {
+      if kind == "directory" || ["safetensors","json"].contains(url.pathExtension) {
         for component in preset.components where (component.accepts ?? [component.kind]).contains(kind) {
           if (try? NativeModelInspector.matches(url, key: component.key,
             engine: preset.engine, task: preset.task)) == true {
@@ -182,7 +182,14 @@ public enum NativeModelSetup {
         components:h3.filter { $0.key != "transformer" } + [
           component("fast_"+label+"_transformer","FastH3 "+variant+" Q8 pages",["directory"],importOnly:true)])
     }
-    return ordinary + [h3Fun,vdn,vdn50] + fast + dfr + references + [union] + controls + [crossviewIngredients] + guided + automaticDuration
+    let omni = ModelSetupPreset(id:NativeH3OmniProfile.presetID,
+      name:"MiniMax H3 · FastH3 Omni · 8 evaluations · Experimental Swift",engine:"h3",task:"ref2va",
+      description:NativeH3OmniProfile.requirements + " Link the pinned ddalcu affine Q8 transformer and separate official FastVideo contract. Reuse compatible Qwen/vision, tokenizer and original VAEs in place. Model weights retain the MiniMax H3 Community License; the official MLX kit has no weights.",
+      components:h3.filter { !["checkpoint","transformer","processor"].contains($0.key) } + [
+        component("omni_transformer","Pinned FastH3 Omni affine Q8 transformer",["file"]),
+        component("omni_contract","Pinned official fastvideo_inference.json contract",["file"]),
+        component("vision_encoder","Compatible Qwen3-VL vision source",["file","directory"])])
+    return ordinary + [h3Fun,vdn,vdn50,omni] + fast + dfr + references + [union] + controls + [crossviewIngredients] + guided + automaticDuration
   }
 
   public static func recipe(preset: ModelSetupPreset, selected: [String: String],
@@ -299,6 +306,22 @@ public enum NativeModelSetup {
     let controlFamilies = ["swift-ltx25-motion-track": "motion_track",
       "swift-ltx25-crossview": "crossview_warp", "swift-ltx25-crossview-ingredients": "crossview_ingredients"]
     if let family = controlFamilies[preset.id] { conditioning["control_family"] = family }
+    if preset.id == NativeH3OmniProfile.presetID {
+      let source=components.removeValue(forKey:"omni_transformer") as! String
+      let contract=components.removeValue(forKey:"omni_contract") as! String
+      let file=NativeModelDownloadFile(repo:"ddalcu/FastH3-Omni-MLX-Serve-8bit",revision:"3277ecd1f31f46037f8d51e4882d24139be8d112",filename:"transformer.safetensors",size:NativeH3OmniProfile.sourceBytes,sha256:NativeH3OmniProfile.sourceSHA256,target:"transformer.safetensors",provider:nil)
+      guard try NativeModelDownloads.verified(URL(fileURLWithPath:source),file:file),
+        try NativeModelInspector.matches(URL(fileURLWithPath:contract),key:"omni_contract",engine:"h3",task:"ref2va") else {
+        throw StudioError.invalid("FastH3 Omni source or official contract checksum differs from the pinned release. Link the matching installed files.")
+      }
+      components["transformer"]=source
+      config["steps"]=9;config["width"]=768;config["height"]=512;config["duration_seconds"]=5.0
+      let recipe:[String:Any] = ["format":"weetodd-headless-v2","engine":"h3","candidate":preset.id,
+        "components":components,"config":config,"prompt":"A continuous scene with synchronized sound.","conditioning":conditioning,
+        "fasth3_omni":["version":1,"contract_path":contract,"contract_sha256":NativeH3OmniProfile.contractSHA256]]
+      _=try NativeH3OmniProfile.ordinary(recipe)
+      return recipe
+    }
     if preset.id.hasPrefix("swift-h3-fast-") {
       let sparse = preset.id == "swift-h3-fast-vsa"
       components["transformer"] = components.removeValue(forKey:sparse ? "fast_vsa_transformer":"fast_dense_transformer")
@@ -434,6 +457,16 @@ private enum NativeModelInspector {
   static func matches(_ url: URL, key: String, engine: String, task: String) throws -> Bool {
     let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     if engine == "h3" {
+      if key=="omni_contract" {
+        guard !directory,let size=(try? FileManager.default.attributesOfItem(atPath:url.path)[.size] as? NSNumber)?.int64Value,size==776 else {return false}
+        let file=NativeModelDownloadFile(repo:"FastVideo/FastVideo-FastH3-Omni-8-Step-V1",revision:"53e0d26a1691aa473b6262d8196a8feb2c297df0",filename:"fastvideo_inference.json",size:776,sha256:NativeH3OmniProfile.contractSHA256,target:"fastvideo_inference.json",provider:nil)
+        return try NativeModelDownloads.verified(url,file:file)
+      }
+      if key=="omni_transformer" {
+        guard !directory,(try? FileManager.default.attributesOfItem(atPath:url.path)[.size] as? NSNumber)?.int64Value==NativeH3OmniProfile.sourceBytes,
+          let metadata=(try? header(url)["__metadata__"]) as? [String:String] else {return false}
+        return metadata["modified_from"]=="FastVideo/FastVideo-FastH3-Omni-8-Step-V1" && metadata["quantization"]=="affine 8-bit g64"
+      }
       if ["fast_dense_transformer","fast_vsa_transformer"].contains(key) {
         guard directory,let manifest = try? document(url.appendingPathComponent("paged_manifest.json")),
           manifest["format"] as? String == "weetodd-h3-paged-v1",manifest["num_blocks"] as? Int == 50,

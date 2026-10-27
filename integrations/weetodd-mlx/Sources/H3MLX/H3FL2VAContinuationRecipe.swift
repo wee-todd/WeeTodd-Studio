@@ -23,6 +23,7 @@ public enum H3FL2VAContinuationRecipe {
     try Task.checkCancellation()
     guard data.count <= 1_048_576,
       var recipe = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+      recipe["fasth3_omni"] == nil,
       (recipe["components"] as? [String: Any])?["task"] as? String == "fl2va",
       var conditioning = recipe["conditioning"] as? [String: Any],
       conditioning["task"] as? String == "fflf",

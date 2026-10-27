@@ -71,6 +71,16 @@ public struct H3BackendReport: Sendable, Equatable {
 /// Terminal handoff to Studio and headless hosts. Keep the original request
 /// identity on the final event as well as in the saved metadata.
 public enum H3WorkerReceipt {
+  /// Accept late source checks before the atomic directory move. Failed or
+  /// cancelled acceptance leaves staging owned by the caller's cleanup scope.
+  public static func publish(staging: URL, output: URL,
+    validate: () throws -> Void) throws {
+    try Task.checkCancellation()
+    try validate()
+    try Task.checkCancellation()
+    try FileManager.default.moveItem(at: staging, to: output)
+  }
+
   /// Decode callbacks count raw frames, including continuation context. Both
   /// previews and stage callbacks publish the cropped frame clock and share
   /// the previous fraction so interleaved events cannot move progress back.

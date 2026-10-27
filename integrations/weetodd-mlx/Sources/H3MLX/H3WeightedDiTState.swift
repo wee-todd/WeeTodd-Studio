@@ -54,6 +54,7 @@ final class H3WeightedDiTState {
       }
     }
   }
+  private let omni: H3OmniRunner.Context?
   private let checkpointURL: URL
   private let layout: Layout
   private let blockCount: Int
@@ -107,7 +108,7 @@ final class H3WeightedDiTState {
 
   init(checkpointURL: URL, layout: Layout,
     textEmbeddings: MLXArray, timestepTable: [Float],
-    blockCount: Int,
+    blockCount: Int, omni: H3OmniRunner.Context? = nil,
     projectionMode: H3ProjectionMode = .weightDecoded,
     allowMPP: Bool = false, nativeWorkerURL: URL? = nil, transformerWeightCacheGB:Int = 0,
     experimentalSol: H3SolTaskPolicy? = nil,
@@ -139,11 +140,12 @@ final class H3WeightedDiTState {
       _ = try H3FunControlLayout(url: funControl.checkpoint,
         base: H3CheckpointLayout(url: checkpointURL))
     }
+    self.omni = omni
     self.checkpointURL = checkpointURL
     self.layout = layout
     self.blockCount = blockCount
     self.projectionMode = projectionMode
-    self.allowMPP = allowMPP && nativeWorkerURL == nil
+    self.allowMPP = allowMPP && nativeWorkerURL == nil && omni == nil
     self.nativeWorkerURL = nativeWorkerURL
     var adapters = additionalLoRAs
     if let turboLoRAURL {
@@ -178,7 +180,14 @@ final class H3WeightedDiTState {
       }
       self.vdn=try H3VDNRuntime(selection:vdn,packed:packed)
     } else { self.vdn=nil }
-    let checkpointLayout = try H3CheckpointLayout(url:checkpointURL)
+    if let omni {
+      guard case .references = layout, blockCount == 50, projectionMode == .weightDecoded,
+        nativeWorkerURL == nil, experimentalSol == nil, transformerWeightCacheGB == 0,
+        funControl == nil, vdn == nil, effective.isEmpty, omni.attention.rows == layout.tags.count else {
+        throw H3CheckpointError.invalid("Invalid shared Omni transformer strategy.")
+      }
+    }
+    let checkpointLayout = try H3CheckpointSource.layout(checkpointURL, omni: omni?.source)
     self.experimentalSol = experimentalSol
     if let experimentalSol {
       let referenceLayout:Bool
@@ -234,17 +243,17 @@ final class H3WeightedDiTState {
     let projected = try H3PreparationObservation.measure(.conditionProjection,
       observer: preparationObserver) {
       try H3InputProjection.evaluate(checkpointURL: checkpointURL,
-        kind: .condition, input: textEmbeddings)
+        kind: .condition, input: textEmbeddings, omni: omni?.source)
     }
     let refined = try H3PreparationObservation.measure(.tokenRefinement,
       observer: preparationObserver) {
       try H3TokenRefiner.evaluate(checkpointURL: checkpointURL,
-        input: projected, lora: application)
+        input: projected, lora: application, omni: omni?.source)
     }
     let (time, loraTime) = try H3PreparationObservation.measure(.timeAndSmallMetadata,
       observer: preparationObserver) {
       let time = try H3TimeEmbedding.evaluate(checkpointURL: checkpointURL,
-        timesteps: MLXArray(timestepTable))
+        timesteps: MLXArray(timestepTable), omni: omni?.source)
       let loraTime = try vdn?.adalnInputGrid.map {
         try H3VDNInputGrid(url:$0).evaluate(timesteps:timestepTable)
       }
@@ -257,7 +266,7 @@ final class H3WeightedDiTState {
       for index in 0..<blockCount {
         tables.append(try H3AdaLNProjection.evaluate(
           checkpointURL: checkpointURL, blockIndex: index,
-          timeEmbeddings: time, projectionMode: projectionMode,lora:application,loraInput:loraTime))
+          timeEmbeddings: time, projectionMode: projectionMode,lora:application,loraInput:loraTime, omni: omni?.source))
         if index + 1 < blockCount { progress(index + 1, blockCount) }
         try Task.checkCancellation()
       }
@@ -330,7 +339,8 @@ final class H3WeightedDiTState {
     timestepIndices: [Int32], progress: (Int, Int) -> Void = { _, _ in }) throws
     -> H3FinalLayer.Output {
     var succeeded = false
-    defer { if (nativeWorkerURL != nil || transformerWeightCache != nil) && !succeeded { unload() } }
+    defer { if (nativeWorkerURL != nil || transformerWeightCache != nil || omni != nil) && !succeeded { unload() } }
+    guard omni == nil || completedEvaluations < 8 else { throw H3CheckpointError.invalid("Omni supports exactly eight evaluations.") }
     guard nativeWorkerURL == nil || completedEvaluations < 4 else {
       throw H3CheckpointError.invalid("Experimental NNC supports exactly four transformer evaluations.")
     }
@@ -391,19 +401,41 @@ final class H3WeightedDiTState {
       return result
     }
     let video = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
-      kind: .video, input: videoLatents).asType(.bfloat16)
+      kind: .video, input: videoLatents, omni: omni?.source).asType(.bfloat16)
     let audio = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
-      kind: .audio, input: audioLatents).asType(.bfloat16)
+      kind: .audio, input: audioLatents, omni: omni?.source).asType(.bfloat16)
     let packed = try layout.pack(text: text, video: video, audio: audio,
       timestepIndices: timestepIndices)
     // Layout and positional coordinates are immutable for this stage, even
     // when per-row timestep indices change between evaluations.
     if rotaryAngles == nil {
       rotaryAngles = try H3TransformerBlock.prepareRotaryAngles(
-        checkpointURL: checkpointURL, positions: packed.positions, maximumRows: layout.maximumPackedRows)
+        checkpointURL: checkpointURL, positions: packed.positions, maximumRows: layout.maximumPackedRows, omni: omni?.source)
     }
     guard let rotaryAngles, rotaryAngles.rows == packed.positions.shape[0] else {
       throw H3CheckpointError.invalid("H3 prepared rotary differs from the stage layout.")
+    }
+    if let omni {
+      var value = packed.embeddings
+      for index in 0..<blockCount {
+        value = try autoreleasepool {
+          let owner = try H3PreparedBlock(checkpointURL:checkpointURL,index:index,
+            projectionMode:.weightDecoded,omni:omni.source)
+          defer { owner.close() }
+          return try H3TransformerBlock.evaluateOmni(owner:owner,input:value,
+            modulation:modulations[index],modulationIndices:packed.modulationIndices,
+            angles:rotaryAngles,plan:omni.attention)
+        }
+        progress(index + 1,blockCount)
+        try Task.checkCancellation()
+      }
+      let result = try H3FinalLayer.evaluateOmni(source:omni.source,input:value,
+        timeEmbeddings:timeEmbeddings,timestepIndices:packed.timestepIndices,
+        videoIndices:packed.videoIndices,audioIndices:packed.audioIndices,
+        plan:omni.plan,step:completedEvaluations)
+      completedEvaluations += 1
+      succeeded = true
+      return result
     }
     let control = try funControl?.initialize(hidden: packed.embeddings,
       targetIndices: packed.videoIndices)
@@ -510,9 +542,9 @@ final class H3WeightedDiTState {
     return try autoreleasepool {
       for (url, file) in nativeModelFiles { try file.checkUnchanged(at: url) }
       let video = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
-        kind: .video, input: videoLatents).asType(.bfloat16)
+        kind: .video, input: videoLatents, omni: omni?.source).asType(.bfloat16)
       let audio = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
-        kind: .audio, input: audioLatents).asType(.bfloat16)
+        kind: .audio, input: audioLatents, omni: omni?.source).asType(.bfloat16)
       let packed = try layout.pack(text: text, video: video, audio: audio,
         timestepIndices: timestepIndices)
       if rotaryAngles == nil {

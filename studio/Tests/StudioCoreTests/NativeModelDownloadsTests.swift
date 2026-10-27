@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import XCTest
 @testable import StudioCore
 
@@ -17,6 +18,63 @@ private final class ModelResponseProtocol: URLProtocol, @unchecked Sendable {
 }
 
 final class NativeModelDownloadsTests: XCTestCase {
+  private func physicalFootprint() throws -> UInt64 {
+    var info = task_vm_info_data_t()
+    var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+    let status = withUnsafeMutablePointer(to: &info) { pointer in
+      pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+        task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+      }
+    }
+    XCTAssertEqual(status, KERN_SUCCESS)
+    return info.phys_footprint
+  }
+
+  func testVerificationHostStorageIsBoundedAndChecksumRemainsExact() throws {
+    let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+    let url = root.appendingPathComponent("synthetic-payload")
+    let size = 256 * 1024 * 1024
+    try Data().write(to: url)
+    let writer = try FileHandle(forWritingTo: url)
+    try writer.truncate(atOffset: UInt64(size)); try writer.close()
+    let zeros = Data(repeating: 0, count: 1024 * 1024)
+    var oracle = SHA256()
+    for _ in 0..<256 { oracle.update(data: zeros) }
+    let digest = oracle.finalize().map { String(format: "%02x", $0) }.joined()
+    let file = NativeModelDownloadFile(repo: "fixture/model", revision: String(repeating: "a", count: 40),
+      filename: "payload", size: Int64(size), sha256: digest, target: "payload", provider: nil)
+    try autoreleasepool {
+      let before = try physicalFootprint()
+      XCTAssertTrue(try NativeModelDownloads.verified(url, file: file))
+      let after = try physicalFootprint()
+      print("setup-digest-only physical before=\(before) after=\(after) payload=\(size)")
+      XCTAssertLessThan(after, before + 64 * 1024 * 1024,
+        "Setup verification must release checksum chunks before its caller pool drains.")
+    }
+    let wrongHash = NativeModelDownloadFile(repo: file.repo, revision: file.revision,
+      filename: file.filename, size: file.size, sha256: String(repeating: "0", count: 64),
+      target: file.target, provider: nil)
+    XCTAssertFalse(try NativeModelDownloads.verified(url, file: wrongHash))
+    let changed = try FileHandle(forWritingTo: url)
+    try changed.truncate(atOffset: 1); try changed.close()
+    XCTAssertFalse(try NativeModelDownloads.verified(url, file: file))
+  }
+
+  func testCancelledVerificationStopsChecksumReading() async throws {
+    let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+    let (_, file) = try fixture(root), url = root.appendingPathComponent("payload")
+    try bytes.write(to: url)
+    let task = Task { () throws -> Bool in
+      withUnsafeCurrentTask { $0?.cancel() }
+      do {
+        _ = try NativeModelDownloads.verified(url, file: file)
+        return false
+      } catch is CancellationError { return true }
+    }
+    let cancelled = try await task.value
+    XCTAssertTrue(cancelled)
+  }
+
   func durationCatalog(_ root:URL, compatible:Bool=true) throws -> (URL,URL) {
     let source=try NativeLTXAutomaticDurationTests.headFixture(at:root,wrongShape:!compatible)
     let payload=try Data(contentsOf:source)
@@ -232,7 +290,7 @@ final class NativeModelDownloadsTests: XCTestCase {
     let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
     let catalog = try NativeModelDownloads.catalog(at: source)
-    XCTAssertEqual(catalog.count, 24)
+    XCTAssertEqual(catalog.count, 25)
     let audio=try XCTUnwrap(catalog.first { $0.kind == "h3-audio-vae" })
     XCTAssertEqual(audio.descriptor.components,["audio_vae"])
     XCTAssertTrue(audio.files.contains { $0.filename == "audio_vae.safetensors" && $0.size == 605254808 })

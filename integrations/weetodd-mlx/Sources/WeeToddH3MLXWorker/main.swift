@@ -233,6 +233,7 @@ import UniformTypeIdentifiers
       expectedOutputDirectory: arguments[4])
     let recipeData = try readRequest(envelope.recipePath)
     try envelope.validateRecipe(recipeData)
+    let omniRecipe = try H3OmniRecipe.prepare(data: recipeData)
     if let root = try JSONSerialization.jsonObject(with: recipeData) as? [String: Any], root["still_image"] != nil {
       let result = try H3ImageWorker.execute(envelope: envelope, recipeData: recipeData,
         render: arguments[0] == "render", emitProgress: { try? emit($0) })
@@ -246,7 +247,7 @@ import UniformTypeIdentifiers
     guard let untouchedRecipe = try JSONSerialization.jsonObject(with:recipeData) as? [String:Any] else { throw invalid("Invalid H3 recipe.") }
     _ = try H3TransformerWeightCachePolicy.admitRecipe(untouchedRecipe)
     let twoStageRecipe = try H3TwoStageRecipe.prepare(data: recipeData)
-    let executionRecipeData = twoStageRecipe?.ordinaryRecipe ?? recipeData
+    let executionRecipeData = omniRecipe?.ordinaryRecipe ?? twoStageRecipe?.ordinaryRecipe ?? recipeData
     let motionRecipe = try H3MotionFidelityRecipe.prepare(data: executionRecipeData)
     let jointRefinement = try H3JointRefinementRecipe.prepare(data: motionRecipe?.ordinaryRecipe ?? executionRecipeData)
     let canvasAdmission = twoStageRecipe?.plan.target.canvasAdmission ?? jointRefinement?.targetGeometry.canvasAdmission ?? H3CanvasAdmission.ordinary
@@ -419,7 +420,7 @@ import UniformTypeIdentifiers
       endpointRequest = nil
       textRequest = nil
     } else if selectedTask == "ref2va" {
-      stillRequest = try H3StudioRecipe.compileMediaReferences(data: referenceRecipeData, canvasAdmission: canvasAdmission) {
+      stillRequest = try H3StudioRecipe.compileMediaReferences(data: referenceRecipeData, canvasAdmission: canvasAdmission, omni: omniRecipe?.selection) {
         path, kind, expectedSHA256, geometry, controls in
         let source = try NativeMediaSource(path: path, sha256: expectedSHA256)
         try source.verify()
@@ -553,6 +554,7 @@ import UniformTypeIdentifiers
         "sourceAudioPreserved": true])
     } else { motionSource = nil; motionAdmission = nil }
     var admission: (geometry: H3Geometry, packedRows: Int, evaluations: Int)
+    var admittedOmniSource: H3OmniCheckpoint?
     let continuationIdentity: String?
     var continuationRows: H3Continuation.Rows?
     if let continuation, let textRequest {
@@ -622,6 +624,7 @@ import UniformTypeIdentifiers
     } else if let stillRequest {
       let checked = try H3Ref2VAStillRunner.preflight(stillRequest,
         contextFrames: refContinuation?.plan.sourceManifest == nil ? 0 : refContinuation!.plan.contextFrames, refinement: jointRefinement?.controls)
+      admittedOmniSource = checked.omniSource
       admission = (checked.geometry, checked.packedRows, checked.evaluations)
     } else if let endpointRequest {
       if let continuation, continuation.sourceManifest != nil {
@@ -660,7 +663,7 @@ import UniformTypeIdentifiers
         "overlapFrames": continuation?.overlapFrames ?? 0,
         "packedRows": admission.packedRows,
         "evaluations": admission.evaluations,
-        "referenceImages": sourceImages, "twoStage": automaticMetadata as Any? ?? NSNull(),
+        "referenceImages": sourceImages, "fasth3_omni": omniRecipe?.selection.metadata as Any? ?? NSNull(), "twoStage": automaticMetadata as Any? ?? NSNull(),
         "productionQualified": false, "videoDecode": videoDecodeDiagnostics]])
       return
     }
@@ -956,6 +959,7 @@ import UniformTypeIdentifiers
       "preflightSeconds": preflightSeconds,
       "seconds": Date().timeIntervalSince(started)]
     var completeMetadata = metadata
+    if let omniRecipe { completeMetadata["fasth3_omni"] = omniRecipe.selection.metadata }
     if traceFastPreparation {
       completeMetadata["transformerPreparationDiagnostics"] = [
         "version": 1, "phases": preparationMeasurements,
@@ -1013,9 +1017,18 @@ import UniformTypeIdentifiers
       options: [.prettyPrinted, .sortedKeys]).write(
         to: staging.appendingPathComponent("result.json"),
         options: .withoutOverwriting)
-    try Task.checkCancellation()
-    try motionSource?.identity.verify()
-    try FileManager.default.moveItem(at: staging, to: output)
+    try H3WorkerReceipt.publish(staging:staging, output:output) {
+      try motionSource?.identity.verify()
+      if omniRecipe != nil {
+        _ = try H3OmniRecipe.prepare(data: recipeData)
+        guard let admittedOmniSource else { throw invalid("Missing admitted Omni source at publication.") }
+        try admittedOmniSource.checkUnchanged()
+        for source in sourceImages {
+          guard let path = source["path"] as? String, let digest = source["sha256"] as? String else { throw invalid("Missing Omni source receipt.") }
+          try NativeMediaSource(path:path,sha256:digest).verify()
+        }
+      }
+    }
     published = true
     try emit(["status": "success", "result": H3WorkerReceipt.renderResult(
       video: output.appendingPathComponent("render.mp4"),

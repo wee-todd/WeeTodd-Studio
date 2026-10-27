@@ -199,6 +199,7 @@ public enum H3StudioRecipe {
   }
 
   public static func compileMediaReferences(data: Data, canvasAdmission: H3CanvasAdmission = .ordinary,
+    omni: H3OmniRecipe.Selection? = nil,
     stillImageMode: H3StillImageMode? = nil,
     resolveReference: (String, String, String, H3Geometry, H3ReferencePreparationControls?) throws -> H3Ref2VAReference) throws
     -> H3Ref2VAStillRequest {
@@ -336,7 +337,7 @@ public enum H3StudioRecipe {
       additionalLoRAs: base.additionalLoRAs, loRAAdapters: base.loRAAdapters,
       videoDecodeMemoryMode: base.videoDecodeMemoryMode, videoDecodePrecision: base.videoDecodePrecision,
       samplingMethod: base.samplingMethod, referenceNoise: noise, canvasAdmission: canvasAdmission,
-      transformerBackend: backend, attentionPolicy: attentionPolicy, transformerWeightCacheGB:base.transformerWeightCacheGB, stillImageMode: stillImageMode)
+      transformerBackend: backend, attentionPolicy: attentionPolicy, transformerWeightCacheGB:base.transformerWeightCacheGB, stillImageMode: stillImageMode, omni: omni)
   }
 
   /// An A2V driver is placed at frame zero of the target packed timeline.

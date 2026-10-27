@@ -5,8 +5,9 @@ struct GenerationInspector: View {
   @EnvironmentObject var store: StudioStore
   var clip: Clip
   var detail: GenerationSettingsDetail = .all
+  var isOmni:Bool { descriptor?.fasth3Omni == true || store.profiles.first(where: { $0.id==clip.profileID })?.generation?.fasth3Omni == true }
   var isFastH3:Bool { descriptor?.fasth3 == true || store.profiles.first(where: { $0.id==clip.profileID })?.generation?.fasth3 == true }
-  var isH3TwoStageTurbo:Bool {clip.engine == .h3 && store.runtime.usesNativeH3 && clip.generationSelection?.h3Joint?.twoStage?.useTurboDraft == true}
+  var isH3TwoStageTurbo:Bool {!isOmni && clip.engine == .h3 && store.runtime.usesNativeH3 && clip.generationSelection?.h3Joint?.twoStage?.useTurboDraft == true}
   var isVDN:Bool { descriptor?.vdn == true || store.profiles.first(where: { $0.id==clip.profileID })?.generation?.vdn == true }
   var descriptor: GenerationDescriptor? {
     guard let result = store.generationDescriptions[clip.id],
@@ -41,12 +42,13 @@ struct GenerationInspector: View {
   }
   var solAttentionAvailable: Bool {
     ["ref2va", "i2v", "fflf"].contains(clip.inferredTask) && clip.continuityMode == "independent"
-      && clip.extensionDirection.isEmpty && !isFastH3 && !isVDN
+      && clip.extensionDirection.isEmpty && !isFastH3 && !isVDN && !isOmni
       && clip.generationSelection?.h3Joint == nil && clip.generationSelection?.h3MotionFidelity == nil
       && clip.generationSelection?.transformerBackend != "nnc_experimental"
       && descriptor?.attentionPolicyEditable == true
   }
   var tasks: [String] {
+    if isOmni { return ["ref2va"] }
     if let selected=store.profiles.first(where: { $0.id==clip.profileID && $0.engine==clip.engine.rawValue }),
       (selected.generation?.vdn == true || selected.generation?.fasth3 == true) { return ["t2v"] }
     let supported = store.profiles.filter { $0.engine == clip.engine.rawValue }
@@ -113,7 +115,7 @@ struct GenerationInspector: View {
         }
       }
       if detail.showsBasic, clip.engine == .h3, store.runtime.usesNativeH3 {
-        let vdn=isVDN || isFastH3
+        let vdn=isVDN || isFastH3 || isOmni
         Picker("Sampler", selection: Binding(get: {
           if isH3TwoStageTurbo {return "euler"}
           return clip.generationSelection?.h3SamplingMethod?.rawValue
@@ -124,25 +126,28 @@ struct GenerationInspector: View {
         .disabled(vdn || isH3TwoStageTurbo)
         if isH3TwoStageTurbo {Text("Two-stage draft · Four Euler evaluations with strength-1 Turbo. Refinement uses its separate standard schedule.").font(.caption2).foregroundStyle(.secondary)}
         if vdn {
-          Text(isFastH3 ? "FastH3 · Four Euler evaluations. Independent text-to-audiovisual only." : "VDN · Fixed Euler schedule and released adapters at strength 1. Text-to-video only.").font(.caption2).foregroundStyle(.secondary)
+          Text(isOmni ? "FastH3 Omni · 8 actual Euler evaluations. Ordered appearance references; independent Ref2VA only." : isFastH3 ? "FastH3 · Four Euler evaluations. Independent text-to-audiovisual only." : "VDN · Fixed Euler schedule and released adapters at strength 1. Text-to-video only.").font(.caption2).foregroundStyle(.secondary)
         }
         if clip.generationSelection?.h3SamplingMethod == .resMultistep {
           Text("Experimental multistep sampling. Turbo adapters require Euler.").font(.caption2).foregroundStyle(.secondary)
         }
       }
-      if clip.engine == .h3, store.runtime.usesNativeH3, !isVDN, !isFastH3,
+      if clip.engine == .h3, store.runtime.usesNativeH3, !isVDN, !isFastH3, !isOmni,
         let stage = clip.generationSelection?.h3Joint?.twoStage {
         H3SecondPassStrengthControl(strength: Binding(get: { stage.strength }, set: { value in
           edit { $0.h3Joint?.twoStage?.strength = value }
         }))
       }
       if detail.showsAdvanced, clip.engine == .h3, store.runtime.usesNativeH3 {
-        if !isVDN && !isFastH3 {
+        if !isVDN && !isFastH3 && !isOmni {
           H3CreativeInspector(clip: clip)
           if ["t2v", "t2va"].contains(clip.inferredTask) || clip.generationSelection?.h3MotionFidelity != nil {
             H3MotionFidelityInspector(clip: clip)
           }
         }
+        if isOmni {
+          Text(NativeH3OmniProfile.advancedRequirements).font(.caption2).foregroundStyle(.secondary)
+        } else {
         DisclosureGroup("Advanced attention") {
           Picker("Attention", selection:Binding(get: {
             clip.generationSelection?.h3AttentionPolicy?.rawValue ?? "recipe"
@@ -158,6 +163,7 @@ struct GenerationInspector: View {
           Text("Resolved: \(resolvedAttentionPolicy.label)")
           Text("Sol approximates generated-video attention and may change video and audio. Only ordinary independent Swift MLX Ref2VA or FL2VA with one immediate strength-1 Turbo adapter, Euler, 4 evaluations and Drop AdaLN is supported. Checkpoint and packed-row eligibility are checked before rendering. The first two evaluations remain dense; tau is fixed at 0.5.")
             .font(.caption2).foregroundStyle(.secondary)
+        }
         }
         DisclosureGroup("Advanced video decoding") {
           Picker("Precision", selection: Binding(get: {
@@ -201,7 +207,7 @@ struct GenerationInspector: View {
           .font(.caption2).foregroundStyle(.secondary)
       }
       if detail.showsAdvanced, clip.engine == .h3 {
-        if isVDN || isFastH3 {
+        if isVDN || isFastH3 || isOmni {
           Text("This model uses the shared MLX worker with staged unloading and no retained page cache.").font(.caption2).foregroundStyle(.secondary)
           Button("Reset incompatible model overrides") {
             store.editClip { $0.generationSelection?.resetOverrides();$0.h3PagingCacheGB=nil }
@@ -333,7 +339,7 @@ struct GenerationInspector: View {
   @ViewBuilder func controls(_ controls: GenerationControls) -> some View {
     if let steps = controls.evaluations {
       HStack {
-        Text(clip.engine == .ltx25 && controls.refinementSteps == 0
+        Text(isOmni ? "Actual evaluations" : clip.engine == .ltx25 && controls.refinementSteps == 0
           ? "Evaluations" : controls.refinementSteps == nil ? "Steps" : "Stage one steps")
         TextField("Steps", value: isH3TwoStageTurbo ? .constant(4) : controls.stepsEditable ? integer(\.steps, default: steps) : .constant(steps), format: .number.grouping(.never))
           .disabled(!controls.stepsEditable || isH3TwoStageTurbo)

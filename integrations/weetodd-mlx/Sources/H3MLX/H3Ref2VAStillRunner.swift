@@ -4,6 +4,7 @@ import MLX
 /// An in-memory, ordered visual-reference request. The worker is responsible
 /// for bounded decode and source-file identity before constructing RGB bytes.
 public struct H3Ref2VAStillRequest: Sendable {
+  public let omni: H3OmniRecipe.Selection?
   public let transformerWeightCacheGB:Int
   public let prompt: String
   public let references: [H3Ref2VAReference]
@@ -41,7 +42,7 @@ public struct H3Ref2VAStillRequest: Sendable {
     canvasAdmission: H3CanvasAdmission = .ordinary,
     transformerBackend: H3TransformerBackend = .mlx,
     attentionPolicy: H3AttentionPolicy = .dense, transformerWeightCacheGB:Int = 0,
-    stillImageMode: H3StillImageMode? = nil) throws {
+    stillImageMode: H3StillImageMode? = nil, omni: H3OmniRecipe.Selection? = nil) throws {
     try self.init(prompt: prompt, mediaReferences: references.map { .image($0) },
       width: width, height: height, durationSeconds: durationSeconds,
       seed: seed, requestedSteps: requestedSteps, transformer: transformer,
@@ -52,7 +53,7 @@ public struct H3Ref2VAStillRequest: Sendable {
       videoDecodeMemoryMode: videoDecodeMemoryMode, videoDecodePrecision: videoDecodePrecision, samplingMethod: samplingMethod,
       referenceNoise: referenceNoise, canvasAdmission: canvasAdmission,
       transformerBackend: transformerBackend, attentionPolicy: attentionPolicy, transformerWeightCacheGB:transformerWeightCacheGB,
-      stillImageMode: stillImageMode)
+      stillImageMode: stillImageMode, omni: omni)
   }
 
   public init(prompt: String, mediaReferences: [H3Ref2VAReference], width: Int,
@@ -69,7 +70,17 @@ public struct H3Ref2VAStillRequest: Sendable {
     canvasAdmission: H3CanvasAdmission = .ordinary,
     transformerBackend: H3TransformerBackend = .mlx,
     attentionPolicy: H3AttentionPolicy = .dense, transformerWeightCacheGB:Int = 0,
-    stillImageMode: H3StillImageMode? = nil) throws {
+    stillImageMode: H3StillImageMode? = nil, omni: H3OmniRecipe.Selection? = nil) throws {
+    if omni != nil {
+      guard stillImageMode == nil, (5...15).contains(durationSeconds), requestedSteps == 9,
+        samplingMethod == .euler, referenceNoise == nil, canvasAdmission == .ordinary,
+        transformerBackend == .mlx, attentionPolicy == .dense, transformerWeightCacheGB == 0,
+        turboLoRA == nil, additionalLoRAs.isEmpty, loRAAdapters?.isEmpty ?? true,
+        mediaReferences.allSatisfy({ switch $0 { case .image, .video, .audio: true; default: false } }) else {
+        throw H3CheckpointError.invalid("Omni rejects competing sampling, placement, adapter and image controls.")
+      }
+    }
+    self.omni = omni
     if attentionPolicy == .solExperimental {
       try H3SolTaskPolicy.validateTask(task: "ref2va", contextFrames: 0,
         isRefinement: false, ordinaryCanvas: canvasAdmission == .ordinary,
@@ -185,15 +196,17 @@ public enum H3Ref2VAStillRunner {
     public let textRows: Int
     public let packedRows: Int
     public let evaluations: Int
+    public var omniSource: H3OmniCheckpoint? { omni?.source }
     let layout: H3ReferenceLayout
     let referenceLayout: H3ReferenceLayout
     let contextVideoRows: Int
     let contextAudioRows: Int
-    let videoSchedule: H3Schedule
-    let audioSchedule: H3Schedule
+    let videoSchedule: H3Schedule?
+    let audioSchedule: H3Schedule?
     let rowSchedule: H3ReferenceRowSchedule
     let nativeWorkerURL: URL?
     let experimentalSol: H3SolTaskPolicy?
+    let omni: H3OmniRunner.Context?
   }
 
   public typealias Result = H3AVOutputDecoder.Result
@@ -206,6 +219,10 @@ public enum H3Ref2VAStillRunner {
     guard request.geometry.canvasAdmission == .ordinary || refinement != nil else {
       throw H3CheckpointError.invalid("Expanded H3 canvas requires explicit initialized spatial refinement.")
     }
+    guard request.omni == nil || (contextFrames == 0 && refinement == nil) else {
+      throw H3CheckpointError.invalid("Omni does not support continuation or refinement.")
+    }
+    try request.omni?.checkUnchanged()
     try Task.checkCancellation()
     if let diagnostic = H3SolTaskContext.policy {
       guard request.attentionPolicy == .solExperimental, diagnostic.tau == 0.5 else {
@@ -249,19 +266,15 @@ public enum H3Ref2VAStillRunner {
     guard contextFrames == 0 || refinement == nil else {
       throw H3CheckpointError.invalid("H3 refinement cannot combine latent-tail continuation.")
     }
+    // Omni owns its PDD grid; never construct ordinary schedules for that profile.
     let grids = try refinement?.schedules(requestedSteps: request.requestedSteps)
-    let video = try grids?.video ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 12)
-    let audio = try grids?.audio ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 3)
+    let video = try request.omni == nil ? (grids?.video ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 12)) : nil
+    let audio = try request.omni == nil ? (grids?.audio ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 3)) : nil
     let layout = contextFrames == 0 ? prepared.layout
       : try H3ReferenceLayout(referenceLayout: prepared.layout,
         geometry: request.geometry, contextFrames: contextFrames)
     let contextVideoRows = layout.conditionVideoIndices.count - prepared.layout.conditionVideoIndices.count
     let contextAudioRows = layout.conditionAudioIndices.count - prepared.layout.conditionAudioIndices.count
-    let rows = try H3ReferenceRowSchedule(layout: layout,
-      video: video, audio: audio,
-      visualConditionStrength: request.referenceNoise?.visual ?? 0.999,
-      audioConditionStrength: request.referenceNoise?.audio ?? 1,
-      cleanVideoPrefixRows: contextVideoRows, cleanAudioPrefixRows: contextAudioRows)
     guard layout.tags.count <= request.geometry.maximumPackedRows else {
       throw H3CheckpointError.invalid("H3 reference packed rows exceed engine admission.")
     }
@@ -281,7 +294,23 @@ public enum H3Ref2VAStillRunner {
         throw H3CheckpointError.invalid("The H3 visual conditioner needs a vision tower.")
       }
     }
-    guard try H3CheckpointLayout(url:request.transformer).fastVariant == nil else {
+    let omni: H3OmniRunner.Context?
+    if let selection = request.omni {
+      let plan = try H3PDDPlan(contract: selection.contract)
+      let attention = try H3OmniRunner.attention(references:request.references, geometry:request.geometry,
+        textRows:prepared.qwenRequest.tags.count, layout:layout)
+      omni = H3OmniRunner.Context(source:try H3OmniCheckpoint.admit(url:request.transformer), plan:plan, attention:attention)
+    } else { omni = nil }
+    let rows: H3ReferenceRowSchedule
+    if let omni { rows = try H3ReferenceRowSchedule(layout:layout, omni:omni.plan) }
+    else if let video, let audio {
+      rows = try H3ReferenceRowSchedule(layout: layout,
+        video: video, audio: audio,
+        visualConditionStrength: request.referenceNoise?.visual ?? 0.999,
+        audioConditionStrength: request.referenceNoise?.audio ?? 1,
+        cleanVideoPrefixRows: contextVideoRows, cleanAudioPrefixRows: contextAudioRows)
+    } else { throw H3CheckpointError.invalid("Missing ordinary reference schedules.") }
+    guard try H3CheckpointSource.layout(request.transformer, omni:omni?.source).fastVariant == nil else {
       throw H3CheckpointError.invalid("FastH3 Preview v1 does not support reference-conditioned generation.")
     }
     try H3VideoVAELayout(url: request.videoVAE).validateVideoUse()
@@ -290,6 +319,7 @@ public enum H3Ref2VAStillRunner {
       try H3AudioVAEEncoder.inspect(checkpointURL: request.audioVAE)
     }
     for adapter in request.loRAAdapters {
+      guard let video else { throw H3CheckpointError.invalid("Omni cannot use LoRA adapters.") }
       try adapter.validate(requestedSteps: video.timesteps.count + 1, samplingMethod: request.samplingMethod)
       _ = try H3LoRAFile(url: adapter.url,
         strength: adapter.strength, requestedSteps: video.timesteps.count + 1, samplingMethod: request.samplingMethod, qkvLayout: adapter.qkvLayout, profile: adapter.profile, startAfterEvaluations: adapter.startAfterEvaluations, requiresStandardProfile: refinement.map { $0.strength < 1 || $0.startVideoSigma != nil } ?? false)
@@ -297,10 +327,10 @@ public enum H3Ref2VAStillRunner {
     return Admission(geometry: request.geometry,
       textRows: prepared.qwenRequest.tags.count,
       packedRows: layout.tags.count,
-      evaluations: video.timesteps.count, layout: layout, referenceLayout: prepared.layout,
+      evaluations: rows.indicesByStep.count, layout: layout, referenceLayout: prepared.layout,
       contextVideoRows: contextVideoRows, contextAudioRows: contextAudioRows,
       videoSchedule: video, audioSchedule: audio, rowSchedule: rows, nativeWorkerURL: nativeWorkerURL,
-      experimentalSol: experimentalSol)
+      experimentalSol: experimentalSol, omni: omni)
   }
 
   public static func run(_ request: H3Ref2VAStillRequest,
@@ -334,6 +364,7 @@ public enum H3Ref2VAStillRunner {
       throw H3CheckpointError.invalid("Ref2VA history must contain the complete finite synchronized tail.")
     }
     let geometry = admission.geometry
+    defer { Stream.gpu.synchronize(); Memory.clearCache() }
     let textRows = try autoreleasepool { () throws -> [Float] in
       let prepared = try H3VideoReferencePreparation.prepare(prompt: request.prompt,
         geometry: geometry, references: request.references,
@@ -384,12 +415,12 @@ public enum H3Ref2VAStillRunner {
 
     var backendReport: H3BackendReport?
     let rawRows = try autoreleasepool { () throws -> ([Float], [Float]) in
-      let state = try H3ReferenceDiTState(checkpointURL: request.transformer,
+      return try H3ReferenceDiTState.withStage({ try H3ReferenceDiTState(checkpointURL: request.transformer,
         layout: admission.layout,
         textEmbeddings: MLXArray(textRows,
           [1, admission.textRows, 5120]).asType(.bfloat16),
         timestepTable: admission.rowSchedule.table,
-        blockCount: 50, transformerWeightCacheGB:request.transformerWeightCacheGB,
+        blockCount: 50, omni: admission.omni, transformerWeightCacheGB:request.transformerWeightCacheGB,
         allowMPP: H3MPPProjection.isTaskEligible(.ref2va, contextFrames: contextFrames,
           isRefinement: refinement != nil),
         nativeWorkerURL: admission.nativeWorkerURL, experimentalSol: admission.experimentalSol,
@@ -397,45 +428,58 @@ public enum H3Ref2VAStillRunner {
         turboLoRAStrength: request.turboLoRAStrength,
         additionalLoRAs: request.additionalLoRAs, loRAAdapters: request.loRAAdapters, progress: { completed, total in
           progress("transformer_prepare", completed, total)
-        })
-      defer { state.unload() }
-      let initial = try H3Noise.makeReference(seed: request.seed,
-        conditionVideo: conditionVideoRows, conditionAudio: conditionAudioRows,
-        videoLatentFrames: geometry.videoLatentFrames,
-        latentHeight: geometry.height / 16, latentWidth: geometry.width / 16,
-        audioLatentFrames: geometry.audioLatentFrames,
-        referenceNoise: request.referenceNoise, stillImageMode: geometry.stillImageMode)
-      let refinedVideo = try initialRows.map {
-        try H3JointRefinement.targetRows(initial.video, source: $0.video,
-          prefix: admission.referenceLayout.conditionVideoIndices.count, schedule: admission.videoSchedule, canvasAdmission: geometry.canvasAdmission)
-      } ?? initial.video
-      let refinedAudio = try initialRows.map {
-        try H3JointRefinement.targetRows(initial.audio, source: $0.audio,
-          prefix: admission.referenceLayout.conditionAudioIndices.count, schedule: admission.audioSchedule, canvasAdmission: geometry.canvasAdmission)
-      } ?? initial.audio
-      let initialVideo = context.map { concatenated([
-        MLXArray($0.video, [1, admission.contextVideoRows, 96]), refinedVideo], axis: 1) } ?? refinedVideo
-      let initialAudio = context.map { concatenated([
-        MLXArray($0.audio, [1, admission.contextAudioRows, 32]), refinedAudio], axis: 1) } ?? refinedAudio
-      let sampled = try H3ReferenceSampler.run(predictor: state,
-        videoSchedule: admission.videoSchedule,
-        audioSchedule: admission.audioSchedule,
-        rowSchedule: admission.rowSchedule,
-        videoLatents: initialVideo, audioLatents: initialAudio,
-        samplingMethod: request.samplingMethod,
-        progress: { completed, total in progress("sampling", completed, total) },
-        blockProgress: { step, completed, total in
-          progress("sampling_block_\(step)", completed, total)
-        })
-      let targetVideo = sampled.video[0..<1,
-        admission.layout.conditionVideoIndices.count..<admission.layout.videoIndices.count, 0..<96]
-      let targetAudio = sampled.audio[0..<1,
-        admission.layout.conditionAudioIndices.count..<admission.layout.audioIndices.count,
-        0..<32]
-      let videoRows = targetVideo.asType(.float32).asArray(Float.self)
-      let audioRows = refinement?.preserveAudio == true ? initialRows!.audio : targetAudio.asType(.float32).asArray(Float.self)
-      backendReport = state.unloadAndReport()
-      return (videoRows, audioRows)
+        }) }) { state in
+        let initial = try H3Noise.makeReference(seed: request.seed,
+          conditionVideo: conditionVideoRows, conditionAudio: conditionAudioRows,
+          videoLatentFrames: geometry.videoLatentFrames,
+          latentHeight: geometry.height / 16, latentWidth: geometry.width / 16,
+          audioLatentFrames: geometry.audioLatentFrames,
+          referenceNoise: request.referenceNoise, stillImageMode: geometry.stillImageMode)
+        let refinedVideo = try initialRows.map {
+          guard let schedule = admission.videoSchedule else { throw H3CheckpointError.invalid("Omni rejects initialized video refinement.") }
+          return try H3JointRefinement.targetRows(initial.video, source: $0.video,
+            prefix: admission.referenceLayout.conditionVideoIndices.count, schedule: schedule, canvasAdmission: geometry.canvasAdmission)
+        } ?? initial.video
+        let refinedAudio = try initialRows.map {
+          guard let schedule = admission.audioSchedule else { throw H3CheckpointError.invalid("Omni rejects initialized audio refinement.") }
+          return try H3JointRefinement.targetRows(initial.audio, source: $0.audio,
+            prefix: admission.referenceLayout.conditionAudioIndices.count, schedule: schedule, canvasAdmission: geometry.canvasAdmission)
+        } ?? initial.audio
+        let initialVideo = context.map { concatenated([
+          MLXArray($0.video, [1, admission.contextVideoRows, 96]), refinedVideo], axis: 1) } ?? refinedVideo
+        let initialAudio = context.map { concatenated([
+          MLXArray($0.audio, [1, admission.contextAudioRows, 32]), refinedAudio], axis: 1) } ?? refinedAudio
+        let sampled: H3ReferenceSampler.Result
+        if let omni = admission.omni {
+          sampled = try H3OmniRunner.sample(layout:admission.layout, plan:omni.plan,
+            rowSchedule:admission.rowSchedule, videoNoise:initialVideo, audioNoise:initialAudio,
+            progress:{ progress("sampling",$0,$1) }) { step,video,audio,indices in
+              try state.predict(videoLatents:video,audioLatents:audio,timestepIndices:indices,
+                progress:{ progress("sampling_block_\(step + 1)",$0,$1) })
+            }
+        } else {
+        guard let videoSchedule = admission.videoSchedule, let audioSchedule = admission.audioSchedule else { throw H3CheckpointError.invalid("Missing ordinary sampler schedules.") }
+        sampled = try H3ReferenceSampler.run(predictor: state,
+          videoSchedule: videoSchedule,
+          audioSchedule: audioSchedule,
+          rowSchedule: admission.rowSchedule,
+          videoLatents: initialVideo, audioLatents: initialAudio,
+          samplingMethod: request.samplingMethod,
+          progress: { completed, total in progress("sampling", completed, total) },
+          blockProgress: { step, completed, total in
+            progress("sampling_block_\(step)", completed, total)
+          })
+        }
+        let targetVideo = sampled.video[0..<1,
+          admission.layout.conditionVideoIndices.count..<admission.layout.videoIndices.count, 0..<96]
+        let targetAudio = sampled.audio[0..<1,
+          admission.layout.conditionAudioIndices.count..<admission.layout.audioIndices.count,
+          0..<32]
+        let videoRows = targetVideo.asType(.float32).asArray(Float.self)
+        let audioRows = refinement?.preserveAudio == true ? initialRows!.audio : targetAudio.asType(.float32).asArray(Float.self)
+        backendReport = state.unloadAndReport()
+        return (videoRows, audioRows)
+      }
     }
     Stream.gpu.synchronize()
     Memory.clearCache()

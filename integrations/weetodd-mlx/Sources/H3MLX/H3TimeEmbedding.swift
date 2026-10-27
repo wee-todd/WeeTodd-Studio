@@ -29,20 +29,21 @@ public enum H3TimeEmbedding {
   }
 
   public static func evaluate(checkpointURL: URL,
-    timesteps: MLXArray) throws -> MLXArray {
+    timesteps: MLXArray, omni: H3OmniCheckpoint? = nil) throws -> MLXArray {
     try evaluate(checkpointURL: checkpointURL, timesteps: timesteps,
-      observe: { _, _ in })
+      omni: omni, observe: { _, _ in })
   }
 
   static func evaluate(checkpointURL: URL, timesteps: MLXArray,
+    omni: H3OmniCheckpoint? = nil,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard timesteps.ndim == 1, (1...4096).contains(timesteps.shape[0]),
       timesteps.dtype.isFloatingPoint else {
       throw H3CheckpointError.invalid("H3 timesteps require a bounded floating-point vector.")
     }
     try Task.checkCancellation()
-    let layout = try H3CheckpointLayout(url: checkpointURL)
-    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let layout = try H3CheckpointSource.layout(checkpointURL, omni: omni)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, omni: omni)
     let file = try SafeTensorFile(url: tensorURL)
     if layout.curveRank == 64 {
       let table = try file.readFloat32(named: "adaln_t_table")
@@ -52,7 +53,7 @@ public enum H3TimeEmbedding {
       eval(result)
       try observe("curve", result)
       try file.checkUnchanged(at: tensorURL)
-    try H3CheckpointSource.checkUnchanged(checkpointURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL, omni: omni)
       return result
     }
     defer {
@@ -77,9 +78,9 @@ public enum H3TimeEmbedding {
       }
     }
     let firstWeight = try read("time_embedder.proj_in.weight", shape: [5376, 256], dtype: "BF16")
-    let firstBias = try read("time_embedder.proj_in.bias", shape: [5376], dtype: layout.fastVariant == nil ? "F32" : "BF16")
+    let firstBias = try read("time_embedder.proj_in.bias", shape: [5376], dtype: layout.fastVariant == nil && layout.omniVariant == nil ? "F32" : "BF16")
     let secondWeight = try read("time_embedder.proj_out.weight", shape: [2688, 5376], dtype: "BF16")
-    let secondBias = try read("time_embedder.proj_out.bias", shape: [2688], dtype: layout.fastVariant == nil ? "F32" : "BF16")
+    let secondBias = try read("time_embedder.proj_out.bias", shape: [2688], dtype: layout.fastVariant == nil && layout.omniVariant == nil ? "F32" : "BF16")
     let indices = MLXArray((0..<128).map(Float.init))
     let exponent = (-Float(log(10_000.0)) * indices) / Float(128)
     let frequencies = MLX.exp(exponent)
@@ -95,7 +96,7 @@ public enum H3TimeEmbedding {
     try observe("output", output)
     eval(output)
     try file.checkUnchanged(at: tensorURL)
-    try H3CheckpointSource.checkUnchanged(checkpointURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL, omni: omni)
     try Task.checkCancellation()
     return output
   }

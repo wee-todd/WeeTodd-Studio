@@ -1,0 +1,15 @@
+{
+  "1": {
+    "class_type": "WeeToddSwiftVideoGenerate",
+    "inputs": {
+      "engine": "h3",
+      "recipe_path": "/REPLACE/WITH/YOUR/RECIPES/h3_fasth3_omni_ref2va.json",
+      "swift_worker_path": "/REPLACE/WITH/YOUR/WORKERS/WeeToddH3MLXWorker",
+      "filename_prefix": "WeeTodd/FastH3-Omni",
+      "ffmpeg_path": "/REPLACE/WITH/YOUR/BIN/ffmpeg"
+    },
+    "_meta": {
+      "title": "FastH3 Omni \u00b7 fixed 8 evaluations \u00b7 Swift recipe"
+    }
+  }
+}

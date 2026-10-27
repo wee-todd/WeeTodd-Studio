@@ -29,7 +29,7 @@ public enum H3TwoStageRecipe {
     guard let fields=raw as? [String:Any],
       Set(fields.keys).isSubset(of:["version","draft_scale","strength","evaluations","resize_method","learned_upscaler_path","learned_upscaler_header_sha256","refinement_adapter_policy"]),
       try integer(fields["version"])==1,fields["refinement_adapter_policy"] as? String=="standard",
-      ["refinement","joint_refinement","continuation","motion_fidelity","fasth3","vdn"].allSatisfy({root[$0]==nil}),
+      ["refinement","joint_refinement","continuation","motion_fidelity","fasth3","fasth3_omni","vdn"].allSatisfy({root[$0]==nil}),
       let config=root["config"] as? [String:Any],let components=root["components"] as? [String:Any],
       components["fun_controlnet"]==nil,
       ["t2va","fl2va","ref2va"].contains(components["task"] as? String ?? ""),

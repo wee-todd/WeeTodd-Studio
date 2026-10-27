@@ -22,6 +22,7 @@ import StudioCore
   @Published var downloadFraction = 0.0
   @Published var downloadStatus = ""
   @Published var convertingTransformer = false
+  @Published var preparingRecipe = false
   private var conversionAttempt = UUID()
   var nativeDownloadCatalogURL: URL?
   var readNativeDownloadToken: () async throws -> String? = {
@@ -65,7 +66,9 @@ import StudioCore
       let local = URL(fileURLWithPath: runtime.root).appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
       let source = [bundled, local].compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0.path) }
       nativeDownloadCatalogURL = source
-      downloads = try source.map { try NativeModelDownloads.catalog(at: $0).map(\.descriptor) } ?? []
+      downloads = try await Task.detached(priority:.utility) {
+        try source.map { try NativeModelDownloads.catalog(at:$0).map(\.descriptor) } ?? []
+      }.value
       downloads = downloads.filter {
         ($0.supports(engine: "h3") && Self.nativeH3Available(runtime)) ||
           ($0.supports(engine: "ltx25") && Self.nativeLTXAvailable(runtime))
@@ -130,14 +133,18 @@ import StudioCore
   }
 
   func createRecipe(store: StudioStore) async {
-    guard !convertingTransformer, let preset = selectedPreset, selection.missingComponents(for: preset).isEmpty else {
+    guard !preparingRecipe,!convertingTransformer, let preset = selectedPreset, selection.missingComponents(for: preset).isEmpty else {
       return
     }
-    error = ""
+    error = "";preparingRecipe=true
+    defer {preparingRecipe=false}
     do {
       if preset.id.hasPrefix("swift-") {
-        let recipe = try NativeModelSetup.recipe(preset: preset,
-          selected: selection.components, memoryMode: memoryMode)
+        let selected=selection.components, mode=memoryMode
+        let recipe = try await Task.detached(priority:.userInitiated) {
+          try NativeModelSetup.recipe(preset:preset,selected:selected,memoryMode:mode)
+        }.value
+        guard selectedPreset?.id==preset.id,selection.components==selected,memoryMode==mode else { return }
         let staged = try NativeModelSetup.stage(recipe, directory: store.runtime.profilesDirectory)
         if preset.task == "t2v" {
           let probe = StudioStore.supportDirectory.appendingPathComponent("SetupPreflight/\(UUID().uuidString)")
@@ -257,6 +264,10 @@ import StudioCore
     let recipePath = resultPath
     store.editClip {
       $0.profileID = recipePath
+      if preset.id == NativeH3OmniProfile.presetID {
+        if $0.generationSelection == nil { $0.generationSelection = GenerationSelection(task:"ref2va") }
+        $0.generationSelection?.steps=8;$0.generationSelection?.h3SamplingMethod = .euler
+      }
       if preset.id.hasPrefix("swift-h3-fast-") {
         if $0.generationSelection == nil { $0.generationSelection = GenerationSelection(task:"t2v") }
         $0.generationSelection?.steps = 4;$0.generationSelection?.h3SamplingMethod = .euler

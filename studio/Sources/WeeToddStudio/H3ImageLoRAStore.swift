@@ -17,7 +17,7 @@ import StudioCore
   }
   var h3ImageProfiles: [ModelProfile] {
     profiles.filter { $0.engine == "h3" && ["t2v", "fflf", "ref2va"].contains($0.task)
-      && $0.generation?.vdn != true && $0.generation?.fasth3 != true }
+      && $0.generation?.vdn != true && $0.generation?.fasth3 != true && $0.generation?.fasth3Omni != true }
   }
   func selectH3ImageProfile(_ id: String) {
     imageDraft?.modelID = id

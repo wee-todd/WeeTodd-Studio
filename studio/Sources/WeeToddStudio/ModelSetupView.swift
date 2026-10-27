@@ -71,7 +71,7 @@ struct ModelSetupView: View {
           Text("Set up compatible models").font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
-        Button("Done") { state.selectedPreset = nil }.disabled(bridge.busy || state.downloading || state.convertingTransformer)
+        Button("Done") { state.selectedPreset = nil }.disabled(bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe)
       }
       Divider()
       ScrollViewReader { proxy in
@@ -100,7 +100,7 @@ struct ModelSetupView: View {
                 Button("Use Recipe for Selected Clip") {
                   state.useRecipeForSelectedClip(store: store)
                 }
-                .disabled(bridge.busy || state.downloading || state.convertingTransformer || clip.profileID == state.resultPath)
+                .disabled(bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe || clip.profileID == state.resultPath)
                 Text(
                   clip.profileID == state.resultPath
                     ? "Selected for \(clip.name). Prepare the clip to validate its media and settings."
@@ -157,14 +157,15 @@ struct ModelSetupView: View {
             .font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
+        if state.preparingRecipe { ProgressView("Verifying linked model checksums…").controlSize(.small) }
         Button("Create Recipe") { Task { await state.createRecipe(store: store) } }
           .buttonStyle(.borderedProminent)
           .disabled(
-            bridge.busy || state.downloading || state.convertingTransformer || state.rawDevTransformer != nil || !state.selection.missingComponents(for: preset).isEmpty
+            bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe || state.rawDevTransformer != nil || !state.selection.missingComponents(for: preset).isEmpty
               || !state.resultPath.isEmpty)
       }
     }.padding(24).frame(width: 720, height: 760)
-      .interactiveDismissDisabled(bridge.busy || state.downloading || state.convertingTransformer)
+      .interactiveDismissDisabled(bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe)
   }
 
   private var displayLog: String {
@@ -206,7 +207,7 @@ struct ModelSetupView: View {
           .disabled(state.roots.isEmpty || state.scanning)
         if state.scanning { ProgressView().controlSize(.small) }
       }
-    }.disabled(bridge.busy || state.downloading || state.convertingTransformer)
+    }.disabled(bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe)
   }
 
   private var componentChoices: some View {
@@ -215,7 +216,7 @@ struct ModelSetupView: View {
       ForEach(preset.components) { component in
         componentRow(component)
       }
-    }.disabled(bridge.busy || state.downloading || state.convertingTransformer)
+    }.disabled(bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe)
   }
 
   private func componentRow(_ component: ModelSetupComponent) -> some View {
@@ -328,7 +329,7 @@ struct ModelSetupView: View {
         "This Mac: \(Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824, specifier: "%.0f") GB unified memory"
       )
       .font(.caption).foregroundStyle(.secondary)
-    }.disabled(bridge.busy || state.downloading || state.convertingTransformer).onChange(of: state.memoryMode) { _, _ in state.resultPath = "" }
+    }.disabled(bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe).onChange(of: state.memoryMode) { _, _ in state.resultPath = "" }
   }
 
   private var compatibleDownloads: [ModelSetupDownload] {
@@ -363,7 +364,7 @@ struct ModelSetupView: View {
             Text(
               "Prepared model: "
                 + URL(fileURLWithPath: state.downloadDestination).appendingPathComponent(
-                  download.id
+                  download.id == "h3-fasth3-omni-q8" && URL(fileURLWithPath:state.downloadDestination).lastPathComponent != "FastH3-Omni" ? "FastH3-Omni/"+download.id : download.id
                 ).path
             )
             .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
@@ -389,7 +390,7 @@ struct ModelSetupView: View {
         if !state.downloadMessage.isEmpty {
           Text(state.downloadMessage).font(.caption).textSelection(.enabled)
         }
-      }.padding(.top, 10).disabled(bridge.busy || state.downloading || state.convertingTransformer)
+      }.padding(.top, 10).disabled(bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe)
         .onChange(of: state.selectedDownloadID) { _, _ in sourceTermsReviewed = false }
     }
   }

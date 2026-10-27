@@ -123,6 +123,14 @@ through the same compiler and worker used by Studio. Frozen manifests include re
 soundtracks, full-latent artifacts and continuation payloads; changing those inputs invalidates
 execution/resume admission. Cut-only native finishing restrictions remain in force.
 
+Experimental FastH3 Omni exports the same fixed eight-evaluation Ref2VA recipe used by Studio,
+with ordered image/video/audio references and at least one visual input. It supports explicit
+CPU image budgets, movie size policy and full temporal density; timed anchors, reduced density,
+continuation, refinement, extra LoRAs and sampler/motion overrides fail before weighted work.
+The profile does not change planning definitions or create another sampler. See the
+[Omni setup and portable recipe](../headless/README.md#experimental-fasth3-omni--eight-evaluations)
+and [measured qualification scope](../../STATUS.md#october-26-experimental-native-fasth3-omni).
+
 Ordinary LTX accepts up to eight timed images and 0–8 generated slots, with slots in stage one
 only. One HQ + predicted-duration + timed/generated combination completed real inference.
 Scene v2 has a separate 32-anchor/256 MiB reference budget and rejects guided/automatic-duration,

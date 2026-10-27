@@ -1,0 +1,46 @@
+{
+  "format": "weetodd-headless-v2",
+  "engine": "h3",
+  "candidate": "fasth3-omni-portable-example",
+  "components": {
+    "task": "ref2va",
+    "transformer": "/REPLACE/WITH/YOUR/MODELS/FastH3-Omni/mlx8/transformer.safetensors",
+    "text_encoder": "/REPLACE/WITH/YOUR/MODELS/H3/qwen-q8-vision-paged",
+    "vision_encoder": "/REPLACE/WITH/YOUR/MODELS/H3/vision-source.safetensors",
+    "tokenizer": "/REPLACE/WITH/YOUR/MODELS/H3/processor/tokenizer.json",
+    "video_vae": "/REPLACE/WITH/YOUR/MODELS/H3/video_vae.safetensors",
+    "audio_vae": "/REPLACE/WITH/YOUR/MODELS/H3/audio_vae.safetensors"
+  },
+  "config": {
+    "width": 768,
+    "height": 512,
+    "duration_seconds": 5,
+    "steps": 9,
+    "seed": 42,
+    "sampling_method": "euler",
+    "drop_adaln": true,
+    "memory_mode": "low_memory_bf16"
+  },
+  "prompt": "subject_definitions: The person in <Picture 1>.\nsummary: A calm indoor portrait.\nretention_analysis: Preserve the person's appearance and clothing.\ndetailed_description: The person slowly turns toward the camera, then smiles. A steady medium shot in soft window light.\noverall_soundscape: Quiet room ambience and natural clothing movement.\nnon_diegetic_music: None.",
+  "conditioning": {
+    "version": 1,
+    "task": "ref2va",
+    "audio_policy": "generated",
+    "inputs": [
+      {
+        "id": "appearance-1",
+        "kind": "image",
+        "role": "reference",
+        "image_pixel_budget_percent": 400,
+        "path": "/REPLACE/WITH/YOUR/MEDIA/appearance.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "strength": 1.0
+      }
+    ]
+  },
+  "fasth3_omni": {
+    "version": 1,
+    "contract_path": "/REPLACE/WITH/YOUR/MODELS/FastH3-Omni/mlx8/fastvideo_inference.json",
+    "contract_sha256": "68577f23f0c866e329aa8a578b2455e4ca9a26a3ca1d15ddd6d0e99091007e18"
+  }
+}

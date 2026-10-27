@@ -42,7 +42,7 @@ public enum NativeModelDownloads {
   }
   public static func catalog(at url: URL) throws -> [NativeModelDownloadPackage] {
     let bytes = try bounded(url, limit: 8 * 1024 * 1024)
-    let kinds: Set<String> = ["h3-qwen", "ltx25", "h3-video-vae", "h3-audio-vae", "h3-dt-tokenizer",
+    let kinds: Set<String> = ["h3-omni", "h3-qwen", "ltx25", "h3-video-vae", "h3-audio-vae", "h3-dt-tokenizer",
       "h3-direct-transformer", "h3-native-support", "h3-native-control", "ltx25-adapter",
       "ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae"]
     var packages = try JSONDecoder().decode([NativeModelDownloadPackage].self, from: bytes)
@@ -79,6 +79,18 @@ public enum NativeModelDownloads {
       }
       guard total <= 512 * 1_073_741_824, total == package.descriptor.downloadBytes else {
         throw StudioError.invalid("Native model package size differs from its catalog.")
+      }
+      if package.kind == "h3-omni" {
+        let sourceRepo="ddalcu/FastH3-Omni-MLX-Serve-8bit",sourceRevision="3277ecd1f31f46037f8d51e4882d24139be8d112"
+        guard package.descriptor.id=="h3-fasth3-omni-q8",package.descriptor.engines==["h3"],package.descriptor.tasks==["ref2va"],
+          package.descriptor.components==["omni_transformer","omni_contract"],
+          Set(package.files.map(\.target))==["transformer.safetensors","config.json","LICENSE","NOTICE","MODIFICATIONS.md","fastvideo_inference.json"],
+          package.files.allSatisfy({ $0.filename==$0.target && ($0.target=="fastvideo_inference.json"
+            ? $0.repo=="FastVideo/FastVideo-FastH3-Omni-8-Step-V1" && $0.revision=="53e0d26a1691aa473b6262d8196a8feb2c297df0" && $0.sha256==NativeH3OmniProfile.contractSHA256 && $0.size==776
+            : $0.repo==sourceRepo && $0.revision==sourceRevision) }),
+          package.files.contains(where: { $0.target=="transformer.safetensors" && $0.sha256==NativeH3OmniProfile.sourceSHA256 && $0.size==NativeH3OmniProfile.sourceBytes }) else {
+          throw StudioError.invalid("FastH3 Omni acquisition requires the pinned ddalcu affine Q8 source and separate official inference contract, including original license metadata.")
+        }
       }
       if ["ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae"].contains(package.kind) {
         let key = package.kind == "ltx25-duration-head" ? "duration_head_path"
@@ -131,9 +143,16 @@ public enum NativeModelDownloads {
     guard fstat(descriptor, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
       before.st_size == file.size else { return false }
     var hash = SHA256()
-    while let bytes = try handle.read(upToCount: 1024 * 1024), !bytes.isEmpty {
+    while true {
       try Task.checkCancellation()
-      hash.update(data: bytes)
+      // Drain Foundation's temporary read buffers per chunk, including when
+      // verifying a large installed source inside a long-lived setup task.
+      let consumed = try autoreleasepool {
+        let bytes = try handle.read(upToCount: 1024 * 1024) ?? Data()
+        hash.update(data: bytes)
+        return bytes.count
+      }
+      if consumed == 0 { break }
     }
     guard fstat(descriptor, &after) == 0, before.st_size == after.st_size,
       before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
@@ -179,7 +198,10 @@ public enum NativeModelDownloads {
       throw StudioError.invalid("Choose a pinned native download package.")
     }
     if let token { _ = try ModelDownloadToken.normalized(token) }
-    let fm = FileManager.default, root = destination.standardizedFileURL.resolvingSymlinksInPath()
+    let fm = FileManager.default
+    let chosen = destination.standardizedFileURL.resolvingSymlinksInPath()
+    let root = package.kind == "h3-omni" && chosen.lastPathComponent != "FastH3-Omni"
+      ? chosen.appendingPathComponent("FastH3-Omni") : chosen
     guard root.path.hasPrefix("/"), !root.path.utf8.contains(0) else { throw StudioError.invalid("Choose a model library.") }
     try fm.createDirectory(at: root, withIntermediateDirectories: true)
     let final = root.appendingPathComponent(id), lock = root.appendingPathComponent("." + id + ".lock")

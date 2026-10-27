@@ -15,12 +15,22 @@ struct H3ReferenceInspector:View {
       c.attachments[i].h3ReferencePlacement = value.isEmpty ? nil : value
     }
   }
+  private var isOmni:Bool { store.profiles.first { $0.id==store.selectedClip?.profileID }?.generation?.fasth3Omni == true }
   private var frame:Int {
     if case .index(let i)=attachment.h3ReferencePlacement?.frame {return i};return 0
   }
   var body:some View {
     DisclosureGroup("H3 reference placement") {
-      if showsPlacement {
+      if isOmni {
+        Text("Omni uses fixed ordered appearance references. Image budgets and movie sizing prepare inputs on CPU; full movie temporal density is required. The worker validates the complete packed media budget.").font(.caption2).foregroundStyle(.secondary)
+        if let value=attachment.h3ReferencePlacement,value.frame != nil || value.videoTemporalDensity != nil && value.videoTemporalDensity != .full {
+          Text("Retained unsupported reference settings: timed placement or reduced temporal density.").font(.caption2).foregroundStyle(.orange)
+          Button("Clear unsupported reference settings") {
+            edit { NativeH3OmniProfile.clearUnsupportedReferenceSettings(&$0) }
+          }
+        }
+      }
+      if showsPlacement && !isOmni {
       Picker("Frame",selection:Binding(get:{
         switch attachment.h3ReferencePlacement?.frame {
         case nil:return "default"
@@ -49,9 +59,9 @@ struct H3ReferenceInspector:View {
             Text("Native H3 budget").tag(H3VideoReferenceSizePolicy.nativeH3)
           }
           Picker("Temporal density",selection:Binding(get:{attachment.h3ReferencePlacement?.videoTemporalDensity ?? .full},set:{v in edit {$0.videoTemporalDensity=v}})) {
-            ForEach(H3VideoReferenceTemporalDensity.allCases,id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+            ForEach(isOmni ? [.full] : H3VideoReferenceTemporalDensity.allCases,id: \.self) { Text($0.rawValue.capitalized).tag($0) }
           }
-          Text("Density reduces video encoding work while keeping the original reference duration and audio clock.").font(.caption2).foregroundStyle(.secondary)
+          Text(isOmni ? "Omni keeps all aligned reference frames; sizing never enlarges smaller originals." : "Density reduces video encoding work while keeping the original reference duration and audio clock.").font(.caption2).foregroundStyle(.secondary)
         }
         if let sound=attachment.h3ReferencePlacement?.soundtrackPath {
           Text(URL(fileURLWithPath:sound).lastPathComponent).font(.caption).textSelection(.enabled)

@@ -240,6 +240,10 @@ public enum NativeH3Preparation {
     return number.doubleValue.isFinite && (0...1).contains(number.doubleValue)
   }
   private static func supported(_ recipe: [String: Any]) -> Bool {
+    if recipe["fasth3_omni"] != nil {
+      guard let ordinary = try? NativeH3OmniProfile.ordinary(recipe) else { return false }
+      return supported(ordinary)
+    }
     if recipe["fasth3"] != nil {
       guard let ordinary = try? NativeH3FastProfile.ordinary(recipe) else { return false }
       return supported(ordinary)
@@ -306,23 +310,24 @@ public enum NativeH3Preparation {
     let modelTask = (recipe["components"] as? [String: Any])?["task"] as? String
     let task = (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
       : modelTask == "ref2va" ? "ref2va" : modelTask == "fl2va" ? "fflf" : "t2v"
-    let vdn=recipe["vdn"] != nil,fast=recipe["fasth3"] != nil
+    let vdn=recipe["vdn"] != nil,fast=recipe["fasth3"] != nil,omni=recipe["fasth3_omni"] != nil
     return ["samplingMethod": config["sampling_method"] as? String ?? "euler",
       "videoDecodePrecision": config["video_decode_precision"] as? String ?? "float32",
       "videoDecodePrecisionEditable": true,
       "transformerWeightCacheGB":config["transformer_weight_cache_gb"] as? Int ?? 0,
-      "transformerWeightCacheEditable":!vdn && !fast && (recipe["components"] as? [String:Any])?["fun_controlnet"] == nil,
-      "attentionPolicy": config["attention_policy"] as? String ?? "dense",
-      "attentionPolicyEditable": ["ref2va", "fl2va"].contains(modelTask ?? "") && !vdn && !fast
+      "transformerWeightCacheEditable":!vdn && !fast && !omni && (recipe["components"] as? [String:Any])?["fun_controlnet"] == nil,
+      "attentionPolicy": omni ? "trained-vsa-128-90" : config["attention_policy"] as? String ?? "dense",
+      "attentionPolicyEditable": ["ref2va", "fl2va"].contains(modelTask ?? "") && !vdn && !fast && !omni
         && (recipe["components"] as? [String:Any])?["fun_controlnet"] == nil
         && (config["transformer_backend"] as? String ?? "mlx") == "mlx",
-      "vdn":vdn,"fasth3":fast,
-      "supportedTasks": config["attention_policy"] as? String == "sol_experimental" ? (modelTask == "fl2va" ? ["i2v", "fflf"] : ["ref2va"])
+      "vdn":vdn,"fasth3":fast,"fasth3Omni":omni,
+      "supportedTasks": omni ? ["ref2va"] : config["attention_policy"] as? String == "sol_experimental" ? (modelTask == "fl2va" ? ["i2v", "fflf"] : ["ref2va"])
         : task == "ref2va" ? ["ref2va", "a2v", "extension"] : [task], "controls": [
       "evaluations": max(0, (config["steps"] as? Int ?? 20) - 1),
-      "stepsEditable": !vdn && !fast, "refinementStepsEditable": false,
+      "stepsEditable": !vdn && !fast && !omni, "refinementStepsEditable": false,
+      "cfg": omni ? 1 as Any : NSNull(),
       "cfgEditable": false, "shiftEditable": false,
-      "stepsExplanation": fast ? "FastH3 Preview v1 requires four Euler evaluations." : vdn ? "VDN requires its released Euler evaluation count and full-strength adapter stack." : "H3 uses one fewer model evaluation than sigma grid points.",
+      "stepsExplanation": omni ? NativeH3OmniProfile.requirements : fast ? "FastH3 Preview v1 requires four Euler evaluations." : vdn ? "VDN requires its released Euler evaluation count and full-strength adapter stack." : "H3 uses one fewer model evaluation than sigma grid points.",
       "cfgExplanation": "Guidance is distilled into H3.",
       "shiftExplanation": "Swift H3 does not expose a Shift override."],
       "presets": [["id": "custom", "name": "Custom", "description": "Use the admitted profile settings."]]]
@@ -338,7 +343,7 @@ public enum NativeH3Preparation {
       try Task.checkCancellation()
       guard let recipe = try? profile(url.path), supported(recipe) else { return nil }
       return ["id": try canonical(url.path),
-        "name": recipe["fasth3"] != nil ? "MiniMax H3 · FastH3 \((recipe["fasth3"] as? [String:Any])?["variant"] as? String ?? "") · Swift" : recipe["vdn"] != nil ? "MiniMax H3 · VDN \(((recipe["config"] as? [String:Any])?["steps"] as? Int ?? 9)-1)-step · Swift" : url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " "),
+        "name": recipe["fasth3_omni"] != nil ? "MiniMax H3 · FastH3 Omni · 8 evaluations · Experimental Swift" : recipe["fasth3"] != nil ? "MiniMax H3 · FastH3 \((recipe["fasth3"] as? [String:Any])?["variant"] as? String ?? "") · Swift" : recipe["vdn"] != nil ? "MiniMax H3 · VDN \(((recipe["config"] as? [String:Any])?["steps"] as? Int ?? 9)-1)-step · Swift" : url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " "),
         "engine": "h3", "task": (recipe["components"] as? [String: Any])?["fun_controlnet"] != nil ? "control"
           : (recipe["components"] as? [String: Any])?["task"] as? String == "ref2va"
           ? "ref2va" : (recipe["components"] as? [String: Any])?["task"] as? String == "fl2va"
@@ -412,7 +417,7 @@ public enum NativeH3Preparation {
       : ["i2v", "fflf"].contains(task) ? "fflf" : "t2v"
     guard let chosen = profiles.first(where: {
       $0["task"] as? String == catalogTask &&
-        (clip.profileID == "auto" ? (($0["generation"] as? [String:Any])?["vdn"] as? Bool != true && ($0["generation"] as? [String:Any])?["fasth3"] as? Bool != true) : $0["id"] as? String == clip.profileID)
+        (clip.profileID == "auto" ? (($0["generation"] as? [String:Any])?["vdn"] as? Bool != true && ($0["generation"] as? [String:Any])?["fasth3"] as? Bool != true && ($0["generation"] as? [String:Any])?["fasth3Omni"] as? Bool != true) : $0["id"] as? String == clip.profileID)
     }),
       let path = chosen["id"] as? String else {
       throw unsupported("no compatible \(catalogTask) profile is installed")
@@ -427,6 +432,7 @@ public enum NativeH3Preparation {
     try validateAttentionSelection(try attentionPolicy(policyConfig),clip:clip)
     try validateAttentionPolicy(policyRecipe)
     try validateWeightCache(policyRecipe)
+    if recipe["fasth3_omni"] != nil { try NativeH3OmniProfile.validate(clip:clip,project:project,motion:motion,recipe:recipe) }
     if recipe["fasth3"] != nil { try NativeH3FastProfile.validate(clip:clip,project:project,motion:motion,recipe:recipe) }
     if recipe["vdn"] != nil { try NativeH3VDNProfile.validate(clip:clip,project:project,motion:motion,recipe:recipe) }
     return (project, clip, runtime, path, recipe,motion)
@@ -812,6 +818,15 @@ public enum NativeH3Preparation {
       recipe["conditioning"] = ["version": 1, "task": "fflf",
         "inputs": referenceInputs, "audio_policy": "generated"]
     }
+    if recipe["fasth3_omni"] != nil {
+      let visual=referenceInputs.filter { ["image","video"].contains($0["kind"] as? String ?? "") }
+      guard !visual.isEmpty,Set(referenceInputs.compactMap { $0["id"] as? String }).count==referenceInputs.count else {
+        throw unsupported("Omni needs unique ordered references including an image or movie")
+      }
+      // The native media compiler counts embedded movie soundtracks and admits
+      // complete text/media packed rows before any weighted stage.
+      _=try NativeH3OmniProfile.ordinary(recipe)
+    }
     recipe=try NativeH3JointPreparation.apply(clip.generationSelection?.h3Joint,to:recipe,continuityMode:clip.continuityMode)
     let configuredFFmpeg = runtime["ffmpegPath"] as? String ?? ""
     let ffmpeg = configuredFFmpeg.isEmpty ? [recipe["ffmpeg"] as? String ?? "",
@@ -880,6 +895,7 @@ public enum NativeH3Preparation {
     }
     if let adapters=(content["loras"] as? [String:Any])?["adapters"] as? [[String:Any]] { sources += adapters.compactMap { $0["path"] as? String } }
     sources += NativeH3VDNProfile.sources(content)
+    if let contract=(content["fasth3_omni"] as? [String:Any])?["contract_path"] as? String {sources.append(contract)}
 
     if let context=(content["continuation"] as? [String:Any])?["source_context"] as? String {
       sources += [context,URL(fileURLWithPath:context).deletingLastPathComponent().appendingPathComponent("latents.f32").path]

@@ -220,7 +220,24 @@ enum H3CheckpointSource {
     cache.sources[root.standardizedFileURL.path] = source
     return source
   }
-  static func fileURL(_ root: URL, block: Int? = nil) throws -> URL {
+  /// Omni access requires its verified token at every entrypoint. Merely
+  /// inspecting a header must never enable an ordinary or Preview request.
+  static func layout(_ root: URL, omni: H3OmniCheckpoint?) throws -> H3CheckpointLayout {
+    guard let omni else { return try H3CheckpointLayout(url: root) }
+    guard root.standardizedFileURL == omni.url.standardizedFileURL else {
+      throw H3CheckpointError.invalid("Omni execution token belongs to another checkpoint.")
+    }
+    try omni.checkUnchanged()
+    return omni.layout
+  }
+  static func fileURL(_ root: URL, block: Int? = nil, omni: H3OmniCheckpoint? = nil) throws -> URL {
+    if let omni {
+      _ = try layout(root, omni: omni)
+      guard block.map({ (0..<50).contains($0) }) ?? true else {
+        throw H3CheckpointError.invalid("Invalid Omni block slot.")
+      }
+      return omni.url
+    }
     guard isPaged(root) else { return root }
     let source = try inspect(root)
     if let block {
@@ -229,7 +246,8 @@ enum H3CheckpointSource {
     }
     return source.fixed
   }
-  static func checkUnchanged(_ root: URL) throws {
+  static func checkUnchanged(_ root: URL, omni: H3OmniCheckpoint? = nil) throws {
+    if let omni { _ = try layout(root, omni: omni); return }
     if isPaged(root) {
       // Both cached inspection and fresh admission finish with the complete
       // identity walk. Preserve its subsequent cancellation checkpoint only.

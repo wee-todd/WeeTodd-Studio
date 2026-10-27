@@ -462,12 +462,12 @@ Swift H3 and LTX 2.5 setup can find compatible components in folders you select,
 including existing ComfyUI model libraries. Discovery reads bounded metadata and leaves
 weights in place. Compatible pinned preconverted downloads now run in Swift with
 streamed checksums, resume and cancellation. Native setup includes DFR, MSR and
-Ingredients, Union, Motion Track and CrossView profiles. The merged native catalog has 24 pinned packages, including the duration head, raw Dev transformer, distilled refinement adapter, one-step Diffusion VAE and MSR V2 adapter;
+Ingredients, Union, Motion Track and CrossView profiles. The merged native catalog has 25 pinned packages, including FastH3 Omni, the duration head, raw Dev transformer, distilled refinement adapter, one-step Diffusion VAE and MSR V2 adapter;
 checkpoint/task admission and complete clean-machine installation remain separately qualified.
 Native setup can convert the admitted raw LTX 2.5 Dev transformer to unmerged Q8 pages in a new directory. Other source conversions and unsupported adapters retain their explicit setup paths. A final-app isolated clean-registry check passed eight setup/header cases against the then-current 23 catalog contracts,
 including Diffusion VAE adoption, without Python, network, conversion reruns or weight copies.
 The acquisition audit passes pinned HTTPS transfer/checksum, resume, cancellation, corruption and
-access-error tests, and covers every non-import-only setup component in the 24-package catalog.
+access-error tests, and covers every non-import-only setup component in the then-current 24-package catalog.
 It does not establish first installation of every large package. Simulated lower-RAM admission
 rejects oversized LTX requests and unsafe H3 cache budgets before weighted work; physical
 smaller-Mac speed and peak memory remain unmeasured.
@@ -2359,6 +2359,34 @@ bakes the rank-450 and Pixel-Spatial adapters together for stage two.
 
 Do not build stage two from the stage-one pages. Sequential requantization changes video output.
 Preflight verifies the stage-one adapter, stage-two adapter, and selected Pixel-Spatial adapter.
+
+## Experimental native FastH3 Omni
+
+**FastH3 Omni · experimental** is a separate native Swift Ref2VA profile with eight actual
+PDD evaluations (`config.steps=9` schedule nodes), coarse Euler and CFG 1. Choose it explicitly
+in Model setup and link the pinned community affine-Q8 conversion plus the official inference
+contract; reuse compatible installed Qwen/vision, tokenizer and original quality video/audio
+VAEs in place. The video VAE must use a supported native format; the qualified setup uses
+the original-architecture affine-Q8 VAE with default FP32 decode. Unsupported raw VAE metadata
+rejects at preflight, without automatic conversion or fallback. Setup verifies source hashes before inference. See the
+[setup and portable recipe guide](examples/headless/README.md#experimental-fasth3-omni--eight-evaluations) for exact sources and license metadata.
+
+Omni takes ordered appearance references, including at least one image or movie: at most
+12 total, with ceilings of 9 images, 3 videos and 3 audio sources including movie soundtracks.
+Choose the output canvas explicitly: 32-pixel axes up to 2048, within the existing native pixel
+budget, 5–15 seconds, and at most 40,000 complete packed rows. Qwen and decoded-media limits
+also apply. Image pixel budgets 50–400%, movie `match_output`/`native_h3` size policies and
+full temporal density are supported CPU preparation controls. They preserve source aspect and
+never enlarge smaller originals. Reduced or automatic temporal density is unsupported.
+
+The fixed trained profile uses PDD 32 with boundaries 0,4,8,12,16,20,24,28,32, grid maximum
+0.999, video/audio shifts 12/3, VSA tiles of 128 at sparsity 0.9 and `p2_multi_region` reference
+keep rate 0.1. Still output, timed anchors, continuation, refinement, extra LoRAs, model/sampler/
+motion overrides, Preview/VDN/Sol and prefix/approximation caches reject before weighted work.
+Studio's explicit repair actions retain the prompt, canvas and attachments; reference repair
+also retains supported sizing and soundtrack choices. Generation uses the shared worker and
+staged component release. Audio is newly generated, not preservation of a reference soundtrack.
+See the [measured qualification and limitations](STATUS.md#october-26-experimental-native-fasth3-omni); this remains an experimental profile.
 
 ## FastH3 production profile
 

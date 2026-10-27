@@ -55,6 +55,15 @@ struct GenerationModelInspector: View {
         Spacer()
         Button("Model setup…") { store.showRuntime = true }.font(.caption2)
       }
+      if selectedProfile?.generation?.fasth3Omni == true {
+        Text(NativeH3OmniProfile.requirements).font(.caption2).foregroundStyle(.secondary)
+        ForEach(NativeH3OmniProfile.conflicts(clip:clip),id: \.self) { issue in
+          Text(issue).font(.caption2).foregroundStyle(.orange)
+        }
+        Button("Apply required Omni sampling settings") {
+          store.editClip { NativeH3OmniProfile.applyRequiredSettings(to:&$0) }
+        }.help("Explicitly clears Turbo/two-stage, refinement, reference-noise, attention and cache overrides. Keeps all inputs, LoRAs, prompt, canvas and duration. Disable extra LoRAs or remove incompatible inputs below.")
+      }
       ClipLoRAInspector(clip: clip)
       if clip.generationSelection?.isModified == true || clip.h3PagingCacheGB != nil {
         Button("Use model defaults") { store.editClip { $0.useSelectedModelDefaults() } }

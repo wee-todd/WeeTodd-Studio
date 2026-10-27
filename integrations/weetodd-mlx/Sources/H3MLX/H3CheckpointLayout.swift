@@ -18,6 +18,7 @@ public enum H3FastVariant: String, Sendable, Codable {
 }
 
 public struct H3CheckpointLayout: Sendable {
+  public let omniVariant: H3OmniVariant?
   public let fastVariant: H3FastVariant?
   public let prefix: String
   public let blockCount: Int
@@ -194,12 +195,24 @@ public struct H3CheckpointLayout: Sendable {
         }
       }
     }
+    self.omniVariant = nil
     self.fastVariant = fastVariant
     prefix = root
     curveRank = curved ? 64 : nil
     blockCount = 50
     quantizedProjections = quantized.count
     quantizedBases = quantized
+  }
+
+  /// Only the strict Omni schema validator constructs this intrinsic layout.
+  init(validatedOmni variant: H3OmniVariant) {
+    omniVariant = variant
+    fastVariant = nil
+    prefix = ""
+    blockCount = 50
+    quantizedProjections = 310
+    curveRank = nil
+    quantizedBases = []
   }
 
   public init(url: URL) throws {
@@ -221,6 +234,10 @@ public struct H3CheckpointLayout: Sendable {
 
   private init(validatingURL url: URL) throws {
     let file = try SafeTensorFile(url: url)
+    if file.metadata["modified_from"] == "FastVideo/FastVideo-FastH3-Omni-8-Step-V1"
+      || file.tensors["blocks.0.attn.to_gate_compress.weight"] != nil {
+      throw H3CheckpointError.invalid("FastH3 Omni requires its dedicated verified source and execution contract.")
+    }
     if file.tensors["adaln_t_table"] != nil {
       guard file.metadata["partition"]?.uppercased() == "FL2VA",
         file.metadata["adaln_curve_grid"] == "1001",

@@ -20,21 +20,35 @@ public enum H3InputProjection {
   }
 
   public static func evaluate(checkpointURL: URL, kind: Kind,
-    input: MLXArray) throws -> MLXArray {
+    input: MLXArray, omni: H3OmniCheckpoint? = nil) throws -> MLXArray {
     guard input.ndim == 3, input.shape[0] == 1,
       (1...65536).contains(input.shape[1]), input.shape[2] == kind.columns,
       input.dtype.isFloatingPoint else {
       throw H3CheckpointError.invalid("Invalid H3 \(kind.rawValue) input shape.")
     }
     try Task.checkCancellation()
-    let layout = try H3CheckpointLayout(url: checkpointURL)
-    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let layout = try H3CheckpointSource.layout(checkpointURL, omni: omni)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, omni: omni)
     let file = try SafeTensorFile(url: tensorURL)
     defer {
       Stream.gpu.synchronize()
       Memory.clearCache()
     }
     let stem = layout.prefix + kind.rawValue
+    if let omni {
+      return try omni.withParameters { scope in
+        let bias = try scope.read(stem + ".bias")
+        let result: MLXArray
+        if kind == .condition {
+          result = try scope.project(stem, input: input.asType(.bfloat16)) + bias
+        } else {
+          let weight = try scope.read(stem + ".weight")
+          result = addMM(bias.asType(.float32), input.asType(.float32), weight.asType(.float32).T)
+        }
+        eval(result)
+        return result
+      }
+    }
     let weightName = stem + ".weight"
     let biasName = stem + ".bias"
     let biasDtype = kind == .condition || layout.fastVariant != nil ? "BF16" : "F32"
@@ -65,7 +79,7 @@ public enum H3InputProjection {
     }
     eval(result)
     try file.checkUnchanged(at: tensorURL)
-    try H3CheckpointSource.checkUnchanged(checkpointURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL, omni: omni)
     try Task.checkCancellation()
     return result
   }

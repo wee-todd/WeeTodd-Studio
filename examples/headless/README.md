@@ -235,3 +235,59 @@ implicit. Setup starts at eight evaluations, Shift 5, CFG 1/STG 0 and zero refin
 `config.stage1_steps` and `config.shift` can be changed; the eight-step/Shift-5 combination is the
 matched tested configuration. The recipe is T2V with generated audio only. Studio clip exports
 retain these fields and use this same renderer. Physical 36 GB qualification remains open.
+
+## Experimental FastH3 Omni · eight evaluations
+
+[The portable Omni recipe](h3_fasth3_omni_ref2va.json) uses the shared Swift H3 worker's
+`fasth3_omni` wrapper and native Ref2VA route. [The ComfyUI API example](../h3_fasth3_omni_swift_api.json)
+passes that saved recipe unchanged through the existing `WeeToddSwiftVideoGenerate` node. Native
+headless execution uses the same recipe with `scripts/render_headless.py --recipe ...
+--swift-worker ... --output-directory ...`; the worker owns preflight and inference. No Python model is loaded
+by the recipe-backed host. These files are portable templates, **not runtime-ready recipes**.
+Replace every `/REPLACE/WITH/YOUR/` path, compute the actual media SHA256 (the zero digest is a
+placeholder), and choose an executable FFmpeg before preflight or rendering. The model-free
+`preflight_h3_workflow.py --all-api` sweep validates explicit portable placeholders and reports
+`runtime_ready: null`; a saved actual ComfyUI prompt still requires `--workflow` and `--comfy-root`
+for installed worker/media admission.
+
+Studio Model setup offers **MiniMax H3 · FastH3 Omni · 8 evaluations · Experimental Swift**.
+Link the existing affine Q8 transformer from
+`ddalcu/FastH3-Omni-MLX-Serve-8bit@3277ecd1f31f46037f8d51e4882d24139be8d112` and the separate
+`fastvideo_inference.json` from
+`FastVideo/FastVideo-FastH3-Omni-8-Step-V1@53e0d26a1691aa473b6262d8196a8feb2c297df0`.
+The official FastH3-Omni-MLX kit has no weights. Source/checksum verification runs in the background;
+compatible installed Qwen/vision, tokenizer and original-architecture VAE components are reused in place.
+Use a supported native-format video VAE; qualification uses the existing affine-Q8 conversion
+of the original quality VAE with default FP32 decode, not a fast or distilled decoder. Raw
+upstream SafeTensors are not automatically converted or silently substituted; unsupported
+format/normalization metadata fails preflight.
+The optional pinned download creates `FastH3-Omni/h3-fasth3-omni-q8` under the chosen destination
+library (or `h3-fasth3-omni-q8` when the chosen folder is already named `FastH3-Omni`). Partial
+files and staging stay in that family folder. Keep model LICENSE, NOTICE and MODIFICATIONS metadata;
+these weights retain the MiniMax H3 Community License Agreement, separately from product code.
+
+Omni is independent Ref2VA with at least one image or movie appearance reference, in attachment order.
+It admits at most **12 total** references: **9 images, 3 videos and 3 audio sources**, where included
+movie soundtracks also consume audio slots. The output canvas stays user-selected on a 32-pixel grid,
+with each axis up to 2048, a requested duration of 5–15 seconds, and a complete **40,000-row** packed
+budget for text, target and media checked by the worker. Media preparation also checks the existing
+Qwen visual-pad and RGB budgets; passing canvas checks alone does not establish media admission.
+`config.steps=9` records grid nodes and means **8 actual PDD evaluations**, with coarse Euler,
+CFG 1 and fixed trained VSA. The profile owns PDD 32, boundaries `[0,4,8,12,16,20,24,28,32]`, grid
+maximum 0.999, video/audio shifts 12/3, tile 128, sparsity 0.9, `p2_multi_region` and keep rate 0.1.
+Omit `attention_policy`, including explicit `dense`. Still images, anchors/timing, continuation,
+refinement, model/sampler/motion controls, extra LoRAs, Preview/VDN/Sol and approximation caches are unsupported.
+CPU reference preparation remains explicit: images accept `image_pixel_budget_percent` 50–400;
+movies accept `size_policy=match_output|native_h3` and `temporal_density=full` only. These policies
+resize down without enlarging smaller originals and do not change the sampling contract. The
+example uses an explicit 400% image budget to retain more source detail, subject to Qwen and packed-row limits.
+Half, quarter and automatic temporal thinning reject. Omitted preparation fields retain existing defaults.
+
+Selecting the profile keeps authored work. Retained incompatible settings block preparation/export;
+**Apply required Omni sampling settings** explicitly clears incompatible sampling, Turbo/two-stage,
+refinement, reference-noise and cache overrides. Disable extra LoRAs or remove incompatible input
+purposes in their visible controls, and clear timed placement or non-full density explicitly.
+Clearing unsupported reference settings preserves valid sizing and soundtrack selections. Prompt, canvas,
+duration and ordered attachments survive. This experimental profile remains unqualified for
+production; portable schema tests do not establish installed-model generation or creative quality. See the
+[measured qualification scope](../../STATUS.md#october-26-experimental-native-fasth3-omni) for actual AV and app-lifecycle checks.

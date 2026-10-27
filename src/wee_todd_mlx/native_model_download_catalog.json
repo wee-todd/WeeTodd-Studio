@@ -1146,5 +1146,79 @@
         "sha256": "be75acae5c99b0fb16ed6cfbf8f731e5121a729bef112d20337699407e796451"
       }
     ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-fasth3-omni-q8",
+      "name": "MiniMax H3 \u00b7 FastH3 Omni affine Q8 \u00b7 Swift",
+      "description": "Experimental eight-evaluation Ref2VA transformer, pinned community ddalcu export plus separate official FastVideo inference contract. Reuse installed Qwen/vision, tokenizer and VAEs; no duplicate support download. The official FastH3-Omni-MLX kit contains no weights.",
+      "downloadBytes": 37304427323,
+      "requiredDiskBytes": 37572862779,
+      "sourceURL": "https://huggingface.co/ddalcu/FastH3-Omni-MLX-Serve-8bit/tree/3277ecd1f31f46037f8d51e4882d24139be8d112",
+      "licenseURL": "https://huggingface.co/ddalcu/FastH3-Omni-MLX-Serve-8bit/blob/3277ecd1f31f46037f8d51e4882d24139be8d112/LICENSE",
+      "licenseNotice": "Model weights retain the MiniMax H3 Community License Agreement, LICENSE, NOTICE and MODIFICATIONS metadata. Product implementation and FastVideo source licenses are separate.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "tasks": [
+        "ref2va"
+      ],
+      "components": [
+        "omni_transformer",
+        "omni_contract"
+      ]
+    },
+    "kind": "h3-omni",
+    "files": [
+      {
+        "repo": "ddalcu/FastH3-Omni-MLX-Serve-8bit",
+        "revision": "3277ecd1f31f46037f8d51e4882d24139be8d112",
+        "filename": "transformer.safetensors",
+        "size": 37304406432,
+        "sha256": "44fff6e29adde8ec485b1dddad02d9a134d75c52df2218e19bbf760199080ba6",
+        "target": "transformer.safetensors"
+      },
+      {
+        "repo": "ddalcu/FastH3-Omni-MLX-Serve-8bit",
+        "revision": "3277ecd1f31f46037f8d51e4882d24139be8d112",
+        "filename": "config.json",
+        "size": 1012,
+        "sha256": "fb1c071b4afd500cafad2d874357673eb1567e2cfd8c8c478357d15acc65d318",
+        "target": "config.json"
+      },
+      {
+        "repo": "ddalcu/FastH3-Omni-MLX-Serve-8bit",
+        "revision": "3277ecd1f31f46037f8d51e4882d24139be8d112",
+        "filename": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44",
+        "target": "LICENSE"
+      },
+      {
+        "repo": "ddalcu/FastH3-Omni-MLX-Serve-8bit",
+        "revision": "3277ecd1f31f46037f8d51e4882d24139be8d112",
+        "filename": "NOTICE",
+        "size": 121,
+        "sha256": "154fe7fbdf198395d53c57d6786b2fbf7e63a083ff70843c5ef78c0c7303d91a",
+        "target": "NOTICE"
+      },
+      {
+        "repo": "ddalcu/FastH3-Omni-MLX-Serve-8bit",
+        "revision": "3277ecd1f31f46037f8d51e4882d24139be8d112",
+        "filename": "MODIFICATIONS.md",
+        "size": 1378,
+        "sha256": "9227ac30450a0a8b97314f10ce15718bb0e60818051b324d40d810d89a6781b2",
+        "target": "MODIFICATIONS.md"
+      },
+      {
+        "repo": "FastVideo/FastVideo-FastH3-Omni-8-Step-V1",
+        "revision": "53e0d26a1691aa473b6262d8196a8feb2c297df0",
+        "filename": "fastvideo_inference.json",
+        "size": 776,
+        "sha256": "68577f23f0c866e329aa8a578b2455e4ca9a26a3ca1d15ddd6d0e99091007e18",
+        "target": "fastvideo_inference.json"
+      }
+    ]
   }
 ]

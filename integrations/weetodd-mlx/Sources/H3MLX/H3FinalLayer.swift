@@ -129,6 +129,31 @@ public enum H3FinalLayer {
     return result
   }
 
+  static func evaluateOmni(source: H3OmniCheckpoint, input: MLXArray,
+    timeEmbeddings: MLXArray, timestepIndices: MLXArray,
+    videoIndices: MLXArray, audioIndices: MLXArray,
+    plan: H3PDDPlan, step: Int) throws -> Output {
+    try source.withParameters { scope in
+      let activated = silu(timeEmbeddings.asType(.float32)).asType(.bfloat16)
+      let modulation = try scope.project("final_layer.adaln_proj.linear",input:activated)
+        + scope.read("final_layer.adaln_proj.linear.bias")
+      let shift = take(modulation[0..<timeEmbeddings.shape[0],0..<5376],timestepIndices,axis:0)
+      let scale = take(modulation[0..<timeEmbeddings.shape[0],5376..<10752],timestepIndices,axis:0)
+      let normalized = try modulatedNormalization(input:input,
+        normWeight:scope.read("final_layer.norm.weight"),shift:shift,scale:scale)
+      func head(_ name:String, _ modality:H3PDDPlan.Modality, _ indices:MLXArray) throws -> MLXArray {
+        // Output-head banks are an FP32 runtime island despite BF16 checkpoint storage.
+        // Promote before fusion so its source-dtype preservation cannot round fused parameters.
+        let parameters = try H3PDDHeadFusion.fuse(weight:scope.read("final_layer." + name + ".weight").asType(.float32),
+          bias:scope.read("final_layer." + name + ".bias").asType(.float32),plan:plan,step:step,modality:modality)
+        return addMM(parameters.bias!.asType(.float32),take(normalized,indices,axis:1).asType(.float32),parameters.weight.asType(.float32).T)
+      }
+      let output = try Output(video:head("video_out",.video,videoIndices),audio:head("audio_out",.audio,audioIndices))
+      eval(output.video,output.audio)
+      return output
+    }
+  }
+
   /// Python's retained NNC path leaves x in FP32 through FinalLayer.norm_out. MLX promotes
   /// the BF16 norm weight to x's FP32 dtype. Modulation stays in its original dtype; there
   /// is no FP16/BF16 residual cast before RMS normalization or before the FP32 heads.

@@ -8,20 +8,20 @@ import TensorIO
 /// created and the large QKV/FFN matrices are never resident together.
 public enum H3TokenRefiner {
   public static func evaluate(checkpointURL: URL,
-    input: MLXArray) throws -> MLXArray {
-    try evaluate(checkpointURL: checkpointURL, input: input, lora: nil)
+    input: MLXArray, omni: H3OmniCheckpoint? = nil) throws -> MLXArray {
+    try evaluate(checkpointURL: checkpointURL, input: input, lora: nil, omni: omni)
   }
 
   static func evaluate(checkpointURL: URL, input: MLXArray,
-    lora: (any H3LoRAApplying)?) throws -> MLXArray {
+    lora: (any H3LoRAApplying)?, omni: H3OmniCheckpoint? = nil) throws -> MLXArray {
     var value = input
     for index in 0..<2 {
       value = try evaluateBlock(checkpointURL: checkpointURL,
-        index: index, input: value, lora: lora,
+        index: index, input: value, lora: lora, omni: omni,
         observe: { _, _ in })
     }
-    let layout = try H3CheckpointLayout(url: checkpointURL)
-    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let layout = try H3CheckpointSource.layout(checkpointURL, omni: omni)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, omni: omni)
     let file = try SafeTensorFile(url: tensorURL)
     let name = layout.prefix + "token_refiner.final_norm.weight"
     guard let descriptor = file.tensors[name], descriptor.dtype == "BF16",
@@ -34,28 +34,32 @@ public enum H3TokenRefiner {
     let result = MLXFast.rmsNorm(value, weight: weight, eps: 1e-5)
     eval(result)
     try file.checkUnchanged(at: tensorURL)
-    try H3CheckpointSource.checkUnchanged(checkpointURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL, omni: omni)
     try Task.checkCancellation()
     return result
   }
 
   public static func evaluateBlock(checkpointURL: URL, index: Int,
-    input: MLXArray) throws -> MLXArray {
+    input: MLXArray, omni: H3OmniCheckpoint? = nil) throws -> MLXArray {
     try evaluateBlock(checkpointURL: checkpointURL, index: index,
-      input: input, lora: nil, observe: { _, _ in })
+      input: input, lora: nil, omni: omni, observe: { _, _ in })
   }
 
   static func evaluateBlock(checkpointURL: URL, index: Int,
     input: MLXArray, lora: (any H3LoRAApplying)? = nil,
+    omni: H3OmniCheckpoint? = nil,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard (0..<2).contains(index), input.ndim == 3,
       input.shape[0] == 1, (1...H3QwenRequest.maximumTokenRows).contains(input.shape[1]),
       input.shape[2] == 5376, input.dtype == .bfloat16 else {
       throw H3CheckpointError.invalid("Invalid H3 text refiner block or input.")
     }
+    guard omni == nil || lora == nil else {
+      throw H3CheckpointError.invalid("Omni token refinement does not support ordinary LoRAs.")
+    }
     try Task.checkCancellation()
-    let layout = try H3CheckpointLayout(url: checkpointURL)
-    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    let layout = try H3CheckpointSource.layout(checkpointURL, omni: omni)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, omni: omni)
     let file = try SafeTensorFile(url: tensorURL)
     let prefix = layout.prefix + "token_refiner.blocks.\(index)."
     let previousCacheLimit = Memory.cacheLimit
@@ -80,7 +84,11 @@ public enum H3TokenRefiner {
     func project(_ activation: MLXArray, _ suffix: String,
       rows: Int, columns: Int, qkv: Bool = false) throws -> MLXArray {
       let base: MLXArray
-      if layout.fastVariant != nil {
+      if let omni {
+        base = try omni.withParameters { scope in
+          try scope.project(prefix + suffix, input: activation)
+        }
+      } else if layout.fastVariant != nil {
         let projection = try H3QwenQ8Projection(file: file, name: prefix + suffix + ".weight")
         guard projection.rows == rows, projection.columns == columns else {
           throw H3CheckpointError.invalid("FastH3 text projection changed after admission.")
@@ -147,7 +155,7 @@ public enum H3TokenRefiner {
     eval(output)
     try observe("output", output)
     try file.checkUnchanged(at: tensorURL)
-    try H3CheckpointSource.checkUnchanged(checkpointURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL, omni: omni)
     try Task.checkCancellation()
     return output
   }

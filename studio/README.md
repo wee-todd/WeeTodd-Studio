@@ -191,6 +191,32 @@ A learned 1920 × 1088, 73-frame target completed and received human motion/audi
 on October 5. Clean performance and maximum-duration/max-canvas combinations remain unqualified.
 The learned upscaler is separate from spatial interpolation.
 
+**FastH3 Omni · experimental** is a separate native Swift Ref2VA profile with eight actual
+PDD evaluations (`config.steps=9` schedule nodes), coarse Euler and CFG 1. Choose it explicitly
+in Model setup and link the pinned community affine-Q8 conversion plus the official inference
+contract; reuse compatible installed Qwen/vision, tokenizer and original quality video/audio
+VAEs in place. The video VAE must use a supported native format; the qualified setup uses
+the original-architecture affine-Q8 VAE with default FP32 decode. Unsupported raw VAE metadata
+rejects at preflight, without automatic conversion or fallback. Setup verifies source hashes before inference. See the
+[setup and portable recipe guide](../examples/headless/README.md#experimental-fasth3-omni--eight-evaluations) for exact sources and license metadata.
+
+Omni takes ordered appearance references, including at least one image or movie: at most
+12 total, with ceilings of 9 images, 3 videos and 3 audio sources including movie soundtracks.
+Choose the output canvas explicitly: 32-pixel axes up to 2048, within the existing native pixel
+budget, 5–15 seconds, and at most 40,000 complete packed rows. Qwen and decoded-media limits
+also apply. Image pixel budgets 50–400%, movie `match_output`/`native_h3` size policies and
+full temporal density are supported CPU preparation controls. They preserve source aspect and
+never enlarge smaller originals. Reduced or automatic temporal density is unsupported.
+
+The fixed trained profile uses PDD 32 with boundaries 0,4,8,12,16,20,24,28,32, grid maximum
+0.999, video/audio shifts 12/3, VSA tiles of 128 at sparsity 0.9 and `p2_multi_region` reference
+keep rate 0.1. Still output, timed anchors, continuation, refinement, extra LoRAs, model/sampler/
+motion overrides, Preview/VDN/Sol and prefix/approximation caches reject before weighted work.
+Studio's explicit repair actions retain the prompt, canvas and attachments; reference repair
+also retains supported sizing and soundtrack choices. Generation uses the shared worker and
+staged component release. Audio is newly generated, not preservation of a reference soundtrack.
+See the [measured qualification and limitations](../STATUS.md#october-26-experimental-native-fasth3-omni); this remains an experimental profile.
+
 **FastH3 Preview v1 · experimental** has explicit **FastH3 DENSE** and **FastH3 VSA**
 Swift T2VA presets in **Studio Settings → Model setup**. Link the corresponding existing
 pinned affine-Q8 pages and shared text/video/audio components. The worker checks every page
@@ -1122,7 +1148,8 @@ configure the native MLX engines.
    or LTX 2.3/2.5 text/image. Swift LTX 2.5 also offers spatial DFR and one- or two-round
    temporal DFR presets, MSR images, Ingredients sheets, Union, Motion Track and CrossView
    controls when its worker is enabled. H3 also offers native Fun ControlNet and
-   **VDN 8-step**, **VDN 50-step**, **FastH3 DENSE** and **FastH3 VSA** Swift presets.
+   **VDN 8-step**, **VDN 50-step**, **FastH3 DENSE**, **FastH3 VSA** and
+   **FastH3 Omni · 8 evaluations · Experimental Swift** presets. DENSE and VSA use Preview v1.
    Compatible installed adapters can be reused or acquired through pinned native catalog entries.
 2. Choose **Set Up… → Use Existing Models**, select model folders (including an existing ComfyUI
    `models` folder), then scan. Inspection reads bounded headers and manifests, never model tensors.
@@ -1144,9 +1171,11 @@ configure the native MLX engines.
    released `stage-dmd-step-250` folder and `h3_silu_temb_grid.safetensors`, plus the ordinary
    Qwen/processor/tokenizer and VAE components. Keep the stage folder intact; both named adapters
    remain at strength 1. The VDN50 preset uses `stage-b-step-2000` with only its standard adapter and no timestep
-   grid. FastH3 dense/VSA presets instead link the corresponding pinned affine-Q8 student
-   pages. All specialized transformer/stage/grid fields are import-only; they have no pinned
-   catalog download. No backbone weights are copied or converted.
+   grid. FastH3 Preview dense/VSA presets instead link the corresponding pinned affine-Q8 student
+   pages. Those Preview and VDN transformer/stage/grid fields are import-only. Omni links a
+   separately pinned affine-Q8 transformer file and official inference contract; both also have
+   a pinned native catalog download. See the [Omni setup guide](../examples/headless/README.md#experimental-fasth3-omni--eight-evaluations).
+   Linking installed backbone weights keeps them in place without conversion.
 3. Use **Automatic** to select a lower-memory policy on Macs with 64 GB or less, **Lower Memory** to
    request supported memory-saving settings, or **Custom** to retain the preset policy for later
    advanced adjustment. Memory information is advisory and does not promise fit, allocate RAM, or
@@ -1165,10 +1194,13 @@ configure the native MLX engines.
    Existing recipes and model files are preserved. Automatic selection can use the new compatible
    components; a specific recipe can be pinned through **Model profile**. **Set Up Models…**
    is also available from missing-model actions. VDN and FastH3 are always explicit: use the
-   setup result for a T2V clip or pin its recipe through **Model profile**. Released Euler
-   evaluations are fixed at 8 or 50 for VDN and 4 for FastH3; unsupported controls are hidden.
-   **Reset incompatible model overrides** repairs inherited sampler/backend/cache settings
-   while preserving prompt and media. Remove incompatible attachments and continuity settings explicitly before preparing.
+   VDN/Preview setup result for a T2V clip or select Omni for an independent Ref2VA clip with
+   at least one visual reference. Pin the recipe through **Model profile**. Actual evaluations
+   are fixed at 8 or 50 for VDN, 4 for FastH3 Preview and 8 for FastH3 Omni; unsupported controls are hidden.
+   **Reset incompatible model overrides** repairs inherited Preview/VDN sampler/backend/cache
+   settings while preserving prompt and media. Omni offers **Apply required Omni sampling settings**;
+   its reference repair clears timed placement and non-full temporal density while retaining supported
+   sizing and soundtrack choices. Remove incompatible attachments and continuity settings explicitly before preparing.
 
 **Download or prepare a model** shows compatible catalog items with source terms, download size and
 required space before an explicit download. Prefer the
@@ -1186,7 +1218,7 @@ hardlinked on the same volume or linked across volumes; keep the original files 
 Cancellation preserves partial downloads without publishing an incomplete package. Progress
 and **Cancel** appear in the setup window. The native path uses a Studio Keychain token or
 `HF_TOKEN`; it never writes the token into download state, provenance or logs.
-The merged native catalog has 24 pinned packages, including the duration head, raw Dev transformer,
+The merged native catalog has 25 pinned packages, including FastH3 Omni, the duration head, raw Dev transformer,
 distilled refinement adapter, one-step Diffusion VAE and MSR V2 adapter.
 It also includes direct H3 transformer/support, Qwen, video VAE, folded audio VAE and tokenizer, plus
 supported task adapters. This field coverage does not establish every checkpoint/task combination;

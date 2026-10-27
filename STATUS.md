@@ -1,5 +1,60 @@
 # WeeTodd Studio implementation status
 
+## October 26 experimental native FastH3 Omni
+
+Studio and the shared Swift/MLX worker now expose the pinned FastH3 Omni Ref2VA profile,
+with eight PDD evaluations, CFG 1 and trained VSA/reference retention. It accepts ordered
+image/video/audio conditions, requires a visual reference and rejects unsupported sampler,
+motion, timed-anchor, continuation, refinement, LoRA and approximation-cache controls before
+weighted work. Existing deterministic image budgets (50–400%), video size policy and full
+temporal density are supported; reduced/automatic temporal density is not. Admission retains
+12 total references, per-kind limits of nine images/three videos/three audio sources, the
+aggregate Qwen visual budget and 40,000 packed rows. Included movie soundtracks count as audio
+sources. Ordinary H3, Preview, still-image and saved-document contracts remain separate.
+
+Setup links the exact community affine-Q8 transformer conversion and official pinned inference
+contract, then reuses supported Qwen/vision/tokenizer and audio/video VAE components. The original
+video VAE architecture is retained; the qualified native video VAE is its existing affine-Q8
+conversion with FP32 decoding. Raw source weights without native normalization metadata fail
+preflight. No implicit conversion, component substitution or sampler fallback occurs.
+
+The isolated Release app completed an actual 832×480, five-second request with the full
+1152×768 appearance sheet (explicit 400% budget), eight evaluations and seed 20261026. Its
+exported headless job matched the app's frozen recipe and bundled worker. Actual output was
+124 frames at 24 fps, 5.167 s video and 5.175 s non-silent stereo 32 kHz audio. Save/quit/reopen
+retained the generated take and playback without another inference job. The 786.05 s run on
+Apple M3 Ultra / 256 GiB includes 687.30 s sampling and 47.71 s FP32 video decoding; it is
+one sub-training-resolution smoke test, not a warm speed benchmark or full-canvas quality claim.
+Audio signal/stream checks passed; semantic listening was unavailable in this qualification.
+
+The first worker also exposed a checksum-lifetime defect: its 43.96 GB physical peak included
+roughly 37 GB of retained Foundation read buffers, despite only 5.84 GB peak MLX allocation.
+Preflight-only and synthetic checksum tests isolated this from weighted stages. Native admission
+and Studio setup now drain temporary checksum buffers per chunk; focused tests preserve exact
+SHA256, changed-file rejection and cancellation while bounding synthetic verification storage.
+The first memory figure therefore does not characterize the corrected implementation.
+
+The corrected packaged worker then completed the ordered image/silent-video/separate-audio
+request in 715.64 s (630.18 s sampling; 45.08 s FP32 video decoding). The original full sheet
+remained 1152×768; an explicitly fitted/padded 512×288 excerpt retained all 22 frames and a
+separate 29,333-sample audio reference. Admission reported 18,042 packed rows and 1,008 Qwen
+visual pads. Output again decoded all 124 frames with non-silent stereo 32 kHz audio and an
+8.3 ms AV-duration difference. Sampled frames retained a coherent warrior/goose/courtyard;
+requested backward-jog choreography remained limited, with a sustained late pose.
+
+The corrected preflight of the same 37.304 GB pinned source peaked at 516 MB physical memory,
+compared with 37.63 GB before the checksum fix. The actual mixed generation peaked at 16.17 GB
+physical / 14.76 GB MLX; that MLX peak had already been reached during reference-video encoding.
+After mux, active MLX allocation was 68 bytes and worker physical footprint was 597 MB; the
+worker then exited. Weighted-stage release and bounded checksum storage do not mean zero process
+memory before exit. These two different reference requests and worker builds are functional
+qualification, not a controlled speed comparison or full-checkpoint numerical parity result.
+
+Combined core/Studio/workflow validation passed: Python 3,560 tests with seven optional skips;
+Swift inference/native/Studio 208/1,109/1,140 tests with 10/188/53 optional skips and no failures.
+Portable Swift workflow templates validate without ComfyUI and report unknown runtime readiness;
+explicit runtime workflow validation still requires the selected ComfyUI installation.
+
 ## October 26 H3 image integration validation
 
 The H3 image and LoRA prompt-guidance changes passed combined core, Studio, remote-adapter

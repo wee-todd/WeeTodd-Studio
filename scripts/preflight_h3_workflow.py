@@ -382,6 +382,34 @@ def runtime_preflight(
     }
 
 
+def portable_swift_recipe_paths(graph: dict[str, dict]) -> dict:
+    """Validate explicit placeholder templates without claiming installed runtime admission."""
+    _, node = unique_node(graph, SWIFT_VIDEO_NODE)
+    inputs = node["inputs"]
+    path_fields = {"recipe_path", "swift_worker_path", "ffmpeg_path"}
+    if not set(inputs).issubset(path_fields | {"engine", "filename_prefix"}):
+        raise ValueError("Unknown portable Swift video input")
+    if inputs.get("engine") not in {"h3", "ltx25"}:
+        raise ValueError("Portable Swift video engine must be h3 or ltx25")
+    paths = {}
+    for key in path_fields:
+        value = inputs.get(key)
+        if (not isinstance(value, str) or not value.startswith("/REPLACE/WITH/YOUR/")
+                or not value.removeprefix("/REPLACE/WITH/YOUR/")
+                or ".." in Path(value).parts or "\\" in value or "\x00" in value):
+            raise ValueError(
+                f"Portable Swift {key} requires an explicit /REPLACE/WITH/YOUR/ placeholder"
+            )
+        paths[key] = value
+    prefix = inputs.get("filename_prefix")
+    if not isinstance(prefix, str) or not prefix or "\x00" in prefix:
+        raise ValueError("Portable Swift filename_prefix is missing")
+    relative = Path(prefix.replace("\\", "/"))
+    if relative.is_absolute() or ".." in relative.parts or not relative.name:
+        raise ValueError("Portable Swift filename_prefix must stay inside ComfyUI output")
+    return {"engine": inputs["engine"], "paths": paths, "filename_prefix": prefix}
+
+
 def _run_swift_preflight(*, worker: Path, recipe: Path, output: Path, engine: str) -> dict:
     from wee_todd_mlx.swift_video_worker import run_swift_video_worker
 
@@ -487,6 +515,16 @@ def main() -> int:
                     "Swift recipe nodes and composable H3 loaders cannot share this preflight"
                 )
             if args.comfy_root is None:
+                if args.all_api:
+                    try:
+                        portable = portable_swift_recipe_paths(graph)
+                    except ValueError as exc:
+                        raise SystemExit(
+                            f"Portable Swift workflow failed for {path}: {exc}"
+                        ) from exc
+                    reports.append({"workflow": str(path), "portable_paths_valid": True,
+                                    "runtime_ready": None, **portable})
+                    continue
                 raise SystemExit("Swift video workflow preflight requires --comfy-root")
             try:
                 reports.append(runtime_preflight_swift_recipe(

@@ -149,8 +149,11 @@ def test_missing_component_paths_reports_all_missing_values(tmp_path):
 def test_every_shipped_h3_api_workflow_has_portable_component_paths():
     for path in sorted((ROOT / "examples").glob("h3_*_api.json")):
         document = MODULE.load_api_workflow(path)
-        MODULE.portable_component_paths(document)
-        MODULE.validate_fasth3_profile_wiring(document)
+        if any(node["class_type"] == MODULE.SWIFT_VIDEO_NODE for node in document.values()):
+            MODULE.portable_swift_recipe_paths(document)
+        else:
+            MODULE.portable_component_paths(document)
+            MODULE.validate_fasth3_profile_wiring(document)
 
 
 @pytest.mark.parametrize(
@@ -291,3 +294,26 @@ def test_ripple_workflow_preflight_freezes_output_without_changing_source(
     assert recipe.read_bytes() == original
     assert result["task"] == "ripple"
     assert result["recipe_sha256"] != result["preflight_recipe_sha256"]
+
+
+def test_portable_swift_template_in_all_api_sweep_is_not_runtime_ready(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--project", str(ROOT), "--all-api"])
+    assert MODULE.main() == 0
+    reports = json.loads(capsys.readouterr().out)
+    report = next(r for r in reports if r["workflow"].endswith("h3_fasth3_omni_swift_api.json"))
+    assert report["portable_paths_valid"] is True
+    assert report["runtime_ready"] is None
+    assert report["engine"] == "h3"
+
+
+@pytest.mark.parametrize("key,value", [
+    ("recipe_path", "/Users/private/recipe.json"),
+    ("swift_worker_path", "/REPLACE/WITH/YOUR/../worker"),
+    ("ffmpeg_path", True), ("engine", "unknown"),
+    ("filename_prefix", "../escape"), ("unknown", "setting"),
+])
+def test_portable_swift_template_rejects_malformed_or_machine_paths(key, value):
+    template = json.loads((ROOT / "examples/h3_fasth3_omni_swift_api.json").read_text())
+    template["1"]["inputs"][key] = value
+    with pytest.raises(ValueError):
+        MODULE.portable_swift_recipe_paths(template)

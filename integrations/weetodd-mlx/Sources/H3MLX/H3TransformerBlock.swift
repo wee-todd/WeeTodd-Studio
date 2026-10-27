@@ -29,15 +29,15 @@ public enum H3TransformerBlock {
     }
   }
   static func prepareRotaryAngles(checkpointURL: URL,
-    positions: MLXArray, maximumRows: Int = 40_000) throws -> H3RotaryAngles {
-    let layout = try H3CheckpointLayout(url: checkpointURL)
-    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL)
+    positions: MLXArray, maximumRows: Int = 40_000, omni: H3OmniCheckpoint? = nil) throws -> H3RotaryAngles {
+    let layout = try H3CheckpointSource.layout(checkpointURL, omni: omni)
+    let tensorURL = try H3CheckpointSource.fileURL(checkpointURL, omni: omni)
     let file = try SafeTensorFile(url: tensorURL)
     let angles = try H3CheckpointSource.isPaged(checkpointURL)
       ? prepareRotaryAngles(inverse: computedInverseFrequency(), positions: positions, maximumRows: maximumRows)
       : prepareRotaryAngles(file: file, prefix: layout.prefix, positions: positions, maximumRows: maximumRows)
     try file.checkUnchanged(at: tensorURL)
-    try H3CheckpointSource.checkUnchanged(checkpointURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL, omni: omni)
     return angles
   }
 
@@ -122,6 +122,9 @@ public enum H3TransformerBlock {
       guard preparedWeights.checkpointURL == checkpointURL, preparedWeights.index == index,
         projectionMode == .weightDecoded else {
         throw H3CheckpointError.invalid("Prepared H3 weights differ from the requested block.")
+      }
+      guard preparedWeights.layout.omniVariant == nil else {
+        throw H3CheckpointError.invalid("FastH3 Omni requires its dedicated attention execution contract.")
       }
       try preparedWeights.checkUnchanged()
     }
@@ -275,6 +278,31 @@ public enum H3TransformerBlock {
     try file.checkUnchanged(at: tensorURL)
     try H3CheckpointSource.checkUnchanged(checkpointURL)
     try Task.checkCancellation()
+    return output
+  }
+
+  static func evaluateOmni(owner: H3PreparedBlock, input: MLXArray,
+    modulation: MLXArray, modulationIndices: MLXArray,
+    angles: H3RotaryAngles, plan: H3OmniVSAPlan) throws -> MLXArray {
+    guard owner.layout.omniVariant != nil, input.shape == [1,plan.rows,5376],
+      input.dtype == .bfloat16, angles.rows == plan.rows else {
+      throw H3CheckpointError.invalid("Omni attention requires an admitted source and exact packed geometry.")
+    }
+    try owner.checkUnchanged()
+    let prefix = "blocks.\(owner.index)."
+    let output = try evaluateKernel(input:input, modulation:modulation, modulationIndices:modulationIndices,
+      angles:angles, read:{ try owner.read(prefix + $0,shape:$1,dtype:"BF16") },
+      project:{ try owner.project($1,activation:$0,rows:$2,columns:$3,qkv:$4) },
+      hybridAttention:{ first,_,query,key,value in
+        let gate = try owner.project("attn.to_gate_compress",activation:first,rows:7168,columns:5376)
+          .reshaped([1,plan.rows,56,128]).transposed(0,2,1,3)
+        let attended = try H3OmniAttention.evaluate(query:query,key:key,value:value,gate:gate,plan:plan)
+          .transposed(0,2,1,3).reshaped([1,plan.rows,7168])
+        return try owner.project("attn.out_proj",activation:attended,rows:5376,columns:7168)
+      }, feedRowChunk:8192, drainAttentionInputs:true,
+      retireAttention:{ owner.retireProjection("attn.qkv_proj"); owner.retireProjection("attn.out_proj"); owner.retireProjection("attn.to_gate_compress") })
+    eval(output)
+    try owner.checkUnchanged()
     return output
   }
 

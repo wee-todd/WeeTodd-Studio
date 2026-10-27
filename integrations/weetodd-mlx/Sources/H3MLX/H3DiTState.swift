@@ -62,6 +62,15 @@ public final class H3DiTState {
 
 /// Reference-conditioned H3 shares the same weighted transformer stage.
 public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
+  /// The shared reference stage owns its weights until the operation completes,
+  /// and releases them on success, downstream failure or cancellation.
+  static func withStage<T>(_ make: () throws -> H3ReferenceDiTState,
+    operation: (H3ReferenceDiTState) throws -> T) rethrows -> T {
+    let state = try make()
+    defer { state.unload() }
+    return try operation(state)
+  }
+
   public let layout: H3ReferenceLayout
   private let core: H3WeightedDiTState
 
@@ -90,7 +99,7 @@ public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
   }
 
   init(checkpointURL: URL, layout: H3ReferenceLayout,
-    textEmbeddings: MLXArray, timestepTable: [Float], blockCount: Int,
+    textEmbeddings: MLXArray, timestepTable: [Float], blockCount: Int, omni: H3OmniRunner.Context? = nil,
     projectionMode: H3ProjectionMode = .weightDecoded, transformerWeightCacheGB:Int = 0,
     allowMPP: Bool = false, nativeWorkerURL: URL? = nil,
     experimentalSol: H3SolTaskPolicy? = nil,
@@ -101,7 +110,7 @@ public final class H3ReferenceDiTState: H3ReferenceVelocityPredictor {
     self.layout = layout
     core = try H3WeightedDiTState(checkpointURL: checkpointURL,
       layout: .references(layout), textEmbeddings: textEmbeddings,
-      timestepTable: timestepTable, blockCount: blockCount,
+      timestepTable: timestepTable, blockCount: blockCount, omni: omni,
       projectionMode: projectionMode, allowMPP: allowMPP, nativeWorkerURL: nativeWorkerURL, transformerWeightCacheGB:transformerWeightCacheGB,
       experimentalSol: experimentalSol, turboLoRAURL: turboLoRAURL,
       turboLoRAStrength: turboLoRAStrength,

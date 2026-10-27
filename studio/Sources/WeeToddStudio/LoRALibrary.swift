@@ -390,13 +390,15 @@ struct LoRAStrength: View {
 struct ClipLoRAInspector: View {
   @EnvironmentObject var store: StudioStore
   var clip: Clip
+  var isOmni:Bool { store.profiles.first { $0.id==clip.profileID }?.generation?.fasth3Omni == true }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack {
         SmallLabel(text: "LoRAs")
         Spacer()
-        Button("Add / Groups…") { store.showLoRALibrary = true }.controlSize(.small)
+        Button("Add / Groups…") { store.showLoRALibrary = true }.controlSize(.small).disabled(isOmni)
       }
+      if isOmni { Text("Omni cannot use extra LoRAs or groups. Retained adapters can be disabled or removed below.").font(.caption2).foregroundStyle(.secondary) }
       ForEach(clip.attachments.filter { $0.role == .lora }) { attachment in
         let asset = store.allAssets.first { $0.id == attachment.assetID }
         VStack(alignment: .leading, spacing: 6) {

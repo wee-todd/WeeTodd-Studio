@@ -2248,4 +2248,17 @@ struct DivOp {
     .replacingOccurrences(of:"params->V_strides[2], Vs, simd_group_id, simd_lane_id);",
       with:"params->V_strides[2], Vs, simd_group_id, simd_lane_id, ROW_MAP, kb*64+key_chunk*BK);")
 
+  /// The original 64-row source remains byte-for-byte stable for Preview/Sol.
+  /// Only mapped-row Omni instantiation changes tile address arithmetic; the
+  /// BQ32/BK16 matrix operations and softmax reduction are identical.
+  static func mappedBody(tileRows: Int) -> String {
+    precondition(tileRows == 64 || tileRows == 128)
+    return originalRowBody
+      .replacingOccurrences(of: "tid.x / 2", with: "tid.x / \(tileRows / 32)")
+      .replacingOccurrences(of: "tid.x % 2", with: "tid.x % \(tileRows / 32)")
+      .replacingOccurrences(of: "* 64", with: "* \(tileRows)")
+      .replacingOccurrences(of: "*64", with: "*\(tileRows)")
+      .replacingOccurrences(of: "(64 / BK)", with: "(\(tileRows) / BK)")
+  }
+
 }

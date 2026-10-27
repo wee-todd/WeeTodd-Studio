@@ -32,6 +32,7 @@ final class H3PreparedBlock {
     }
   }
 
+  private let omni: H3OmniCheckpoint?
   private let retainProjections: Bool
   private let useMPP: Bool
   private let verificationScope: String
@@ -53,7 +54,8 @@ final class H3PreparedBlock {
   init(checkpointURL: URL, index: Int,
     projectionMode: H3ProjectionMode, rowWindow: Int = 1024, useMPP: Bool = false,
     verificationScope: String? = nil, groupedBF16Loading: Bool = true,
-    groupedFastQ8Loading: Bool = true, retainProjections: Bool = false) throws {
+    groupedFastQ8Loading: Bool = true, retainProjections: Bool = false,
+    omni: H3OmniCheckpoint? = nil) throws {
     guard (0..<50).contains(index) else {
       throw H3CheckpointError.invalid("Invalid prepared H3 block index.")
     }
@@ -64,9 +66,10 @@ final class H3PreparedBlock {
       throw H3CheckpointError.invalid("Prepared H3 decode row window is unsupported.")
     }
     try Task.checkCancellation()
-    let admittedLayout = try H3CheckpointLayout(url: checkpointURL)
-    let admittedURL = try H3CheckpointSource.fileURL(checkpointURL, block: index)
+    let admittedLayout = try H3CheckpointSource.layout(checkpointURL, omni: omni)
+    let admittedURL = try H3CheckpointSource.fileURL(checkpointURL, block: index, omni: omni)
     let admittedFile = try SafeTensorFile(url: admittedURL)
+    self.omni = omni
     self.retainProjections = retainProjections
     self.useMPP = useMPP
     self.verificationScope = verificationScope ?? checkpointURL.standardizedFileURL.path
@@ -77,10 +80,11 @@ final class H3PreparedBlock {
     layout = admittedLayout
 
     let prefix = layout.prefix + "blocks.\(index)."
-    let denseDefinitions = [
+    var denseDefinitions = [
       ("attn.qkv_proj", 21504, 5376), ("attn.out_proj", 5376, 7168),
       ("mlp.fc1", 28672, 5376), ("mlp.fc2", 5376, 14336),
     ]
+    if omni != nil { denseDefinitions.append(("attn.to_gate_compress", 7168, 5376)) }
     usesGroupedBF16Loading = groupedBF16Loading && admittedLayout.fastVariant == nil
       && admittedLayout.curveRank != nil && denseDefinitions.allSatisfy {
         admittedFile.tensors[prefix + $0.0 + ".weight"]?.dtype == "BF16"
@@ -157,7 +161,8 @@ final class H3PreparedBlock {
           guard weight.rows == rows, weight.columns == columns else {
             throw H3CheckpointError.invalid("Paged H3 affine projection changed after admission.")
           }
-          // Native pages already store QKV rows in head-major attention order.
+          // Preview pages are head-major. Omni keeps source Q,K,V rows and
+          // reorders only the small projected activation in project().
           projection = .affineQ8(weight)
         } else if layout.curveRank != nil {
           guard let descriptor = file.tensors[name], descriptor.dtype == "BF16",
@@ -260,6 +265,7 @@ final class H3PreparedBlock {
 
   func read(_ fullname: String, shape: [Int], dtype: String = "BF16") throws -> MLXArray {
     try requireOpen()
+    try omni?.checkUnchanged()
     guard let descriptor = file.tensors[fullname], descriptor.dtype == dtype,
       descriptor.shape == shape.map(UInt64.init), let value = tensors[fullname] else {
       throw H3CheckpointError.invalid("Missing prepared H3 block tensor: \(fullname)")
@@ -272,13 +278,15 @@ final class H3PreparedBlock {
   func project(_ suffix: String, activation: MLXArray,
     rows: Int, columns: Int, qkv: Bool = false) throws -> MLXArray {
     try requireOpen()
+    try omni?.checkUnchanged()
     guard let projection = projections[suffix], projection.shape == [rows, columns],
       qkv == (suffix == "attn.qkv_proj"), activation.ndim >= 2,
       activation.shape.last == columns, activation.dtype.isFloatingPoint else {
       throw H3CheckpointError.invalid("Invalid prepared H3 projection inputs.")
     }
     try file.checkUnchanged(at: tensorURL)
-    let value = try projection.project(activation,useMPP:useMPP,verificationScope:verificationScope)
+    var value = try projection.project(activation,useMPP:useMPP,verificationScope:verificationScope)
+    if omni != nil && qkv { value = try H3OmniParameterScope.headMajorQKV(value) }
     try Task.checkCancellation()
     return value
   }
@@ -286,7 +294,7 @@ final class H3PreparedBlock {
   func checkUnchanged() throws {
     try requireOpen()
     try file.checkUnchanged(at: tensorURL)
-    try H3CheckpointSource.checkUnchanged(checkpointURL)
+    try H3CheckpointSource.checkUnchanged(checkpointURL, omni: omni)
     try Task.checkCancellation()
   }
 
@@ -294,6 +302,9 @@ final class H3PreparedBlock {
   /// applying implementations without prepared support retain their old path.
   func prepareLoRA(_ application: (any H3LoRAApplying)?) throws -> (any H3LoRAApplying)? {
     try requireOpen()
+    guard omni == nil || application == nil else {
+      throw H3CheckpointError.invalid("Omni prepared blocks do not support ordinary LoRAs.")
+    }
     if !loRABindingInitialized {
       loRAScope = try application?.prepareBlock(index: index)
       loRABindingInitialized = true

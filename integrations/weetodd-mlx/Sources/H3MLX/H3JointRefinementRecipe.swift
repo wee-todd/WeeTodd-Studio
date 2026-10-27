@@ -43,7 +43,7 @@ public enum H3JointRefinementRecipe {
       throw H3CheckpointError.invalid("Invalid bounded H3 refinement recipe.")
     }
     guard root["joint_latents"] != nil || root["refinement"] != nil else { return nil }
-    guard root["continuation"] == nil,
+    guard root["continuation"] == nil, root["fasth3_omni"] == nil,
       let config = root["config"] as? [String: Any] else {
       throw H3CheckpointError.invalid("H3 initialized refinement cannot combine saved-tail continuation.")
     }
