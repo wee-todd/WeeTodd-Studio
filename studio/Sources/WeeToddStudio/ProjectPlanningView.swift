@@ -316,6 +316,19 @@ struct ProjectPlanningView: View {
         SubjectSourceText(title: "Evidence", entries: subject.evidence.isEmpty ? [] : [subject.evidence])
         SubjectSourceText(title: "Suggestions", entries: subject.suggestions.isEmpty ? [] : [subject.suggestions])
         Divider()
+        if subject.kind == .character {
+          CharacterVoiceControls(
+            binding: Binding(
+              get: { store.planning.subjects.first { $0.id == subject.id }?.voiceBinding },
+              set: { binding in
+                store.changePlanning { value in
+                  if let i = value.subjects.firstIndex(where: { $0.id == subject.id }) {
+                    value.subjects[i].voiceBinding = binding
+                  }
+                }
+              }),
+            onUseVoice: { dismiss() })
+        }
         Text("Visual references").font(.headline)
         Text("Approve images and an optional H3 RefMod separately from the description. Files remain linked in place.")
           .font(.caption).foregroundStyle(.secondary)

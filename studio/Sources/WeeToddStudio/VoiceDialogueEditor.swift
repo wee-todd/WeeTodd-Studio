@@ -50,9 +50,9 @@ struct VoiceDialogueEditor: View {
           Picker("Speaker", selection: Binding(get: { current.speakerID }, set: { id in edit { $0.assignSpeaker(id, to: current.id) } })) {
             ForEach(dialogue.speakers) { Text($0.name).tag($0.id) }
           }
-          Text("Pause after")
+          if draft.engine != .fishDrama3 {Text("Pause after")
           TextField("Seconds", value: turn(\.gapAfter, default: 0), format: .number).frame(width: 55)
-          Text("s").foregroundStyle(.secondary)
+          Text("s").foregroundStyle(.secondary)}
           Button { move(-1) } label: { Image(systemName: "arrow.left") }.help("Move line earlier").disabled(dialogue.turns.first?.id == current.id)
           Button { move(1) } label: { Image(systemName: "arrow.right") }.help("Move line later").disabled(dialogue.turns.last?.id == current.id)
           Button(role: .destructive) { edit { $0.turns.removeAll { $0.id == current.id } }; selected = nil } label: { Image(systemName: "trash") }.help("Remove line").disabled(dialogue.turns.count <= 1)
@@ -65,7 +65,7 @@ struct VoiceDialogueEditor: View {
             QwenVoiceStyleControls(speaker: .constant(nil), instructions: turn(\.instructions, default: nil), showSpeaker: false)
           }
         } else {
-        if draft.engine == .fishS2Pro {
+        if draft.engine != .qwen3TTS {
           Toggle("Override speaker voice direction for this line", isOn: Binding(get: { current.fishDirection != nil }, set: { enabled in
             turn(\.fishDirection, default: nil).wrappedValue = enabled
               ? (dialogue.speakers.first { $0.id == current.speakerID }?.fishDirection ?? FishVoiceDirection()) : nil
@@ -74,13 +74,13 @@ struct VoiceDialogueEditor: View {
             Button("Edit line’s voice direction…") { showDirection = true }.font(.caption)
           }
         }
-        HStack {
+        if draft.engine != .fishDrama3 {HStack {
           Button(current.reference == nil ? "Use a different performance sample…" : "Edit line’s performance sample…") { showPerformance = true }
             .disabled(dialogue.speakers.first { $0.id == current.speakerID }?.referenceMode == .synthetic)
           if current.reference != nil { Button("Use speaker default") { turn(\.reference, default: nil).wrappedValue = nil } }
-        }.font(.caption)
+        }.font(.caption)}
         }
-        Text("Lines render in order using each speaker’s voice, then join into one dialogue take. Set the last pause to 0 for a tight ending.").font(.caption).foregroundStyle(.secondary)
+        Text(draft.engine == .fishDrama3 ? "Drama 3 performs the scene with shared context. Use delivery cues and punctuation for timing." : "Lines render in order using each speaker’s voice, then join into one dialogue take. Set the last pause to 0 for a tight ending.").font(.caption).foregroundStyle(.secondary)
       }
     }
     .sheet(isPresented: $showSpeakers) { VoiceSpeakersView().environmentObject(store) }
@@ -135,7 +135,7 @@ struct VoiceSpeakersView: View {
           var speaker = VoiceSpeaker(name: "Speaker \(speakers.count + 1)")
           if store.selectedVoiceModel?.supportsInstructions == true { speaker.referenceMode = .customVoice }
           store.change { $0.voiceDraft?.dialogue?.speakers.append(speaker) }; selected = speaker.id
-        }.disabled(speakers.count >= 64)
+        }.disabled(speakers.count >= (store.project.voiceDraft?.engine == .fishDrama3 ? 16 : 64))
         Button("Done") { dismiss() }
       }
       ScrollView {
@@ -150,16 +150,17 @@ struct VoiceSpeakersView: View {
             store.change { $0.voiceDraft?.dialogue?.speakers.removeAll { $0.id == current.id } }; selected = nil
           }.disabled(speakers.count <= 1 || store.project.voiceDraft?.dialogue?.turns.contains { $0.speakerID == current.id } == true)
         }
+        if store.project.voiceDraft?.engine == .fishDrama3 {Drama3SpeakerVoiceControls(speakerID:current.id)}
         Text("Names identify dialogue lines and are never spoken. Reassign a speaker’s lines before removing them.").font(.caption).foregroundStyle(.secondary)
         if store.selectedVoiceModel?.supportsInstructions == true {
           QwenVoiceStyleControls(speaker: field(\.presetVoice, default: nil), instructions: field(\.instructions, default: nil))
         } else {
         Picker("Voice source", selection: field(\.referenceMode, default: .audioAndTranscript)) {
           Text("Audio + transcript").tag(VoiceReferenceMode.audioAndTranscript)
-          if store.project.voiceDraft?.engine == .fishS2Pro { Text("Synthetic voice").tag(VoiceReferenceMode.synthetic) }
+          if store.project.voiceDraft?.engine != .qwen3TTS { Text("Synthetic voice").tag(VoiceReferenceMode.synthetic) }
           else { Text("Speaker identity only").tag(VoiceReferenceMode.speakerIdentityOnly) }
         }
-        if store.project.voiceDraft?.engine == .fishS2Pro {
+        if store.project.voiceDraft?.engine != .qwen3TTS {
           FishVoiceDirectionControls(direction: field(\.fishDirection, default: nil))
         }
         if current.referenceMode != .synthetic {

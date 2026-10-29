@@ -44,7 +44,7 @@ public enum NativeModelDownloads {
     let bytes = try bounded(url, limit: 8 * 1024 * 1024)
     let kinds: Set<String> = ["h3-omni", "h3-qwen", "ltx25", "h3-video-vae", "h3-audio-vae", "h3-dt-tokenizer",
       "h3-direct-transformer", "h3-native-support", "h3-native-control", "ltx25-adapter",
-      "ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae"]
+      "ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae", "drama3-native"]
     var packages = try JSONDecoder().decode([NativeModelDownloadPackage].self, from: bytes)
       .filter { kinds.contains($0.kind) }
     // Direct Swift checkpoints have a different admission contract from the
@@ -162,7 +162,7 @@ public enum NativeModelDownloads {
     return hash.finalize().map { String(format: "%02x", $0) }.joined() == file.sha256
   }
 
-  private static func existingFiles(roots: [String], sizes: Set<Int64>) throws -> [Int64: [URL]] {
+  static func existingFiles(roots: [String], sizes: Set<Int64>, includeHidden: Bool = false) throws -> [Int64: [URL]] {
     var result: [Int64: [URL]] = [:], seen: Set<String> = []
     var pending = roots.map { URL(fileURLWithPath: $0) }, count = 0
     while let raw = pending.popLast() {
@@ -174,7 +174,7 @@ public enum NativeModelDownloads {
       let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .fileSizeKey])
       if values?.isDirectory == true {
         let children = (try? FileManager.default.contentsOfDirectory(at: url,
-          includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+          includingPropertiesForKeys: nil, options: includeHidden ? [] : [.skipsHiddenFiles])) ?? []
         pending += children.filter { ![".git", ".cache"].contains($0.lastPathComponent) }
       } else if values?.isRegularFile == true, let size = values?.fileSize, sizes.contains(Int64(size)) {
         result[Int64(size), default: []].append(url)
@@ -293,7 +293,7 @@ public enum NativeModelDownloads {
   }
 }
 
-private extension NSError {
+extension NSError {
   var underlyingPOSIXCode: Int? { (userInfo[NSUnderlyingErrorKey] as? NSError).flatMap {
     $0.domain == NSPOSIXErrorDomain ? $0.code : nil
   } }

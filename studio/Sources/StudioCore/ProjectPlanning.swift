@@ -25,6 +25,7 @@ public struct PlanningSubject: Codable, Equatable, Identifiable {
   public var approvedRevision: String?
   public var approvedReferenceRevision: String?
   public var characterAppearance: CharacterAppearance?
+  public var voiceBinding: CharacterVoiceBinding?
   public var originalAppearanceDescription: String?
   public var descriptionReview: SubjectDescriptionReview?
   public var relationships: [ObjectRelationship]?

@@ -80,7 +80,7 @@ def build_checks(project: Path, profiles: list[str], python: str) -> list[list[s
                            "scripts/studio_image.py", "scripts/benchmark_qwen_image21.py",
                            "scripts/studio_dialogue.py", "scripts/studio_ripple.py",
                            "scripts/studio_production.py",
-                           "scripts/build_studio_app.py",
+                           "scripts/build_studio_app.py", "scripts/build_drama3_worker.py",
                            "scripts/build_ltx_worker.py",
                            "scripts/install_studio_runtime.py", "scripts/setup_assistant_model.py",
                            "scripts/studio_assistant_models.py",
@@ -105,6 +105,8 @@ def build_checks(project: Path, profiles: list[str], python: str) -> list[list[s
     if "studio" in selected:
         checks.append(["swift", "test", "--build-system", "native", "--package-path", "studio",
                        "--jobs", "2"])
+    if "studio" in selected:
+        checks.append(["bash", "integrations/weetodd-drama3/scripts/test.sh"])
     if "remote" in selected:
         checks.append(["swift", "test", "--build-system", "native", "--package-path",
                        "integrations/drawthings-client", "--jobs", "2"])

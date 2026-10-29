@@ -1,5 +1,6 @@
 import AppKit
 import StudioCore
+import Drama3Contracts
 import SwiftUI
 
 struct VoiceScriptEditor: View {
@@ -15,7 +16,7 @@ struct VoiceScriptEditor: View {
   @State private var error: String?
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if engine == .fishS2Pro {
+      if engine != .qwen3TTS {
         HStack {
           Menu("Add tag") {
             ForEach(FishVoiceTags.groups, id: \.0) { group in
@@ -26,6 +27,7 @@ struct VoiceScriptEditor: View {
           ForEach(["whisper", "excited", "pause", "sigh"], id: \.self) { tag in
             Button(tag.capitalized) { insert(tag) }.controlSize(.small)
           }
+          if engine == .fishDrama3 {Menu("Scope selection") {ForEach(["whisper","slow","emphasis","laughing"],id: \.self){tag in Button(tag.capitalized){do{text=try Drama3Text.scoped(tag,text:text,selection:selection);error=nil}catch{self.error=error.localizedDescription}}}}}
           Spacer()
           Button { showAutoTag = true } label: { Label("Auto Tag", systemImage: "sparkles") }
             .disabled(store.operationBusy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

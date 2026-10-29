@@ -159,7 +159,7 @@ def resolve_signing_identity(root: Path, explicit: str | None) -> str:
 def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | None = None,
                  signing_identity: str = "-", native_worker: Path | None = None,
                  ltx_worker: Path | None = None,
-                 h3_mlx_worker: Path | None = None) -> None:
+                 h3_mlx_worker: Path | None = None, drama3_worker: Path | None = None) -> None:
     """Assemble a fresh bundle without requiring ignored agent configuration."""
     binaries = root / "studio" / ".build" / configuration
     macos = app / "Contents" / "MacOS"
@@ -198,6 +198,10 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
         from build_h3_mlx_worker import install_worker as install_h3_mlx_worker
 
         install_h3_mlx_worker(h3_mlx_worker, macos, resources)
+    if drama3_worker is not None:
+        from build_drama3_worker import install_worker as install_drama3_worker
+
+        install_drama3_worker(drama3_worker, macos, resources)
     source = resources / "RendererSource"
     source.mkdir(parents=True, exist_ok=True)
     shutil.copy2(root / "studio/Resources/AppIcon.icns", resources / "AppIcon.icns")
@@ -250,6 +254,10 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
         from build_h3_mlx_worker import record_installed_signature
 
         record_installed_signature(macos, resources)
+    if drama3_worker is not None:
+        from build_drama3_worker import record_installed_signature as record_drama3_signature
+
+        record_drama3_signature(macos, resources)
     subprocess.run(["codesign", "--force", "--sign", signing_identity, str(app)], check=True)
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
 
@@ -274,7 +282,7 @@ def assert_app_not_running(app: Path) -> None:
 def package_app(root: Path, configuration: str, drawthings: Path | None = None,
                 signing_identity: str | None = None, output: Path | None = None,
                 native_worker: Path | None = None, ltx_worker: Path | None = None,
-                h3_mlx_worker: Path | None = None) -> Path:
+                h3_mlx_worker: Path | None = None, drama3_worker: Path | None = None) -> Path:
     signing_identity = resolve_signing_identity(root, signing_identity)
     build = root / "studio" / ".build"
     app = output.resolve() if output is not None else build / "WeeTodd Studio.app"
@@ -286,7 +294,7 @@ def package_app(root: Path, configuration: str, drawthings: Path | None = None,
     with tempfile.TemporaryDirectory(prefix=".studio-package-", dir=app.parent) as temporary:
         staging = Path(temporary) / app.name
         build_bundle(root, configuration, staging, drawthings, signing_identity,
-                     native_worker, ltx_worker, h3_mlx_worker)
+                     native_worker, ltx_worker, h3_mlx_worker, drama3_worker)
         # The user may have launched the app while the bundle was being assembled.
         assert_app_not_running(app)
         previous = Path(temporary) / "Previous.app"
@@ -352,8 +360,13 @@ def main():
 
     h3_mlx_worker = build_h3_mlx_worker(root, swift=toolchain.swift, env=toolchain.env,
                                        build_arguments=toolchain.build_arguments)
+    from build_drama3_worker import build_worker as build_drama3_worker
+
+    drama3_worker = build_drama3_worker(root, swift=toolchain.swift, env=toolchain.env,
+                                         build_arguments=toolchain.build_arguments)
     print(package_app(root, args.configuration, args.drawthings_distribution,
-                      identity, args.output, native_worker, ltx_worker, h3_mlx_worker))
+                      identity, args.output, native_worker, ltx_worker, h3_mlx_worker,
+                      drama3_worker))
 
 
 if __name__ == "__main__":

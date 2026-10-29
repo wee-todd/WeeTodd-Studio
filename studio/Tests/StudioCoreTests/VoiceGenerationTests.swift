@@ -3,7 +3,7 @@ import XCTest
 @testable import StudioCore
 final class VoiceGenerationTests: XCTestCase {
   func testReferenceModesNeverSilentlyFallBack() throws {
-    var d = VoiceDraft(); d.modelPath = "/model"; d.text = "Hello"
+    var d = VoiceDraft(engine: .qwen3TTS); d.modelPath = "/model"; d.text = "Hello"
     XCTAssertThrowsError(try d.request())
     d.reference = VoiceReference(path: "/ref.wav", duration: 5, transcript: "A sample.")
     XCTAssertNoThrow(try d.request())
@@ -15,7 +15,7 @@ final class VoiceGenerationTests: XCTestCase {
     XCTAssertThrowsError(try d.request())
   }
   func testRequestHasExplicitEngineAndNativeReferenceMode() throws {
-    var d = VoiceDraft(); d.modelPath = "/model"; d.text = "Hello"
+    var d = VoiceDraft(engine: .qwen3TTS); d.modelPath = "/model"; d.text = "Hello"
     d.reference = VoiceReference(path: "/ref.wav", duration: 5, transcript: "A sample.")
     let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(d.request())) as! [String: Any]
     XCTAssertEqual(object["engine"] as? String, "qwen3TTS")

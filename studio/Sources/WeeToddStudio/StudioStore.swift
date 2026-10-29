@@ -21,6 +21,7 @@ struct RuntimeSettings: Codable {
   var nativeLTX25Enabled: Bool?
   var usesNativeLTX25: Bool { nativeLTX25Enabled ?? true }
   var h3WorkerPath: String?
+  var drama3WorkerPath: String?
   var nativeH3Enabled: Bool?
   var usesNativeH3: Bool { nativeH3Enabled ?? true }
   var acceleration: AccelerationSettings?
@@ -48,6 +49,7 @@ struct RuntimeSettings: Codable {
     var value = data.flatMap { try? JSONDecoder().decode(Self.self, from: $0) } ?? defaults
     if let bundled = defaults.ltx25WorkerPath { value.ltx25WorkerPath = bundled }
     if let bundled = defaults.h3WorkerPath { value.h3WorkerPath = bundled }
+    if let bundled = defaults.drama3WorkerPath { value.drama3WorkerPath = bundled }
     value.presentationHelperPath = defaults.presentationHelperPath
     let savedHelper = value.drawThingsHelperPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if !FileManager.default.isExecutableFile(atPath: savedHelper) {
@@ -74,6 +76,8 @@ struct RuntimeSettings: Codable {
     if FileManager.default.isExecutableFile(atPath: ltx) { value.ltx25WorkerPath = ltx }
     let h3 = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddH3MLXWorker").path
     if FileManager.default.isExecutableFile(atPath: h3) { value.h3WorkerPath = h3 }
+    let drama = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddDrama3Worker").path
+    if FileManager.default.isExecutableFile(atPath: drama) { value.drama3WorkerPath = drama }
     return value
   }
 }
@@ -127,10 +131,24 @@ struct BridgeResponseBuffer {
   init(invocation: Invocation? = nil) { self.invocation = invocation }
   func independent() -> Bridge { Bridge(invocation: invocation) }
   private var process: Process?
+  private var speechInput:FileHandle?
+  let speechPlayback=NativeSpeechPlayback()
+  @Published var acceptsSpeechText=false
+  @Published var speechTextPending=false
+  @Published var speechTextAcceptedRevision=0
+  private var speechTextSequence=0
+  func appendSpeechText(_ text:String) throws {
+    guard acceptsSpeechText,!speechTextPending,let speechInput else {throw StudioError.invalid("Start a live text generation first.")}
+    guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,text.utf8.count<=32000 else {throw StudioError.invalid("Append between 1 and 32,000 bytes of text.")}
+    speechTextSequence+=1
+    var data=try JSONSerialization.data(withJSONObject:["op":"append","text":text,"sequence":speechTextSequence]);data.append(10);try speechInput.write(contentsOf:data);speechTextPending=true
+  }
+  func finishSpeechText() {guard let speechInput else{return};try? speechInput.write(contentsOf:Data("{\"op\":\"finish\"}\n".utf8));try? speechInput.close();self.speechInput=nil;acceptsSpeechText=false;speechTextPending=false}
   private var preparationTask: Task<Data, Error>?
   private var cancellationRequested = false
   func cancel() {
     cancellationRequested = true
+    finishSpeechText();speechPlayback.stop()
     message = "Cancelling and releasing render resources…"
     preparationTask?.cancel()
     process?.interrupt()
@@ -232,14 +250,15 @@ struct BridgeResponseBuffer {
     }
     let conversionVerb = ["ltx-native-preflight-transformer-conversion": "preflight-transformer-conversion",
       "ltx-native-convert-transformer": "convert-transformer"][command]
+    let nativeDrama = ["drama3-render", "drama3-preflight", "drama3-stream", "drama3-supplement-head"].contains(command)
     let nativeLTX = ["ltx-native-render", "ltx-native-preflight"].contains(command) || conversionVerb != nil
     let nativeH3 = ["h3-native-render", "h3-native-preflight"].contains(command)
-    if nativeLTX || nativeH3 {
+    if nativeLTX || nativeH3 || nativeDrama {
       workerEventsPath = nil; workerEventsTruncated = false; workerEventsArchiveError = nil
     }
-    if nativeLTX || nativeH3 {
-      let workerPath = nativeH3 ? runtime.h3WorkerPath : runtime.ltx25WorkerPath
-      let label = nativeH3 ? "H3" : "LTX"
+    if nativeLTX || nativeH3 || nativeDrama {
+      let workerPath = nativeDrama ? runtime.drama3WorkerPath : nativeH3 ? runtime.h3WorkerPath : runtime.ltx25WorkerPath
+      let label = nativeDrama ? "Drama 3" : nativeH3 ? "H3" : "LTX"
       guard let worker = workerPath, FileManager.default.isExecutableFile(atPath: worker), output != nil else {
         throw StudioError.invalid("The native \(label) worker is missing. Use a complete Studio build.")
       }
@@ -291,6 +310,8 @@ struct BridgeResponseBuffer {
       guard NSDictionary(dictionary: body).isEqual(to: payload) else {
         throw StudioError.invalid("Native transformer conversion transport differs from its validated request.")
       }
+    } else if nativeDrama {
+      body = payload
     } else if nativeLTX || nativeH3 {
       body = try nativeH3
         ? NativeVideoJobRequest.h3(payload: payload, runtime: runtime, output: output!)
@@ -302,7 +323,7 @@ struct BridgeResponseBuffer {
       to: input, options: .atomic)
     defer { try? FileManager.default.removeItem(at: input) }
     // Create the archive before launching weighted work, outside its atomic output.
-    let archive = try nativeLTX || nativeH3
+    let archive = try nativeLTX || nativeH3 || nativeDrama
       ? NativeWorkerEventArchive(output: output!, jobID: body["jobID"] as? String ?? UUID().uuidString) : nil
     if let archive { workerEventsPath = archive.url.path }
     defer { archive?.finish() }
@@ -313,15 +334,17 @@ struct BridgeResponseBuffer {
     message = command.capitalized + "…"
     log = ""
     let task = Process()
-    task.executableURL = URL(fileURLWithPath: nativeH3 ? runtime.h3WorkerPath! : nativeLTX ? runtime.ltx25WorkerPath! : runtime.pythonPath)
-    task.arguments = nativeLTX || nativeH3 ? [conversionVerb ?? (command.hasSuffix("render") ? "render" : "preflight"), "--request", input.path]
+    task.executableURL = URL(fileURLWithPath: nativeDrama ? runtime.drama3WorkerPath! : nativeH3 ? runtime.h3WorkerPath! : nativeLTX ? runtime.ltx25WorkerPath! : runtime.pythonPath)
+    task.arguments = nativeLTX || nativeH3 || nativeDrama ? [conversionVerb ?? (command == "drama3-supplement-head" ? "supplement-head" : command == "drama3-stream" ? "stream-text" : command.hasSuffix("render") ? "render" : "preflight"), "--request", input.path]
       : [runtime.root + "/scripts/studio_bridge.py", command, "--request", input.path]
     if let output { task.arguments! += ["--output", output.path] }
-    task.currentDirectoryURL = nativeLTX || nativeH3 ? input.deletingLastPathComponent() : URL(fileURLWithPath: runtime.root)
+    task.currentDirectoryURL = nativeLTX || nativeH3 || nativeDrama ? input.deletingLastPathComponent() : URL(fileURLWithPath: runtime.root)
     task.environment = env
     let pipe = Pipe()
     task.standardOutput = pipe
     task.standardError = pipe
+    if command == "drama3-stream" {let input=Pipe();task.standardInput=input;speechInput=input.fileHandleForWriting;acceptsSpeechText=true}
+    if nativeDrama {speechPlayback.start()}
     process = task
     do { try task.run() } catch {
       busy = false
@@ -331,6 +354,8 @@ struct BridgeResponseBuffer {
     defer {
       busy = false
       process = nil
+      finishSpeechText()
+      if cancellationRequested {speechPlayback.stop()}
       try? FileManager.default.removeItem(at: input)
     }
     let response: [String: Any] = try await withCheckedThrowingContinuation { continuation in
@@ -354,7 +379,9 @@ struct BridgeResponseBuffer {
             }
             for event in events {
               self.message = event.message
+              if event.inputSequence==self.speechTextSequence,let accepted=event.inputAccepted {self.speechTextPending=false;if accepted {self.speechTextAcceptedRevision+=1}}
               self.fraction = event.fraction ?? self.fraction
+              if nativeDrama,let output,let audio=event.audioPreviewPath,!self.cancellationRequested {self.speechPlayback.enqueue(audio,output:output)}
               if let previewFile, event.previewPath == previewFile.path,
                 let revision = event.previewRevision, revision > (self.livePreview?.previewRevision ?? 0),
                 !self.cancellationRequested {
@@ -451,6 +478,12 @@ extension Encodable {
   @Published var showAudioPresentation = false
   @Published var audioVisualFeatures: AudioVisualFeatures?
   @Published var showVoice = false
+  @Published var showVoiceLibrary = false
+  @Published var voiceLibraryProfiles: [VoiceProfileSnapshot] = []
+  @Published var voiceLibraryBusy = false
+  var nativeVoiceSetupTask:Task<Void,Never>?
+  var nativeVoiceSetupAttempt = UUID()
+  @Published var nativeVoiceSetupMessage: String?
   @Published var selectedVoiceAssetID: UUID?
   lazy var audioMixBridge = bridge.independent()
   @Published var showMusic = false
@@ -539,7 +572,7 @@ extension Encodable {
   @Published var preparingDrawThings = false
   @Published var characterDirectorBusy = false
   lazy var characterDirector = CharacterDirectorCoordinator(store: self)
-  var operationBusy: Bool { characterDirectorBusy || bridge.busy || preparingImageRequest || activeNativeRequest != nil || preparingDrawThings || acceptingContinuousScene || connectingContinuousScene }
+  var operationBusy: Bool { characterDirectorBusy || voiceLibraryBusy || nativeVoiceSetupMessage != nil || bridge.busy || preparingImageRequest || activeNativeRequest != nil || preparingDrawThings || acceptingContinuousScene || connectingContinuousScene }
   var preparedFingerprint: String?
   var motionPromptSession: MotionPromptEditorSession?
   private var undoStates: [StudioProject] = []

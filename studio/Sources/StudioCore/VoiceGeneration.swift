@@ -1,3 +1,4 @@
+import Drama3Contracts
 import Foundation
 public struct VoiceSampling: Codable, Equatable {
   public var temperature: Double = 0.9
@@ -21,10 +22,12 @@ public struct VoiceRequest: Codable, Equatable {
   public var speaker: String? = nil
   public var instruct: String? = nil
   public var voiceDirection: [String]? = nil
+  public var drama3: Drama3Request? = nil
   enum CodingKeys: String, CodingKey {
     case engine, modelPath = "model_path", precision, text, referenceMode = "reference_mode"
     case reference, language, seed, sampling, turns, speaker, instruct
     case voiceDirection = "voice_direction"
+    case drama3
   }
 }
 public struct VoiceDraft: Codable, Equatable, Identifiable {
@@ -46,8 +49,31 @@ public struct VoiceDraft: Codable, Equatable, Identifiable {
   public var presetVoice: String?
   public var instructions: String?
   public var fishDirection: FishVoiceDirection?
-  public init() {}
+  public var voiceProfile: VoiceProfileSnapshot?
+  public var characterID: UUID?
+  public var dramaReferences: [VoiceReference]?
+  public var dramaSpeakerMap: Drama3SpeakerMap?
+  public var dramaMode: String?
+  public var dramaDirection: String?
+  public var dramaScene: String?
+  public var dramaLanguage: String?
+  public var dramaDurationHint: Double?
+  public var dramaStream: Bool?
+  public var dramaPromptRows:Int?
+  public var dramaMemoryGiB:Double?
+  public var dramaFirstChunkFrames:Int?
+  public var dramaStreamIntervalFrames:Int?
+  public var dramaParentTakeID: UUID?
+  public var dramaSourceAudio: String?
+  public var dramaEditOperation:String?
+  public var dramaEditStart: Double?
+  public var dramaEditEnd: Double?
+  public init(engine:VoiceEngine = .fishDrama3) {
+    self.engine=engine
+    if engine == .fishDrama3 {referenceMode = .synthetic;sampling.temperature=0.7;sampling.topP=0.7;sampling.topK=30;sampling.maxTokens=1024}
+  }
   public func request() throws -> VoiceRequest {
+    if engine == .fishDrama3 { return try request(resolvedDrama3: drama3Request()) }
     if usesDialogue == true { return try dialogueRequest() }
     let direction = engine == .fishS2Pro ? try fishDirection?.tags() ?? [] : []
     let directionBytes = direction.map { "[\($0)] " }.joined().utf8.count

@@ -145,6 +145,7 @@ public struct CharacterSheetDocument: Codable, Equatable, Identifiable {
   public var panels: CharacterPanelDetection?
   public var cropsApproved = false
   public var headReference: CharacterHeadReference?
+  public var voiceBinding: CharacterVoiceBinding?
   public var pipeline = CharacterSheetPipelineManifest()
   public init(id: UUID = UUID(), title: String = "New character") {
     self.id = id; self.title = title

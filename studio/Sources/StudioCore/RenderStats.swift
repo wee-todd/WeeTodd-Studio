@@ -52,6 +52,9 @@ public struct RenderStats: Codable, Equatable {
 public struct BridgeProgressEvent: Equatable, Sendable {
   public let message: String
   public let fraction: Double?
+  public var inputSequence:Int? = nil
+  public var inputAccepted:Bool? = nil
+  public var audioPreviewPath:String? = nil
   public var previewPath: String? = nil
   public var previewRevision: Int? = nil
 }
@@ -72,7 +75,7 @@ public struct BridgeProgressStream {
           let fraction = object["fraction"] as? Double
           if fraction == nil || (fraction!.isFinite && (0...1).contains(fraction!)) {
             events.append(BridgeProgressEvent(message: String(message.prefix(512)), fraction: fraction,
-              previewPath: object["previewPath"] as? String, previewRevision: object["previewRevision"] as? Int))
+              inputSequence:object["inputSequence"] as? Int,inputAccepted:object["inputAccepted"] as? Bool,audioPreviewPath:object["audioPreviewPath"] as? String, previewPath: object["previewPath"] as? String, previewRevision: object["previewRevision"] as? Int))
           }
         }
         line.removeAll(keepingCapacity: true); dropping = false

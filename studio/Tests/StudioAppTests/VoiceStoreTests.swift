@@ -19,7 +19,7 @@ final class VoiceStoreTests: XCTestCase {
       return ["audio": "/take.wav", "duration": 3.0, "sample_rate": 24000, "frames": 72000,
               "channels": 1, "artifacts": "/take", "truncated": false]
     })
-    store.openVoice()
+    store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice()
     store.change { $0.voiceDraft?.modelPath = "/model"; $0.voiceDraft?.text = "New words"
       $0.voiceDraft?.reference = VoiceReference(path: "/reference.wav", transcript: "Original words") }
     await store.generateVoice()
@@ -35,7 +35,7 @@ final class VoiceStoreTests: XCTestCase {
     let store = StudioStore(dataDirectory: try directory(), restoreSession: false, invocation: { _, _, _, _ in
       try await withCheckedThrowingContinuation { continuation = $0; entered.fulfill() }
     })
-    store.openVoice(); store.change { $0.voiceDraft?.engine = .fishS2Pro; $0.voiceDraft?.referenceMode = .synthetic
+    store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice(); store.change { $0.voiceDraft?.engine = .fishS2Pro; $0.voiceDraft?.referenceMode = .synthetic
       $0.voiceDraft?.modelPath = "/model"; $0.voiceDraft?.text = "Hello" }
     let task = Task { await store.generateVoice() }; await fulfillment(of: [entered], timeout: 2)
     store.project = StudioProject()
@@ -61,8 +61,8 @@ extension VoiceStoreTests {
   @MainActor func testVoiceModelPersistsAcrossMoviesAndAppSessions() throws {
     let folder = try directory()
     let store = StudioStore(dataDirectory: folder, restoreSession: false)
-    var draft = VoiceDraft(); draft.engine = .fishS2Pro; draft.modelPath = "/fish-model"
-    store.project.voiceDraft = draft; store.openVoice()
+    var draft = VoiceDraft(engine: .qwen3TTS); draft.engine = .fishS2Pro; draft.modelPath = "/fish-model"
+    store.project.voiceDraft = draft; store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice()
     let model = try XCTUnwrap(store.selectedVoiceModel)
     XCTAssertEqual(model.path, "/fish-model")
     XCTAssertEqual(store.project.voiceDraft?.modelPath, "")
@@ -78,11 +78,11 @@ extension VoiceStoreTests {
 
   @MainActor func testOpeningSavedVoiceDraftPreservesItsModelAndReference() throws {
     let store = StudioStore(dataDirectory: try directory(), restoreSession: false)
-    var first = VoiceDraft(); first.modelPath = "/qwen-model"
-    store.project.voiceDraft = first; store.openVoice()
-    var saved = VoiceDraft(); saved.engine = .fishS2Pro; saved.modelPath = "/fish-model"
+    var first = VoiceDraft(engine: .qwen3TTS); first.modelPath = "/qwen-model"
+    store.project.voiceDraft = first; store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice()
+    var saved = VoiceDraft(engine: .qwen3TTS); saved.engine = .fishS2Pro; saved.modelPath = "/fish-model"
     saved.text = "Keep my script"; saved.reference = VoiceReference(path: "/sample.wav", transcript: "Keep my reference")
-    store.project = StudioProject(); store.project.voiceDraft = saved; store.openVoice()
+    store.project = StudioProject(); store.project.voiceDraft = saved; store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice()
     XCTAssertEqual(store.selectedVoiceModel?.path, saved.modelPath)
     saved.modelPath = ""; saved.modelID = store.selectedVoiceModel?.id
     XCTAssertEqual(store.project.voiceDraft, saved)
@@ -92,8 +92,8 @@ extension VoiceStoreTests {
     let file = try directory().appendingPathComponent("not-a-directory")
     try Data("file".utf8).write(to: file)
     let store = StudioStore(dataDirectory: file, restoreSession: false)
-    var draft = VoiceDraft(); draft.modelPath = "/preserve-me"
-    store.project.voiceDraft = draft; store.openVoice()
+    var draft = VoiceDraft(engine: .qwen3TTS); draft.modelPath = "/preserve-me"
+    store.project.voiceDraft = draft; store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice()
     XCTAssertEqual(store.project.voiceDraft, draft)
     XCTAssertNotNil(store.error)
   }
@@ -104,7 +104,7 @@ extension VoiceStoreTests {
     let large = InstalledVoiceModel(engine: .qwen3TTS, name: "Qwen3-TTS Base · 1.7B · 8-bit", path: "/qwen-large")
     let fish = InstalledVoiceModel(engine: .fishS2Pro, name: "Fish S2 Pro · BF16", path: "/fish")
     var models = VoiceModelSettings(); models.register(small); models.register(large); models.register(fish)
-    store.runtime.voiceModels = models; store.openVoice()
+    store.runtime.voiceModels = models; store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice()
     store.change { $0.voiceDraft?.text = "Keep these words"; $0.voiceDraft?.reference = VoiceReference(path: "/sample.wav", transcript: "Sample words") }
     store.selectVoiceModel(large.id)
     store.selectVoiceFamily(.fishS2Pro)
@@ -126,7 +126,7 @@ extension VoiceStoreTests {
     var settings = VoiceModelSettings()
     let first = settings.register(InstalledVoiceModel(engine: .qwen3TTS, name: "Small", path: "/small"))
     settings.register(InstalledVoiceModel(engine: .qwen3TTS, name: "Large", path: "/large"))
-    store.runtime.voiceModels = settings; store.openVoice(); store.removeVoiceModel(first)
+    store.runtime.voiceModels = settings; store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice(); store.removeVoiceModel(first)
     XCTAssertNil(store.selectedVoiceModel)
     await store.generateVoice()
     XCTAssertTrue(store.error?.contains("installed speech model") == true)
@@ -140,7 +140,7 @@ extension VoiceStoreTests {
       XCTAssertNil((body["voice"] as? [String: Any])?["engine"])
       return try await withCheckedThrowingContinuation { continuation = $0; entered.fulfill() }
     })
-    store.openVoice()
+    store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice()
     let task = Task { await store.addVoiceModel(at: URL(fileURLWithPath: "/qwen")) }
     await fulfillment(of: [entered], timeout: 2)
     store.project = StudioProject(); let newProject = store.project
@@ -189,7 +189,7 @@ extension VoiceStoreTests {
       return ["audio": "/dialogue.wav", "duration": 5.0, "sample_rate": 24000, "frames": 120000,
               "channels": 1, "artifacts": "/dialogue", "truncated": false]
     })
-    store.openVoice()
+    store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice()
     store.change {
       $0.voiceDraft?.modelPath = "/model"; $0.voiceDraft?.text = "Hello"
       $0.voiceDraft?.reference = VoiceReference(path: "/first.wav", transcript: "Hello")
@@ -212,7 +212,7 @@ extension VoiceStoreTests {
     var settings = VoiceModelSettings()
     let base = settings.register(InstalledVoiceModel(engine: .qwen3TTS, name: "Base", path: "/base"))
     let custom = settings.register(InstalledVoiceModel(engine: .qwen3TTS, name: "CustomVoice", path: "/custom", kind: "custom_voice"))
-    store.runtime.voiceModels = settings; store.openVoice()
+    store.runtime.voiceModels = settings; store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice()
     store.change {
       $0.voiceDraft?.text = "Hello"; $0.voiceDraft?.reference = VoiceReference(path: "/sample.wav", transcript: "Hi")
       $0.voiceDraft?.startDialogue()
@@ -246,7 +246,7 @@ extension VoiceStoreTests {
       XCTAssertNil(voice["reference"])
       return ["audio":"/custom.wav", "duration":1.0, "frames":24000, "sample_rate":24000, "channels":1, "artifacts":"/custom"]
     })
-    store.openVoice(); store.change { $0.voiceDraft?.text = "Hello" }
+    store.runtime.voiceModels = store.runtime.voiceModels ?? VoiceModelSettings();store.runtime.voiceModels?.lastFamily = .qwen3TTS;store.openVoice(); store.change { $0.voiceDraft?.text = "Hello" }
     try store.registerVoiceModel(["model":["engine":"qwen3TTS", "path":"/custom", "name":"CustomVoice", "kind":"custom_voice"]])
     XCTAssertNil(store.project.voiceDraft?.modelID)
     await store.generateVoice()

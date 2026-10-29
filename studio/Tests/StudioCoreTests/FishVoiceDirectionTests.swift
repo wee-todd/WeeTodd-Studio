@@ -4,7 +4,7 @@ import XCTest
 
 final class FishVoiceDirectionTests: XCTestCase {
   private func draft() -> VoiceDraft {
-    var draft = VoiceDraft(); draft.engine = .fishS2Pro; draft.modelPath = "/model"
+    var draft = VoiceDraft(engine: .qwen3TTS); draft.engine = .fishS2Pro; draft.modelPath = "/model"
     draft.referenceMode = .synthetic; draft.text = "Hello"
     return draft
   }
@@ -15,7 +15,7 @@ final class FishVoiceDirectionTests: XCTestCase {
   }
 
   func testStoredDirectionBecomesSeparateRequestTagsWithoutChangingScript() throws {
-    var draft = VoiceDraft(); draft.engine = .fishS2Pro; draft.modelPath = "/model"
+    var draft = VoiceDraft(engine: .qwen3TTS); draft.engine = .fishS2Pro; draft.modelPath = "/model"
     draft.referenceMode = .synthetic; draft.text = "[excited] Hello, 世界!"
     var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as! [String: Any]
     object["fishDirection"] = ["pitch": "low voice", "pace": "slow delivery", "timbre": "warm voice",

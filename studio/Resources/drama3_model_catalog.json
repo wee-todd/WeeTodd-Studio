@@ -1,0 +1,682 @@
+[
+  {
+    "descriptor": {
+      "id": "drama3-3bit",
+      "name": "Fish Drama 3 \u00b7 Compact \u00b7 Native",
+      "description": "Native MLX weights with all scene-control rows. Includes temporary original head shard extraction; temporary source link is removed after setup; the verified shared download cache remains reusable.",
+      "downloadBytes": 24392997215,
+      "requiredDiskBytes": 25466739039,
+      "sourceURL": "https://huggingface.co/mlx-community/fish-audio-drama-3-3bit/tree/7120e8b11630aa6ae614224074457ef9bb4f48c0",
+      "licenseURL": "https://huggingface.co/fishaudio/drama-3/blob/e0a9218aa48888270f06ef1ed9ea67622c0e17d2/LICENSE",
+      "licenseNotice": "Built with Fish Audio. Model weights retain the Fish Audio Community License. Review the linked source terms.",
+      "outputKind": "directory",
+      "engines": [
+        "drama3"
+      ],
+      "tasks": [
+        "speak",
+        "scene",
+        "direct",
+        "infill",
+        "lineSeparated",
+        "streamingText"
+      ],
+      "components": [
+        "checkpoint",
+        "tokenizer",
+        "codec"
+      ]
+    },
+    "kind": "drama3-native",
+    "files": [
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "LICENSE",
+        "size": 19685,
+        "sha256": "733a32442087acbda12ecafe8e71eb8ee5890c89b50ce7ac4ea3777faa3c823e",
+        "target": "LICENSE"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "NOTICE",
+        "size": 514,
+        "sha256": "09374ad46eb37ce1ec23e15e3bf628133ee98e0610c9920d61da83d2ea67a224",
+        "target": "NOTICE"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "codec.safetensors",
+        "size": 1572080341,
+        "sha256": "6ff9d6f07920b2155e3a48ada21956004b96df9114d255ed9f0788484ba73040",
+        "target": "codec.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "config.json",
+        "size": 53444,
+        "sha256": "a53ca61944793f4f874ecc76666a89344485b07d2a768dec71639b757496cd60",
+        "target": "config.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "model-00001.safetensors",
+        "size": 4315585035,
+        "sha256": "d2f638bc8bad47c6b808a75a70ca67dff4e2a8d3f66d2e1317fed76dcbc302d0",
+        "target": "model-00001.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "model-00002.safetensors",
+        "size": 4386263574,
+        "sha256": "cfb4a47317c757f6409c1f83d0cd91bbf45cc2be688da4a1e4b65497e8fdfa46",
+        "target": "model-00002.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "model-00003.safetensors",
+        "size": 4334840381,
+        "sha256": "4d81d7a926b4af488c57ab219be2b288c0dee25cf18bc0dac6c625253cc50afc",
+        "target": "model-00003.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "model-00004.safetensors",
+        "size": 4305337082,
+        "sha256": "7b950e3a7bf4959d47fce8216cfe075ea145674386c076199704c78e494d4219",
+        "target": "model-00004.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "model-00005.safetensors",
+        "size": 819396490,
+        "sha256": "c2cac79fa7e3af806d5552de312490afb296495a798b6dce1564fded2c8f7f43",
+        "target": "model-00005.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "special_tokens_map.json",
+        "size": 102779,
+        "sha256": "08aed9e321dc05275ac68cf883bfa96006b3fc09ff5cccadf262b6bce0873adb",
+        "target": "special_tokens_map.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "tokenizer.json",
+        "size": 20791070,
+        "sha256": "0e9b9db76b2f0389b04b6ef057a2ac3b89100b7e96f2dd7034d19580a09654d6",
+        "target": "tokenizer.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-3bit",
+        "revision": "7120e8b11630aa6ae614224074457ef9bb4f48c0",
+        "filename": "tokenizer_config.json",
+        "size": 103580,
+        "sha256": "00e800279d8436c324b924e97872c7eacd2b19406aa0fe71eeb557b4cd53aa3e",
+        "target": "tokenizer_config.json"
+      },
+      {
+        "repo": "fishaudio/drama-3",
+        "revision": "e0a9218aa48888270f06ef1ed9ea67622c0e17d2",
+        "filename": "model-00008-of-00008.safetensors",
+        "size": 4638423240,
+        "sha256": "c5b065cce3b3b851369dfdb5a3b60f6abf2699121071c2b1a9dfd84acb7b8f7d",
+        "target": ".original-head-source.safetensors"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "drama3-4bit",
+      "name": "Fish Drama 3 \u00b7 Balanced \u00b7 Native",
+      "description": "Native MLX weights with all scene-control rows. Includes temporary original head shard extraction; temporary source link is removed after setup; the verified shared download cache remains reusable.",
+      "downloadBytes": 28419529483,
+      "requiredDiskBytes": 29493271307,
+      "sourceURL": "https://huggingface.co/mlx-community/fish-audio-drama-3-4bit/tree/cc639e27aba7edb73429d3e3806f471dcd79d316",
+      "licenseURL": "https://huggingface.co/fishaudio/drama-3/blob/e0a9218aa48888270f06ef1ed9ea67622c0e17d2/LICENSE",
+      "licenseNotice": "Built with Fish Audio. Model weights retain the Fish Audio Community License. Review the linked source terms.",
+      "outputKind": "directory",
+      "engines": [
+        "drama3"
+      ],
+      "tasks": [
+        "speak",
+        "scene",
+        "direct",
+        "infill",
+        "lineSeparated",
+        "streamingText"
+      ],
+      "components": [
+        "checkpoint",
+        "tokenizer",
+        "codec"
+      ]
+    },
+    "kind": "drama3-native",
+    "files": [
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "LICENSE",
+        "size": 19685,
+        "sha256": "733a32442087acbda12ecafe8e71eb8ee5890c89b50ce7ac4ea3777faa3c823e",
+        "target": "LICENSE"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "NOTICE",
+        "size": 910,
+        "sha256": "d2dc9c9fd71c2faf01b825f69797b20e1eca961505aa9ba2a3c5004b99262d73",
+        "target": "NOTICE"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "codec.safetensors",
+        "size": 1572080341,
+        "sha256": "6ff9d6f07920b2155e3a48ada21956004b96df9114d255ed9f0788484ba73040",
+        "target": "codec.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "config.json",
+        "size": 53444,
+        "sha256": "e980dfd9128edeb5f5d066fd7c322a2dfc08fedcbea58019d8d2e8e5cf7b50d5",
+        "target": "config.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "model-00001.safetensors",
+        "size": 4354661374,
+        "sha256": "de6eeebdd8c09316acd4f5fdd05482221e8596a19a6e8384d7fd129d70e894bf",
+        "target": "model-00001.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "model-00002.safetensors",
+        "size": 4360386773,
+        "sha256": "cdd874495884ba7a1f9ae5b2baf7fc8fed85f73799556e87a6406184b4f8cf9f",
+        "target": "model-00002.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "model-00003.safetensors",
+        "size": 4304379853,
+        "sha256": "eefa12cee1d032b511869de2a71666b4f07c82ca2fd8c94c3c5bcd1da431ef11",
+        "target": "model-00003.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "model-00004.safetensors",
+        "size": 4407528323,
+        "sha256": "cd4960872fc5ceff7c719bd5be9d9f770f3357068eca83af065db6ba68927a8a",
+        "target": "model-00004.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "model-00005.safetensors",
+        "size": 4425623733,
+        "sha256": "e0dbbeb7f66a2168fd744df15987b145780213d65cb6b3579a2531a78e92774e",
+        "target": "model-00005.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "model-00006.safetensors",
+        "size": 335374378,
+        "sha256": "0b3e0b1b620080e4f4db53cc3b9c697c4179964be0e2172b339b605459470a7e",
+        "target": "model-00006.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "special_tokens_map.json",
+        "size": 102779,
+        "sha256": "08aed9e321dc05275ac68cf883bfa96006b3fc09ff5cccadf262b6bce0873adb",
+        "target": "special_tokens_map.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "tokenizer.json",
+        "size": 20791070,
+        "sha256": "0e9b9db76b2f0389b04b6ef057a2ac3b89100b7e96f2dd7034d19580a09654d6",
+        "target": "tokenizer.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-4bit",
+        "revision": "cc639e27aba7edb73429d3e3806f471dcd79d316",
+        "filename": "tokenizer_config.json",
+        "size": 103580,
+        "sha256": "00e800279d8436c324b924e97872c7eacd2b19406aa0fe71eeb557b4cd53aa3e",
+        "target": "tokenizer_config.json"
+      },
+      {
+        "repo": "fishaudio/drama-3",
+        "revision": "e0a9218aa48888270f06ef1ed9ea67622c0e17d2",
+        "filename": "model-00008-of-00008.safetensors",
+        "size": 4638423240,
+        "sha256": "c5b065cce3b3b851369dfdb5a3b60f6abf2699121071c2b1a9dfd84acb7b8f7d",
+        "target": ".original-head-source.safetensors"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "drama3-8bit",
+      "name": "Fish Drama 3 \u00b7 Quality \u00b7 Native",
+      "description": "Native MLX weights with all scene-control rows. Includes temporary original head shard extraction; temporary source link is removed after setup; the verified shared download cache remains reusable.",
+      "downloadBytes": 46816019313,
+      "requiredDiskBytes": 47889761137,
+      "sourceURL": "https://huggingface.co/mlx-community/fish-audio-drama-3-8bit/tree/fedc7cc92bab5a180709cbaae6208d10b390bb97",
+      "licenseURL": "https://huggingface.co/fishaudio/drama-3/blob/e0a9218aa48888270f06ef1ed9ea67622c0e17d2/LICENSE",
+      "licenseNotice": "Built with Fish Audio. Model weights retain the Fish Audio Community License. Review the linked source terms.",
+      "outputKind": "directory",
+      "engines": [
+        "drama3"
+      ],
+      "tasks": [
+        "speak",
+        "scene",
+        "direct",
+        "infill",
+        "lineSeparated",
+        "streamingText"
+      ],
+      "components": [
+        "checkpoint",
+        "tokenizer",
+        "codec"
+      ]
+    },
+    "kind": "drama3-native",
+    "files": [
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "LICENSE",
+        "size": 19685,
+        "sha256": "733a32442087acbda12ecafe8e71eb8ee5890c89b50ce7ac4ea3777faa3c823e",
+        "target": "LICENSE"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "NOTICE",
+        "size": 980,
+        "sha256": "869c34c0d89f15e4a94350c1eeed57ad92a3ff33187a009b7e5dbcc9bdcc0d25",
+        "target": "NOTICE"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "codec.safetensors",
+        "size": 1572080341,
+        "sha256": "6ff9d6f07920b2155e3a48ada21956004b96df9114d255ed9f0788484ba73040",
+        "target": "codec.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "config.json",
+        "size": 18051,
+        "sha256": "076e54412c52b8d9f41197b07e8deb89d65fcf01853801a314632f7e7a12ffc0",
+        "target": "config.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00001.safetensors",
+        "size": 4395122258,
+        "sha256": "c29814a41d79e452c0e9c03a106ac7b7b2ac07b43b8f4f723bbe2f367d54d066",
+        "target": "model-00001.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00002.safetensors",
+        "size": 4409665164,
+        "sha256": "4f457ebde3ccc3956c7c9300a56a8c1a6db64ee1417246e45c5dd18421304d6e",
+        "target": "model-00002.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00003.safetensors",
+        "size": 4345652689,
+        "sha256": "29886d23ddacba4dd9a5d461fcbf51c04dcd1f5f967a592f08f748f8393283d2",
+        "target": "model-00003.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00004.safetensors",
+        "size": 4571837882,
+        "sha256": "8c004deba5a0b760c7da81543a19d52db555a2edd45de2725d54566cbec038b5",
+        "target": "model-00004.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00005.safetensors",
+        "size": 4354071124,
+        "sha256": "98e25de091972867f607397efb47126c3ea0528ec8d4f1aededa0ea4c829dd66",
+        "target": "model-00005.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00006.safetensors",
+        "size": 4571846179,
+        "sha256": "a3d97fef461aec6fc78a99192e7bba7f45b7c8ba0733ce10d1ad766371eff227",
+        "target": "model-00006.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00007.safetensors",
+        "size": 4408599907,
+        "sha256": "bf06dbda13a539e13936742b542d579ec76e5a2943ecfbeed4dc7821fb989b9a",
+        "target": "model-00007.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00008.safetensors",
+        "size": 4514258890,
+        "sha256": "4d215a0b8bdda65cb56c942b8dbc8429b7974288cf064c499b789cde9c2babfd",
+        "target": "model-00008.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00009.safetensors",
+        "size": 4381109233,
+        "sha256": "4483f5e06ff17f06cb8860fac6e9c3c7b7993a0af6156001bdb9b8023b975d20",
+        "target": "model-00009.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "model-00010.safetensors",
+        "size": 632316261,
+        "sha256": "5a391679632c4f8cb94d990fa9e609ad3f693f66938c533f603d19c13234eb91",
+        "target": "model-00010.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "special_tokens_map.json",
+        "size": 102779,
+        "sha256": "08aed9e321dc05275ac68cf883bfa96006b3fc09ff5cccadf262b6bce0873adb",
+        "target": "special_tokens_map.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "tokenizer.json",
+        "size": 20791070,
+        "sha256": "0e9b9db76b2f0389b04b6ef057a2ac3b89100b7e96f2dd7034d19580a09654d6",
+        "target": "tokenizer.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-8bit",
+        "revision": "fedc7cc92bab5a180709cbaae6208d10b390bb97",
+        "filename": "tokenizer_config.json",
+        "size": 103580,
+        "sha256": "00e800279d8436c324b924e97872c7eacd2b19406aa0fe71eeb557b4cd53aa3e",
+        "target": "tokenizer_config.json"
+      },
+      {
+        "repo": "fishaudio/drama-3",
+        "revision": "e0a9218aa48888270f06ef1ed9ea67622c0e17d2",
+        "filename": "model-00008-of-00008.safetensors",
+        "size": 4638423240,
+        "sha256": "c5b065cce3b3b851369dfdb5a3b60f6abf2699121071c2b1a9dfd84acb7b8f7d",
+        "target": ".original-head-source.safetensors"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "drama3-bf16",
+      "name": "Fish Drama 3 \u00b7 BF16 reference \u00b7 Native",
+      "description": "Native MLX weights with all scene-control rows. Includes temporary original head shard extraction; temporary source link is removed after setup; the verified shared download cache remains reusable.",
+      "downloadBytes": 77014963229,
+      "requiredDiskBytes": 78088705053,
+      "sourceURL": "https://huggingface.co/mlx-community/fish-audio-drama-3-bf16/tree/0980952ff1bcb52140ef39876cd0d6c789d825bb",
+      "licenseURL": "https://huggingface.co/fishaudio/drama-3/blob/e0a9218aa48888270f06ef1ed9ea67622c0e17d2/LICENSE",
+      "licenseNotice": "Built with Fish Audio. Model weights retain the Fish Audio Community License. Review the linked source terms.",
+      "outputKind": "directory",
+      "engines": [
+        "drama3"
+      ],
+      "tasks": [
+        "speak",
+        "scene",
+        "direct",
+        "infill",
+        "lineSeparated",
+        "streamingText"
+      ],
+      "components": [
+        "checkpoint",
+        "tokenizer",
+        "codec"
+      ]
+    },
+    "kind": "drama3-native",
+    "files": [
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "LICENSE",
+        "size": 19685,
+        "sha256": "733a32442087acbda12ecafe8e71eb8ee5890c89b50ce7ac4ea3777faa3c823e",
+        "target": "LICENSE"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "NOTICE",
+        "size": 726,
+        "sha256": "36fa9e43fb0c99ad99476586c4497607dac871f68f233bbc4177de807d9bf8bf",
+        "target": "NOTICE"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "codec.safetensors",
+        "size": 1572080341,
+        "sha256": "6ff9d6f07920b2155e3a48ada21956004b96df9114d255ed9f0788484ba73040",
+        "target": "codec.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "config.json",
+        "size": 5380,
+        "sha256": "b7401b9fd070d17855f3e9da9be939087b36dafb4e61e4a72b0dd2488408dbce",
+        "target": "config.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00001.safetensors",
+        "size": 4396843915,
+        "sha256": "61e1c87d7aee4341acd2967129e219d83efdf9a8ab72c58eb85d9207d165d1a6",
+        "target": "model-00001.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00002.safetensors",
+        "size": 4573903843,
+        "sha256": "f1e39d1d7aa2d6c3d33df537672ecf7ee7de5b22b33ae8f051f20f74d60286dc",
+        "target": "model-00002.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00003.safetensors",
+        "size": 4507514512,
+        "sha256": "1c450efc912147fcee878c6b5f7a883eb10fa22264e43e48728e6591610ab9e5",
+        "target": "model-00003.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00004.safetensors",
+        "size": 4431658019,
+        "sha256": "53948d1c15c7b4b7d698065a61b08746737014282f1e5e979ea31573c247382c",
+        "target": "model-00004.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00005.safetensors",
+        "size": 4518309819,
+        "sha256": "9dfd7bfbe177acd42def853eccae467b22b46304f104e062bc0457afe62d59fc",
+        "target": "model-00005.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00006.safetensors",
+        "size": 4384482409,
+        "sha256": "13afdf8c903ce1bdc0b3bfe5f7d66d36cf48b8ffa9d52d5635b1363dd12a9325",
+        "target": "model-00006.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00007.safetensors",
+        "size": 4499096134,
+        "sha256": "0cab9c56ef6b20fa075891c3bff53da2ec96b2d5f8ec0ab9b085590d520b4252",
+        "target": "model-00007.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00008.safetensors",
+        "size": 4506457536,
+        "sha256": "a12e043b75c35aa44ac3a6990a6c7458092f4cf7c4d241fd7214ef7e75302cc1",
+        "target": "model-00008.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00009.safetensors",
+        "size": 4451928780,
+        "sha256": "662bb99a345f258670efff77cb493cb29d47cbf12f09915fe296818210dc40c2",
+        "target": "model-00009.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00010.safetensors",
+        "size": 4499096112,
+        "sha256": "0523f098e6798cda48853ab11a5b20e7c6d4446f7646610911887195d97c26a9",
+        "target": "model-00010.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00011.safetensors",
+        "size": 4506457552,
+        "sha256": "27134b3ba7b61a748305573f7ae28ea01648f9effb5c71ab0a18a3d6d7de0fe3",
+        "target": "model-00011.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00012.safetensors",
+        "size": 4451928806,
+        "sha256": "c42171f2a00b92239a3c820549393cd8b6b04d2dee69683a8ac06a3f59f05580",
+        "target": "model-00012.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00013.safetensors",
+        "size": 4482425358,
+        "sha256": "217d5babe37acec92655325e86520df0484876d90632499e4648629a20ea5204",
+        "target": "model-00013.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00014.safetensors",
+        "size": 4506457524,
+        "sha256": "ba1a6fb9989a616da6aaa466bddc9f1c829d64983d58afaa4ac5d70a9e0314ea",
+        "target": "model-00014.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00015.safetensors",
+        "size": 4303385441,
+        "sha256": "3ccdb07af6c19f59ffe2a14e48d4bc3802b3d80f7f51d63a0250301eb47758ed",
+        "target": "model-00015.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "model-00016.safetensors",
+        "size": 3763490668,
+        "sha256": "720b786c550ecc0cdceab79f56d64c67aebe1922a7ee99e15d0ea6ed0cf7d0aa",
+        "target": "model-00016.safetensors"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "special_tokens_map.json",
+        "size": 102779,
+        "sha256": "08aed9e321dc05275ac68cf883bfa96006b3fc09ff5cccadf262b6bce0873adb",
+        "target": "special_tokens_map.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "tokenizer.json",
+        "size": 20791070,
+        "sha256": "0e9b9db76b2f0389b04b6ef057a2ac3b89100b7e96f2dd7034d19580a09654d6",
+        "target": "tokenizer.json"
+      },
+      {
+        "repo": "mlx-community/fish-audio-drama-3-bf16",
+        "revision": "0980952ff1bcb52140ef39876cd0d6c789d825bb",
+        "filename": "tokenizer_config.json",
+        "size": 103580,
+        "sha256": "00e800279d8436c324b924e97872c7eacd2b19406aa0fe71eeb557b4cd53aa3e",
+        "target": "tokenizer_config.json"
+      },
+      {
+        "repo": "fishaudio/drama-3",
+        "revision": "e0a9218aa48888270f06ef1ed9ea67622c0e17d2",
+        "filename": "model-00008-of-00008.safetensors",
+        "size": 4638423240,
+        "sha256": "c5b065cce3b3b851369dfdb5a3b60f6abf2699121071c2b1a9dfd84acb7b8f7d",
+        "target": ".original-head-source.safetensors"
+      }
+    ]
+  }
+]

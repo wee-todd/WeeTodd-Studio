@@ -8,6 +8,9 @@ public struct VoiceSpeaker: Codable, Equatable, Identifiable {
   public var presetVoice: String?
   public var instructions: String?
   public var fishDirection: FishVoiceDirection?
+  public var voiceProfile: VoiceProfileSnapshot?
+  public var dramaReferences: [VoiceReference]?
+  public var characterID: UUID?
   public init(name: String, reference: VoiceReference? = nil) { self.name = name; self.reference = reference }
 }
 public struct VoiceTurn: Codable, Equatable, Identifiable {
@@ -32,7 +35,10 @@ public struct VoiceDialogue: Codable, Equatable {
     turns[index].fishDirection = nil
   }
   public mutating func mapPaths(_ transform: (String) throws -> String) rethrows {
-    for i in speakers.indices { if let ref = speakers[i].reference { speakers[i].reference?.path = try transform(ref.path) } }
+    for i in speakers.indices { try speakers[i].voiceProfile?.mapPaths(transform); if let ref = speakers[i].reference { speakers[i].reference?.path = try transform(ref.path) } }
+    for i in speakers.indices where speakers[i].dramaReferences != nil {
+      for j in speakers[i].dramaReferences!.indices { speakers[i].dramaReferences![j].path = try transform(speakers[i].dramaReferences![j].path) }
+    }
     for i in turns.indices { if let ref = turns[i].reference { turns[i].reference?.path = try transform(ref.path) } }
   }
 }
@@ -58,9 +64,11 @@ extension VoiceDraft {
     if dialogue == nil {
       var speaker = VoiceSpeaker(name: "Speaker 1", reference: reference); speaker.referenceMode = referenceMode
       speaker.presetVoice = presetVoice; speaker.instructions = instructions
-      speaker.fishDirection = fishDirection
+      speaker.fishDirection = fishDirection;speaker.voiceProfile=voiceProfile;speaker.characterID=characterID
+      speaker.dramaReferences = dramaReferences
       dialogue = VoiceDialogue(speakers: [speaker], turns: [VoiceTurn(speakerID: speaker.id, text: text)])
     }
+    if engine == .fishDrama3,dramaMode==nil || dramaMode=="speak" {dramaMode="lineContinuation"}
     usesDialogue = true
   }
   public func dialogueRequest() throws -> VoiceRequest {

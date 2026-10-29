@@ -11,7 +11,7 @@ public struct ProductionLibraryPackage: Codable, Equatable, Identifiable {
   public var id: UUID { rootID }
   public var root: PlanningSubject? { subjects.first { $0.id == rootID } }
   public var missingMediaPaths: [String] {
-    Array(Set(assets.filter { !FileManager.default.fileExists(atPath: $0.path) }.map(\.path))).sorted()
+    Array(Set(assets.filter { !FileManager.default.fileExists(atPath: $0.path) }.map(\.path) + subjects.flatMap { $0.voiceBinding?.profile.samples.map(\.path) ?? [] }.filter { !FileManager.default.fileExists(atPath: $0) })).sorted()
   }
 }
 
@@ -138,7 +138,8 @@ public extension StudioProject {
     var next = self; var plan = next.planning ?? ProjectPlanning()
     for object in package.subjects {
       if let old = plan.subjects.first(where: { $0.id == object.id }) {
-        guard old.revision == object.revision, old.referenceAssetIDs == object.referenceAssetIDs else {
+        guard old.revision == object.revision, old.referenceAssetIDs == object.referenceAssetIDs,
+          old.voiceBinding?.profile.fingerprint == object.voiceBinding?.profile.fingerprint else {
           throw StudioError.invalid("“\(old.name)” already has a different movie definition. Keep this movie’s version or import the library into a new movie.")
         }
       } else {

@@ -39,6 +39,7 @@ enum CharacterDirectorCloseChoice { case keepRunning, cancelJob }
     var document = persisted ?? CharacterSheetDocument(title: context?.name ?? "New character")
     if persisted == nil, let context {
       document.subjectKey = context.subjectKey
+      document.voiceBinding=store.planning.subjects.first(where:{store.project.id.uuidString+":"+$0.id.uuidString==context.subjectKey})?.voiceBinding
       document.originalDescription = context.description
       if let definition = context.characterDefinition { document.definition = definition }
       var sheetContext = context

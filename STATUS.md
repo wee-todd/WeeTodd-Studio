@@ -309,6 +309,27 @@ renderer binary used for these jobs was retained from the earlier tests; the upd
 bundle independently passed packaging/signature verification. Final integration validation is
 recorded in the October 25 entry above. Broader real hardware and speech qualification remain open.
 
+## October 17 native Drama 3 voice integration
+
+New voice drafts default to Fish Audio Drama 3, with prior explicit family choices preserved.
+The Swift/MLX worker shares lightweight contracts with StudioCore and runs without Python.
+Conversations default to explicit native line continuation; joint-scene generation remains
+experimental and flags mismatched boundaries. Native model setup admits per-layer quantized checkpoints, verifies pinned downloads, and adds
+the original scene-separator output row omitted by community conversions. Reusable voice profiles
+own lossless sample copies and versioned transcripts; characters pin those profiles independently
+of visual approvals. Character exports and collected projects preserve their voice media.
+
+The native interface includes multi-reference and synthetic speech, scene casting and stable
+speaker IDs, direct-a-take history, range infilling, deletion, streamed audio and bounded live-text
+append/finish. Causal decode retains bounded convolution/attention state; generation state remains
+process-local and is released between weighted stages and after cancellation. Real scene and
+long-form runs can miss lines or reach token limits; detected failures flag takes for review.
+Fine-grained edit quality depends on matching the selected audio range to the full updated
+transcript. The available task controls do not imply quality qualification for every checkpoint,
+language, character count or direction. Numerical, packaging and real-run qualification records
+remain separate from ordinary contract tests.
+
+
 ## October 12 audio-first editing and music extensions consolidation
 
 Studio preserves full voice and music takes on an empty timeline, with independent Voice and
@@ -317,7 +338,7 @@ clip contract. Clip-attached voice placement offers full-take and explicit trim 
 waveform/spectrum presentation fills empty video sections and audio tails; preview and export share
 one drawing implementation. English caption/lyric generation uses the existing local MLX acoustic
 recognizer, retains source-relative measured cues and supports manual correction. Audio export
-writes the complete mix as 24-bit WAV. Advanced mixing, music, speech and caption inference still
+writes the complete mix as 24-bit WAV. Advanced mixing, music, legacy Fish S2/Qwen speech and caption inference still
 use the optional Python runtime; they are outside the accepted H3/LTX Swift migration.
 
 Music models now register once in Runtime Settings and are selected by name. Legacy draft paths

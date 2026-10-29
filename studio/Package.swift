@@ -10,8 +10,9 @@ let package = Package(
     .executable(name: "WeeToddCLI", targets: ["WeeToddCLI"]),
     .library(name: "StudioCore", targets: ["StudioCore"]),
   ],
+  dependencies: [.package(path: "../integrations/weetodd-drama3")],
   targets: [
-    .target(name: "StudioCore"),
+    .target(name: "StudioCore", dependencies: [.product(name: "Drama3Contracts", package: "weetodd-drama3")]),
     .executableTarget(name: "WeeToddStudio", dependencies: ["StudioCore"]),
     .executableTarget(name: "StudioMetal"),
     .executableTarget(name: "WeeToddCLI", dependencies: ["StudioCore"]),

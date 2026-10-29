@@ -641,10 +641,12 @@ readable location, and let setup validate the particular component layout and ta
 
 ## Native voice and audio mixing
 
-Open **Movie → Generate Voice…**. Speech inference runs inside WeeTodd's own MLX engines through
-its local runtime, with no speech API or external inference server. Configure shared model locations
+Open **Movie → Generate Voice…**. New voice work defaults to **Fish Audio Drama 3**, using the
+bundled native Swift/MLX worker without a Python interpreter, speech API or external inference
+server. An explicitly saved family choice is retained. Fish S2 Pro and Qwen retain their existing
+optional local Python/MLX runtime. Configure shared model locations
 under **Runtime Settings → Speech models**, using **Add installed model…** or **Download speech
-model…**. In Voice, choose **Family** (Fish or Qwen), then an **Installed model** variant. Each
+model…**. In Voice, choose **Family → Drama 3 · native** (or Fish S2 Pro/Qwen), then an **Installed model** variant. Each
 family remembers its last selection across movies and app launches. Model paths belong to Runtime
 settings; new voice drafts store a model ID, while completed takes retain their resolved request.
 Older draft model locations migrate into Runtime settings when opened. Downloads are pinned and
@@ -653,15 +655,78 @@ the installed checkpoint. Removing an entry from Runtime settings does not delet
 
 | Engine | Supported local weights | Reference modes | Master audio |
 | --- | --- | --- | --- |
+| Fish Drama 3 | Native MLX community 3-bit, 4-bit, 8-bit or BF16; scene-control supplement | Multiple audio + transcript references; synthetic voice | 44.1 kHz mono |
 | Fish S2 Pro | MLX community S2 Pro 8-bit or BF16 | Audio + transcript; synthetic voice | 44.1 kHz mono |
 | Qwen3-TTS Base | MLX community 12Hz Base 1.7B or 0.6B, 8-bit | Audio + transcript; speaker identity only | 24 kHz mono |
 | Qwen3-TTS CustomVoice | MLX community 12Hz CustomVoice 1.7B, 8-bit | Nine built-in voices; delivery instructions | 24 kHz mono |
 
-Fish weights use the [Fish Audio Research License](https://huggingface.co/fishaudio/s2-pro/blob/main/LICENSE.md);
+**Built with Fish Audio.** Drama 3 weights use the [Fish Audio Community License 1.0](https://huggingface.co/fishaudio/drama-3/blob/main/LICENSE). Downloads preserve the model
+license and notices; these terms are separate from the application source license. Fish S2 Pro
+weights use the [Fish Audio Research License](https://huggingface.co/fishaudio/s2-pro/blob/main/LICENSE.md);
 commercial use requires separate permission from Fish Audio. Qwen3-TTS weights use
 [Apache 2.0](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base).
 These terms are separate from WeeTodd's source license. Original Fish `codec.pth`, arbitrary MLX
 conversions, Qwen VoiceDesign, CustomVoice 0.6B, fine-tuning and speech LoRAs are not supported here.
+
+
+**Drama 3 setup and memory:** use **Runtime Settings → Speech models → Download speech model… →
+Drama 3 · Balanced 4-bit · recommended** for the usual starting point, or **Drama 3 · Compact 3-bit**
+when memory is limited. To reuse compatible weights, choose **Add installed model…** and select the
+model folder containing its `config.json`. Quality 8-bit and BF16 require more memory. Existing compatible
+weights are inspected in place; original FP8 and Torch/ComfyUI offload layouts are rejected. Setup
+verifies pinned downloads and extracts the missing scene-separator output row from the original
+release; the temporary original source link is removed after extraction; verified shared download caches remain reusable. An imported MLX model without
+this supplement can speak, direct and edit. To enable scene tasks or retry interrupted extraction,
+choose **Complete scene controls…** beside that installed model. Setup searches shared model storage
+for the verified original shard first. If none is available, it downloads only the pinned
+4,638,423,240-byte source into that model folder. Failed/cancelled setup retains resumable source
+bytes; successful extraction removes the temporary source link/file from the model folder, while
+verified shared download caches remain reusable. The existing generator and codec stay
+in place. **Cancel setup** stops the native transfer/worker. Native model state lives in the worker process and is explicitly released between weighted stages and at exit.
+Live audio opts into overlapping decoder residency. Live text releases the generator while it waits
+for lookahead. Only derived reference codes may be purged; retained voice samples remain owned media.
+
+**Reusable cloned voices:** choose the exact sample range/channel and transcript, then open **Saved
+voices… → Save cloned voice**. Additional samples can guide the same speaker. Studio copies lossless
+44.1 kHz mono audio into its Voice Library and saves immutable profile versions. Reusing a voice
+requires no original-media reference; unchanged audio and codec reuse derived codes, even if only
+the transcript changes. **Edit details** creates a new version. Existing assignments keep their
+pinned version until explicitly changed. Missing/changed retained samples produce an actionable
+error rather than a different voice.
+
+**Character voices:** use **Character voice → Choose saved voice** in production-object details or
+the Character Director's **Voice** tab. Use **Use character voice** in Voice, or choose a character
+for each conversation speaker. IDs determine speaker slots, which remain stable through reordering;
+Drama 3 supports 16 slots (0–15), with at most three active speakers per automatic text chunk.
+Voice assignments do not invalidate visual approvals. Character Director exports include retained
+voice audio; the imported character's **Use voice** action retains its profile in the receiving
+Voice Library and opens single-voice generation. Collect Media also collects movie voice references and take history. Production
+Library JSON remains a linked-path metadata export; use a portable Character Director export or
+Collect Media when transferring its media to another machine.
+
+**Drama 3 tasks:** Speak handles single voices. Conversations default to explicit native line
+continuation, retaining actual first/latest audio context and generating every script line. **Joint
+scene (experimental)** performs the whole scene in one pass; separate-lines requests explicit
+scene boundaries. Native Drama 3 conversations use delivery cues, punctuation and character
+references for performance and timing. Exact per-line pauses and legacy per-line sample overrides
+are unavailable in native conversation modes. Missing
+or repeated audio-line boundaries flag the resulting take for review. **Direct** on a take creates
+a child using actual earlier audio codes and a relative or absolute note. **Edit speech** uses a
+waveform/numeric range for replacement, insertion or deletion. Enter the **full updated transcript**,
+including the unchanged words around the edit. Choose boundaries by auditioning; Studio does not
+infer word alignment from text position. Boundaries snap to 2,048-sample codec frames (about 46 ms).
+Deletion retains the outside codes and does not load generator weights. Insertions and replacements
+retain both outside code spans and condition on suffix before prefix. Audition the seams and wording.
+
+**Direction and streaming:** inline `[delivery cues]`, scoped `<whisper>selected words</whisper>`,
+freeform director notes, scene descriptions, language codes and duration hints are available. Hints
+are guidance rather than timing guarantees. **Play audio as it generates** uses a bounded causal
+decoder and a small playback queue; the complete WAV and codes remain the saved master. **Stream
+text** starts with the script, accepts bounded acknowledged **Append text** operations, and waits
+for one chunk of lookahead. Select **Finish input** for the final chunk or Cancel to release it.
+Recorded chunks, source audio/codes, sampling settings and integrity receipts accompany each take.
+Advanced model controls can still produce incomplete speech; audition flagged and unflagged takes
+before placing them on the timeline.
 
 **Sampled-reference workflow:** choose an audio/video sample, an existing audio asset, or the
 selected clip's soundtrack. Enter the sample start and length (up to 60 seconds), choose its channel,
@@ -703,7 +768,7 @@ remain separate from the spoken script. CustomVoice does not accept sampled voic
 Base preserves your references. VoiceDesign and 0.6B CustomVoice are not supported.
 The distinctions follow the [official Qwen model capability table](https://github.com/QwenLM/Qwen3-TTS#released-models-description-and-download).
 
-**Conversations:** switch **Single voice → Conversation**, open **Speakers**, and name each character
+**Fish S2 Pro/Qwen conversations:** switch **Single voice → Conversation**, open **Speakers**, and name each character
 and assign their reference sample. Add ordered lines, choose their speakers and set pauses (0–10 seconds).
 A line can override its speaker's sample with another performance by the same character. Changing the
 assigned speaker clears that line's old override. Fish tags and Auto Tag work on the selected line.

@@ -1,5 +1,5 @@
 import Foundation
-public enum VoiceEngine: String, Codable, CaseIterable { case fishS2Pro, qwen3TTS }
+public enum VoiceEngine: String, Codable, CaseIterable { case fishDrama3, fishS2Pro, qwen3TTS }
 public enum VoiceReferenceMode: String, Codable, CaseIterable {
   case audioAndTranscript, speakerIdentityOnly, synthetic, customVoice
 }
@@ -31,12 +31,22 @@ public struct VoicePreset: Codable, Equatable, Identifiable {
 }
 extension StudioProject {
   public mutating func mapVoicePaths(_ transform: (String) throws -> String) rethrows {
+    if planning != nil {
+      for i in planning!.subjects.indices { try planning!.subjects[i].voiceBinding?.profile.mapPaths(transform) }
+    }
+    if let source=voiceDraft?.dramaSourceAudio {voiceDraft?.dramaSourceAudio=try transform(source)}
+    try voiceDraft?.voiceProfile?.mapPaths(transform)
+    if voiceDraft?.dramaReferences != nil { for i in voiceDraft!.dramaReferences!.indices { voiceDraft!.dramaReferences![i].path = try transform(voiceDraft!.dramaReferences![i].path) } }
     try voiceDraft?.dialogue?.mapPaths(transform)
     if let reference = voiceDraft?.reference { voiceDraft?.reference?.path = try transform(reference.path) }
     if voicePresets != nil {
       for i in voicePresets!.indices { voicePresets![i].reference.path = try transform(voicePresets![i].reference.path) }
     }
     for i in assets.indices where assets[i].voiceGeneration != nil {
+      try assets[i].voiceGeneration!.draft.voiceProfile?.mapPaths(transform)
+      if let source=assets[i].voiceGeneration!.draft.dramaSourceAudio {assets[i].voiceGeneration!.draft.dramaSourceAudio=try transform(source)}
+      if assets[i].voiceGeneration!.draft.dramaReferences != nil {for j in assets[i].voiceGeneration!.draft.dramaReferences!.indices {assets[i].voiceGeneration!.draft.dramaReferences![j].path=try transform(assets[i].voiceGeneration!.draft.dramaReferences![j].path)}}
+      try assets[i].voiceGeneration!.request.drama3?.mapMediaPaths(transform)
       try assets[i].voiceGeneration!.draft.dialogue?.mapPaths(transform)
       if assets[i].voiceGeneration!.request.turns != nil {
         for j in assets[i].voiceGeneration!.request.turns!.indices {

@@ -19,10 +19,15 @@ import StudioCore
   let store: StudioStore
   let storage: CharacterSheetDocumentStore
   var onUse: ((MediaAsset) async -> Bool)?
-  private var undoStack: [CharacterSheetDocument] = []
-  private var redoStack: [CharacterSheetDocument] = []
+  private struct EditSnapshot {
+    var document: CharacterSheetDocument
+    var changesVoice: Bool
+  }
+  private var undoStack: [EditSnapshot] = []
+  private var redoStack: [EditSnapshot] = []
   private var revisionClock: Int
   private var observation: AnyCancellable?
+  private var voiceObservation: AnyCancellable?
   var cancelled = false
   var workTask: Task<Void, Never>?
   var compiled: CompiledCharacterSheet { CharacterSheetCompiler.compile(document.definition) }
@@ -38,13 +43,34 @@ import StudioCore
     if self.document.draft.profileID.isEmpty { self.document.draft.profileID = localConnections.first?.id ?? "" }
     observation = self.bridge.objectWillChange.throttle(for: .milliseconds(500), scheduler: RunLoop.main, latest: true)
       .sink { [weak self] _ in self?.objectWillChange.send() }
+    voiceObservation = store.$project.sink { [weak self] project in
+      self?.refreshCharacterVoice(from: project)
+    }
+  }
+  func assignVoice(_ value:CharacterVoiceBinding?) {
+    edit(changesVoice: true) {$0.voiceBinding=value}
+    syncCharacterVoice()
+  }
+  private func refreshCharacterVoice(from project: StudioProject) {
+    guard let key = document.subjectKey,
+      let character = project.planning?.subjects.first(where: { project.id.uuidString + ":" + $0.id.uuidString == key }),
+      document.voiceBinding != character.voiceBinding else { return }
+    document.voiceBinding = character.voiceBinding
+    // External Planning changes replace the voice history, while visual undo
+    // remains useful and preserves the current voice assignment.
+    undoStack.removeAll { $0.changesVoice }; redoStack.removeAll { $0.changesVoice }
+    save()
+  }
+  private func syncCharacterVoice() {
+    guard let key=document.subjectKey,let character=store.planning.subjects.first(where:{store.project.id.uuidString+":"+$0.id.uuidString==key}) else{return}
+    store.changePlanning {plan in if let i=plan.subjects.firstIndex(where:{$0.id==character.id}) {plan.subjects[i].voiceBinding=document.voiceBinding}}
   }
   func save() {
     do { try storage.save(document) } catch { self.error = error.localizedDescription }
   }
-  func edit(_ body: (inout CharacterSheetDocument) -> Void) {
+  func edit(changesVoice: Bool = false, _ body: (inout CharacterSheetDocument) -> Void) {
     guard !running else { return }
-    undoStack.append(document); if undoStack.count > 40 { undoStack.removeFirst() }; redoStack.removeAll()
+    undoStack.append(.init(document: document, changesVoice: changesVoice)); if undoStack.count > 40 { undoStack.removeFirst() }; redoStack.removeAll()
     body(&document); advanceRevision(); save()
   }
   private func advanceRevision() {
@@ -53,11 +79,21 @@ import StudioCore
   }
   func undo() {
     guard canUndo, let previous = undoStack.popLast() else { return }
-    redoStack.append(document); document = previous; advanceRevision(); save()
+    redoStack.append(.init(document: document, changesVoice: previous.changesVoice))
+    let voice = document.voiceBinding
+    document = previous.document
+    if !previous.changesVoice { document.voiceBinding = voice }
+    advanceRevision(); save()
+    if previous.changesVoice { syncCharacterVoice() }
   }
   func redo() {
     guard canRedo, let next = redoStack.popLast() else { return }
-    undoStack.append(document); document = next; advanceRevision(); save()
+    undoStack.append(.init(document: document, changesVoice: next.changesVoice))
+    let voice = document.voiceBinding
+    document = next.document
+    if !next.changesVoice { document.voiceBinding = voice }
+    advanceRevision(); save()
+    if next.changesVoice { syncCharacterVoice() }
   }
   func setText(_ path: String, _ text: String) {
     edit { doc in

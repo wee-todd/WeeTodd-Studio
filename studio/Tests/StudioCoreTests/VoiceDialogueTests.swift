@@ -4,7 +4,7 @@ import XCTest
 
 final class VoiceDialogueTests: XCTestCase {
   func testConversationResolvesSpeakersAndPerLinePerformance() throws {
-    var draft = VoiceDraft(); draft.engine = .qwen3TTS; draft.modelPath = "/model"
+    var draft = VoiceDraft(engine: .qwen3TTS); draft.engine = .qwen3TTS; draft.modelPath = "/model"
     let alice = VoiceSpeaker(name: "Alice", reference: VoiceReference(path: "/alice.wav", transcript: "Hello"))
     let bob = VoiceSpeaker(name: "Bob", reference: VoiceReference(path: "/bob.wav", transcript: "Hi"))
     var second = VoiceTurn(speakerID: bob.id, text: "How are you?")
@@ -19,7 +19,7 @@ final class VoiceDialogueTests: XCTestCase {
     XCTAssertThrowsError(try draft.request())
   }
   func testDialoguePersistenceAndPortableReferences() throws {
-    var draft = VoiceDraft(); draft.reference = VoiceReference(path: "/single.wav")
+    var draft = VoiceDraft(engine: .qwen3TTS); draft.reference = VoiceReference(path: "/single.wav")
     draft.startDialogue()
     draft.dialogue?.turns[0].reference = VoiceReference(path: "/delivery.wav")
     let decoded = try JSONDecoder().decode(VoiceDraft.self, from: JSONEncoder().encode(draft))
@@ -39,7 +39,7 @@ final class VoiceDialogueTests: XCTestCase {
     XCTAssertEqual(try FishVoiceTags.inserting("whisper", into: "Hello", at: NSRange(location: 0, length: 5)).text, "[whisper] Hello")
   }
   func testDialogueRejectsInvalidBudgetsAndUnsupportedTagsForQwen() throws {
-    var draft = VoiceDraft(); draft.modelPath = "/model"; draft.text = "Hello"
+    var draft = VoiceDraft(engine: .qwen3TTS); draft.modelPath = "/model"; draft.text = "Hello"
     draft.reference = VoiceReference(path: "/ref.wav", transcript: "Hello")
     draft.startDialogue(); draft.dialogue?.turns[0].gapAfter = .nan
     XCTAssertThrowsError(try draft.request())
@@ -50,7 +50,7 @@ final class VoiceDialogueTests: XCTestCase {
     XCTAssertNoThrow(try draft.request())
   }
   func testAutoTagProposalRefusesChangedLineMovieOrVoiceMode() throws {
-    var project = StudioProject(); var draft = VoiceDraft(); draft.engine = .fishS2Pro; draft.text = "Hello"
+    var project = StudioProject(); var draft = VoiceDraft(engine: .qwen3TTS); draft.engine = .fishS2Pro; draft.text = "Hello"
     draft.startDialogue(); project.voiceDraft = draft
     let session = UUID(), lineID = try XCTUnwrap(draft.dialogue?.turns.first?.id)
     let context = try VoiceTagContext(project: project, documentSessionID: session, lineID: lineID)

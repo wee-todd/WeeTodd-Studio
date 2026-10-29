@@ -32,7 +32,7 @@ struct CharacterDirectorWindow: View {
       }
       HSplitView {
         VStack(alignment: .leading, spacing: 6) {
-          ForEach(["Character", "Sources", "Generate", "Panels", "Prompt"], id: \.self) { item in
+          ForEach(["Character", "Sources", "Voice", "Generate", "Panels", "Prompt"], id: \.self) { item in
             Button { tab = item } label: {
               Label(item, systemImage: icon(item)).frame(maxWidth: .infinity, alignment: .leading)
             }.buttonStyle(.plain).padding(7).background(tab == item ? Color.accentColor.opacity(0.18) : .clear).cornerRadius(6)
@@ -85,6 +85,7 @@ struct CharacterDirectorWindow: View {
   @ViewBuilder private var content: some View {
     switch tab {
     case "Sources": sources
+    case "Voice": CharacterVoiceControls(binding: Binding(get: { controller.document.voiceBinding }, set: { value in controller.assignVoice(value) }))
     case "Generate": generation
     case "Panels": panels
     case "Prompt": prompt

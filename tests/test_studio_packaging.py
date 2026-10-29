@@ -342,3 +342,29 @@ def test_native_worker_bundle_includes_notices_and_rejects_tampering(source, mon
     with pytest.raises(ValueError, match="hash mismatch"):
         packager.package_app(source, "release", native_worker=distribution)
     assert (app / "Contents/Resources/H3Native/Notices.txt").read_text() == "native fixture"
+
+
+def test_drama3_worker_installs_its_own_verified_metal_library(source, monkeypatch):
+    import build_drama3_worker
+    monkeypatch.setattr(packager.subprocess, "run", skip_codesign)
+    folder = source / "drama3-distribution"
+    folder.mkdir()
+    names = ("WeeToddDrama3Worker", "mlx.metallib", "Notices.txt", "ModelCatalog.json")
+    for name in names:
+        (folder / name).write_text(name + " fixture")
+    (folder / "WeeToddDrama3Worker").chmod(0o755)
+    (folder / "manifest.json").write_text(json.dumps({
+        "format": "weetodd-drama3-native-worker-v1", "protocol": 1,
+        "files": {name: build_drama3_worker.digest(folder / name) for name in names}}))
+    app = packager.package_app(source, "release", drama3_worker=folder)
+    assert (app / "Contents/MacOS/WeeToddDrama3Worker").is_file()
+    assert (app / "Contents/Resources/Drama3Native/mlx.metallib").is_file()
+    assert not (app / "Contents/Resources/LTXNative/mlx.metallib").exists()
+    installed = json.loads((app / "Contents/Resources/Drama3Native/manifest.json").read_text())
+    assert installed["files"]["WeeToddDrama3Worker"] == build_drama3_worker.digest(
+        app / "Contents/MacOS/WeeToddDrama3Worker")
+    (folder / "mlx.metallib").write_text("tampered")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        packager.package_app(source, "release", drama3_worker=folder)
+    assert (app / "Contents/Resources/Drama3Native/mlx.metallib").read_text() == (
+        "mlx.metallib fixture")

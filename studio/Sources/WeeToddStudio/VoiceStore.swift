@@ -1,12 +1,13 @@
 import AppKit
 import AVFoundation
 import StudioCore
+import Drama3Contracts
 
 @MainActor extension StudioStore {
   var voiceTakes: [MediaAsset] { project.assets.filter { $0.voiceGeneration != nil } }
   var installedVoiceModels: [InstalledVoiceModel] { runtime.voiceModels?.models ?? [] }
   var familyVoiceModels: [InstalledVoiceModel] {
-    installedVoiceModels.filter { $0.engine == (project.voiceDraft?.engine ?? .qwen3TTS) }
+    installedVoiceModels.filter { $0.engine == (project.voiceDraft?.engine ?? .fishDrama3) }
   }
   var selectedVoiceModel: InstalledVoiceModel? {
     guard let draft = project.voiceDraft else { return nil }
@@ -24,7 +25,8 @@ import StudioCore
   }
   func openVoice() {
     if project.voiceDraft == nil {
-      var draft = VoiceDraft(); draft.engine = runtime.voiceModels?.lastFamily ?? .qwen3TTS
+      var draft = VoiceDraft(engine: runtime.voiceModels?.lastFamily ?? .fishDrama3)
+      if draft.engine == .fishDrama3 { draft.referenceMode = .synthetic; draft.sampling.temperature=0.7; draft.sampling.topP=0.7; draft.sampling.topK=30; draft.sampling.maxTokens=1024 }
       draft.modelID = runtime.voiceModels?.preferred(for: draft.engine)?.id
       change { $0.voiceDraft = draft }
     }
@@ -52,16 +54,16 @@ import StudioCore
     change {
       $0.voiceDraft?.engine = engine; $0.voiceDraft?.modelID = settings.preferred(for: engine)?.id
       $0.voiceDraft?.modelPath = ""; $0.voiceDraft?.precision = "auto"
-      if engine == .fishS2Pro { $0.voiceDraft?.language = "auto" }
+      if engine != .qwen3TTS { $0.voiceDraft?.language = "auto" }
       if $0.voiceDraft?.dialogue != nil {
         for index in $0.voiceDraft!.dialogue!.speakers.indices {
           let mode = $0.voiceDraft!.dialogue!.speakers[index].referenceMode
-          if (engine == .fishS2Pro && mode == .speakerIdentityOnly) || (engine == .qwen3TTS && mode == .synthetic) {
+          if (engine != .qwen3TTS && mode == .speakerIdentityOnly) || (engine == .qwen3TTS && mode == .synthetic) {
             $0.voiceDraft?.dialogue?.speakers[index].referenceMode = .audioAndTranscript
           }
         }
       }
-      if (engine == .fishS2Pro && $0.voiceDraft?.referenceMode == .speakerIdentityOnly)
+      if (engine != .qwen3TTS && $0.voiceDraft?.referenceMode == .speakerIdentityOnly)
         || (engine == .qwen3TTS && $0.voiceDraft?.referenceMode == .synthetic) {
         $0.voiceDraft?.referenceMode = .audioAndTranscript
       }
@@ -71,7 +73,7 @@ import StudioCore
   func adaptVoiceMode(to model: InstalledVoiceModel) {
     func compatible(_ mode: VoiceReferenceMode) -> VoiceReferenceMode {
       if model.supportsInstructions { return .customVoice }
-      if mode == .customVoice || (model.engine == .fishS2Pro && mode == .speakerIdentityOnly)
+      if mode == .customVoice || (model.engine != .qwen3TTS && mode == .speakerIdentityOnly)
         || (model.engine == .qwen3TTS && mode == .synthetic) { return .audioAndTranscript }
       return mode
     }
@@ -104,6 +106,9 @@ import StudioCore
   }
   func addVoiceModel(at url: URL) async {
     guard !operationBusy else { return }
+    if let bytes=try? Data(contentsOf:url.appendingPathComponent("config.json")), let raw=try? JSONSerialization.jsonObject(with:bytes) as? [String:Any], raw["model_type"] as? String == "fish_drama3" {
+      await addNativeDramaModel(at:url); return
+    }
     do {
       let result = try await bridge.invoke("voice-inspect", runtime: runtime, payload: ["voice": ["model_path": url.path]])
       try registerVoiceModel(result)
@@ -121,7 +126,7 @@ import StudioCore
   }
   func chooseVoiceModel() {
     let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
-    panel.title = "Add an installed Fish S2 Pro or Qwen3-TTS model"
+    panel.title = "Add an installed Drama 3, Fish S2 Pro or Qwen3-TTS model"
     guard panel.runModal() == .OK, let url = panel.url else { return }
     Task { await addVoiceModel(at: url) }
   }
@@ -150,6 +155,7 @@ import StudioCore
   }
   func downloadVoiceModel(_ modelID: String) {
     guard !operationBusy else { return }
+    if modelID.hasPrefix("drama3-") { downloadNativeDramaModel(modelID); return }
     let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
     panel.title = "Choose a speech model library"
     guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -163,6 +169,7 @@ import StudioCore
   }
   func inspectVoiceModel(_ model: InstalledVoiceModel) async {
     guard !operationBusy else { return }
+    if model.engine == .fishDrama3 {await addNativeDramaModel(at:URL(fileURLWithPath:model.path));return}
     do {
       let result = try await bridge.invoke("voice-inspect", runtime: runtime, payload: ["voice": ["engine": model.engine.rawValue, "model_path": model.path]])
       try registerVoiceModel(result)
@@ -171,6 +178,7 @@ import StudioCore
   }
   func generateVoice() async {
     guard !operationBusy else { return }
+    if project.voiceDraft?.engine == .fishDrama3 { await generateDramaVoice(); return }
     migrateVoiceModelLocation()
     if let model = selectedVoiceModel { adaptVoiceMode(to: model) }
     guard let draft = project.voiceDraft else { return }
@@ -185,7 +193,7 @@ import StudioCore
       let result = try await bridge.invoke(draft.usesDialogue == true ? "voice-dialogue" : "voice-generate", runtime: runtime, payload: ["voice": try request.object()], output: job)
       guard let path = result["audio"] as? String, let duration = result["duration"] as? Double,
         let rate = result["sample_rate"] as? Int, let frames = result["frames"] as? Int,
-        duration.isFinite, duration > 0, rate == (draft.engine == .fishS2Pro ? 44100 : 24000), frames > 0,
+        duration.isFinite, duration > 0, rate == (draft.engine != .qwen3TTS ? 44100 : 24000), frames > 0,
         abs(duration - Double(frames) / Double(rate)) < 1 / Double(rate), !path.isEmpty,
         result["channels"] as? Int == 1, let artifacts = result["artifacts"] as? String else {
         throw StudioError.invalid("Speech did not return a verified audio take.")

@@ -23,7 +23,8 @@ struct VoiceEditor: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 14) {
             Picker("Family", selection: Binding(get: { draft.engine }, set: { store.selectVoiceFamily($0) })) {
-              Text("Fish").tag(VoiceEngine.fishS2Pro)
+              Text("Drama 3 · native").tag(VoiceEngine.fishDrama3)
+              Text("Fish S2 Pro").tag(VoiceEngine.fishS2Pro)
               Text("Qwen").tag(VoiceEngine.qwen3TTS)
             }.disabled(store.operationBusy)
             Picker("Installed model", selection: Binding<UUID?>(get: { store.selectedVoiceModel?.id }, set: { store.selectVoiceModel($0) })) {
@@ -41,6 +42,7 @@ struct VoiceEditor: View {
               Text("This model is unavailable. Reconnect its drive or update its location in Runtime settings.")
                 .font(.caption).foregroundStyle(.orange)
             }
+            HStack { Button("Saved voices…") { store.showVoiceLibrary=true }; Menu("Use character voice") { ForEach(store.planning.subjects.filter { $0.kind == .character && $0.voiceBinding != nil }) { character in Button(character.name) { store.useCharacterVoice(character.id) } } } }
             Button("Manage speech models in Runtime settings…") { store.showRuntime = true }
             Text(store.selectedVoiceModel?.supportsInstructions == true
               ? "Your model choice is remembered. Choose a built-in voice and describe its delivery."
@@ -49,6 +51,7 @@ struct VoiceEditor: View {
                 : "Your model choice is remembered. The audio sample below supplies the voice to copy.")
               .font(.caption).foregroundStyle(.secondary)
             Divider()
+            if draft.engine == .fishDrama3 {Drama3VoiceControls()}
             if draft.usesDialogue == true {
               Text("Each character has their own voice. Open Speakers in the dialogue editor to configure them.").font(.callout).foregroundStyle(.secondary)
             } else if store.selectedVoiceModel?.supportsInstructions == true {
@@ -57,9 +60,9 @@ struct VoiceEditor: View {
             Picker("Reference", selection: field(\.referenceMode)) {
               Text("Audio + transcript").tag(VoiceReferenceMode.audioAndTranscript)
               if draft.engine == .qwen3TTS { Text("Speaker identity only").tag(VoiceReferenceMode.speakerIdentityOnly) }
-              if draft.engine == .fishS2Pro { Text("Synthetic voice").tag(VoiceReferenceMode.synthetic) }
+              if draft.engine != .qwen3TTS { Text("Synthetic voice").tag(VoiceReferenceMode.synthetic) }
             }
-            if draft.engine == .fishS2Pro {
+            if draft.engine != .qwen3TTS {
               FishVoiceDirectionControls(direction: field(\.fishDirection))
             }
             if draft.referenceMode == .synthetic {
@@ -99,6 +102,7 @@ struct VoiceEditor: View {
                   Text("Words spoken in the sample").font(.headline)
                   TextEditor(text: reference(\.transcript,"")).frame(minHeight: 90).border(Color.secondary.opacity(0.3))
                 } else { Text("Identity-only mode can be less faithful than audio with a transcript.").font(.caption).foregroundStyle(.secondary) }
+                if draft.engine == .fishDrama3 {Drama3AdditionalSamples()}
                 Button("Save reference preset") { store.saveVoicePreset() }
               }
             }
@@ -173,6 +177,10 @@ struct VoiceEditor: View {
                 }
                 Spacer()
                 Button("Play") { store.auditionMusic(asset) }
+                if asset.voiceGeneration?.request.engine == .fishDrama3 {
+                  Button("Direct") {store.prepareDramaRevision(asset,infill:false)}
+                  Button("Edit speech") {store.prepareDramaRevision(asset,infill:true)}
+                }
                 Button("Add to timeline") { store.placeAudioTake(asset, role: .voice) }
                 Menu("Attach to clip") {
                   Button("Keep full take") { store.placeVoiceTake(asset, trimToClip: false) }
@@ -181,7 +189,7 @@ struct VoiceEditor: View {
               }.padding(8).background(Theme.raised, in: RoundedRectangle(cornerRadius: 6))
             }
           }
-          Button("Stop audition") { store.musicPlayer.pause() }
+          Button("Stop audition") { store.musicPlayer.pause();store.bridge.speechPlayback.stop() }
         }.padding().frame(minWidth: 420)
       }
       Divider()
@@ -191,6 +199,6 @@ struct VoiceEditor: View {
         Spacer()
         Button("Generate voice") { Task { await store.generateVoice() } }.buttonStyle(.borderedProminent).disabled(store.operationBusy || store.selectedVoiceModel.map { !store.voiceModelAvailable($0) } != false)
       }.padding()
-    }.background(Theme.background).onDisappear { store.musicPlayer.pause() }
+    }.sheet(isPresented: $store.showVoiceLibrary) { VoiceLibraryView().environmentObject(store) }.background(Theme.background).onDisappear { store.musicPlayer.pause();store.bridge.speechPlayback.stop() }
   }
 }

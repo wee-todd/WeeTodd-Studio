@@ -18,7 +18,7 @@ public struct InstalledVoiceModel: Codable, Equatable, Identifiable {
 
 public struct VoiceModelSettings: Codable, Equatable {
   public var models: [InstalledVoiceModel] = []
-  public var lastFamily: VoiceEngine = .qwen3TTS
+  public var lastFamily: VoiceEngine = .fishDrama3
   public var selectedModels: [String: UUID] = [:]
   public init() {}
   public func preferred(for engine: VoiceEngine) -> InstalledVoiceModel? {
@@ -37,5 +37,5 @@ public struct VoiceModelSettings: Codable, Equatable {
 }
 
 extension VoiceEngine {
-  public var label: String { self == .fishS2Pro ? "Fish S2 Pro" : "Qwen3-TTS" }
+  public var label: String { self == .fishDrama3 ? "Fish Drama 3" : self == .fishS2Pro ? "Fish S2 Pro" : "Qwen3-TTS" }
 }

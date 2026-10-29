@@ -116,6 +116,7 @@ private func portableContextSignature(at url: URL) throws -> String? {
 
 private extension CharacterSheetDocument {
   mutating func transformPortablePaths(_ transform: (String) throws -> String) throws {
+    try voiceBinding?.profile.mapPaths(transform)
     for key in sources.keys.sorted() where !(sources[key] ?? "").isEmpty { sources[key] = try transform(sources[key]!) }
     try draft.transformPortablePaths(transform)
     for index in proposals.indices where !proposals[index].sourcePath.isEmpty {
