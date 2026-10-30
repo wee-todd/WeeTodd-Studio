@@ -62,8 +62,9 @@ matched the native CLI result byte-for-byte, with all weighted-stage residency c
 to zero. Original/restored comparison playback, H3 Fast preflight, admission reset when switching
 families, retention of the completed Flash result, and Drama 3's visible native-family control
 were checked interactively. Saving serialized the result and receipt link; relaunch/autosave
-recovery retained the asset. UI automation timed out after the subsequent Open Project dialog,
-so the explicit saved-file reopen visual check remains pending. No long H3 trial was restarted.
+recovery retained the asset. On October 30, explicit saved-file reopening was verified visually:
+the app reported the saved project opened, with the Flash result, thumbnail and 512×288 metadata
+present in Project media. No long H3 trial was restarted.
 
 ## October 26 experimental native FastH3 Omni
 
