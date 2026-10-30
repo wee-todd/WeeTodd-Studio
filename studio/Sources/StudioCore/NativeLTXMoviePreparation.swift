@@ -13,6 +13,14 @@ public enum NativeLTXMoviePreparation {
       "frames":clock.times.count,"duration":Double(clock.times.count)/clock.fps,
       "startSeconds":clock.times[0]]
   }
+  public struct RefinementLoRA: Codable, Equatable, Sendable {
+    public let path: String
+    public let strength: Double
+    public let enabled: Bool
+    public init(path: String, strength: Double, enabled: Bool = true) {
+      self.path = path; self.strength = strength; self.enabled = enabled
+    }
+  }
   public struct Endpoint:Sendable {
     public let path:String,role:String,strength:Double,crf:Int
     public init(path:String,role:String,strength:Double,crf:Int=33) {
@@ -32,7 +40,7 @@ public enum NativeLTXMoviePreparation {
     let mapping=["video_checkpoint":"video_vae_path","spatial_upscaler_checkpoint":"spatial_upscaler_path",
       "gemma_root":"text_encoder_path","transformer_root":"transformer_path","audio_checkpoint":"audio_vae_path"]
     var result:[String:String]=[:]
-    for (target,key) in mapping where mode != .latentOnly || ["video_checkpoint","spatial_upscaler_checkpoint"].contains(target) {
+    for (target,key) in mapping where (mode != .latentOnly || ["video_checkpoint","spatial_upscaler_checkpoint"].contains(target)) && (mode != .enhance || target != "spatial_upscaler_checkpoint") {
       guard let path=profile[key] as? String,path.hasPrefix("/"),path.utf8.count<=4096,!path.utf8.contains(0) else {
         throw StudioError.invalid("Movie upscaling is missing native model component: \(key)")
       }
@@ -106,8 +114,16 @@ public enum NativeLTXMoviePreparation {
   public static func prepare(source:URL,startSeconds:Double=0,visibleFrames:Int?=nil,
     settings:LTX25MovieUpscaleSettings,components:[String:String],prompt:String,seed:UInt64,
     endpoints:[Endpoint]=[],sidecar:Sidecar?=nil,ffmpeg:URL,destination:URL,
-    outputDirectory:URL,editorRequest:[String:Any]?=nil,diffusionVAE:LTX25DiffusionVAESettings?=nil) async throws -> [String:Any] {
+    outputDirectory:URL,editorRequest:[String:Any]?=nil,diffusionVAE:LTX25DiffusionVAESettings?=nil,
+    refinementLoRAs:[RefinementLoRA]=[]) async throws -> [String:Any] {
     try settings.validate()
+    guard refinementLoRAs.count <= (settings.mode == .pixelSpatial ? 15 : 16),
+      settings.mode != .latentOnly || refinementLoRAs.isEmpty,
+      refinementLoRAs.allSatisfy({ NativePixelCQSettings.validPath($0.path) && $0.strength.isFinite && abs($0.strength) <= 3 }),
+      Set(refinementLoRAs.map { URL(fileURLWithPath:$0.path).resolvingSymlinksInPath().path }).count == refinementLoRAs.count,
+      !refinementLoRAs.contains(where:{ URL(fileURLWithPath:$0.path).resolvingSymlinksInPath().path == components["pixel_spatial_adapter"].map { URL(fileURLWithPath:$0).resolvingSymlinksInPath().path } }) else {
+      throw StudioError.invalid("Movie refinement adapters need distinct local paths and finite strengths; learned-only mode cannot apply LoRAs.")
+    }
     guard source.isFileURL,source.path.utf8.count<=4096,!source.path.utf8.contains(0),
       startSeconds.isFinite,startSeconds>=0,endpoints.count<=2,Set(endpoints.map(\.role)).count==endpoints.count,
       endpoints.allSatisfy({ ["first","last"].contains($0.role) && $0.strength==settings.anchorStrength && (0...51).contains($0.crf)
@@ -116,7 +132,7 @@ public enum NativeLTXMoviePreparation {
       destination.isFileURL,outputDirectory.isFileURL,!FileManager.default.fileExists(atPath:destination.path) else {
       throw StudioError.invalid("Movie upscaling needs one frozen source interval, exact endpoint strengths and explicit audio selection.")
     }
-    let required:Set<String>=["video_checkpoint","spatial_upscaler_checkpoint"]
+    let required:Set<String> = settings.mode == .enhance ? ["video_checkpoint"] : ["video_checkpoint","spatial_upscaler_checkpoint"]
     let refine:Set<String>=["gemma_root","connector_checkpoint","transformer_root","audio_checkpoint"]
     let keys=required.union(settings.mode == .latentOnly ? []:refine).union(settings.mode == .pixelSpatial ? ["pixel_spatial_adapter"]:[])
     guard Set(components.keys)==keys,components.values.allSatisfy({ $0.hasPrefix("/") && $0.utf8.count<=4096 && !$0.utf8.contains(0) }),
@@ -139,6 +155,9 @@ public enum NativeLTXMoviePreparation {
       throw StudioError.invalid("Movie source selection must preserve its exact CFR frames and FPS.")
     }
     let size=try grid(width:clock.width,height:clock.height,policy:settings.sizePolicy)
+    guard settings.mode != .enhance || (size.width == clock.width && size.height == clock.height) else {
+      throw StudioError.invalid("Same-size enhancement requires source dimensions on the 32-pixel grid; resizing or cropping is not applied.")
+    }
     guard size.width<=2048,size.height<=2048 else { throw StudioError.invalid("Movie upscaling needs a processed source at most2048 per axis.") }
     let fm=FileManager.default,parent=destination.deletingLastPathComponent()
     try fm.createDirectory(at:parent,withIntermediateDirectories:true)
@@ -181,6 +200,9 @@ public enum NativeLTXMoviePreparation {
       "prompt":prompt,"seed":seed,"refinement_strength":settings.refinementStrength,"anchors":settings.anchors.rawValue,"anchor_strength":settings.anchorStrength,"pixel_strength":settings.pixelStrength,
       "reference_images":references,"reference_image_sha256":referenceSHA,"audio_policy":settings.audioPolicy.rawValue,"audio_source":audio,"maximum_audio_drift_seconds":settings.maximumAudioDriftSeconds,
       "chunking":settings.chunking,"chunk_frame_megapixel_budget":settings.chunkFrameMegapixelBudget,"resume":settings.resume,"keep_chunks":settings.keepChunks]
+    if !refinementLoRAs.isEmpty {
+      body["refinement_loras"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(refinementLoRAs))
+    }
     if let diffusion { body["diffusion_vae"]=diffusion }
     guard Set(inputs.map { $0["path"] as! String }).count==inputs.count else {
       throw StudioError.invalid("Movie publication cannot alias frozen source roles.")
@@ -192,11 +214,11 @@ public enum NativeLTXMoviePreparation {
     let fingerprint="swift-json-v1:"+SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined()
     let report:[String:Any]=["task":"video_upscale","resolvedFingerprint":fingerprint,"pythonModelInference":false,
       "use_complete_duration":true,"usable_duration":Double(count)/clock.fps,"sourceFrames":count,"fps":clock.fps,
-      "width":size.width*2,"height":size.height*2,"sourceFrameStart":start,"sourceMovieSHA256":sourceSHA,"sourceRGBSHA256":rawSHA,
+      "width":size.width*(settings.mode == .enhance ? 1:2),"height":size.height*(settings.mode == .enhance ? 1:2),"sourceFrameStart":start,"sourceMovieSHA256":sourceSHA,"sourceRGBSHA256":rawSHA,
       "nativeFPS":clock.fps,"preserveEditorialDuration":false,"nativePreparation":"swift","productionQualified":false,
       "generation":["supportedTasks":["video_upscale"],"pipelineMode":settings.mode.rawValue,
         "controls":["evaluations":settings.mode == .latentOnly ? 0:3,"stepsEditable":false,"refinementStepsEditable":false,"cfgEditable":false,"shiftEditable":false,
-          "stepsExplanation":"Learned 2× optionally followed by three full-resolution source-video refinement evaluations.","cfgExplanation":"Uses released distilled refinement without CFG.","shiftExplanation":"Uses the released three-step refinement schedule."],"presets":[]]]
+          "stepsExplanation":settings.mode == .enhance ? "Same-size source-video enhancement with three refinement evaluations." : "Learned 2× optionally followed by three full-resolution source-video refinement evaluations.","cfgExplanation":"Uses released distilled refinement without CFG.","shiftExplanation":"Uses the released three-step refinement schedule."],"presets":[]]]
     try bytes.write(to:staging.appendingPathComponent("recipe.json"),options:.withoutOverwriting)
     try JSONSerialization.data(withJSONObject:report,options:[.sortedKeys]).write(to:staging.appendingPathComponent("report.json"),options:.withoutOverwriting)
     if let editorRequest {

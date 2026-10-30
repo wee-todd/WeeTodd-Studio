@@ -322,7 +322,8 @@ private final class MovieWorkerEvents:@unchecked Sendable {
         metadata["current_process_footprint_bytes"]=info.phys_footprint
         metadata["process_memory_scope"]="Swift process; external FFmpeg process excluded"
         let result:[String:Any]=["nativeRuntime":"swift-mlx","jobID":envelope.jobID.uuidString,
-          "video":output.appendingPathComponent("render.mp4").path,"metadata":metadata,
+          "video":output.appendingPathComponent(request.intermediateOnly ? "restored.mkv" : "render.mp4").path,"metadata":metadata,
+          "restored":output.appendingPathComponent("restored.mkv").path,
           "use_complete_duration":true,"usable_source_in":0.0,"usable_duration":request.plan.seconds,
           "seconds":Date().timeIntervalSince(started),
           "elapsed_scope":"worker initialization through completed media, before atomic publication"]

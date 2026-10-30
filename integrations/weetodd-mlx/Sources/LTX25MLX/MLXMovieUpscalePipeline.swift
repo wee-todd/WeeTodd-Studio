@@ -46,7 +46,7 @@ public final class MLXMovieUpscalePipeline: @unchecked Sendable {
     _ = try await source.preflight()
     let cuts=try request.chunking ? MLXMovieSourceVideo.sceneCuts(rgb24:URL(fileURLWithPath:request.source.rgbPath),plan:request.plan) : []
     let chunks=try request.chunkPlans(cutFrames:cuts)
-    let componentIdentity=try MLXMovieCheckpointIdentity.capture(request.components)
+    let componentIdentity=try MLXMovieCheckpointIdentity.capture(request.componentIdentityPaths)
     if request.plan.mode != .latentOnly { _ = try MLXImageEncoder(checkpoint:URL(fileURLWithPath:request.components["video_checkpoint"]!)) }
     _ = try MLXVideoEncoder(checkpoint:URL(fileURLWithPath:request.components["video_checkpoint"]!))
     _ = try MLXVideoDecoderSelection(checkpoint:URL(fileURLWithPath:request.components["video_checkpoint"]!),settings:request.diffusionVAE)
@@ -99,7 +99,7 @@ public final class MLXMovieUpscalePipeline: @unchecked Sendable {
     guard enter() else { throw LTXError.invalid("Movie pipeline is already running.") }
     defer { text=nil;Stream.gpu.synchronize();Memory.clearCache();leave() }
     guard MLXMovieUpscaleRequest.validSHA(workerSHA256),FileManager.default.isExecutableFile(atPath:ffmpeg.path),
-      try MLXMovieCheckpointIdentity.capture(request.components)==admission.componentIdentitySHA256 else {
+      try MLXMovieCheckpointIdentity.capture(request.componentIdentityPaths)==admission.componentIdentitySHA256 else {
       throw LTXError.invalid("Movie renderer or checkpoint identity changed after preflight.")
     }
     try request.validateMediaSources();try Task.checkCancellation()
@@ -142,9 +142,9 @@ public final class MLXMovieUpscalePipeline: @unchecked Sendable {
     let times=Timings()
     let start=Date()
     let completed=try await MLXMovieChunkCoordinator.execute(request:request,chunks:admission.chunks,binding:binding,
-      directory:work.appendingPathComponent("chunks"),progress:progress) { chunk,index,temp in
+      directory:work.appendingPathComponent("chunks"),ffmpeg:ffmpeg,progress:progress) { chunk,index,temp in
       try Task.checkCancellation()
-      guard try MLXMovieCheckpointIdentity.capture(self.request.components)==admission.componentIdentitySHA256,
+      guard try MLXMovieCheckpointIdentity.capture(self.request.componentIdentityPaths)==admission.componentIdentitySHA256,
         try MLXMovieFiles.digest(audio.publication)==audioSHA else { throw LTXError.invalid("Movie source audio or model identity changed before a weighted chunk.") }
       let rgb=temp.appendingPathComponent("source-padded.rgb24")
       try MLXMovieFiles.copyRGBRange(source:URL(fileURLWithPath:self.request.source.rgbPath),to:rgb,
@@ -216,8 +216,8 @@ public final class MLXMovieUpscalePipeline: @unchecked Sendable {
         })
       for (name,value) in result.stageSeconds { times.add(name,value) }
       frozenAudio=nil;first=nil;last=nil
-      let writer=try RawVideoWriter(ffmpeg:ffmpeg,output:temp.appendingPathComponent("video.mp4"),
-        width:result.geometry.width,height:result.geometry.height,frames:chunk.frames,fps:result.geometry.fps)
+      let writer=try RawVideoWriter(ffmpeg:ffmpeg,output:temp.appendingPathComponent("restored.mkv"),
+        width:result.geometry.width,height:result.geometry.height,frames:chunk.frames,fps:result.geometry.fps,encoding:.ffv1)
       defer { writer.cancel() }
       let decodeStart=Date()
       try autoreleasepool {
@@ -227,6 +227,9 @@ public final class MLXMovieUpscalePipeline: @unchecked Sendable {
           if frame<chunk.frames { try writer.append(bytes,frame:frame);try decodedPreview?(chunk.startFrame+frame,bytes) }
         }
         try writer.finish()
+        let proof=try LosslessVideoVerifier.verify(ffmpeg:ffmpeg,video:temp.appendingPathComponent("restored.mkv"),
+          width:result.geometry.width,height:result.geometry.height,frames:chunk.frames,fps:result.geometry.fps,expectedRGBSHA256:writer.rgbSHA256)
+        try JSONEncoder().encode(proof).write(to:temp.appendingPathComponent("lossless.json"),options:.withoutOverwriting)
       }
       times.add("video_decode_and_encode",Date().timeIntervalSince(decodeStart))
       try progress("movie_video_weights_released",index+1,admission.chunks.count)
@@ -235,37 +238,44 @@ public final class MLXMovieUpscalePipeline: @unchecked Sendable {
     text=nil;Stream.gpu.synchronize();Memory.clearCache()
     let staging=output.deletingLastPathComponent().appendingPathComponent(".movie-publication-"+UUID().uuidString)
     try fm.createDirectory(at:staging,withIntermediateDirectories:false);defer { try? fm.removeItem(at:staging) }
-    // Independently verified silent chunks share the exact encoder/timebase.
-    // Copy video packets; never add interpolation or a second lossy encode.
-    let list=staging.appendingPathComponent("chunks.ffconcat")
-    var parts:[URL]=[]
-    for (index,chunk) in completed.enumerated() {
-      let part=staging.appendingPathComponent(String(format:"part-%06d.mp4",index))
-      try fm.linkItem(at:chunk.video,to:part);parts.append(part)
+    let restored=staging.appendingPathComponent("restored.mkv")
+    let proof=try MLXMovieLosslessPublication.concatenate(ffmpeg:ffmpeg,chunks:completed.map(\.video),output:restored,
+      width:request.plan.size.outputWidth,height:request.plan.size.outputHeight,frames:request.plan.frames,fps:request.plan.fps)
+    if !request.intermediateOnly {
+      try fm.copyItem(at:audio.publication,to:staging.appendingPathComponent("audio.wav"))
+      try MLXMovieFiles.run(ffmpeg,["-v","error","-nostdin","-n","-i",restored.path,"-i",staging.appendingPathComponent("audio.wav").path,
+        "-map","0:v:0","-map","1:a:0","-c:v","libx264","-crf","18","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k",
+        "-frames:v",String(request.plan.frames),"-movflags","+faststart",staging.appendingPathComponent("render.mp4").path],log:staging.appendingPathComponent("mux.log"))
+      let rendered=try await MLXMovieFiles.videoClock(staging.appendingPathComponent("render.mp4"),maximumFrames:request.plan.frames)
+      guard rendered.times.count==request.plan.frames,rendered.width==request.plan.size.outputWidth,rendered.height==request.plan.size.outputHeight,
+        abs(rendered.fps-request.plan.fps)<0.001,try MLXMovieFiles.digest(staging.appendingPathComponent("audio.wav"))==audioSHA else {
+        throw LTXError.invalid("Movie delivery changed its source/audio/canvas contract.")
+      }
     }
-    let lines=parts.map { "file '"+$0.lastPathComponent+"'" }.joined(separator:"\n")+"\n"
-    try Data(lines.utf8).write(to:list,options:.withoutOverwriting)
-    try MLXMovieFiles.run(ffmpeg,["-v","error","-nostdin","-n","-f","concat","-safe","1","-i",list.path,
-      "-an","-c:v","copy","-frames:v",String(request.plan.frames),staging.appendingPathComponent("video.mp4").path],log:staging.appendingPathComponent("concat.log"))
-    for part in parts { try fm.removeItem(at:part) }
-    try fm.copyItem(at:audio.publication,to:staging.appendingPathComponent("audio.wav"))
-    try MLXMovieFiles.run(ffmpeg,["-v","error","-nostdin","-n","-i",staging.appendingPathComponent("video.mp4").path,"-i",staging.appendingPathComponent("audio.wav").path,
-      "-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac","-b:a","192k","-frames:v",String(request.plan.frames),"-movflags","+faststart",staging.appendingPathComponent("render.mp4").path],log:staging.appendingPathComponent("mux.log"))
-    let rendered=try await MLXMovieFiles.videoClock(staging.appendingPathComponent("render.mp4"),maximumFrames:request.plan.frames)
-    guard rendered.times.count==request.plan.frames,rendered.width==request.plan.size.outputWidth,rendered.height==request.plan.size.outputHeight,abs(rendered.fps-request.plan.fps)<0.001,
-      try MLXMovieFiles.digest(staging.appendingPathComponent("audio.wav"))==audioSHA,
-      try MLXMovieCheckpointIdentity.capture(request.components)==admission.componentIdentitySHA256 else { throw LTXError.invalid("Movie final publication changed its source/audio/canvas contract.") }
+    guard try MLXMovieCheckpointIdentity.capture(request.componentIdentityPaths)==admission.componentIdentitySHA256 else {
+      throw LTXError.invalid("Movie component identity changed during publication.")
+    }
     try request.validateMediaSources();try Task.checkCancellation()
     var metadata:[String:Any]=["version":1,"engine":"ltx25","task":"video_upscale","nativeRuntime":"swift-mlx","pythonModelInference":false,
       "source_movie_sha256":request.source.sha256,"source_rgb_sha256":request.source.rgbSHA256,
       "source_start_seconds":request.source.startSeconds,"source_duration_seconds":request.source.durationSeconds,
       "reference_image_sha256":request.referenceImageSHA256,"seed":request.seed,
       "refinement_sigmas":request.plan.mode == .latentOnly ? [] : request.plan.sigmas,
+      "applied_refinement_adapters":request.refinementAdapters.map { ["path":$0.path,"strength":$0.strength] as [String:Any] },
       "transformer_evaluations_per_chunk":request.plan.mode == .latentOnly ? 0 : 3,
-      "mode":request.plan.mode.rawValue,"frames":request.plan.frames,"padded_chunk_frames":admission.chunks.map(\.paddedFrames),"width":rendered.width,"height":rendered.height,"fps":request.plan.fps,"video_seconds":request.plan.seconds,
+      "mode":request.plan.mode.rawValue,"spatial_scale":request.plan.size.outputScale,
+      "source_reference_downscale_factor":request.plan.mode.sourceReferenceDownscaleFactor ?? 0,
+      "frames":request.plan.frames,"padded_chunk_frames":admission.chunks.map(\.paddedFrames),"width":proof.width,"height":proof.height,"fps":request.plan.fps,"video_seconds":request.plan.seconds,
       "audio_policy":request.audioPolicy.rawValue,"source_audio_sample_rate":audio.contract.publicationSampleRate,"source_audio_samples":audio.contract.publicationSamples,"source_audio_sha256":audioSHA,
       "worker_sha256":workerSHA256,"component_identity_sha256":admission.componentIdentitySHA256,"contract_sha256":request.contractSHA256,
       "executed_chunks":completed.filter { !$0.reused }.count,"reused_chunks":completed.filter(\.reused).count,"stage_seconds":times.snapshot,"pipeline_seconds":Date().timeIntervalSince(start)]
+    metadata["intermediate_only"]=request.intermediateOnly
+    metadata["restored"]=["file":"restored.mkv","sha256":try MLXMovieFiles.digest(restored),"rgb_sha256":proof.rgbSHA256,
+      "codec":"ffv1","pixel_format":"bgr0","frames":proof.frames,"width":proof.width,"height":proof.height,
+      "fps_numerator":proof.fpsNumerator,"fps_denominator":proof.fpsDenominator,"has_audio":false]
+    if let experiment=request.experimentalConditioningMetadata {
+      metadata["experimental_conditioning"]=experiment
+    }
     let selected=try MLXVideoDecoderSelection(checkpoint:URL(fileURLWithPath:request.components["video_checkpoint"]!),settings:request.diffusionVAE)
     metadata.merge(MLXNativeVideoDecoder.publicationMetadata(isDiffusion:selected.isDiffusion,settings:request.diffusionVAE)) { _,new in new }
     try JSONSerialization.data(withJSONObject:metadata,options:[.sortedKeys,.prettyPrinted]).write(to:staging.appendingPathComponent("metadata.json"),options:.withoutOverwriting)

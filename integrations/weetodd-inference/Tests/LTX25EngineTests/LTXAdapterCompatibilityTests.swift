@@ -4,6 +4,27 @@ import InferenceTestSupport
 @testable import LTX25Engine
 
 final class LTXAdapterCompatibilityTests: XCTestCase {
+  func testKohyaCQNamesResolveWithoutGuessingUnderscoreBoundaries() throws {
+    try withTensorFile(tensors:[
+      ("lora_unet_transformer_blocks_0_attn1_to_out_0.lora_down.weight",[2,4096],"F32"),
+      ("lora_unet_transformer_blocks_0_attn1_to_out_0.lora_up.weight",[4096,2],"F32"),
+      ("lora_unet_transformer_blocks_47_audio_ff_net_0_proj.lora_down.weight",[2,2048],"F32"),
+      ("lora_unet_transformer_blocks_47_audio_ff_net_0_proj.lora_up.weight",[8192,2],"F32")]) { url in
+      let plan=try LTXAdapterCompatibility.standardPlan(file:SafeTensorFile(url:url),strength:0.5)
+      XCTAssertEqual(plan.pairs.map(\.target),["transformer_blocks.0.attn1.to_out","transformer_blocks.47.audio_ff.proj_in"])
+      XCTAssertEqual(plan.pairs.map(\.scale),[0.5,0.5])
+    }
+    XCTAssertNil(LTXAdapterCompatibility.normalize("lora_unet_transformer_blocks_0_unknown_projection"))
+  }
+  func testKohyaAndDottedAliasesCannotApplyTheSameTargetTwice() throws {
+    try withTensorFile(tensors:[
+      ("lora_unet_transformer_blocks_0_attn1_to_q.lora_down.weight",[2,4096],"F32"),
+      ("lora_unet_transformer_blocks_0_attn1_to_q.lora_up.weight",[4096,2],"F32"),
+      ("transformer_blocks.0.attn1.to_q.lora_A.weight",[2,4096],"F32"),
+      ("transformer_blocks.0.attn1.to_q.lora_B.weight",[4096,2],"F32")]) { url in
+      XCTAssertThrowsError(try LTXAdapterCompatibility.standardPlan(file:SafeTensorFile(url:url),strength:0.5))
+    }
+  }
   func testCompleteMotionAndCrossViewAdaptersRequireTheirDistinctTrainedGrid() throws {
     let projections=["attn1.to_k","attn1.to_out.0","attn1.to_q","attn1.to_v",
       "attn2.to_k","attn2.to_out.0","attn2.to_q","attn2.to_v","ff.net.0.proj","ff.net.2"]

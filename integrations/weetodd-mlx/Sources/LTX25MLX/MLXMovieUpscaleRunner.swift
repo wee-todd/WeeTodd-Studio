@@ -12,7 +12,7 @@ public final class MLXMovieUpscaleRunner {
   public let plan:MLXMovieUpscalePlan
   public let layout:MLXMovieUpscaleLayout?
   private let seed:UInt64,maximumActivationBytes:Int
-  private let upscaler:MLXLatentUpscaler,weights:MLXDenoiserWeights?
+  private let upscaler:MLXLatentUpscaler?,weights:MLXDenoiserWeights?
   private let gate=NSLock()
   public init(request:MLXMovieUpscaleRequest,chunk:MLXMovieUpscalePlan.Chunk,
     firstStrength:Float?,lastStrength:Float?,maximumActivationBytes:Int=2*1024*1024*1024) throws {
@@ -22,10 +22,13 @@ public final class MLXMovieUpscaleRunner {
     plan=try MLXMovieUpscalePlan(mode:request.plan.mode,width:request.plan.size.width,height:request.plan.size.height,
       frames:chunk.frames,fps:request.plan.fps,sizePolicy:.strict,refinementStrength:request.plan.refinementStrength)
     self.seed=request.seed;self.maximumActivationBytes=maximumActivationBytes
-    _ = try MLXLatentUpscaler.admit(shape:[plan.paddedFrames/8+1,plan.size.height/32,plan.size.width/32,128],
-      maximumActivationBytes:maximumActivationBytes)
-    upscaler=try MLXLatentUpscaler(checkpoint:URL(fileURLWithPath:request.components["spatial_upscaler_checkpoint"]!),
-      statisticsCheckpoint:URL(fileURLWithPath:request.components["video_checkpoint"]!))
+    if plan.mode.sameSize { upscaler=nil }
+    else {
+      _ = try MLXLatentUpscaler.admit(shape:[plan.paddedFrames/8+1,plan.size.height/32,plan.size.width/32,128],
+        maximumActivationBytes:maximumActivationBytes)
+      upscaler=try MLXLatentUpscaler(checkpoint:URL(fileURLWithPath:request.components["spatial_upscaler_checkpoint"]!),
+        statisticsCheckpoint:URL(fileURLWithPath:request.components["video_checkpoint"]!))
+    }
     if plan.mode == .latentOnly {
       guard firstStrength == nil,lastStrength == nil else { throw LTXError.invalid("Latent-only cannot consume unused movie anchors.") }
       layout=nil;weights=nil
@@ -38,9 +41,9 @@ public final class MLXMovieUpscaleRunner {
         videoAttentionGroups:layout.groupRows.count>1 ? layout.groupRows : [])
       if layout.mask.contains(where:{ $0 != 1 }) { try block.admitPerTokenVideo() }
       _ = try MLXDenoiser.admitRotary(configuration:config,maximumActivationBytes:maximumActivationBytes)
-      let adapter=plan.mode == .pixelSpatial ? LoRAAdapter(path:request.components["pixel_spatial_adapter"]!,strength:request.pixelStrength) : nil
+      let adapter=request.pixelSpatialAdapter
       let source=try MLXDenoiserWeights(root:URL(fileURLWithPath:request.components["transformer_root"]!),
-        configuration:config,adapters:adapter.map { [$0] } ?? [],maximumActivationBytes:maximumActivationBytes,
+        configuration:config,adapters:request.refinementAdapters,maximumActivationBytes:maximumActivationBytes,
         pixelSpatialDFRAdapterPath:adapter?.path)
       guard source.sourceCheckpoint == "ltx-2.5-22b-distilled-transformer-bf16.safetensors" else {
         throw LTXError.invalid("Movie refinement requires the released distilled native transformer pages.")
@@ -77,11 +80,21 @@ public final class MLXMovieUpscaleRunner {
     }
     var seconds:[String:Double]=[:]
     let started=Date()
-    let upscaled=try upscaler.upscale(source,maximumActivationBytes:maximumActivationBytes) {
-      try progress("movie_upscale:"+$0,0,1)
-    }.reshaped([g.videoTokens,128])
-    eval(upscaled);seconds["latent_upscale"]=Date().timeIntervalSince(started)
-    try progress("movie_upscaler_weights_released",1,1);try Task.checkCancellation()
+    let upscaled:MLXArray
+    if let upscaler {
+      upscaled=try upscaler.upscale(source,maximumActivationBytes:maximumActivationBytes) {
+        try progress("movie_upscale:"+$0,0,1)
+      }.reshaped([g.videoTokens,128])
+      eval(upscaled);seconds["latent_upscale"]=Date().timeIntervalSince(started)
+      try progress("movie_upscaler_weights_released",1,1)
+    } else {
+      // Enhancement starts from the already normalized source, with no learned
+      // latent upscale, spatial resize or second normalization.
+      upscaled=source.reshaped([g.videoTokens,128]);eval(upscaled)
+      seconds["source_latent_initialization"]=Date().timeIntervalSince(started)
+      try progress("movie_source_latent_initialized",1,1)
+    }
+    try Task.checkCancellation()
     guard let layout,let weights else { return Result(video:upscaled,geometry:g,visibleFrames:plan.frames,stageSeconds:seconds) }
     let originalAudio=audio!
     let frozen:MLXArray
@@ -92,7 +105,7 @@ public final class MLXMovieUpscaleRunner {
     let sigma=Float(plan.sigmas[0])
     let noise=MLXNoisePolicy.seeded(seed &+ 2,tokens:g.videoTokens).asType(.float32)
     let initialized=upscaled*(1-sigma)+noise*sigma
-    let prepared=try layout.prepare(generated:initialized,source:layout.pixelReference ? source.reshaped([layout.sourceGeometry.videoTokens,128]) : nil,
+    let prepared=try layout.prepare(generated:initialized,source:layout.referenceTokens > 0 ? source.reshaped([layout.sourceGeometry.videoTokens,128]) : nil,
       first:first,last:last)
     var inputs:[String:MLXArray]=["video_latent":prepared.latent,"audio_latent":frozen,
       "video_text":videoContext!,"audio_text":audioContext!,

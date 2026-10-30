@@ -205,6 +205,30 @@ import UniformTypeIdentifiers
   private static func execute() throws {
     let started = Date()
     let arguments = Array(CommandLine.arguments.dropFirst())
+    if arguments.first == "convert-ref2va-base" {
+      guard arguments.count == 7,arguments[1] == "--source",arguments[3] == "--output",arguments[5] == "--model-root" else {
+        throw invalid("Usage: WeeToddH3MLXWorker convert-ref2va-base --source FILE --output NEW_FILE --model-root ROOT")
+      }
+      let converted=try H3Ref2VABaseConverter.convert(source:URL(fileURLWithPath:arguments[2]),
+        destination:URL(fileURLWithPath:arguments[4]),modelRoot:URL(fileURLWithPath:arguments[6])) { done,total in
+        try? emit(["event":"progress","stage":"convert_ref2va_base","completed":done,"total":total])
+      }
+      try emit(["status":"success","operation":"convert-ref2va-base","inferenceExecuted":false,
+        "path":converted.url.path,"sha256":converted.sha256,"payloadBytes":converted.payloadBytes,"format":H3Ref2VABaseConverter.version])
+      return
+    }
+    if arguments.first == "convert-publisher-encoder" {
+      guard arguments.count == 9,arguments[1] == "--shard2",arguments[3] == "--shard3",arguments[5] == "--output",arguments[7] == "--model-root" else {
+        throw invalid("Usage: WeeToddH3MLXWorker convert-publisher-encoder --shard2 FILE --shard3 FILE --output NEW_FILE --model-root ROOT")
+      }
+      let converted=try H3PublisherEncoderConverter.convert(shards:[URL(fileURLWithPath:arguments[2]),URL(fileURLWithPath:arguments[4])],
+        destination:URL(fileURLWithPath:arguments[6]),modelRoot:URL(fileURLWithPath:arguments[8])) { done,total in
+        try? emit(["event":"progress","stage":"convert_publisher_encoder","completed":done,"total":total])
+      }
+      try emit(["status":"success","operation":"convert-publisher-encoder","inferenceExecuted":false,
+        "path":converted.url.path,"sha256":converted.sha256,"payloadBytes":converted.payloadBytes,"format":H3PublisherEncoderLayout.version])
+      return
+    }
     if arguments.first == "import-context-batch" {
       try importContextBatch(arguments)
       return
@@ -218,21 +242,18 @@ import UniformTypeIdentifiers
       arguments[1] == "--request", arguments[3] == "--output" else {
       throw invalid("Usage: WeeToddH3MLXWorker preflight|render --request ENVELOPE --output DIRECTORY")
     }
-    let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
-    if executable.deletingLastPathComponent().lastPathComponent == "MacOS" {
-      let library = executable.deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("Resources/LTXNative/mlx.metallib")
-      guard FileManager.default.fileExists(atPath: library.path) else {
-        throw invalid("The packaged MLX Metal library is missing.")
-      }
-      GPU.metallib = library
-    }
+    GPU.metallib = try NativeMLXMetalLibrary.resolve(
+      executable: URL(fileURLWithPath: CommandLine.arguments[0]))
     try Task.checkCancellation()
     let envelope = try NativeVideoJobEnvelope.decode(
       readRequest(arguments[2]), expectedEngine: .h3,
       expectedOutputDirectory: arguments[4])
     let recipeData = try readRequest(envelope.recipePath)
     try envelope.validateRecipe(recipeData)
+    if let root=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any],root["task"] as? String == "h3_regenerate" {
+      let result=try H3RegenerateWorker.execute(envelope:envelope,recipeData:recipeData,render:arguments[0] == "render",emitProgress:{try? emit($0)})
+      try emit(["status":"success","result":result]);return
+    }
     let omniRecipe = try H3OmniRecipe.prepare(data: recipeData)
     if let root = try JSONSerialization.jsonObject(with: recipeData) as? [String: Any], root["still_image"] != nil {
       let result = try H3ImageWorker.execute(envelope: envelope, recipeData: recipeData,
@@ -1038,7 +1059,15 @@ import UniformTypeIdentifiers
   static func main() async {
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
+    let owner=getppid()
     let job = Task.detached(priority: .userInitiated) { try execute() }
+    let parent=DispatchSource.makeTimerSource(queue:.global())
+    parent.schedule(deadline:.now(),repeating:.milliseconds(200))
+    parent.setEventHandler { @Sendable in
+      if owner > 1,Darwin.kill(owner,0) != 0,errno == ESRCH { job.cancel() }
+    }
+    parent.resume()
+    defer { parent.cancel() }
     let signals = [SIGINT, SIGTERM].map { number in
       let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
       source.setEventHandler { @Sendable in job.cancel() }

@@ -26,9 +26,9 @@ import StudioCore
   private var conversionAttempt = UUID()
   var nativeDownloadCatalogURL: URL?
   var readNativeDownloadToken: () async throws -> String? = {
-    let saved = try await BackgroundCredential.read { try ModelDownloadToken.read() }
-    let environment = try ModelDownloadToken.environment(ProcessInfo.processInfo.environment, savedToken: saved)
-    return environment["HF_TOKEN"]
+    try await BackgroundCredential.read {
+      try ModelDownloadToken.resolveExisting(environment: ProcessInfo.processInfo.environment)
+    }
   }
   private var nativeDownloadTask: Task<URL, Error>?
   private var nativeDownloadCancelled = false

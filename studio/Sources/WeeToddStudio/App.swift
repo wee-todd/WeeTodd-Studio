@@ -166,6 +166,7 @@ struct StudioView: View {
         )
       }.padding(24).frame(width: 480)
     }
+    .sheet(isPresented: $store.showVideoUpscale) { VideoUpscaleInspector().environmentObject(store) }
     .sheet(isPresented: $store.showDrawThings) { DrawThingsSettings().environmentObject(store) }
     .sheet(isPresented: $store.showContinuousSceneReview) { ContinuousSceneReviewView().environmentObject(store) }
     .sheet(isPresented: $store.showDrawThingsConfigImport) { DrawThingsConfigImportView().environmentObject(store) }

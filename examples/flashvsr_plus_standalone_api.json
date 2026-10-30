@@ -1,0 +1,24 @@
+{
+  "1": {
+    "class_type": "WeeToddFlashVSRUpscale",
+    "inputs": {
+      "source_path": "",
+      "decoder": "tiny",
+      "width": 1280,
+      "height": 720,
+      "seed": 0,
+      "keep_audio": true,
+      "temporal_compression": 4,
+      "color_fix": "wavelet",
+      "swift_cli_path": "",
+      "model_root": "",
+      "vpipe_path": "",
+      "filename_prefix": "WeeTodd/FlashVSR",
+      "ffmpeg_path": "",
+      "ffprobe_path": "",
+      "backend": "swiftMLX",
+      "variant": "turbo",
+      "swift_worker_path": ""
+    }
+  }
+}

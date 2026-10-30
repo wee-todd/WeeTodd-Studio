@@ -477,6 +477,31 @@ extension Encodable {
   @Published var rippleSelectedTakeID: UUID?
   @Published var showAudioPresentation = false
   @Published var audioVisualFeatures: AudioVisualFeatures?
+  @Published var showVideoUpscale = false
+  @Published var videoUpscaleTool = NativeUpscalerTool.flashVSR {
+    didSet {
+      guard videoUpscaleTool != oldValue else { return }
+      videoUpscalePlan = nil; h3RegeneratePlan = nil
+      let name = videoUpscaleTool == .h3Regenerate ? "H3 Regenerate" : "FlashVSR+"
+      videoUpscaleStatus = videoUpscaleSourcePath.isEmpty ? "Select a source movie." : "Check setup for " + name + "."
+    }
+  }
+  @Published var nativeUpscalerModelLibrary = ""
+  @Published var h3RegenerateSettings = H3RegenerateSettings()
+  @Published var h3RegeneratePlan: H3RegenerateResolvedPlan?
+  @Published var h3RegenerateResult: H3RegenerateReceipt?
+  @Published var videoUpscaleSettings = FlashVSRSettings()
+  @Published var videoUpscaleRuntime = FlashVSRRuntime()
+  @Published var videoUpscaleSourcePath = ""
+  @Published var videoUpscaleSourceAssetID: UUID?
+  @Published var videoUpscaleBusy = false
+  @Published var videoUpscaleStatus = "Select a source movie."
+  @Published var videoUpscalePlan: FlashVSRResolvedPlan?
+  @Published var videoUpscaleResult: FlashVSRReceipt?
+  @Published var videoUpscalePresets: [VideoUpscalePreset] = []
+  @Published var videoUpscalePresetName = ""
+  var videoUpscaleTask: Task<Void, Never>?
+  var videoProcessingCancellation: NativeHeadlessCancellation?
   @Published var showVoice = false
   @Published var showVoiceLibrary = false
   @Published var voiceLibraryProfiles: [VoiceProfileSnapshot] = []
@@ -572,7 +597,7 @@ extension Encodable {
   @Published var preparingDrawThings = false
   @Published var characterDirectorBusy = false
   lazy var characterDirector = CharacterDirectorCoordinator(store: self)
-  var operationBusy: Bool { characterDirectorBusy || voiceLibraryBusy || nativeVoiceSetupMessage != nil || bridge.busy || preparingImageRequest || activeNativeRequest != nil || preparingDrawThings || acceptingContinuousScene || connectingContinuousScene }
+  var operationBusy: Bool { videoUpscaleBusy || characterDirectorBusy || voiceLibraryBusy || nativeVoiceSetupMessage != nil || bridge.busy || preparingImageRequest || activeNativeRequest != nil || preparingDrawThings || acceptingContinuousScene || connectingContinuousScene }
   var preparedFingerprint: String?
   var motionPromptSession: MotionPromptEditorSession?
   private var undoStates: [StudioProject] = []
@@ -611,6 +636,7 @@ extension Encodable {
     runtime = RuntimeSettings.restoring(
       try? Data(contentsOf: dataDirectory.appendingPathComponent("runtime.json")),
       defaults: runtime)
+    loadVideoUpscalePreferences()
     guard restoreSession else { return }
     try? FileManager.default.createDirectory(
       at: dataDirectory.appendingPathComponent("Profiles"),
@@ -1106,6 +1132,7 @@ extension Encodable {
       }
       for i in p.assets.indices where p.assets[i].kind != .lora {
         p.assets[i].path = try collect(p.assets[i].path)
+        if let receipt = p.assets[i].upscaleReceipt { p.assets[i].upscaleReceipt = try collect(receipt) }
         if let generation = p.assets[i].musicGeneration {
           if let known = copied[generation.artifacts] {
             p.assets[i].musicGeneration?.artifacts = known
@@ -1145,6 +1172,11 @@ extension Encodable {
         p.clips[i].motionDirectory = try collect(p.clips[i].motionDirectory)
         for j in p.clips[i].versions.indices {
           p.clips[i].versions[j].path = try collect(p.clips[i].versions[j].path)
+          if var lineage = p.clips[i].versions[j].processingLineage {
+            lineage.source = FlashVSRFile(path: try collect(lineage.source.path), sha256: lineage.source.sha256, bytes: lineage.source.bytes)
+            lineage.receiptPath = try collect(lineage.receiptPath)
+            p.clips[i].versions[j].processingLineage = lineage
+          }
           if let artifact = p.clips[i].versions[j].continuationArtifact {
             if let known = copied[artifact.manifest] {
               p.clips[i].versions[j].continuationArtifact?.manifest = known
@@ -1332,6 +1364,7 @@ extension Encodable {
     }
     preparedRecipe = nil; preparedFingerprint = nil
     do {
+      _ = try await preflightClipVideoProcessing(clip)
       if clip.engine == .ltx25, !settings.usesNativeLTX25,
         let leader = try project.continuousSceneMembers(for: clip).first,
         (leader.continuity?.sceneDecodeMode ?? "single") != "single" {
@@ -1397,6 +1430,10 @@ extension Encodable {
     do {
       guard signature(for: c) == preparedFingerprint else {
         throw StudioError.invalid("Clip changed. Prepare it again before rendering.")
+      }
+      let processingPlan = try await preflightClipVideoProcessing(c)
+      guard documentSessionID == session, project.id == projectID, project.clips.first(where: { $0.id == c.id }) == c else {
+        throw StudioError.invalid("Clip changed during processing admission. Prepare the current clip again.")
       }
       let destination = URL(fileURLWithPath: path).deletingLastPathComponent()
         .deletingLastPathComponent().appendingPathComponent("render")
@@ -1493,7 +1530,7 @@ extension Encodable {
         let current = project.clips.first(where: { $0.id == c.id }) else {
         throw StudioError.invalid("The destination project or clip changed. The completed video is saved at \(video)")
       }
-      let stillCurrent = current == c && signature(for: current) == submittedSignature
+      let stillCurrent = current.matchesGenerationSubmission(c) && signature(for: current) == submittedSignature
       var finishedClip = c
       finishedClip.duration = motionDuration ?? movieDuration ?? automaticDuration ?? (nativeH3 && continuationArtifact != nil && r["use_complete_duration"] as? Bool == true
         ? renderedDuration : preserveEditorialDuration ? c.duration : min(c.duration, renderedDuration))
@@ -1538,7 +1575,11 @@ extension Encodable {
         showPrompt = false
         refreshPreview()
       }
-      notice = stillCurrent ? "Render complete. Added to clip versions and Clip Assets."
+      if stillCurrent, let accepted = project.clips.first(where: { $0.id == c.id }) {
+        guard documentSessionID == session, project.id == projectID else { return }
+        try await processAcceptedClipVideo(videoProcessingDestination(for: accepted), plan: processingPlan)
+      }
+      notice = stillCurrent ? (processingPlan == nil ? "Render complete. Added to clip versions and Clip Assets." : "Generation and upscale complete. Original retained in Versions.")
         : "Render saved as a version. The clip changed during generation; prepare its new settings."
     } catch { self.error = error.localizedDescription }
   }

@@ -60,6 +60,7 @@ final class H3WeightedDiTState {
   private let blockCount: Int
   private let projectionMode: H3ProjectionMode
   private let lora: H3LoRAStack?
+  private let regenerate:H3RegenerateExecutionContext?
   private var rotaryAngles: H3RotaryAngles?
   private var text: MLXArray?
   private var timeEmbeddings: MLXArray?
@@ -117,6 +118,7 @@ final class H3WeightedDiTState {
     loRAAdapters: [H3LoRAAdapter]? = nil,
     funControl: H3FunControlCondition? = nil,
     vdn:H3VDNSelection? = nil,
+    regenerate:H3RegenerateExecutionContext? = nil,
     preparationObserver: H3PreparationObservation.Observer? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     let textRows = layout.textRows
@@ -126,7 +128,7 @@ final class H3WeightedDiTState {
       (1...128).contains(timestepTable.count),
       timestepTable.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
       zip(timestepTable, timestepTable.dropFirst()).allSatisfy({ $0 < $1 }),
-      [40_000, 64_000].contains(layout.maximumPackedRows),
+      ([40_000,64_000].contains(layout.maximumPackedRows) || (regenerate != nil && layout.maximumPackedRows == H3RegenerateAdmission.maximumPackedRows)),
       (1...layout.maximumPackedRows).contains(layout.tags.count) else {
       throw H3CheckpointError.invalid("Invalid H3 denoiser preparation request.")
     }
@@ -140,6 +142,16 @@ final class H3WeightedDiTState {
       _ = try H3FunControlLayout(url: funControl.checkpoint,
         base: H3CheckpointLayout(url: checkpointURL))
     }
+    if let regenerate {
+      guard case .audiovisual(let packed)=layout,packed.conditionVideoRows == 0,
+        packed.tags.count == regenerate.admission.packedRows,regenerate.adapter.activeStage == .regenerate,
+        blockCount == 50,omni == nil,funControl == nil,vdn == nil,nativeWorkerURL == nil,
+        experimentalSol == nil,transformerWeightCacheGB == 0,projectionMode == .weightDecoded,
+        turboLoRAURL == nil,additionalLoRAs.isEmpty,loRAAdapters == nil || loRAAdapters!.isEmpty else {
+        throw H3CheckpointError.invalid("Regenerate requires its isolated shared-DiT context and exact admitted packed rows.")
+      }
+    }
+    self.regenerate=regenerate
     self.omni = omni
     self.checkpointURL = checkpointURL
     self.layout = layout
@@ -206,11 +218,11 @@ final class H3WeightedDiTState {
     } else { solGeometry = nil }
     // Controls and larger spatial admission retain their independently
     // qualified execution paths. Core H3 uses bounded stage-local owners.
-    preparedWindowSize = nativeWorkerURL == nil && projectionMode == .weightDecoded && funControl == nil
+    preparedWindowSize = regenerate == nil && nativeWorkerURL == nil && projectionMode == .weightDecoded && funControl == nil
       && vdn == nil && layout.maximumPackedRows == 40_000
       ? (checkpointLayout.fastVariant == nil ? 1:2) : nil
     if checkpointLayout.fastVariant != nil {
-      guard blockCount == 50,funControl == nil,effective.isEmpty,vdn == nil,
+      guard regenerate == nil,blockCount == 50,funControl == nil,effective.isEmpty,vdn == nil,
         case .audiovisual(let packed) = layout,packed.conditionVideoRows == 0 else {
         throw H3CheckpointError.invalid("FastH3 requires unmasked T2VA without additional adapters or controls.")
       }
@@ -227,7 +239,7 @@ final class H3WeightedDiTState {
     } else if transformerWeightCacheGB != 0 { throw H3CheckpointError.invalid("Invalid H3 transformer cache budget.") }
     self.lora = try effective.isEmpty ? nil : H3LoRAStack(adapters: effective)
     let application: (any H3LoRAApplying)?
-    if let vdn = self.vdn { application = vdn.lora } else { application = self.lora }
+    if let regenerate { application=regenerate.adapter } else if let vdn = self.vdn { application = vdn.lora } else { application = self.lora }
     self.text = nil
     self.timeEmbeddings = nil
     self.modulations = nil
@@ -264,9 +276,9 @@ final class H3WeightedDiTState {
       var tables: [MLXArray] = []
       tables.reserveCapacity(blockCount)
       for index in 0..<blockCount {
-        tables.append(try H3AdaLNProjection.evaluate(
-          checkpointURL: checkpointURL, blockIndex: index,
-          timeEmbeddings: time, projectionMode: projectionMode,lora:application,loraInput:loraTime, omni: omni?.source))
+        let base=try H3AdaLNProjection.evaluate(checkpointURL:checkpointURL,blockIndex:index,
+          timeEmbeddings:time,projectionMode:projectionMode,lora:regenerate == nil ? application:nil,loraInput:loraTime,omni:omni?.source)
+        tables.append(try regenerate.map { try H3SharpCurve.add(delta:$0.sharp.modulationDelta(block:index,times:timestepTable),to:base) } ?? base)
         if index + 1 < blockCount { progress(index + 1, blockCount) }
         try Task.checkCancellation()
       }
@@ -378,7 +390,7 @@ final class H3WeightedDiTState {
     lora?.evaluation = completedEvaluations
     defer { lora?.evaluation = nil }
     let application: (any H3LoRAApplying)?
-    if let vdn { application = vdn.lora } else { application = lora }
+    if let regenerate { application=regenerate.adapter } else if let vdn { application = vdn.lora } else { application = lora }
     if nativeWorkerURL != nil {
       let exported = try exportProjectionPacked(videoLatents: videoLatents,
         audioLatents: audioLatents, timestepIndices: timestepIndices,
@@ -400,10 +412,14 @@ final class H3WeightedDiTState {
       succeeded = true
       return result
     }
-    let video = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
-      kind: .video, input: videoLatents, omni: omni?.source).asType(.bfloat16)
-    let audio = try H3InputProjection.evaluate(checkpointURL: checkpointURL,
-      kind: .audio, input: audioLatents, omni: omni?.source).asType(.bfloat16)
+    let video:MLXArray,audio:MLXArray
+    if regenerate != nil {
+      video=try H3InputProjection.evaluateRegenerate(checkpointURL:checkpointURL,kind:.video,input:videoLatents)
+      audio=try H3InputProjection.evaluateRegenerate(checkpointURL:checkpointURL,kind:.audio,input:audioLatents)
+    } else {
+      video=try H3InputProjection.evaluate(checkpointURL:checkpointURL,kind:.video,input:videoLatents,omni:omni?.source).asType(.bfloat16)
+      audio=try H3InputProjection.evaluate(checkpointURL:checkpointURL,kind:.audio,input:audioLatents,omni:omni?.source).asType(.bfloat16)
+    }
     let packed = try layout.pack(text: text, video: video, audio: audio,
       timestepIndices: timestepIndices)
     // Layout and positional coordinates are immutable for this stage, even
@@ -492,7 +508,8 @@ final class H3WeightedDiTState {
           index: index, input: input, modulation: modulations[index],
           modulationIndices: packed.modulationIndices,
           positions: packed.positions, projectionMode: projectionMode,
-          lora: application, rotaryAngles: rotaryAngles, maximumRows: layout.maximumPackedRows,
+          lora: application, regenerateAdmission:regenerate?.admission,regenerateAttentionPlan:regenerate?.attentionPlan,
+          rotaryAngles: rotaryAngles, maximumRows: layout.maximumPackedRows,
           vdn:vdn,fastTiles:fastTiles,preparedWeights:owner,attendedOverride:attendedOverride,onAttentionBackend: { consumer in
             switch consumer {
             case .originalRowsIndexed: self.vsaOriginalRowsIndexedCalls += 1
@@ -517,7 +534,7 @@ final class H3WeightedDiTState {
       timestepIndices: packed.timestepIndices,
       videoIndices: packed.videoIndices,
       audioIndices: packed.audioIndices, maximumRows: layout.maximumPackedRows,
-      residualPrecision: .bfloat16, lora:application,loraInput:modulationLoRAInputs,observe: { _, _ in })
+      residualPrecision: .bfloat16, lora:regenerate == nil ? application:nil,loraInput:modulationLoRAInputs,observe: { _, _ in })
     completedEvaluations += 1
     succeeded = true
     return result

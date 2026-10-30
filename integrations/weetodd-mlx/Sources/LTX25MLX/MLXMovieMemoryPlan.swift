@@ -26,12 +26,15 @@ public struct MLXMovieMemoryPlan: Sendable {
     let g=try AVGeometry(width:local.size.outputWidth,height:local.size.outputHeight,
       frames:largest.paddedFrames,fps:local.fps)
     let sourceShape=[g.latentFrames,local.size.height/32,local.size.width/32,128]
-    var upscaleConfiguration=LatentUpscaleConfiguration()
-    upscaleConfiguration.maximumActivationBytes=Int.max
-    let upscale=try LatentUpscalePlan(shape:sourceShape,configuration:upscaleConfiguration)
-    // This is the SAME full im2col reserve enforced by MLXLatentUpscaler.admit.
-    let upscaleWorkspace=upscale.outputShape.dropLast().reduce(1,*)*1024*27*4
-    var transformer=upscale.activationBytes+upscaleWorkspace
+    var transformer=0
+    if !local.mode.sameSize {
+      var upscaleConfiguration=LatentUpscaleConfiguration()
+      upscaleConfiguration.maximumActivationBytes=Int.max
+      let upscale=try LatentUpscalePlan(shape:sourceShape,configuration:upscaleConfiguration)
+      // This is the SAME full im2col reserve enforced by MLXLatentUpscaler.admit.
+      let upscaleWorkspace=upscale.outputShape.dropLast().reduce(1,*)*1024*27*4
+      transformer=upscale.activationBytes+upscaleWorkspace
+    }
     let usesFirst=request.anchors != .none || request.referenceImages.contains { $0.role=="first" }
     let usesLast=request.anchors == .firstLast || request.referenceImages.contains { $0.role=="last" }
     if local.mode != .latentOnly {
@@ -46,7 +49,7 @@ public struct MLXMovieMemoryPlan: Sendable {
       // Rotary grids are included within the block estimate; verify that reserve.
       _ = try MLXDenoiser.admitRotary(configuration:configuration,maximumActivationBytes:transformer)
     }
-    _ = try MLXLatentUpscaler.admit(shape:sourceShape,maximumActivationBytes:transformer)
+    if !local.mode.sameSize { _ = try MLXLatentUpscaler.admit(shape:sourceShape,maximumActivationBytes:transformer) }
     let encoder=try MLXVideoEncodeTilePlan(frames:largest.paddedFrames,
       width:local.size.width,height:local.size.height,maximumOwnedBufferBytes:Int.max)
       .tiles.map(\.ownedBufferBytes).max()!

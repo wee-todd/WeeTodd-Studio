@@ -97,6 +97,7 @@ extension StudioStore {
     let settings = runtime
     let key = generationRequestKey(for: clip)
     do {
+      let processingPlan = try await preflightClipVideoProcessing(clip)
       var body = try payload()
       body["connection"] = try prepared.connection.object()
       try await attachmentDigests.resolve(drawThingsAttachmentPaths(clip), force: true)
@@ -116,7 +117,7 @@ extension StudioStore {
         throw StudioError.invalid("The destination project or clip changed. The completed video is saved at \(video)")
       }
       let stillCurrent = project.clips.first(where: { $0.id == clip.id })
-        .map { $0 == clip && signature(for: $0) == prepared.signature } ?? false
+        .map { $0.matchesGenerationSubmission(clip) && signature(for: $0) == prepared.signature } ?? false
       change { p in
         guard let i = p.clips.firstIndex(where: { $0.id == clip.id }) else { return }
         p.clips[i].versions.append(RenderVersion(path: video, seed: clip.seed, prompt: clip.prompt,
@@ -135,6 +136,9 @@ extension StudioStore {
         p.assets.append(asset)
       }
       preparedDrawThingsClip = nil
+      if stillCurrent, let accepted = project.clips.first(where: { $0.id == clip.id }) {
+        try await processAcceptedClipVideo(videoProcessingDestination(for: accepted), plan: processingPlan)
+      }
       if stillCurrent && selectedClipID == clip.id {
         showPrompt = false
         refreshPreview()

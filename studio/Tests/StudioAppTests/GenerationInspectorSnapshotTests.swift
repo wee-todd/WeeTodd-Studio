@@ -6,6 +6,30 @@ import XCTest
 @testable import WeeToddStudio
 
 final class GenerationInspectorSnapshotTests: XCTestCase {
+  @MainActor func testNativeFlashToolHostsWithoutChangingTheSourceRecipe() throws {
+    let fixture = try h3Fixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+    fixture.store.videoUpscaleTool = .flashVSR
+    fixture.store.videoUpscaleRuntime.modelRoot = "/shared/model-library/FlashVSR-Plus"
+    fixture.store.videoUpscaleSourcePath = "/source/original.mov"
+    let settings = fixture.store.videoUpscaleSettings
+    try capture(VideoUpscaleInspector(), fixture: fixture, name: "native-flash-tool", height: 820, width: 872)
+    XCTAssertEqual(fixture.store.videoUpscaleSettings, settings)
+    XCTAssertEqual(fixture.store.videoUpscaleSettings.backend, .swiftMLX)
+  }
+
+  @MainActor func testNativeH3ToolHostsTheExplicitFastDecoderWithoutChangingItsRecipe() throws {
+    let fixture = try h3Fixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+    fixture.store.videoUpscaleTool = .h3Regenerate
+    fixture.store.videoUpscaleSourcePath = "/source/original.mov"
+    fixture.store.h3RegenerateSettings.baseProfilePath = "/profiles/ordinary-ref2va.json"
+    fixture.store.h3RegenerateSettings.decoder = .fastH3
+    let settings = fixture.store.h3RegenerateSettings
+    try capture(VideoUpscaleInspector(), fixture: fixture, name: "native-h3-tool", height: 820, width: 872)
+    XCTAssertEqual(fixture.store.h3RegenerateSettings, settings)
+    XCTAssertEqual(fixture.store.h3RegenerateSettings.decoder, .fastH3)
+  }
   @MainActor func testIngredientsBasicHostsWithoutChangingTheSavedRecipe() throws {
     let fixture = try ingredientsFixture()
     defer { try? FileManager.default.removeItem(at: fixture.directory) }
@@ -73,12 +97,11 @@ final class GenerationInspectorSnapshotTests: XCTestCase {
   }
 
   @MainActor private func capture<Content: View>(_ content: Content, fixture: Fixture,
-                                                name: String, height: CGFloat, requiredFields:[String:Double] = [:]) throws {
+                                                name: String, height: CGFloat, width: CGFloat = 420, requiredFields:[String:Double] = [:]) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = .sortedKeys
     let before = try encoder.encode(fixture.clip)
     _ = NSApplication.shared
-    let width: CGFloat = 420
     let root = content
       .environmentObject(fixture.store)
       .environment(\.colorScheme, .dark)

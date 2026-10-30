@@ -67,6 +67,19 @@ public struct H3Geometry: Sendable {
     audioLatentFrames = stillImageMode.audioLatentFrames
   }
 
+  /// Exact source timeline for the explicit regeneration path. No duration or
+  /// cadence resampling occurs; padded frames are separate from visible frames.
+  public init(regenerateWidth width:Int,height:Int,paddedFrames:Int) throws {
+    try H3CanvasAdmission.regenerate.validate(width:width,height:height)
+    guard (5...362).contains(paddedFrames),(paddedFrames-5).isMultiple(of:17) else {
+      throw H3GeometryError.invalid("Regeneration requires the exact 5+17*n padded source timeline.")
+    }
+    self.canvasAdmission = .regenerate;self.stillImageMode=nil
+    self.width=width;self.height=height;frames=paddedFrames
+    videoLatentFrames=(paddedFrames-5)/17*5+2
+    audioLatentFrames=(try H3RegenerateAdmission.silenceSampleCount(paddedFrames:paddedFrames)+799)/800
+  }
+
   public func packedRows(textRows: Int, conditionVideoRows: Int,
     conditionAudioRows: Int) throws -> Int {
     guard textRows > 0, conditionVideoRows >= 0, conditionAudioRows >= 0 else {
@@ -78,7 +91,7 @@ public struct H3Geometry: Sendable {
       guard !overflow else { throw H3GeometryError.invalid("H3 packed row count overflows Int.") }
       result = sum
     }
-    if canvasAdmission == .spatialRefinement { try canvasAdmission.validatePackedRows(result) }
+    if canvasAdmission != .ordinary { try canvasAdmission.validatePackedRows(result) }
     return result
   }
 }

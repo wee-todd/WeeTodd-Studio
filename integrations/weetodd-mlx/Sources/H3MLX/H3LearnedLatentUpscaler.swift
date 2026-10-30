@@ -99,6 +99,14 @@ public struct H3LearnedUpscalerLayout: Sendable {
     return SHA256.hash(data: prefix + json).map { String(format: "%02x", $0) }.joined()
   }
 
+  /// For callers that already bind the whole file SHA, capture the exact
+  /// admitted header digest used by the existing execution API.
+  public static func inspectHeader(url:URL) throws -> String {
+    let file=try SafeTensorFile(url:url)
+    _ = try validate(descriptors:file.tensors)
+    return try headerDigest(url:url,file:file)
+  }
+
   public init(url: URL, expectedHeaderSHA256: String) throws {
     guard expectedHeaderSHA256.utf8.count == 64,
       expectedHeaderSHA256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
@@ -230,9 +238,13 @@ public enum H3LearnedLatentUpscaler {
   /// own no upscaler weights; success, failure and cancellation drop the stage.
   public static func upscale(rows: MLXArray, source: H3Geometry, target: H3Geometry,
     checkpointURL: URL, expectedHeaderSHA256: String, videoVAE: URL,
+    mathProfile:H3LatentUpscalerMathProfile = .nativeF32Geometric,
     progress: (Int,Int) -> Void = { _,_ in }) throws -> Result {
-    guard source.frames == target.frames, target.canvasAdmission == .spatialRefinement,
-      target.width > source.width, target.height > source.height,
+    guard source.frames == target.frames,
+      (mathProfile == .nativeF32Geometric ? target.canvasAdmission == .spatialRefinement : target.canvasAdmission == .regenerate),
+      target.width >= source.width, target.height >= source.height,
+      (target.width > source.width || target.height > source.height),
+      (mathProfile == .publisherBF16Arithmetic || (target.width > source.width && target.height > source.height)),
       target.width <= 2*source.width, target.height <= 2*source.height,
       rows.shape == [1,source.videoRows,96], rows.dtype == .float32 else {
       throw H3CheckpointError.invalid("Learned H3 spatial refinement needs matching complete source video and bounded enlarged target.")
@@ -243,7 +255,7 @@ public enum H3LearnedLatentUpscaler {
     let layout = try H3LearnedUpscalerLayout(url: checkpointURL, expectedHeaderSHA256: expectedHeaderSHA256)
     let file = try SafeTensorFile(url: checkpointURL)
     _ = try H3VideoVAELayout(url: videoVAE)
-    let plan = try H3UpscalerConvolutionPlan()
+    let plan = try H3UpscalerConvolutionPlan(maximumSpatial:mathProfile == .publisherBF16Arithmetic ? 256:120)
     let workspace = try plan.validate(channels: 512,kernel:3,bytesPerElement:4)
     let tileCount = try plan.tileCount(frames: target.videoLatentFrames,
       height: target.height/16,width:target.width/16)
@@ -303,8 +315,8 @@ public enum H3LearnedLatentUpscaler {
     let raw = try H3LearnedUpscalerOps.unpackSamplerRows(rows, geometry: source)
     let mean = MLXArray(latentMean).reshaped([1,1,1,1,24])
     let std = MLXArray(latentStandardDeviation).reshaped([1,1,1,1,24])
-    let scale = sqrt(Double(target.width*target.height)/Double(source.width*source.height))
-    let embedding = try linear(silu(linear(MLXArray([Float(scale-1)],[1,1]),"embed.0")),"embed.2")
+    let scale = mathProfile.scale(sourceWidth:source.width,sourceHeight:source.height,targetWidth:target.width,targetHeight:target.height)
+    let embedding = try linear(silu(linear(MLXArray([Float(scale-1)],[1,1]).asType(mathProfile.dtype),"embed.0")),"embed.2")
     var completed = 0
     func materialize(_ value:MLXArray) throws -> MLXArray {
       eval(value); try Task.checkCancellation()
@@ -314,16 +326,16 @@ public enum H3LearnedLatentUpscaler {
       }
       completed += 1; progress(completed,39); return value
     }
-    var value = try materialize(convolution((raw-mean)/std,"conv_in"))
+    var value = try materialize(convolution(mathProfile.normalize(raw,mean:mean,std:std),"conv_in"))
     for index in 0..<18 {
       value = try autoreleasepool { try materialize(block(value,"in_blocks.\(index)",embedding,index%3 == 1)) }
     }
-    value = try materialize(H3LearnedUpscalerOps.resizeBilinear(value,height:target.height/16,width:target.width/16))
+    value = try materialize(H3LearnedUpscalerOps.resizeBilinear(value,height:target.height/16,width:target.width/16).asType(mathProfile.dtype))
     for index in 0..<18 {
       value = try autoreleasepool { try materialize(block(value,"out_blocks.\(index)",embedding,index%3 == 1)) }
     }
     let output = try materialize(convolution(silu(norm(value,"norm_out")),"conv_out"))
-    let packed = try H3LearnedUpscalerOps.packSamplerLatents(output*std+mean)
+    let packed = try H3LearnedUpscalerOps.packSamplerLatents(mathProfile.denormalize(output,mean:mean,std:std))
     try file.checkUnchanged(at:checkpointURL)
     guard try H3LearnedUpscalerLayout.headerDigest(url:checkpointURL,file:file) == layout.headerSHA256 else {
       throw H3CheckpointError.invalid("Learned H3 source changed during execution.")

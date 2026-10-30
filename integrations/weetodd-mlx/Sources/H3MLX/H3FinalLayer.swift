@@ -43,7 +43,7 @@ public enum H3FinalLayer {
     lora: (any H3LoRAApplying)? = nil, loraInput: MLXArray? = nil,
     observe: (String, MLXArray) throws -> Void) throws -> Output {
     guard input.ndim == 3, input.shape[0] == 1,
-      [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(input.shape[1]), input.shape[2] == 5376,
+      [40_000,64_000,H3RegenerateAdmission.maximumPackedRows].contains(maximumRows), (1...maximumRows).contains(input.shape[1]), input.shape[2] == 5376,
       input.dtype == residualPrecision.dtype, timeEmbeddings.ndim == 2,
       (1...128).contains(timeEmbeddings.shape[0]),
       [64, 2688].contains(timeEmbeddings.shape[1]),

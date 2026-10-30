@@ -19,6 +19,44 @@ public enum H3InputProjection {
     }
   }
 
+  static func regenerateWindows(rows:Int,chunkRows:Int=8192) throws -> [Range<Int>] {
+    guard (1...H3RegenerateAdmission.maximumPackedRows).contains(rows),(1...8192).contains(chunkRows),
+      rows<=Int(Int32.max)/5376 else {
+      throw H3CheckpointError.invalid("Regenerate input projection exceeds its bounded row/index profile.")
+    }
+    return stride(from:0,to:rows,by:chunkRows).map{$0..<min(rows,$0+chunkRows)}
+  }
+
+  static func projectRegenerateRows(kind:Kind,input:MLXArray,chunkRows:Int=8192,
+    project:(MLXArray)throws->MLXArray) throws -> MLXArray {
+    guard kind != .condition,input.ndim==3,input.shape[0]==1,input.shape[2]==kind.columns,input.dtype.isFloatingPoint else {
+      throw H3CheckpointError.invalid("Invalid regenerate input projection stream.")
+    }
+    let windows=try regenerateWindows(rows:input.shape[1],chunkRows:chunkRows)
+    var parts=[MLXArray]()
+    for rows in windows {
+      try Task.checkCancellation()
+      let part=try autoreleasepool {
+        let value=try project(input[0..<1,rows,0..<kind.columns])
+        guard value.shape==[1,rows.count,5376],value.dtype.isFloatingPoint else {
+          throw H3CheckpointError.invalid("Regenerate input projection changed its row layout.")
+        }
+        let cast=value.asType(.bfloat16);eval(cast);return cast
+      }
+      parts.append(part)
+    }
+    let result=concatenated(parts,axis:1);eval(result)
+    return result
+  }
+
+  /// Exact row-independent FP32 projections, cast to model precision per window.
+  /// The ordinary loader and its65,536-row admission remain unchanged.
+  static func evaluateRegenerate(checkpointURL:URL,kind:Kind,input:MLXArray) throws -> MLXArray {
+    try projectRegenerateRows(kind:kind,input:input) { rows in
+      try evaluate(checkpointURL:checkpointURL,kind:kind,input:rows)
+    }
+  }
+
   public static func evaluate(checkpointURL: URL, kind: Kind,
     input: MLXArray, omni: H3OmniCheckpoint? = nil) throws -> MLXArray {
     guard input.ndim == 3, input.shape[0] == 1,

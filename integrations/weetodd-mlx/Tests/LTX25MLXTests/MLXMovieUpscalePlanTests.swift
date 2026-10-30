@@ -2,6 +2,24 @@ import XCTest
 @testable import LTX25MLX
 
 final class MLXMovieUpscalePlanTests: XCTestCase {
+  func testEnhancePreservesFullHDCanvasAndThreeEvaluationDenoiseStrength() throws {
+    let mode=try XCTUnwrap(MLXMovieUpscalePlan.Mode(rawValue:"enhance"))
+    let plan=try MLXMovieUpscalePlan(mode:mode,width:1920,height:1088,frames:120,
+      fps:24,sizePolicy:.strict,refinementStrength:0.5)
+    XCTAssertEqual(plan.size.outputWidth,1920);XCTAssertEqual(plan.size.outputHeight,1088)
+    XCTAssertEqual(plan.frames,120);XCTAssertEqual(plan.paddedFrames,121)
+    XCTAssertEqual(plan.fps,24);XCTAssertEqual(plan.seconds,5)
+    XCTAssertEqual(plan.sigmas.count,4)
+    XCTAssertEqual(plan.sigmas[0],0.5,accuracy:1e-15)
+    XCTAssertEqual(plan.sigmas[1],0.3986254295532646,accuracy:1e-15)
+    XCTAssertEqual(plan.sigmas[2],0.23195876288659795,accuracy:1e-15)
+    XCTAssertEqual(plan.sigmas[3],0)
+    XCTAssertEqual(try plan.chunks().map(\.frames),[120])
+    for policy in [MLXMovieUpscalePlan.SizePolicy.fitNearest,.centerCrop,.strict] {
+      XCTAssertThrowsError(try MLXMovieUpscalePlan(mode:mode,width:1920,height:1080,frames:24,
+        fps:24,sizePolicy:policy,refinementStrength:0.5))
+    }
+  }
   func testArbitraryVisibleFramesPadCausalTailWithoutMovingLastAnchorOrAddingSlots() throws {
     let plan = try MLXMovieUpscalePlan(mode: .pixelSpatial, width: 672, height: 384,
       frames: 98, fps: 24, sizePolicy: .strict)

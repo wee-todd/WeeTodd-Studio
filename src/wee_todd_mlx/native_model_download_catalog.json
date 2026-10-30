@@ -1220,5 +1220,519 @@
         "target": "fastvideo_inference.json"
       }
     ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-regenerate-publisher",
+      "name": "H3 Regenerate \u00b7 publisher adapter stack",
+      "description": "Pinned native Swift/MLX components. Reuses verified installed files; setup and conversion need no Python.",
+      "downloadBytes": 14381849142,
+      "requiredDiskBytes": 14650284598,
+      "sourceURL": "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K",
+      "licenseURL": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/6818f6c32d12b210915e44ad56a4228c2608f160/LICENSE",
+      "licenseNotice": "Model weights retain the MiniMax H3 Community License. Learned latent upscaler retains Apache-2.0. Sharp curve coordinates are prepared separately from the pinned base tensor.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "tasks": [
+        "restore"
+      ],
+      "components": [
+        "regenerate_adapter",
+        "sharp_branches",
+        "latent_upscaler"
+      ]
+    },
+    "kind": "h3-regenerate",
+    "files": [
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "lora/open_h3_regenerate_2k_lora.safetensors",
+        "size": 12452449080,
+        "sha256": "8e36a0912ab72f7f3b00f41e3c7c97c7dfdec21e66c88ab22f08b9b0c681bb04",
+        "target": "lora/open_h3_regenerate_2k_lora.safetensors"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "lora/sharp_curve_branches.safetensors",
+        "size": 1238746768,
+        "sha256": "26ff1c4ea50fc5b0cea252912b67ec308a65d534cef026ef56f415ae92102e4e",
+        "target": "lora/sharp_curve_branches.safetensors"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "lora/lora_config.json",
+        "size": 2107,
+        "sha256": "8c0b54b67cfa8be88814fabdebd1ec04d7cf72239d0b7ddd9756fe62e8cbd878",
+        "target": "lora/lora_config.json"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "lora/module_ranks.json",
+        "size": 39414,
+        "sha256": "ba7a65602a8c566c1e2d5248cec84a0690a45efd8d3319970cb99481475ebe6f",
+        "target": "lora/module_ranks.json"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "lora/MERGE_VERIFY.json",
+        "size": 1056,
+        "sha256": "333dff709460e629d91ed0d9a116d83ca1c50571285494aa5d2fe841fbeedf70",
+        "target": "lora/MERGE_VERIFY.json"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "latent_upsampler/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors",
+        "size": 690592992,
+        "sha256": "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6",
+        "target": "latent_upsampler/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "base_model/LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44",
+        "target": "LICENSE"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "NOTICE",
+        "size": 121,
+        "sha256": "154fe7fbdf198395d53c57d6786b2fbf7e63a083ff70843c5ef78c0c7303d91a",
+        "target": "NOTICE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-fast-decoder",
+      "name": "H3 Regenerate \u00b7 optional fast decoder",
+      "description": "Pinned native Swift/MLX components. Reuses verified installed files; setup and conversion need no Python.",
+      "downloadBytes": 6471274053,
+      "requiredDiskBytes": 6739709509,
+      "sourceURL": "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K",
+      "licenseURL": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/6818f6c32d12b210915e44ad56a4228c2608f160/LICENSE",
+      "licenseNotice": "Optional decoder model weights retain the MiniMax H3 Community License.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "tasks": [
+        "restore"
+      ],
+      "components": [
+        "fast_video_vae"
+      ]
+    },
+    "kind": "h3-fast-vae",
+    "files": [
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "vae_fast/fast_h3_vae_noncausal_24l.safetensors",
+        "size": 6471256328,
+        "sha256": "8658f1e85b5997c4ba716406a2f148bfa36cf97d4d5fcd402c7bd341f54e77a1",
+        "target": "vae_fast/fast_h3_vae_noncausal_24l.safetensors"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "base_model/LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44",
+        "target": "LICENSE"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "NOTICE",
+        "size": 121,
+        "sha256": "154fe7fbdf198395d53c57d6786b2fbf7e63a083ff70843c5ef78c0c7303d91a",
+        "target": "NOTICE"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "flashvsr-native-turbo-tiny",
+      "name": "FlashVSR+ \u00b7 Turbo \u00b7 Tiny",
+      "description": "Pinned native Swift/MLX components. Reuses verified installed files; setup and conversion need no Python.",
+      "downloadBytes": 7020668784,
+      "requiredDiskBytes": 7289104240,
+      "sourceURL": "https://huggingface.co/ruchangyao/FlashVSR_plus",
+      "licenseURL": "https://github.com/OpenImagingLab/FlashVSR_Plus/blob/b548a2cc2c929d3d4676f2973abe27876ec4dee7/LICENSE",
+      "licenseNotice": "FlashVSR+ model repository declares Apache-2.0; retain upstream model and component notices. The selected decoder is explicit.",
+      "outputKind": "directory",
+      "engines": [
+        "flashvsr"
+      ],
+      "tasks": [
+        "restore"
+      ],
+      "components": [
+        "transformer",
+        "projection",
+        "fixed_context",
+        "decoder"
+      ]
+    },
+    "kind": "flashvsr-native",
+    "files": [
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "turbo/dit.safetensors",
+        "size": 5676070392,
+        "sha256": "7862b92178176fa3aebc34c6c071daca6b56ab1dddb8e7ff9a01c47f5226ec8b",
+        "target": "turbo/dit.safetensors"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "turbo/lq_proj_in.safetensors",
+        "size": 1151384272,
+        "sha256": "e77b378ae12342eefbb58f924256f362a151b93ce73dd32808fcdaca9c051496",
+        "target": "turbo/lq_proj_in.safetensors"
+      },
+      {
+        "repo": "OpenImagingLab/FlashVSR_Plus",
+        "revision": "b548a2cc2c929d3d4676f2973abe27876ec4dee7",
+        "filename": "prompt_tensor/posi_prompt.pth",
+        "target": "posi_prompt.pth",
+        "size": 4195504,
+        "sha256": "4601107a11e4e11a936a6b79df579e54dbc99872132bf542151f0ffd65b4b1ef",
+        "provider": "github"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "config.json",
+        "size": 283,
+        "sha256": "13f6ebddb89f61223a06b9e3de1293647dbe74b639ccc45e01bd353a5b6e2577",
+        "target": "config.json"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "TCDecoder.ckpt",
+        "size": 189018333,
+        "sha256": "e224bdcf2f52745cbf4d393ff5374c2ba09e90285d5d19062d2bf63b915b6161",
+        "target": "TCDecoder.ckpt"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "flashvsr-native-turbo-full",
+      "name": "FlashVSR+ \u00b7 Turbo \u00b7 Full",
+      "description": "Pinned native Swift/MLX components. Reuses verified installed files; setup and conversion need no Python.",
+      "downloadBytes": 7339260331,
+      "requiredDiskBytes": 7607695787,
+      "sourceURL": "https://huggingface.co/ruchangyao/FlashVSR_plus",
+      "licenseURL": "https://github.com/OpenImagingLab/FlashVSR_Plus/blob/b548a2cc2c929d3d4676f2973abe27876ec4dee7/LICENSE",
+      "licenseNotice": "FlashVSR+ model repository declares Apache-2.0; retain upstream model and component notices. The selected decoder is explicit.",
+      "outputKind": "directory",
+      "engines": [
+        "flashvsr"
+      ],
+      "tasks": [
+        "restore"
+      ],
+      "components": [
+        "transformer",
+        "projection",
+        "fixed_context",
+        "decoder"
+      ]
+    },
+    "kind": "flashvsr-native",
+    "files": [
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "turbo/dit.safetensors",
+        "size": 5676070392,
+        "sha256": "7862b92178176fa3aebc34c6c071daca6b56ab1dddb8e7ff9a01c47f5226ec8b",
+        "target": "turbo/dit.safetensors"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "turbo/lq_proj_in.safetensors",
+        "size": 1151384272,
+        "sha256": "e77b378ae12342eefbb58f924256f362a151b93ce73dd32808fcdaca9c051496",
+        "target": "turbo/lq_proj_in.safetensors"
+      },
+      {
+        "repo": "OpenImagingLab/FlashVSR_Plus",
+        "revision": "b548a2cc2c929d3d4676f2973abe27876ec4dee7",
+        "filename": "prompt_tensor/posi_prompt.pth",
+        "target": "posi_prompt.pth",
+        "size": 4195504,
+        "sha256": "4601107a11e4e11a936a6b79df579e54dbc99872132bf542151f0ffd65b4b1ef",
+        "provider": "github"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "config.json",
+        "size": 283,
+        "sha256": "13f6ebddb89f61223a06b9e3de1293647dbe74b639ccc45e01bd353a5b6e2577",
+        "target": "config.json"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "Wan2.1_VAE.pth",
+        "size": 507609880,
+        "sha256": "38071ab59bd94681c686fa51d75a1968f64e470262043be31f7a094e442fd981",
+        "target": "Wan2.1_VAE.pth"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "flashvsr-native-base-tiny",
+      "name": "FlashVSR+ \u00b7 Base \u00b7 Tiny",
+      "description": "Pinned native Swift/MLX components. Reuses verified installed files; setup and conversion need no Python.",
+      "downloadBytes": 7020668784,
+      "requiredDiskBytes": 7289104240,
+      "sourceURL": "https://huggingface.co/ruchangyao/FlashVSR_plus",
+      "licenseURL": "https://github.com/OpenImagingLab/FlashVSR_Plus/blob/b548a2cc2c929d3d4676f2973abe27876ec4dee7/LICENSE",
+      "licenseNotice": "FlashVSR+ model repository declares Apache-2.0; retain upstream model and component notices. The selected decoder is explicit.",
+      "outputKind": "directory",
+      "engines": [
+        "flashvsr"
+      ],
+      "tasks": [
+        "restore"
+      ],
+      "components": [
+        "transformer",
+        "projection",
+        "fixed_context",
+        "decoder"
+      ]
+    },
+    "kind": "flashvsr-native",
+    "files": [
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "base/dit.safetensors",
+        "size": 5676070392,
+        "sha256": "58d64c1f1b3a559bafb69bb014f3ab2745e800c89435afdc154966eb96bc7459",
+        "target": "base/dit.safetensors"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "base/lq_proj_in.safetensors",
+        "size": 1151384272,
+        "sha256": "a1fe997f19060171db8dd4d58c30debc78ddfcc357b63481798792a38a356d8d",
+        "target": "base/lq_proj_in.safetensors"
+      },
+      {
+        "repo": "OpenImagingLab/FlashVSR_Plus",
+        "revision": "b548a2cc2c929d3d4676f2973abe27876ec4dee7",
+        "filename": "prompt_tensor/posi_prompt.pth",
+        "target": "posi_prompt.pth",
+        "size": 4195504,
+        "sha256": "4601107a11e4e11a936a6b79df579e54dbc99872132bf542151f0ffd65b4b1ef",
+        "provider": "github"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "config.json",
+        "size": 283,
+        "sha256": "13f6ebddb89f61223a06b9e3de1293647dbe74b639ccc45e01bd353a5b6e2577",
+        "target": "config.json"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "TCDecoder.ckpt",
+        "size": 189018333,
+        "sha256": "e224bdcf2f52745cbf4d393ff5374c2ba09e90285d5d19062d2bf63b915b6161",
+        "target": "TCDecoder.ckpt"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "flashvsr-native-base-full",
+      "name": "FlashVSR+ \u00b7 Base \u00b7 Full",
+      "description": "Pinned native Swift/MLX components. Reuses verified installed files; setup and conversion need no Python.",
+      "downloadBytes": 7339260331,
+      "requiredDiskBytes": 7607695787,
+      "sourceURL": "https://huggingface.co/ruchangyao/FlashVSR_plus",
+      "licenseURL": "https://github.com/OpenImagingLab/FlashVSR_Plus/blob/b548a2cc2c929d3d4676f2973abe27876ec4dee7/LICENSE",
+      "licenseNotice": "FlashVSR+ model repository declares Apache-2.0; retain upstream model and component notices. The selected decoder is explicit.",
+      "outputKind": "directory",
+      "engines": [
+        "flashvsr"
+      ],
+      "tasks": [
+        "restore"
+      ],
+      "components": [
+        "transformer",
+        "projection",
+        "fixed_context",
+        "decoder"
+      ]
+    },
+    "kind": "flashvsr-native",
+    "files": [
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "base/dit.safetensors",
+        "size": 5676070392,
+        "sha256": "58d64c1f1b3a559bafb69bb014f3ab2745e800c89435afdc154966eb96bc7459",
+        "target": "base/dit.safetensors"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "base/lq_proj_in.safetensors",
+        "size": 1151384272,
+        "sha256": "a1fe997f19060171db8dd4d58c30debc78ddfcc357b63481798792a38a356d8d",
+        "target": "base/lq_proj_in.safetensors"
+      },
+      {
+        "repo": "OpenImagingLab/FlashVSR_Plus",
+        "revision": "b548a2cc2c929d3d4676f2973abe27876ec4dee7",
+        "filename": "prompt_tensor/posi_prompt.pth",
+        "target": "posi_prompt.pth",
+        "size": 4195504,
+        "sha256": "4601107a11e4e11a936a6b79df579e54dbc99872132bf542151f0ffd65b4b1ef",
+        "provider": "github"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "config.json",
+        "size": 283,
+        "sha256": "13f6ebddb89f61223a06b9e3de1293647dbe74b639ccc45e01bd353a5b6e2577",
+        "target": "config.json"
+      },
+      {
+        "repo": "ruchangyao/FlashVSR_plus",
+        "revision": "46b79520946ac67dec94d1566490690953c7debc",
+        "filename": "Wan2.1_VAE.pth",
+        "size": 507609880,
+        "sha256": "38071ab59bd94681c686fa51d75a1968f64e470262043be31f7a094e442fd981",
+        "target": "Wan2.1_VAE.pth"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-regenerate-encoder-source",
+      "name": "H3 Regenerate \u00b7 original FP32 video encoder source",
+      "description": "Two pinned original VAE shards supplying the complete FP32 encoder. Native Swift preparation extracts118 tensors to the existing ODHWI layout without rounding to FP16. Reuses verified installed source files.",
+      "downloadBytes": 5354545479,
+      "requiredDiskBytes": 6344332487,
+      "sourceURL": "https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K",
+      "licenseURL": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/6818f6c32d12b210915e44ad56a4228c2608f160/LICENSE",
+      "licenseNotice": "Original and derived encoder weights retain the MiniMax H3 Community License.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "tasks": [
+        "restore"
+      ],
+      "components": [
+        "regenerate_encoder_source"
+      ]
+    },
+    "kind": "h3-encoder-source",
+    "files": [
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "base_model/vae/diffusion_pytorch_model-00002-of-00003.safetensors",
+        "target": "diffusion_pytorch_model-00002-of-00003.safetensors",
+        "size": 4955986528,
+        "sha256": "2e05e8bc23fa4071043e17fd242be8acd0685e781a43987432b2eae925be4198"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "base_model/vae/diffusion_pytorch_model-00003-of-00003.safetensors",
+        "target": "diffusion_pytorch_model-00003-of-00003.safetensors",
+        "size": 398539336,
+        "sha256": "c05d6ac4b1a33de372799d708531da6320f6a3ce6d1ce6d895e770988e004a39"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "base_model/vae/config.json",
+        "target": "config.json",
+        "size": 2011,
+        "sha256": "78f67deec3d63aae807f2bfe7154bc1e26f6372cb20b63265fcbae1b62bb5745"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "base_model/LICENSE",
+        "target": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "h3-regenerate-base-source",
+      "name": "H3 Regenerate \u00b7 original Ref2VA INT8 source",
+      "description": "Pinned original Ref2VA INT8/ConvRot base. Swift preparation preserves every quantized payload and rounds six fixed matrices to BF16. Reuses compatible installed prepared bases or source files.",
+      "downloadBytes": 34038912154,
+      "requiredDiskBytes": 68311858376,
+      "sourceURL": "https://huggingface.co/Comfy-Org/MiniMax-H3/tree/e5eb578a89295337b8ff433a035929ce0279e0b6",
+      "licenseURL": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE",
+      "licenseNotice": "Original and derived weights retain the MiniMax H3 Community License. Native setup preserves the released INT8 quantization.",
+      "outputKind": "directory",
+      "engines": [
+        "h3"
+      ],
+      "tasks": [
+        "restore"
+      ],
+      "components": [
+        "regenerate_base_source"
+      ]
+    },
+    "kind": "h3-ref2va-source",
+    "files": [
+      {
+        "repo": "Comfy-Org/MiniMax-H3",
+        "revision": "e5eb578a89295337b8ff433a035929ce0279e0b6",
+        "filename": "diffusion_models/minimax_h3_ref2va_int8_convrot.safetensors",
+        "target": "minimax_h3_ref2va_int8_convrot.safetensors",
+        "size": 34038894550,
+        "sha256": "9eef934046a0671bc8a5daf87100705e1478419c574cfde70c50fbe6885f76a9"
+      },
+      {
+        "repo": "Efficient-Large-Model/Open-H3-Regenerate-2K",
+        "revision": "5809c33730c18b6b1c827b40974855a4288641b3",
+        "filename": "base_model/LICENSE",
+        "target": "LICENSE",
+        "size": 17604,
+        "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44"
+      }
+    ]
   }
 ]

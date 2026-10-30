@@ -5,6 +5,24 @@ import AdapterRuntime
 import InferenceTestSupport
 
 final class MLXLoRAStackTests: XCTestCase {
+  func testKohyaAdapterActuallyAddsToTheOrderedNativeProjection() throws {
+    let dotted="diffusion_model.proj_out",kohya="lora_unet_proj_out"
+    var down=[Float](repeating:0,count:4096),first=[Float](repeating:0,count:128),second=first
+    down[0]=1;first[0]=2;second[0]=4
+    try withTensorFile(tensors:[(dotted+".lora_down.weight",[1,4096],"F32"),(dotted+".lora_up.weight",[128,1],"F32")],
+      payloads:[dotted+".lora_down.weight":down.withUnsafeBytes { Data($0) },dotted+".lora_up.weight":first.withUnsafeBytes { Data($0) }]) { a in
+      try withTensorFile(tensors:[(kohya+".lora_down.weight",[1,4096],"F32"),(kohya+".lora_up.weight",[128,1],"F32"),(kohya+".alpha",[],"F32")],
+        payloads:[kohya+".lora_down.weight":down.withUnsafeBytes { Data($0) },kohya+".lora_up.weight":second.withUnsafeBytes { Data($0) },kohya+".alpha":[Float(1)].withUnsafeBytes { Data($0) }]) { b in
+        let stack=try MLXLoRAStack(adapters:[LoRAAdapter(path:a.path,strength:1),LoRAAdapter(path:b.path,strength:0.5)])
+        let factors=try stack.loadFixed("proj_out.weight")
+        XCTAssertEqual(factors.map(\.scale),[1,0.5])
+        let base=try MLXWeight(dense:.zeros([128,4096]))
+        let result=try base.projected(MLXArray(down,[1,4096]),adapters:factors).asArray(Float.self)
+        XCTAssertEqual(result[0],4,accuracy:1e-6)
+        XCTAssertTrue(result.dropFirst().allSatisfy { $0 == 0 })
+      }
+    }
+  }
   func test23FixedAdapterChangesSwiftProjectionOutputAtQualifiedScale() throws {
     let stem = "diffusion_model.proj_out"
     var down = [Float](repeating: 0, count: 4096), up = [Float](repeating: 0, count: 128)

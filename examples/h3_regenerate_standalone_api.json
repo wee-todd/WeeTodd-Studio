@@ -1,0 +1,20 @@
+{
+  "1": {
+    "class_type": "WeeToddH3Regenerate",
+    "inputs": {
+      "source_path": "",
+      "profile_path": "",
+      "model_library": "",
+      "decoder": "releasedH3",
+      "width": 2560,
+      "height": 1440,
+      "seed": 0,
+      "prompt": "Preserve the source subjects, identities, composition, lighting, camera and motion while refining fine detail and removing compression artifacts.",
+      "swift_cli_path": "",
+      "filename_prefix": "WeeTodd/H3-Regenerate",
+      "swift_worker_path": "",
+      "ffmpeg_path": "",
+      "ffprobe_path": ""
+    }
+  }
+}

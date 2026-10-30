@@ -8,6 +8,30 @@ import CoreFoundation
 /// This host owns sequential execution and finishing; the existing Swift worker owns inference.
 public struct NativeHeadlessJob: Codable {
   public static let format = "weetodd-studio-native-job-v1"
+  public static let processingFormat = "weetodd-studio-native-job-v2"
+  public static let sequenceFormat = "weetodd-studio-native-job-v3"
+  public static let supportedFormats = [format, processingFormat, sequenceFormat]
+  public var hasProcessing: Bool { project.clips.contains { $0.videoProcessing != nil } }
+  /// Restoration and delivery changes never authorize a second generation.
+  public func generationIdentity() throws -> String { try generationIdentity(keepingUnusedWorkers: false) }
+  func legacyGenerationIdentity() throws -> String { try generationIdentity(keepingUnusedWorkers: true) }
+  private func generationIdentity(keepingUnusedWorkers: Bool) throws -> String {
+    var frozen = self; frozen.processingRuntime = nil; frozen.nativeProcessingRuntime = nil; frozen.h3ProcessingRuntime = nil
+    if !keepingUnusedWorkers {
+      let generationEngines = Set(recipes.values.map(\.engine))
+      frozen.workers = frozen.workers.filter { generationEngines.contains($0.key) }
+    }
+    frozen.project.settings.format = .mp4; frozen.project.settings.quality = 20
+    for i in frozen.project.clips.indices {
+      frozen.project.clips[i].videoProcessing = nil
+      if frozen.project.clips[i].settingsOverride != nil {
+        frozen.project.clips[i].settingsOverride!.format = .mp4
+        frozen.project.clips[i].settingsOverride!.quality = 20
+      }
+    }
+    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    return Self.hash(try encoder.encode(frozen))
+  }
   public struct Recipe: Codable {
     public var engine: String
     public var bytes: Data
@@ -37,6 +61,9 @@ public struct NativeHeadlessJob: Codable {
   public var workers: [String: String]
   public var ffmpeg: String
   public var sources: [Source]
+  public var processingRuntime: FlashVSRRuntime?
+  public var nativeProcessingRuntime: NativePixelCQRuntime?
+  public var h3ProcessingRuntime:H3RegenerateRuntime?
   private struct Envelope: Codable { var format: String; var payload: Data; var payloadSHA256: String }
   public static func hash(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -44,14 +71,18 @@ public struct NativeHeadlessJob: Codable {
   public static func fileHash(_ url: URL) throws -> String {
     let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
     var digest = SHA256()
-    while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
-      digest.update(data: chunk)
-    }
+    while try autoreleasepool(invoking:{ () throws -> Bool in
+      try Task.checkCancellation()
+      guard let chunk=try handle.read(upToCount:1024*1024),!chunk.isEmpty else{return false}
+      digest.update(data:chunk);return true
+    }) {}
     return digest.finalize().map { String(format: "%02x", $0) }.joined()
   }
-  public init(project: StudioProject, recipes: [String: Recipe], workers: [String: String], ffmpeg: String) throws {
+  public init(project: StudioProject, recipes: [String: Recipe], workers: [String: String], ffmpeg: String,
+    processingRuntime: FlashVSRRuntime? = nil, nativeProcessingRuntime: NativePixelCQRuntime? = nil, h3ProcessingRuntime:H3RegenerateRuntime? = nil) throws {
     self.project = project; self.recipes = recipes; self.workers = workers; self.ffmpeg = ffmpeg
     sources = []
+    self.processingRuntime = processingRuntime; self.nativeProcessingRuntime = nativeProcessingRuntime; self.h3ProcessingRuntime=h3ProcessingRuntime
     try validate()
     let owners = try sceneOwners()
     var paths = Set(project.clips.filter { recipes[$0.id.uuidString] == nil && owners[$0.id.uuidString] == nil }.map(\.sourcePath))
@@ -192,7 +223,23 @@ public struct NativeHeadlessJob: Codable {
   }
   public func validate() throws {
     try Self.validateFinishing(project)
+    for clip in project.clips { try clip.videoProcessing?.validate() }
+    if project.clips.contains(where: { $0.videoProcessing?.hasFlashVSR == true }), processingRuntime == nil {
+      throw StudioError.invalid("Connect the optional FlashVSR+ runtime before exporting a processing recipe.")
+    }
+    if project.clips.contains(where:{$0.videoProcessing?.hasH3Regenerate==true}),h3ProcessingRuntime==nil {
+      throw StudioError.invalid("Connect the native H3 restoration runtime before exporting this sequence.")
+    }
+    if project.clips.contains(where: { $0.videoProcessing?.hasNative == true }), nativeProcessingRuntime == nil {
+      throw StudioError.invalid("Link the native LTX upscaler components before exporting a Pixel Spatial + CQ recipe.")
+    }
     let owners = try sceneOwners()
+    for clip in project.clips {
+      let members = try project.continuousSceneMembers(for: clip)
+      guard members.allSatisfy({ $0.videoProcessing == clip.videoProcessing }) else {
+        throw StudioError.invalid("A continuous scene requires one shared video-processing recipe.")
+      }
+    }
     let ids = Set(project.clips.map { $0.id.uuidString })
     guard Set(recipes.keys).isSubset(of: ids), ids.count == project.clips.count else {
       throw StudioError.invalid("Native job recipes must target unique existing clips.")
@@ -287,7 +334,8 @@ public struct NativeHeadlessJob: Codable {
     }
     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
     let payload = try encoder.encode(self)
-    let envelope = Envelope(format: Self.format, payload: payload, payloadSHA256: Self.hash(payload))
+    let version = h3ProcessingRuntime != nil || project.clips.contains(where:{$0.videoProcessing?.isSequence==true}) ? Self.sequenceFormat : hasProcessing || processingRuntime != nil || nativeProcessingRuntime != nil ? Self.processingFormat : Self.format
+    let envelope = Envelope(format: version, payload: payload, payloadSHA256: Self.hash(payload))
     try encoder.encode(envelope).write(to: url, options: .withoutOverwriting)
   }
   public static func read(from url: URL, workerOverrides: [String: String] = [:]) throws -> NativeHeadlessJob {
@@ -297,10 +345,13 @@ public struct NativeHeadlessJob: Codable {
       throw StudioError.invalid("Native job must be a regular JSON file under 64 MiB.")
     }
     let decoder = JSONDecoder(), envelope = try decoder.decode(Envelope.self, from: Data(contentsOf: url))
-    guard envelope.format == Self.format, Self.hash(envelope.payload) == envelope.payloadSHA256 else {
+    guard Self.supportedFormats.contains(envelope.format), Self.hash(envelope.payload) == envelope.payloadSHA256 else {
       throw StudioError.invalid("Native job manifest changed. Re-export the current edit.")
     }
     var job = try decoder.decode(Self.self, from: envelope.payload)
+    guard (envelope.format == Self.sequenceFormat) || (envelope.format == Self.processingFormat && job.h3ProcessingRuntime==nil && !job.project.clips.contains(where:{$0.videoProcessing?.isSequence==true})) || (!job.hasProcessing && job.processingRuntime == nil && job.nativeProcessingRuntime == nil && job.h3ProcessingRuntime==nil) else {
+      throw StudioError.invalid("Processing recipes require a version 2 native job.")
+    }
     let selectedEngines = Set(job.recipes.values.map(\.engine))
     guard Set(workerOverrides.keys).isSubset(of: selectedEngines) else {
       throw StudioError.invalid("A worker override must select an engine rendered by this native job.")
@@ -315,8 +366,16 @@ public final class NativeHeadlessCancellation: @unchecked Sendable {
   private let lock = NSLock()
   private var cancelled = false
   private var process: Process?
+  private var cancellationAction: (() -> Void)?
   public init() {}
-  public func cancel() { lock.lock(); cancelled = true; let child = process; lock.unlock(); if child?.isRunning == true { child?.interrupt() } }
+  public func cancel() {
+    lock.lock(); cancelled = true; let child = process; let action = cancellationAction; lock.unlock()
+    if child?.isRunning == true { child?.interrupt() }; action?()
+  }
+  func onCancellation(_ action: (() -> Void)?) throws {
+    lock.lock(); cancellationAction = action; let stopped = cancelled; lock.unlock()
+    if stopped { action?(); throw CancellationError() }
+  }
   func attach(_ child: Process?) throws {
     lock.lock(); process = child; let stopped = cancelled; lock.unlock()
     if stopped { if child?.isRunning == true { child?.interrupt() }; throw CancellationError() }
@@ -326,6 +385,9 @@ public final class NativeHeadlessCancellation: @unchecked Sendable {
 
 public enum NativeHeadlessExecutor {
   public typealias Worker = (String, URL, URL, String) throws -> [String: Any]
+  public typealias NativeProcessingPreflight = (VideoProcessingRecipe, NativePixelCQRuntime) async throws -> NativeVideoProcessingPlan
+  public typealias SequenceProcessingPreflight = (VideoProcessingRecipe,FlashVSRRuntime?,NativePixelCQRuntime?,H3RegenerateRuntime?) async throws -> NativeVideoProcessingPlan
+  public typealias ProcessingPreflight = (VideoProcessingRecipe, FlashVSRRuntime) async throws -> NativeVideoProcessingPlan
   private struct State: Codable {
     var jobSHA256: String
     var workerSHA256: [String: String]
@@ -334,6 +396,10 @@ public enum NativeHeadlessExecutor {
     var project: StudioProject
     var movieSHA256: String?
     var rippleArtifactSHA256: [String: String]?
+    var generationSHA256: String?
+    var movieInputFingerprint: String?
+    var moviePath: String?
+    var finishedMovies: [String: String]?
   }
   /// CLI event protocol matches the ordinary Studio/Comfy worker handoff.
   public static func worker(_ executable: String, recipe: URL, output: URL, mode: String,
@@ -411,7 +477,10 @@ public enum NativeHeadlessExecutor {
   public static func run(job: NativeHeadlessJob, output: URL, resume: Bool = false,
     preflightOnly: Bool = false, cancellation: NativeHeadlessCancellation = NativeHeadlessCancellation(),
     emit: @escaping (Data) -> Void = { FileHandle.standardOutput.write($0) },
-    worker customWorker: Worker? = nil) async throws -> [String: Any] {
+    worker customWorker: Worker? = nil, processingPreflight: ProcessingPreflight? = nil,
+    processingBackend: (any FlashVSRBackend)? = nil,
+    nativeProcessingPreflight: NativeProcessingPreflight? = nil, nativeProcessingWorker: NativePixelCQService.Worker? = nil,
+    sequenceProcessingPreflight:SequenceProcessingPreflight? = nil, sequenceProcessingWorker:VideoProcessingSequenceExecutor.Worker? = nil) async throws -> [String: Any] {
     try job.validate(); try job.verifySources(); try cancellation.check()
     try await preflightFinishing(project: job.project, ffmpeg: job.ffmpeg, cancellation: cancellation)
     try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
@@ -425,14 +494,17 @@ public enum NativeHeadlessExecutor {
     let identity = NativeHeadlessJob.hash(try encoder.encode(job))
     var hashes: [String: String] = [:]
     for engine in Set(job.recipes.values.map(\.engine)) { hashes[engine] = try NativeHeadlessJob.fileHash(URL(fileURLWithPath: job.workers[engine]!)) }
-    var state = State(jobSHA256: identity, workerSHA256: hashes, project: job.project)
+    let generationIdentity = try job.generationIdentity(), legacyGenerationIdentity = try job.legacyGenerationIdentity()
+    var state = State(jobSHA256: identity, workerSHA256: hashes, project: job.project,
+      generationSHA256: job.hasProcessing ? generationIdentity : nil)
     let stateURL = output.appendingPathComponent("job-state.json")
     if FileManager.default.fileExists(atPath: stateURL.path) {
       guard resume else { throw StudioError.invalid("This output already contains a job. Use --resume or a new directory.") }
       state = try JSONDecoder().decode(State.self, from: Data(contentsOf: stateURL))
-      guard state.jobSHA256 == identity, state.workerSHA256 == hashes else {
+      guard (state.generationSHA256.map { $0 == generationIdentity || $0 == legacyGenerationIdentity } ?? (state.jobSHA256 == identity)), state.workerSHA256 == hashes else {
         throw StudioError.invalid("The native job or Swift worker changed. Use the original runtime or re-export.")
       }
+      if state.generationSHA256 != nil { state.generationSHA256 = generationIdentity }
       for (id, path) in state.completed {
         guard state.mediaSHA256[id] == (try? NativeHeadlessJob.fileHash(URL(fileURLWithPath: path))) else {
           throw StudioError.invalid("A completed native take changed. Preserve it and use a new output directory.")
@@ -458,6 +530,60 @@ public enum NativeHeadlessExecutor {
         throw StudioError.invalid("An accepted Ripple receipt or replay artifact changed. Use a new exported job.")
       }
     }
+    if state.generationSHA256 != nil {
+      state.project.settings = job.project.settings
+      for i in state.project.clips.indices {
+        state.project.clips[i].videoProcessing = job.project.clips[i].videoProcessing
+        state.project.clips[i].settingsOverride = job.project.clips[i].settingsOverride
+      }
+    }
+    // Admit every downstream model before either generation worker can acquire the GPU.
+    var processingPlans: [UUID: NativeVideoProcessingPlan] = [:]
+    for clip in job.project.clips {
+      guard let recipe = clip.videoProcessing else { continue }
+      try cancellation.check()
+      if recipe.isSequence {
+        let admitted:NativeVideoProcessingPlan
+        if let sequenceProcessingPreflight {admitted=try await sequenceProcessingPreflight(recipe,job.processingRuntime,job.nativeProcessingRuntime,job.h3ProcessingRuntime)}
+        else {admitted=try await NativeVideoProcessingPlan.preflight(recipe:recipe,runtime:job.processingRuntime,nativeRuntime:job.nativeProcessingRuntime,h3Runtime:job.h3ProcessingRuntime,cancellation:cancellation)}
+        guard admitted.recipe==recipe,(!recipe.hasFlashVSR || admitted.runtime==job.processingRuntime),
+          (!recipe.hasH3Regenerate || admitted.h3Runtime==job.h3ProcessingRuntime),
+          Set(admitted.resources.keys)==Set(recipe.steps.filter(\.isFlashVSR).map(\.id)),
+          Set(admitted.h3Resources?.keys.map{$0} ?? [])==Set(recipe.steps.filter(\.isH3Regenerate).map(\.id)),
+          Set(admitted.pixelResources?.keys.map{$0} ?? [])==Set(recipe.steps.filter(\.isNative).map(\.id)) else {
+          throw StudioError.invalid("Sequence admission differs from its frozen per-stage resources.")
+        }
+        processingPlans[clip.id]=admitted;continue
+      }
+      var nativeResources: NativePixelCQResources?
+      if let prefix = recipe.nativePrefix {
+        guard let runtime = job.nativeProcessingRuntime else { throw StudioError.invalid("Native processing runtime is missing.") }
+        let admitted: NativeVideoProcessingPlan
+        if let nativeProcessingPreflight { admitted = try await nativeProcessingPreflight(prefix, runtime) }
+        else { admitted = try await NativeVideoProcessingPlan.preflight(recipe: prefix, nativeRuntime: runtime, cancellation: cancellation) }
+        guard admitted.recipe == prefix, admitted.native?.runtime == runtime else {
+          throw StudioError.invalid("The native processing admission does not match the frozen recipe/runtime.")
+        }
+        nativeResources = admitted.native
+      }
+      try cancellation.check(); try Task.checkCancellation()
+      let plan: NativeVideoProcessingPlan
+      if let suffix = recipe.flashSuffix {
+        guard let runtime = job.processingRuntime else { throw StudioError.invalid("FlashVSR runtime is missing.") }
+        let admitted: NativeVideoProcessingPlan
+        if let processingPreflight { admitted = try await processingPreflight(suffix, runtime) }
+        else { admitted = try await NativeVideoProcessingPlan.preflight(recipe: suffix, runtime: runtime) }
+        guard admitted.recipe == suffix, admitted.runtime == runtime,
+          Set(admitted.resources.keys) == Set(suffix.steps.map(\.id)) else {
+          throw StudioError.invalid("The processing admission does not match the frozen recipe/runtime.")
+        }
+        plan = .init(recipe: recipe, runtime: runtime, resources: admitted.resources, native: nativeResources)
+      } else {
+        guard let nativeResources else { throw StudioError.invalid("Native processing resources are missing.") }
+        plan = .init(recipe: recipe, native: nativeResources)
+      }
+      processingPlans[clip.id] = plan
+    }
     let resumedGenerations = state.completed.count
     var newlyGenerated = 0
     let call: Worker = customWorker ?? { executable, recipe, destination, mode in
@@ -480,7 +606,14 @@ public enum NativeHeadlessExecutor {
         let target = try NativeHeadlessRipple.target(recipe) ?? output.appendingPathComponent("preflight-\(clip.id)")
         guard !FileManager.default.fileExists(atPath: target.path) else { throw StudioError.invalid("The frozen native take output already exists. Resume its completed job or export a new job.") }
         _ = try call(job.workers[recipe.engine]!, recipeURL(clip, recipe), target, "preflight")
-      } else { try await inspect(clip: state.project.clips.first { $0.id == clip.id }!) }
+      } else {
+        var accepted = state.project.clips.first { $0.id == clip.id }!
+        if let path = state.completed[owners[clip.id.uuidString] ?? clip.id.uuidString] { accepted.sourcePath = path }
+        else if processingPlans[clip.id] != nil, let lineage = clip.versions.last(where: { $0.path == clip.sourcePath })?.processingLineage {
+          accepted.sourcePath = lineage.source.path
+        }
+        try await inspect(clip: accepted)
+      }
     }
     if preflightOnly { return ["status": "success", "native_runtime": "swift-mlx", "python_inference": false, "generations": job.recipes.count, "newlyGenerated": 0, "resumedGenerations": resumedGenerations,
       "clips": job.project.clips.count] }
@@ -582,21 +715,60 @@ public enum NativeHeadlessExecutor {
       newlyGenerated += 1
     }
     try job.verifySources(); try cancellation.check()
+    var processingReceipts: [String: VideoProcessingReceipt] = [:], reusedProcessingSteps = 0
+    for clip in job.project.clips {
+      try cancellation.check()
+      let id = clip.id.uuidString
+      let originalPath = state.completed[owners[id] ?? id] ?? clip.sourcePath
+      guard let plan = processingPlans[clip.id] else {
+        if state.generationSHA256 != nil, let index = state.project.clips.firstIndex(where: { $0.id == clip.id }) {
+          state.project.clips[index].sourcePath = originalPath
+        }
+        continue
+      }
+      let sourceVersion = clip.versions.last { $0.path == originalPath }
+      let source: FlashVSRFile
+      if let saved = sourceVersion?.processingLineage?.source { source = saved }
+      else { source = try await Task.detached { try FlashVSRFile.capture(URL(fileURLWithPath: originalPath)) }.value }
+      let acceptance=try VideoProcessingAcceptanceToken(project:state.project,clipID:clip.id)
+      let result = try await NativeVideoProcessingExecutor.run(plan: plan, source: source,
+        directory: output.appendingPathComponent("processing"), backend: processingBackend, nativeWorker: nativeProcessingWorker, sequenceWorker:sequenceProcessingWorker,cancellation: cancellation)
+      try cancellation.check(); try job.verifySources()
+      try VideoProcessingAcceptance.apply(result, to: clip.id, project: &state.project,expected:acceptance)
+      processingReceipts[result.receipt.video.path] = result.receipt
+      reusedProcessingSteps += result.reusedSteps
+      try encoder.encode(state).write(to: stateURL, options: .atomic)
+    }
     let suffix = job.project.settings.format == .mp4 ? "mp4" : "mov"
-    let movie = output.appendingPathComponent("movie.\(suffix)")
+    var finalIdentity = state.project
+    // Version creation dates and history are not movie inputs.
+    for i in finalIdentity.clips.indices { finalIdentity.clips[i].versions = [] }
+    finalIdentity.assets = []
+    let movieKey = NativeHeadlessJob.hash(try encoder.encode(finalIdentity))
+    let movie = output.appendingPathComponent(state.generationSHA256 == nil ? "movie.\(suffix)" : "movie-\(movieKey).\(suffix)")
+    if state.generationSHA256 != nil {
+      if state.finishedMovies == nil { state.finishedMovies = [:] }
+      if let oldKey = state.movieInputFingerprint, let oldHash = state.movieSHA256 {
+        state.finishedMovies![oldKey] = oldHash
+      }
+      state.movieSHA256 = state.finishedMovies?[movieKey]
+    }
     if let expected = state.movieSHA256 {
       guard expected == (try? NativeHeadlessJob.fileHash(movie)) else { throw StudioError.invalid("The finished native movie changed.") }
     } else {
       guard !FileManager.default.fileExists(atPath: movie.path) else { throw StudioError.invalid("An unverified finished movie already exists.") }
-      try await finish(project: state.project, ffmpeg: job.ffmpeg, movie: movie, cancellation: cancellation)
+      try await finish(project: state.project, ffmpeg: job.ffmpeg, movie: movie, cancellation: cancellation,
+        processingReceipts: processingReceipts)
       state.movieSHA256 = try NativeHeadlessJob.fileHash(movie)
-      try encoder.encode(state).write(to: stateURL, options: .atomic)
     }
+    if state.generationSHA256 != nil { state.finishedMovies![movieKey] = state.movieSHA256 }
+    state.movieInputFingerprint = movieKey; state.moviePath = movie.path
+    try encoder.encode(state).write(to: stateURL, options: .atomic)
     try ProjectStorage.write(state.project, to: output.appendingPathComponent("result.weetodd"))
     let result: [String: Any] = ["status": "success", "native_runtime": "swift-mlx", "python_inference": false,
       "video": movie.path, "project": output.appendingPathComponent("result.weetodd").path,
       "generations": job.recipes.count, "newlyGenerated": newlyGenerated,
-      "resumedGenerations": resumedGenerations, "clips": job.project.clips.count]
+      "resumedGenerations": resumedGenerations, "reusedProcessingSteps": reusedProcessingSteps, "clips": job.project.clips.count]
     try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]).write(to: output.appendingPathComponent("result.json"), options: .atomic)
     return result
   }
@@ -683,22 +855,28 @@ public enum NativeHeadlessExecutor {
       "fps": clock.fps, "width": clock.width, "height": clock.height]
   }
   private static func finish(project: StudioProject, ffmpeg: String, movie: URL,
-    cancellation: NativeHeadlessCancellation) async throws {
+    cancellation: NativeHeadlessCancellation, processingReceipts: [String: VideoProcessingReceipt] = [:]) async throws {
     var arguments = ["-v", "error", "-nostdin"], filters: [String] = [], labels = ""
     let settings = project.settings
+    var nextInput = 0
     for (index, clip) in project.clips.enumerated() {
       try await inspect(clip: clip)
-      arguments += ["-i", clip.sourcePath]
+      let videoInput = nextInput; var audioInput = nextInput; nextInput += 1
+      if let receipt = processingReceipts[clip.sourcePath] {
+        try receipt.restored.verify(); try receipt.audio?.verify()
+        arguments += ["-r", receipt.fps.argument, "-i", receipt.restored.path]
+        if let audio = receipt.audio { audioInput = nextInput; nextInput += 1; arguments += ["-i", audio.path] }
+      } else { arguments += ["-i", clip.sourcePath] }
       let start = String(format: "%.12f", clip.sourceIn), duration = String(format: "%.12f", clip.duration)
       let scale = settings.fit == "fill"
         ? "scale=\(settings.width):\(settings.height):force_original_aspect_ratio=increase,crop=\(settings.width):\(settings.height)"
         : "scale=\(settings.width):\(settings.height):force_original_aspect_ratio=decrease,pad=\(settings.width):\(settings.height):(ow-iw)/2:(oh-ih)/2"
-      filters.append("[\(index):v:0]trim=start=\(start):duration=\(duration),setpts=PTS-STARTPTS,\(scale),setsar=1,fps=\(settings.fps),format=yuv420p[v\(index)]")
+      filters.append("[\(videoInput):v:0]trim=start=\(start):duration=\(duration),setpts=PTS-STARTPTS,\(scale),setsar=1,fps=\(settings.fps),format=yuv420p[v\(index)]")
       let audio = try await AVURLAsset(url: URL(fileURLWithPath: clip.sourcePath)).loadTracks(withMediaType: .audio)
       if audio.isEmpty {
         filters.append("anullsrc=r=48000:cl=stereo,atrim=duration=\(duration)[a\(index)]")
       } else {
-        filters.append("[\(index):a:0]atrim=start=\(start):duration=\(duration),asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,volume=\(clip.volume),apad,atrim=duration=\(duration)[a\(index)]")
+        filters.append("[\(audioInput):a:0]atrim=start=\(start):duration=\(duration),asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,volume=\(clip.volume),apad,atrim=duration=\(duration)[a\(index)]")
       }
       labels += "[v\(index)][a\(index)]"
     }

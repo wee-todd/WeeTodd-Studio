@@ -1,5 +1,60 @@
 # WeeTodd Studio implementation status
 
+## October 29 native restoration and exact attention optimization
+
+Studio's Upscale Video tool now exposes H3 Regenerate and FlashVSR+ through native Swift/MLX
+helpers. Model acquisition, the supported original-checkpoint/archive conversions and inference
+do not require a Python environment. Setup reuses verified shared-library components. The
+maintained ComfyUI nodes translate their controls into the same native CLI requests.
+See the [H3](studio/H3_REGENERATE_SETTINGS.md) and [FlashVSR+](studio/FLASHVSR_SETTINGS.md) guides
+for source clocks, model setup, controls and current limits.
+
+H3 uses the released Ref2VA/Refiner/Turbo/Sharp three-step profile, learned latent upscaling,
+24 FPS source timing, original source audio and an explicit released/Fast decoder choice.
+**Complete five-second 2K restoration remains unqualified; the production gate above 64,000
+packed rows remains closed.** An interrupted long trial is not a completed result. Full-size
+component/block tests and synthetic decoding do not establish full-clip quality or throughput.
+
+On Apple M3 Ultra / 256 GiB, a matched installed-weight block trial at 133,718 packed rows
+improved from 49.751860 to 31.112642 seconds, 37.46% less time. The complete BF16 output was
+byte-identical. Peak MLX allocation rose from 11.865 to 14.664 GB decimal. The qualified route
+batches 56 heads and up to 8,192 queries in forced fused Metal attention, retaining the original
+256-row output projections. Other devices/geometries retain conservative execution. The worker
+records the resolved plan. Larger output-projection batches were rejected from this exact path
+because they changed rounding. These are single-block measurements, not video speedup figures.
+Sparse Sol regeneration remains separate experimental research.
+
+A completed short H3 trial produced 22 frames at 24 FPS in 2560×1440: learned upscaling took
+3.97 s, refinement 501.55 s, released decoding 85.77 s and the complete job 647.95 s. Fast H3
+decoded those same saved refined latents in 34.21 s while another sampler used the GPU; the
+observed 2.51× is decoder-only concurrent timing. Pose/framing/detail differed; equal visual
+quality is not established. Low-resolution generative refinement changed identity in a separate
+trial. Originals remain available for comparison.
+
+Native Flash qualification covered all 12 Turbo/Base × Tiny/Wan × compression 4/2/1 combinations,
+17 frames across multiple groups, and 24 FPS / 30000/1001 FPS source clocks. Signed native service trials
+at 512×288 preserved exact original stereo PCM and returned weighted residency to zero between
+stages. They establish those functional trials, not arbitrary 4K quality or throughput.
+
+Version 2 sequences support one through eight typed H3/Flash/Pixel stages with verified lossless
+RGB handoff, independent completed-prefix caches and one final source-PCM delivery encode.
+Known incompatible downstream geometry rejects before an expensive prefix. Changed source,
+model or worker identities invalidate affected caches; late results cannot overwrite a changed
+project/clip revision. Older jobs and recipes remain readable.
+
+Core, Studio and workflows validation passed: 3,596 development tests passed with 18 optional
+skips. The Swift inference/MLX/Studio/Drama 3 suites executed 245/1,261/1,317/25 tests with
+11/207/59/3 optional skips and zero failures. The installed-weight block and opt-in attention
+proofs above were run separately. Final packaging and app qualification are recorded separately;
+this entry does not claim a completed long 2K render.
+
+The optimized isolated Release app built successfully and passed deep/strict signature verification.
+Its bundled CLI and Flash worker completed a fresh 17-frame, 512×288, 24 FPS native job in
+38.91 s with the executable search path unavailable and Python environment variables removed.
+Decoded original stereo PCM matched byte-for-byte; projection, transformer and decoder residency
+returned to zero. This verifies that packaged native path without Python. Final interactive checks
+of the updated bundle remain pending while the Mac is locked.
+
 ## October 26 experimental native FastH3 Omni
 
 Studio and the shared Swift/MLX worker now expose the pinned FastH3 Omni Ref2VA profile,
@@ -3096,7 +3151,7 @@ and verified publication inside ComfyUI’s output folder.
 The shared Python/MLX backend runs through ComfyUI or `scripts/render_headless.py`.
 The headless process blocks ComfyUI and node-catalog imports. It accepts versioned JSON
 recipes and records resolved assets, effective conditioning, results, and runtime unloading.
-The catalog contains 129 nodes and 46 UI workflows. Static validation establishes portable
+The catalog contains 131 nodes and 48 UI workflows. Static validation establishes portable
 contracts; it does not establish that every workflow has local models and selected input media.
 
 | Engine | Implemented | Qualification limits |
@@ -3280,3 +3335,54 @@ Earlier checkpoint evidence (retain each figure's original scope):
 
 Local research and detailed historical reports remain outside version control by project policy.
 Historical reports retain their measured scope; this file is the portable current-status entry.
+
+## October 27 standalone FlashVSR+ Turbo integration
+
+The standalone upscaler adds backend-neutral Swift requests, exact movie-clock validation, pinned official Turbo components, Tiny/Full selection, optional vpipe execution, source-audio preservation, reusable receipts, presets and Studio comparison controls. The optional engine has its own supervisor and shares the native inference lease; native Swift/MLX execution remains unavailable. A thin ComfyUI adapter delegates to the same CLI.
+
+Synthetic functional qualification covers both decoders at 1, 16, 17, 24, 25, 49, 120, 121 and 124 visible frames, 24 and 30000/1001 FPS, exact 720p delivery, compression 1/2/4, stream/clips continuity, selected frame intervals and delayed source audio. Model-free regressions cover cancellation, parent death, inference-lease release, component shadow files, symlink changes and stale project/source state. These runs do not qualify broad visual quality, long-video resources, 4K performance or every hardware configuration. More detailed qualification remains local, and the [settings reference](studio/FLASHVSR_SETTINGS.md) states the active constraints.
+
+
+## October 27 FlashVSR+ H3/LTX processing recipes
+
+Portable clip processing recipes default to Turbo/Tiny with Full available and mandatory source audio. Studio accepts originals before restoration, preserves editorial ranges and prior versions, and provides upscale-only retry. Native H3/LTX 2.5 job v2 separates generation identity from processing and delivery settings, preserves the v1 reader, and reuses verified lossless restoration/PCM during final finishing. Interactive LTX 2.3 and Draw Things videos share the processor; pending steps are explicitly rejected by the legacy headless exporter. Optional vpipe remains behind the Swift backend contract; native FlashVSR MLX execution is not implemented.
+
+
+Recipe qualification restores 17-frame existing H3 (24 FPS, stereo 32 kHz) and LTX (25 FPS, stereo 48 kHz) takes through both decoders, then reopens and resumes the verified cache. Model-free tests cover generation count one across failure/cancellation/decoder changes, corrupt-output repair, downstream admission before generation, changed source/components, codec-only reuse, document/source/recipe staleness and shared scene ranges. Saved ComfyUI generation-plus-processing execution was not run for this Studio milestone; portable node contracts remain separately validated.
+
+
+Final review hardened mixed jobs to preserve no-processing clip selections, decoder/codec return to prior verified delivery, admission-time document/source checks, and runtime-only v2 envelope roundtrip. Repeated FlashVSR stages reject explicitly until lossless interstage AV transport exists. Collected result reopening retains the valid local asset when historical comparison paths are unavailable. Direct interactive Ripple apply and the ordinary editor exporter remain separate flows; native headless lossless finishing does not imply universal exporter parity.
+
+## October 28 native Pixel Spatial and CQ recipe integration
+
+H3 and LTX clip processing now has a native Swift/MLX Pixel Spatial x2 plus CQ V2 option.
+Newly enabled processing defaults to Pixel strength 1.0, CQ strength 0.5 and refinement 0.75.
+Both adapter strengths are editable independently. Existing FlashVSR recipes remain compatible.
+The pass preserves the original frame rate/count and copies source audio packets unchanged.
+Original-take lineage, upscale-only retry and independent native generation checkpoints apply to both engines.
+The shared native movie worker owns inference; Studio adds no sampler or Python model runtime.
+See the [native settings reference](studio/NATIVE_PIXEL_CQ_SETTINGS.md) for limits and qualification scope.
+
+Packaged qualification processed a real one-second H3 excerpt into 24 frames at 1344 × 768 and 24 fps, with identical source audio packets.
+CLI resume and app retry reused the completed upscale without source generation. Both H3 and LTX inspectors save independent strengths.
+Core, Studio and workflow profiles passed with 3,558 Python tests passed; final Swift suites ran 210 inference, 1,067 MLX and 1,188 Studio tests, all with zero failures.
+The final signed release app passes its UI history check. A new weighted LTX-source render remains outside this bounded qualification.
+
+## October 28 native-to-Flash processing chain
+
+New H3 and LTX processing recipes default to native Pixel Spatial 1.0 + CQ V2 0.5 (refinement 0.75), followed by FlashVSR+ Turbo/Tiny at 1920 × 1088. Full remains available. Existing single-stage recipes retain their settings. Both stages are admitted before generation; each has independent verified cache identity. Appending Flash preserves the exact saved native prefix. Changing Flash settings or retrying failure reuses a matching native intermediate without regenerating the source.
+
+Final chain delivery copies original audio packets and verifies both encoded and decoded audio hashes. Native and Flash receipts remain immutable; the final delivery has its own receipt and original-source lineage. Current interstage video uses the native worker's encoded movie. Lossless native-to-Flash video transport and native FlashVSR inference remain future work.
+
+Core, Studio and workflow profiles passed with 3,558 Python tests passed, seven skipped; 210 inference, 1,071 MLX and 1,197 Studio tests executed with zero failures. After fixing an exact-range rounding defect in non-chunked movie admission, the final complete MLX suite ran 1,073 tests, 182 skipped, zero failures. New regressions preserve 1/24/120-frame intervals without unwanted partitioning and retain padded audio/video bounds. Chain tests cover H3/LTX failure, cancellation, decoder changes, delivery repair, 25 FPS and 30000/1001 FPS.
+
+A packaged real-source check reused the prior native one-second H3 intermediate, completed Turbo/Tiny at 1920 × 1088/24 FPS, and generated zero sources. The full CLI check took 65.01 seconds; repeat resume reused both stages in 10.35 seconds. Final audio packet and decoded PCM hashes match the original; all 24 frames pass native decoding. This is cached-native chain qualification, not a new LTX-source render or a measured complete fresh-chain latency. Release packaging and signing passed; the subsequent visual check passed for both H3 and LTX, including Tiny/Full, independent strengths, and save/reopen.
+
+The native worker additionally supports explicit same-size `enhance` requests: direct source latent initialization, a frozen full-source guide at spatial factor 1, no learned upscaler and no Pixel Spatial adapter. The CQ-only qualification requests denoise 0.5, CQ V2 amount 1.0 and no extra endpoint anchor, preserving 1920 × 1088/24 FPS. Full five-second guide geometry exceeds the existing 32 GiB activation ceiling; explicit two-window processing admits two 60-frame intervals. The native five-second CQ-only pass completed in 21m52s, retaining 120 frames at 1920 × 1088/24 FPS and identical original audio packets/PCM. All frames decode completely. Sampled facial and join review is coherent; human playback approval remains separate. Source encoding took 5m36s and six refinement evaluations took 15m38s. The one-second quality test took 3m26s. The extra CQ pass remains separate from the default recipe.
+
+
+## October 28 same-size Pixel Spatial plus CQ experiment
+
+An explicit native `enhance_pixel_spatial` worker mode applies typed Pixel Spatial and CQ at source size without learned upscaler execution or input resizing. Pixel remains a factor-two checkpoint; the mode deliberately uses a factor-one clean guide and records experimental conditioning. Ordinary IC-adapter checks and checkpoint metadata remain unchanged. This mode does not change Studio's default recipe.
+
+The existing FlashVSR five-second source completed at 1920 × 1088, 120 frames and 24 FPS with both adapters at 1.0 and denoise 0.5. A matched one-second test took 3m31s; full worker time was 21m57s, compared with the earlier CQ-only 21m52s. Full timing includes two 60-frame windows and six evaluations. Original audio packets and decoded PCM match; complete native decoding passes. Sampled face and join review is coherent; human playback approval remains separate. The complete native suite ran 1,079 tests with 182 skips and zero failures, and independent reviews found no actionable issue.

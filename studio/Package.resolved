@@ -1,6 +1,14 @@
 {
-  "originHash" : "d5769971eb02bf3b432aa7c079a8aec4cdd2ac737551d4292210f80c7d8b65cf",
+  "originHash" : "e4a13ccaba54f86caafb38f02554d55812078cbe2dd8e1a98d1708ac7789d264",
   "pins" : [
+    {
+      "identity" : "ccv",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/liuliu/ccv.git",
+      "state" : {
+        "revision" : "bf5459732be3b552bb470e4004dac53abc01ea11"
+      }
+    },
     {
       "identity" : "eventsource",
       "kind" : "remoteSourceControl",
@@ -37,6 +45,14 @@
       }
     },
     {
+      "identity" : "s4nnc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/liuliu/s4nnc.git",
+      "state" : {
+        "revision" : "c99e45ad0d16c902c6c477e4dc9f1a7e49386dcd"
+      }
+    },
+    {
       "identity" : "swift-asn1",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-asn1.git",
@@ -61,6 +77,14 @@
       "state" : {
         "revision" : "da9d28d69ebe3894b18376c8f2395c2f37b8448f",
         "version" : "4.5.2"
+      }
+    },
+    {
+      "identity" : "swift-fpzip-support",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/weiyanlin117/swift-fpzip-support.git",
+      "state" : {
+        "revision" : "0ec6d4668c9c83bc3da0f8b2d6dfc46da0b98609"
       }
     },
     {
@@ -91,12 +115,28 @@
       }
     },
     {
+      "identity" : "swift-protobuf",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-protobuf.git",
+      "state" : {
+        "revision" : "d57a5aecf24a25b32ec4a74be2f5d0a995a47c4b"
+      }
+    },
+    {
       "identity" : "swift-syntax",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-syntax.git",
       "state" : {
         "revision" : "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
         "version" : "603.0.2"
+      }
+    },
+    {
+      "identity" : "swift-system",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-system.git",
+      "state" : {
+        "revision" : "fbd61a676d79cbde05cd4fda3cc46e94d6b8f0eb"
       }
     },
     {

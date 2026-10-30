@@ -2,6 +2,32 @@ import Foundation
 import StudioCore
 
 @MainActor extension StudioStore {
+  func pixelRuntimeForExport(_ plan: NativeVideoProcessingPlan, previous: NativePixelCQRuntime?) throws -> NativePixelCQRuntime {
+    let steps = plan.recipe.steps.filter(\.isNative)
+    let candidates: [NativePixelCQRuntime]
+    if plan.recipe.isSequence {
+      candidates = steps.compactMap { plan.pixelResources?[$0.id]?.runtime }
+    } else { candidates = plan.native.map { [$0.runtime] } ?? [] }
+    guard !steps.isEmpty, candidates.count == steps.count, let first = candidates.first else {
+      throw StudioError.invalid("Every native Pixel stage must have admitted components before job export.")
+    }
+    let shared = previous ?? first
+    guard candidates.allSatisfy({ $0.workerPath == shared.workerPath && $0.ffmpegPath == shared.ffmpegPath && $0.ffprobePath == shared.ffprobePath }),
+      plan.recipe.isSequence || previous == nil || previous == first else {
+      throw StudioError.invalid("Use the same native LTX worker and media tools throughout the exported job. Legacy recipes also require one shared component selection.")
+    }
+    if plan.recipe.isSequence {
+      for (step, actual) in zip(steps, candidates) {
+        guard let settings = step.pixelCQ, settings.profileID == "auto" else { continue }
+        var expected = try NativeVideoProcessingPlan.pixelRuntime(shared, settings: settings), selected = actual
+        if settings.cqStrength == 0 { expected.cqAdapterPath = nil; selected.cqAdapterPath = nil }
+        guard expected == selected else {
+          throw StudioError.invalid("Automatic Pixel stages resolved different models or adapters. Choose explicit native profiles/adapters when mixing model selections in one exported job.")
+        }
+      }
+    }
+    return shared
+  }
   var nativeHeadlessEligible: Bool {
     !project.clips.isEmpty && project.clips.allSatisfy { clip in
       clip.engine == .movie || clip.engine == .h3 && runtime.usesNativeH3
@@ -44,6 +70,21 @@ import StudioCore
     if let worker = settings.h3WorkerPath { workerPaths["h3"] = worker }
     if let worker = settings.ltx25WorkerPath { workerPaths["ltx25"] = worker }
     try NativeHeadlessJob.validateFinishing(frozenProject)
+    var processingRuntime: FlashVSRRuntime?
+    var nativeProcessingRuntime: NativePixelCQRuntime?
+    var h3ProcessingRuntime: H3RegenerateRuntime?
+    if frozenProject.clips.contains(where: { $0.videoProcessing != nil }) {
+      for clip in frozenProject.clips {
+        guard let recipe = clip.videoProcessing else { continue }
+        let plan = try await preflightClipVideoProcessing(clip)
+        if recipe.hasNative {
+          guard let plan else { throw StudioError.invalid("Native processing was not admitted before job export.") }
+          nativeProcessingRuntime = try pixelRuntimeForExport(plan, previous: nativeProcessingRuntime)
+        }
+        if recipe.hasFlashVSR { loadVideoUpscalePreferences(); processingRuntime = videoUpscaleRuntime }
+        if recipe.hasH3Regenerate { loadVideoUpscalePreferences(); h3ProcessingRuntime = h3RegenerateRuntime }
+      }
+    }
     let inputs = url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + ".inputs-" + UUID().uuidString)
     var published = false
     defer { if !published { try? FileManager.default.removeItem(at: inputs) } }
@@ -77,7 +118,7 @@ import StudioCore
       throw StudioError.invalid("The movie changed during job export. Export the current edit again.")
     }
     let job = try await Task.detached(priority: .userInitiated) {
-      try NativeHeadlessJob(project: frozenProject, recipes: recipes, workers: workerPaths, ffmpeg: settings.ffmpegPath)
+      try NativeHeadlessJob(project: frozenProject, recipes: recipes, workers: workerPaths, ffmpeg: settings.ffmpegPath, processingRuntime: processingRuntime, nativeProcessingRuntime: nativeProcessingRuntime, h3ProcessingRuntime: h3ProcessingRuntime)
     }.value
     guard project == snapshot, documentSessionID == session,
       try productionExecutionFingerprint() == execution else {

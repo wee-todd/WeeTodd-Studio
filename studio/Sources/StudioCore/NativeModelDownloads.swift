@@ -44,7 +44,8 @@ public enum NativeModelDownloads {
     let bytes = try bounded(url, limit: 8 * 1024 * 1024)
     let kinds: Set<String> = ["h3-omni", "h3-qwen", "ltx25", "h3-video-vae", "h3-audio-vae", "h3-dt-tokenizer",
       "h3-direct-transformer", "h3-native-support", "h3-native-control", "ltx25-adapter",
-      "ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae", "drama3-native"]
+      "ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae", "drama3-native",
+      "h3-regenerate", "h3-fast-vae", "h3-encoder-source", "h3-ref2va-source", "flashvsr-native"]
     var packages = try JSONDecoder().decode([NativeModelDownloadPackage].self, from: bytes)
       .filter { kinds.contains($0.kind) }
     // Direct Swift checkpoints have a different admission contract from the
@@ -162,6 +163,15 @@ public enum NativeModelDownloads {
     return hash.finalize().map { String(format: "%02x", $0) }.joined() == file.sha256
   }
 
+  /// A name is only a lookup hint; every candidate still requires its full SHA.
+  static func orderedReuseCandidates(_ candidates:[URL],target:String) -> [URL] {
+    let name=URL(fileURLWithPath:target).lastPathComponent
+    return candidates.sorted { left,right in
+      let leftMatch=left.lastPathComponent==name,rightMatch=right.lastPathComponent==name
+      return leftMatch != rightMatch ? leftMatch:left.path < right.path
+    }
+  }
+
   static func existingFiles(roots: [String], sizes: Set<Int64>, includeHidden: Bool = false) throws -> [Int64: [URL]] {
     var result: [Int64: [URL]] = [:], seen: Set<String> = []
     var pending = roots.map { URL(fileURLWithPath: $0) }, count = 0
@@ -228,7 +238,7 @@ public enum NativeModelDownloads {
       var source = verifiedSources[identity]
       if source == nil, try verified(cached, file: file) { source = cached }
       if source == nil {
-        for candidate in candidates[file.size, default: []] {
+        for candidate in orderedReuseCandidates(candidates[file.size, default: []],target:file.target) {
           if try verified(candidate, file: file) { source = candidate; break }
         }
       }
@@ -279,7 +289,7 @@ public enum NativeModelDownloads {
     }
     try Task.checkCancellation()
     let provenance: [String: Any] = ["format": "weetodd-model-setup-v1", "id": id,
-      "converter": ["ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae"].contains(package.kind) ? "none" : "preconverted",
+      "converter": ["ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae", "h3-regenerate", "h3-fast-vae", "h3-encoder-source", "h3-ref2va-source", "flashvsr-native"].contains(package.kind) ? "none" : "preconverted",
       "requiresNativePageConversion": package.kind == "ltx25-dev-source",
       "nativeRuntime": "swift", "include_vision": package.kind == "h3-qwen",
       "sources": try JSONSerialization.jsonObject(with: JSONEncoder().encode(package.files))]

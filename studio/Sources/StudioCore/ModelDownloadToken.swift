@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Security
 
@@ -31,6 +32,46 @@ public enum ModelDownloadToken {
     var result = original
     result["HF_TOKEN"] = try normalized(savedToken)
     return result
+  }
+
+  /// Reuse the existing Studio or Hugging Face login without copying credentials.
+  /// Call off the UI executor because Keychain can require OS interaction.
+  public static func resolveExisting(environment:[String:String]=ProcessInfo.processInfo.environment) throws -> String? {
+    try resolveExisting(environment:environment,home:FileManager.default.homeDirectoryForCurrentUser,keychainReader:read)
+  }
+
+  static func resolveExisting(environment:[String:String],home:URL,keychainReader:() throws -> String?) throws -> String? {
+    if let saved=try keychainReader() { return try normalized(saved) }
+    if let token=environment["HF_TOKEN"] { return try normalized(token) }
+    for key in ["HF_TOKEN_PATH","HF_HOME","XDG_CACHE_HOME"] {
+      if let value=environment[key],!value.hasPrefix("/") || value.utf8.contains(0) {
+        throw StudioError.invalid("Configured Hugging Face credential locations must be absolute local paths.")
+      }
+    }
+    let path:String
+    if let explicit=environment["HF_TOKEN_PATH"] { path=explicit }
+    else if let root=environment["HF_HOME"] { path=URL(fileURLWithPath:root).appendingPathComponent("token").path }
+    else if let cache=environment["XDG_CACHE_HOME"] { path=URL(fileURLWithPath:cache).appendingPathComponent("huggingface/token").path }
+    else { path=home.appendingPathComponent(".cache/huggingface/token").path }
+    guard path.hasPrefix("/"),!path.utf8.contains(0),path.utf8.count<=4096 else {
+      throw StudioError.invalid("The configured Hugging Face token path must be an absolute local file.")
+    }
+    let descriptor=Darwin.open(path,O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOFOLLOW)
+    if descriptor<0,errno==ENOENT { return nil }
+    guard descriptor>=0 else {throw StudioError.invalid("Cannot read the configured Hugging Face credential file.")}
+    let handle=FileHandle(fileDescriptor:descriptor,closeOnDealloc:true);defer{try?handle.close()}
+    var before=stat(),after=stat()
+    guard fstat(descriptor,&before)==0,before.st_mode&S_IFMT==S_IFREG,(1...16384).contains(before.st_size) else {
+      throw StudioError.invalid("The configured Hugging Face credential must be a nonempty regular file of at most16KiB.")
+    }
+    let data=try handle.read(upToCount:16385) ?? Data()
+    guard data.count==before.st_size,fstat(descriptor,&after)==0,before.st_size==after.st_size,
+      before.st_mtimespec.tv_sec==after.st_mtimespec.tv_sec,before.st_mtimespec.tv_nsec==after.st_mtimespec.tv_nsec,
+      before.st_ctimespec.tv_sec==after.st_ctimespec.tv_sec,before.st_ctimespec.tv_nsec==after.st_ctimespec.tv_nsec,
+      let token=String(data:data,encoding:.utf8) else {
+      throw StudioError.invalid("The configured Hugging Face credential changed while reading or is not UTF-8.")
+    }
+    return try normalized(token)
   }
 
   public static func isConfigured() throws -> Bool {

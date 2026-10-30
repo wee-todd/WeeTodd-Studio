@@ -1,0 +1,49 @@
+{
+  "format": "weetodd-video-processing-v2",
+  "steps": [
+    {
+      "id": "regenerate",
+      "kind": "h3-regenerate",
+      "input": "source",
+      "h3Regenerate": {
+        "version": 1,
+        "targetWidth": 2560,
+        "targetHeight": 1440,
+        "decoder": "releasedH3",
+        "encoderProfile": "publisherPosteriorFP32",
+        "schedule": "publisherThreeStep",
+        "sourceMode": "nativeLatentsWhenAvailable",
+        "fit": "fit",
+        "seed": 0,
+        "posteriorSeed": 0,
+        "latentUpscaleMode": "directPublisher",
+        "baseProfilePath": "",
+        "modelLibraryRoot": "",
+        "publisherEncoderPath": "",
+        "fastDecoderPath": "",
+        "prompt": "Preserve the source subjects, identities, composition, lighting, camera and motion while refining fine detail and removing compression artifacts."
+      }
+    },
+    {
+      "id": "flash",
+      "kind": "flashvsr-turbo",
+      "input": "regenerate",
+      "settings": {
+        "version": 1,
+        "backend": "swiftMLX",
+        "variant": "turbo",
+        "decoder": "tiny",
+        "width": 1920,
+        "height": 1080,
+        "fit": "fit",
+        "seed": 0,
+        "temporalCompression": 4,
+        "temporalSigma": 1,
+        "colorFix": "wavelet",
+        "waveletLevels": 5,
+        "continuity": "stream",
+        "preserveAudio": true
+      }
+    }
+  ]
+}

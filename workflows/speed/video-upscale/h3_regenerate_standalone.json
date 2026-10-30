@@ -1,0 +1,104 @@
+{
+  "last_node_id": 2,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "WeeToddH3Regenerate",
+      "pos": [
+        60,
+        80
+      ],
+      "size": [
+        640,
+        540
+      ],
+      "flags": {
+      },
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+
+      ],
+      "outputs": [
+        {
+          "name": "video_path",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 0
+        },
+        {
+          "name": "regenerate_info",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WeeToddH3Regenerate"
+      },
+      "widgets_values": [
+        "",
+        "",
+        "",
+        "releasedH3",
+        2560,
+        1440,
+        0,
+        "fixed",
+        "Preserve the source subjects, identities, composition, lighting, camera and motion while refining fine detail and removing compression artifacts.",
+        "",
+        "WeeTodd/H3-Regenerate",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": 2,
+      "type": "MarkdownNote",
+      "pos": [
+        760,
+        80
+      ],
+      "size": [
+        580,
+        360
+      ],
+      "flags": {
+      },
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+
+      ],
+      "outputs": [
+
+      ],
+      "properties": {
+      },
+      "title": "Setup and model downloads",
+      "widgets_values": [
+        "# H3 Regenerate · native Swift/MLX\n\nPrepare native H3 restoration models in Studio or use `WeeToddCLI models prepare-h3`. Connect its ordinary original Ref2VA profile, shared model library and Swift CLI.\n\nChoose a 24 FPS SDR source. H3 preserves source timing and original audio; other rates reject before inference. Three publisher refinement steps and the required Refiner/Turbo/Sharp stack are fixed. Direct learned upscaling supports at most 2× per axis. Select Released H3 or Fast H3 decoder explicitly. Unqualified geometry stops before execution.\n\nThis is a portable template; fill local paths before queueing. No Python model runtime or converter is required. See studio/H3_REGENERATE_SETTINGS.md for qualification and resource limits.\n\nOfficial model source: https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K\n\nQueue the workflow only after connecting local paths. ComfyUI/models/ may link to the shared model library; keep weights out of project checkouts."
+      ]
+    }
+  ],
+  "links": [
+
+  ],
+  "groups": [
+
+  ],
+  "config": {
+  },
+  "extra": {
+    "ds": {
+      "scale": 1,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  },
+  "version": 0.4
+}

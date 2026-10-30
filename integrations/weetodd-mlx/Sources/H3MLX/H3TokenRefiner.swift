@@ -84,6 +84,22 @@ public enum H3TokenRefiner {
     func project(_ activation: MLXArray, _ suffix: String,
       rows: Int, columns: Int, qkv: Bool = false) throws -> MLXArray {
       let base: MLXArray
+      if let adapter = lora, adapter.requiresWeightMerge {
+        let baseRows: (Range<Int>) throws -> MLXArray
+        if layout.fastVariant != nil {
+          let parameters = try H3QwenQ8Projection(file:file,name:prefix+suffix+".weight").parametersToMaterialize
+          baseRows = { try H3RegenerateProjection.affineRows(parameters:parameters,range:$0) }
+        } else {
+          var weight = try read(suffix+".weight",shape:[rows,columns])
+          if qkv { weight = H3QKVRowOrder.forHeadMajorAttention(weight,heads:56,headWidth:128,groupedSource:layout.curveRank == nil) }
+          let immutableWeight = weight
+          baseRows = { immutableWeight[$0] }
+        }
+        let output = try adapter.projectMerged(input:activation,
+          target:"diffusion_model.token_refiner.blocks.\(index).\(suffix)",rows:rows,columns:columns,baseRows:baseRows)
+        eval(output); Memory.clearCache(); try Task.checkCancellation()
+        return output
+      }
       if let omni {
         base = try omni.withParameters { scope in
           try scope.project(prefix + suffix, input: activation)

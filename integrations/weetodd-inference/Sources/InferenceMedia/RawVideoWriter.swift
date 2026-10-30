@@ -1,9 +1,13 @@
 import Foundation
 import Darwin
+import CryptoKit
 
 /// Ordered RGB24 frames with bounded pipe backpressure and cancellable writes.
 /// Publishes a video-only file after FFmpeg succeeds; audio is muxed separately.
 public final class RawVideoWriter {
+  public enum Encoding: Sendable { case h264, ffv1 }
+  private var rgbHash = SHA256()
+  public private(set) var rgbSHA256: String?
   private let process:Process
   private let input:FileHandle
   private let log:FileHandle
@@ -13,14 +17,14 @@ public final class RawVideoWriter {
   private let expectedFrames:Int
   private var written=0
   private var closed=false
-  public init(ffmpeg:URL,output:URL,width:Int,height:Int,frames:Int,fps:Double) throws {
+  public init(ffmpeg:URL,output:URL,width:Int,height:Int,frames:Int,fps:Double,encoding:Encoding = .h264) throws {
     guard ffmpeg.isFileURL,FileManager.default.isExecutableFile(atPath:ffmpeg.path),output.isFileURL,
       !FileManager.default.fileExists(atPath:output.path),(2...16384).contains(width),(2...16384).contains(height),
       width%2==0,height%2==0,(1...100000).contains(frames),fps.isFinite,(1...240).contains(fps) else {
       throw MediaOutputError.invalid("Invalid raw video encoder configuration.")
     }
     self.output=output;frameBytes=width*height*3;expectedFrames=frames
-    temporary=output.deletingLastPathComponent().appendingPathComponent(".raw-video-"+UUID().uuidString+".mp4")
+    temporary=output.deletingLastPathComponent().appendingPathComponent(".raw-video-"+UUID().uuidString+(encoding == .ffv1 ? ".mkv" : ".mp4"))
     let logURL=temporary.appendingPathExtension("log")
     let fd=Darwin.open(logURL.path,O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,mode_t(0o600))
     guard fd>=0 else { throw MediaOutputError.invalid("Cannot create encoder log.") }
@@ -29,7 +33,7 @@ public final class RawVideoWriter {
     process=Process();process.executableURL=ffmpeg
     process.arguments=["-v","error","-nostdin","-n","-f","rawvideo","-pixel_format","rgb24",
       "-video_size","\(width)x\(height)","-framerate",String(fps),"-i","pipe:0","-an",
-      "-c:v","libx264","-crf","18","-pix_fmt","yuv420p",temporary.path]
+      ] + (encoding == .ffv1 ? ["-c:v","ffv1","-level","3","-pix_fmt","bgr0","-f","matroska"] : ["-c:v","libx264","-crf","18","-pix_fmt","yuv420p"]) + [temporary.path]
     process.standardInput=pipe;process.standardOutput=log;process.standardError=log
     do {
       let flags=fcntl(input.fileDescriptor,F_GETFL)
@@ -58,6 +62,7 @@ public final class RawVideoWriter {
         if ready<0 && errno != EINTR { throw MediaOutputError.invalid("Cannot wait for video encoder.") }
       }
     }
+    rgbHash.update(data:rgb)
     written += 1
   }
   public func finish() throws {
@@ -69,6 +74,7 @@ public final class RawVideoWriter {
       throw MediaOutputError.invalid("FFmpeg failed to encode the raw video stream.")
     }
     try FileManager.default.moveItem(at:temporary,to:output)
+    rgbSHA256=rgbHash.finalize().map { String(format:"%02x",$0) }.joined()
     closed=true;try? log.close()
     try? FileManager.default.removeItem(at:temporary.appendingPathExtension("log"))
   }

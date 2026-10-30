@@ -70,16 +70,33 @@ public enum H3AudioVAEEncoder {
     try conv("mean_proj", out: 32, input: 32, kernel: 1)
   }
 
+  /// Regeneration encodes real zero waveform context on its padded frame
+  /// clock. This narrowly admits the final aligned362-frame window; ordinary
+  /// caller-supplied reference waveforms keep their existing480000-sample cap.
+  public static func encodeRegenerateSilence(checkpointURL:URL,paddedFrames:Int) throws -> MLXArray {
+    let samples=try H3RegenerateAdmission.silenceSampleCount(paddedFrames:paddedFrames)
+    let metadata=try H3AudioVAELayout(url:checkpointURL)
+    let latent=try encode(checkpointURL:checkpointURL,waveform:.zeros([2,samples,1],dtype:.float32),
+      maximumSamples:484000,observe:{_,_ in})
+    let rows=try H3LatentCodec.audioEncoderRows(latents:latent,mean:metadata.latentsMean,
+      standardDeviation:metadata.latentsStandardDeviation).asType(.bfloat16)
+    guard rows.shape == [1,2*((samples+799)/800),32] else {
+      throw H3CheckpointError.invalid("Encoded silence differs from the exact regenerate audio clock.")
+    }
+    eval(rows);return rows
+  }
+
   public static func encode(checkpointURL: URL, waveform: MLXArray) throws -> MLXArray {
     try encode(checkpointURL: checkpointURL, waveform: waveform,
       observe: { _, _ in })
   }
 
   static func encode(checkpointURL: URL, waveform: MLXArray,
+    maximumSamples:Int=480000,
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard waveform.ndim == 3, waveform.shape[0] == 2,
       waveform.shape[2] == 1, waveform.dtype == .float32,
-      (800...480_000).contains(waveform.shape[1]) else {
+      (800...maximumSamples).contains(waveform.shape[1]) else {
       throw H3CheckpointError.invalid("H3 reference audio requires bounded 32 kHz stereo samples.")
     }
     _ = try H3AudioVAELayout(url: checkpointURL)

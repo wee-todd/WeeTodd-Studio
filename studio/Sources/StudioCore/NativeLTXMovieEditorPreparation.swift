@@ -74,7 +74,7 @@ public enum NativeLTXMovieEditorPreparation {
   private static func descriptor(_ settings:LTX25MovieUpscaleSettings) -> [String:Any] {
     ["supportedTasks":["video_upscale"],"pipelineMode":settings.mode.rawValue,
       "controls":["evaluations":settings.mode == .latentOnly ? 0:3,"stepsEditable":false,"refinementStepsEditable":false,
-        "cfgEditable":false,"shiftEditable":false,"stepsExplanation":"Source-video learned 2× with optional three-step refinement.",
+        "cfgEditable":false,"shiftEditable":false,"stepsExplanation":settings.mode == .enhance ? "Same-size source-video enhancement with three refinement evaluations." : "Source-video learned 2× with optional three-step refinement.",
         "cfgExplanation":"Distilled refinement does not use CFG.","shiftExplanation":"Uses the released refinement schedule."],"presets":[]]
   }
   public static func describe(request:[String:Any]) throws -> [String:Any] {

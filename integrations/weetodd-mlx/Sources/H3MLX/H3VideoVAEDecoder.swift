@@ -51,6 +51,24 @@ public enum H3VideoVAEDecoder {
     return count
   }
 
+  public static func preflightRegenerate(geometry:H3Geometry) throws -> Int {
+    guard geometry.canvasAdmission == .regenerate,geometry.videoLatentFrames >= 7 else {
+      throw H3CheckpointError.invalid("Released regeneration video decode needs at least22 padded frames and the explicit regenerate canvas.")
+    }
+    try geometry.canvasAdmission.validate(width:geometry.width,height:geometry.height)
+    let count=splitTiles(geometry.width).starts.count*splitTiles(geometry.height).starts.count
+    guard (1...512).contains(count) else { throw H3CheckpointError.invalid("Regenerate released decode exceeds512 bounded spatial tiles.") }
+    return count
+  }
+  public static func decodeRegenerateChunks(checkpointURL:URL,latent:MLXArray,geometry:H3Geometry,
+    onChunk:(MLXArray) throws -> Void) throws {
+    _ = try preflightRegenerate(geometry:geometry)
+    guard latent.shape == [1,geometry.videoLatentFrames,geometry.height/16,geometry.width/16,24] else {
+      throw H3CheckpointError.invalid("Regenerate decoder latent geometry differs from its admitted grid.")
+    }
+    try decodeChunks(checkpointURL:checkpointURL,latent:latent,retainWeights:true,maximumSpatialTiles:512,onChunk:onChunk)
+  }
+
   private static func blend(_ previous: MLXArray, _ current: MLXArray,
     extent: Int, axis: Int) -> MLXArray {
     let count = min(extent, previous.shape[axis], current.shape[axis])
@@ -82,12 +100,12 @@ public enum H3VideoVAEDecoder {
 
   private static func decodeClip(checkpointURL: URL, latent: MLXArray,
     session: H3VideoVAEDecodeSession?, spatialBatchSize: Int,
-    precision: H3VideoDecodePrecision) throws -> MLXArray {
+    precision: H3VideoDecodePrecision,maximumSpatialTiles:Int=64) throws -> MLXArray {
     let y = splitTiles(latent.shape[2] * 16)
     let x = splitTiles(latent.shape[3] * 16)
     let count = y.starts.count * x.starts.count
-    guard count <= 64 else {
-      throw H3CheckpointError.invalid("H3 video VAE needs more than 64 spatial tiles.")
+    guard count <= maximumSpatialTiles else {
+      throw H3CheckpointError.invalid("H3 video VAE exceeds its selected bounded spatial tile count.")
     }
     if count == 1 {
       return try H3VideoVAETileDecoder.decode(checkpointURL: checkpointURL,
@@ -199,6 +217,7 @@ public enum H3VideoVAEDecoder {
     memoryMode: H3VideoDecodeMemoryMode? = nil,
     precision: H3VideoDecodePrecision = .defaultPrecision,
     spatialBatchSize: Int? = nil,
+    maximumSpatialTiles:Int=64,
     allocationCacheLimitBytes: Int = H3VideoVAEDecodeSession.defaultAllocationCacheLimitBytes,
     groupedStageLoading: Bool? = nil,
     onSessionClosed: (H3VideoVAEDecodeSession.Statistics) -> Void = { _ in },
@@ -214,7 +233,7 @@ public enum H3VideoVAEDecoder {
       && allocationCacheLimitBytes == H3VideoVAEDecodeSession.defaultAllocationCacheLimitBytes) else {
       throw H3CheckpointError.invalid("Grouped H3 video loading requires a resident128MiB session.")
     }
-    guard (1...4).contains(spatialBatchSize), latent.ndim == 5, latent.shape[0] == 1,
+    guard [64,512].contains(maximumSpatialTiles),(1...4).contains(spatialBatchSize), latent.ndim == 5, latent.shape[0] == 1,
       (7...128).contains(latent.shape[1]),
       (1...256).contains(latent.shape[2]),
       (1...256).contains(latent.shape[3]),
@@ -229,18 +248,18 @@ public enum H3VideoVAEDecoder {
         groupedStageLoading: resolvedGroup,
         onClose: onSessionClosed) { session in
         try decodeChunks(checkpointURL: checkpointURL, latent: latent,
-          session: session, spatialBatchSize: spatialBatchSize, precision:precision, onChunk: onChunk)
+          session: session, spatialBatchSize: spatialBatchSize, precision:precision, maximumSpatialTiles:maximumSpatialTiles,onChunk: onChunk)
       }
     } else {
       _ = try H3VideoVAELayout(url: checkpointURL)
       try decodeChunks(checkpointURL: checkpointURL, latent: latent,
-        session: nil, spatialBatchSize: spatialBatchSize, precision:precision, onChunk: onChunk)
+        session: nil, spatialBatchSize: spatialBatchSize, precision:precision, maximumSpatialTiles:maximumSpatialTiles,onChunk: onChunk)
     }
   }
 
   private static func decodeChunks(checkpointURL: URL, latent: MLXArray,
     session: H3VideoVAEDecodeSession?, spatialBatchSize: Int,
-    precision: H3VideoDecodePrecision,
+    precision: H3VideoDecodePrecision,maximumSpatialTiles:Int,
     onChunk: (MLXArray) throws -> Void) throws {
     let originalTokens = latent.shape[1]
     let chunkTokens = 5
@@ -294,7 +313,7 @@ public enum H3VideoVAEDecoder {
       let clip = try decodeClip(checkpointURL: checkpointURL,
         latent: padded[0..<1, start..<end,
           0..<latent.shape[2], 0..<latent.shape[3], 0..<24], session: session,
-        spatialBatchSize: spatialBatchSize,precision:precision)
+        spatialBatchSize: spatialBatchSize,precision:precision,maximumSpatialTiles:maximumSpatialTiles)
       for part in 0..<2 {
         let frameStart = part * chunkFrames
         let frameEnd = min(frameStart + chunkFrames, clip.shape[1])

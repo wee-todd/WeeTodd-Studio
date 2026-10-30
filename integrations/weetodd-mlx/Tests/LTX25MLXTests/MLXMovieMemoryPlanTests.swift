@@ -7,6 +7,7 @@ final class MLXMovieMemoryPlanTests:XCTestCase {
   private func request(mode:String="refine",frames:Int=49,chunking:Bool=false,
     anchors:String="first_last") throws -> MLXMovieUpscaleRequest {
     var components=["video_checkpoint":try MLXDecoderHeaderFixture.convolutional(test:self).path,"spatial_upscaler_checkpoint":"/model/upscaler.safetensors"]
+    if mode == "enhance" { components.removeValue(forKey:"spatial_upscaler_checkpoint") }
     if mode != "latent_only" {
       components.merge(["gemma_root":"/model/gemma","connector_checkpoint":"/model/fixed.safetensors",
         "transformer_root":"/model/transformer","audio_checkpoint":"/model/audio.safetensors"]) { _,new in new }
@@ -27,6 +28,15 @@ final class MLXMovieMemoryPlanTests:XCTestCase {
   }
   private func plan(_ request:MLXMovieUpscaleRequest,cutFrames:[Int]=[]) throws -> MLXMovieMemoryPlan {
     try MLXMovieMemoryPlan(request:request,cutFrames:cutFrames,physicalMemory:256*gib,recommendedWorkingSet:192*gib)
+  }
+  func testEnhanceAdmitsOnlyOneToOneGuideTransformerAndSourceCanvas() throws {
+    let r=try request(mode:"enhance",anchors:"none"),p=try plan(r)
+    let layout=try MLXMovieUpscaleLayout(plan:r.plan,firstStrength:nil,lastStrength:nil)
+    XCTAssertEqual(layout.geometry.width,384);XCTAssertEqual(layout.geometry.height,256)
+    XCTAssertEqual(layout.groupRows,[672,672])
+    let configuration=try AVBlockConfiguration(videoTokens:1344,audioTokens:52,textTokens:1024)
+    XCTAssertEqual(p.transformerActivationBytes,try MLXAVBlock.estimatedActivationBytes(configuration:configuration,perTokenVideo:true))
+    XCTAssertLessThan(p.videoActivationBytes,try plan(request()).videoActivationBytes)
   }
   func testActualRepresentativeCanvasRequiresMoreThanOldTwoGiBAndAdmitsExactPerTokenReserve() throws {
     let request=try request(),plan=try plan(request)

@@ -39,7 +39,9 @@ open "studio/.build/WeeTodd Studio.app"
 ```
 
 The app bundles the GUI, CLI and renderer source. Building does not install Python dependencies
-or download models. In **Studio Settings**, use **Set Up Managed Renderer** or connect an existing
+or download models. Native **H3 Regenerate** and **FlashVSR+** use bundled Swift/MLX helpers for
+model setup, conversion and inference, without a Python environment. For features that use the
+managed renderer, choose **Set Up Managed Renderer** in **Studio Settings** or connect an existing
 compatible runtime. FFmpeg/FFprobe and optional finishing tools still require configuration.
 See the [build and runtime guide](studio/README.md#build-and-open).
 
@@ -432,8 +434,8 @@ The node collection is a maintained secondary interface to WeeTodd Studio's shar
 media utilities. Existing node IDs, sockets, `WeeTodd/H3` categories and workflow contracts remain
 supported. App-first development does not remove graph execution or its lightweight imports.
 
-- 56 composable nodes under `WeeTodd/H3`
-- 129 registered nodes across all engines and media utilities; 46 shipped UI workflows
+- 56 composable nodes in the `WeeTodd/H3` category tree
+- 131 registered nodes across all engines and media utilities; 48 shipped UI workflows
 
 Use [node installation](#install), [workflow selection](#choose-a-workflow), and the
 [generated node catalog](#node-catalog). The detailed reference below retains model layouts,
@@ -470,7 +472,7 @@ Swift H3 and LTX 2.5 setup can find compatible components in folders you select,
 including existing ComfyUI model libraries. Discovery reads bounded metadata and leaves
 weights in place. Compatible pinned preconverted downloads now run in Swift with
 streamed checksums, resume and cancellation. Native setup includes DFR, MSR and
-Ingredients, Union, Motion Track and CrossView profiles. The merged native catalog has 25 pinned packages, including FastH3 Omni, the duration head, raw Dev transformer, distilled refinement adapter, one-step Diffusion VAE and MSR V2 adapter;
+Ingredients, Union, Motion Track and CrossView profiles. The merged native catalog includes pinned FastH3 Omni, duration head, raw Dev transformer, distilled refinement adapter, one-step Diffusion VAE and MSR V2 packages, alongside native H3 regeneration and FlashVSR+ components;
 checkpoint/task admission and complete clean-machine installation remain separately qualified.
 Native setup can convert the admitted raw LTX 2.5 Dev transformer to unmerged Q8 pages in a new directory. Other source conversions and unsupported adapters retain their explicit setup paths. A final-app isolated clean-registry check passed eight setup/header cases against the then-current 23 catalog contracts,
 including Diffusion VAE adoption, without Python, network, conversion reruns or weight copies.
@@ -2917,6 +2919,8 @@ This table is generated from the registered node contracts. Run
 | Draw Things Estimate | Estimate CU and refresh eligibility only. Use the estimate-only workflow to avoid generation. | Draw Things — Remote generation | Experimental |
 | Draw Things GenerateImage | Generate an image through the shared adapter and load only the returned image into an IMAGE tensor. | Draw Things — Remote generation | Experimental |
 | Draw Things GenerateVideo | Generate video and finish it to a file; frames stay on disk for low-memory graphs. | Draw Things — Remote generation | Experimental |
+| FlashVSR+ Upscale | Restore a source movie with native Swift/MLX FlashVSR+ Turbo or Base and Tiny or Full Wan VAE. Shares Studio's typed CLI settings, preserves the source frame rate and audio, and verifies output. New UI workflows select Swift/MLX; historical API prompts retain their explicit vpipe backend. | Native Swift — Recipe execution | Experimental |
+| H3 Regenerate | Run the fixed three-step H3 Regenerate profile through Studio's native Swift/MLX CLI. Requires an ordinary original Ref2VA component profile and publisher restoration assets. Preserves 24 FPS source timing and original audio; unsupported sources and unqualified grids reject before inference. | Native Swift — Recipe execution | Experimental |
 <!-- END GENERATED NODE CATALOG -->
 
 ## Troubleshooting
@@ -3023,3 +3027,19 @@ terms. The optional H3-capable Draw Things helper uses a GPLv3 community depende
 distribution remains pending [licensing qualification](studio/README.md#build-the-optional-connection-runtime).
 The project is experimental and pre-release. Do not commit checkpoints, generated media,
 caches, credentials, tokens, machine-specific paths, or private information.
+
+## Native H3 and FlashVSR+ video restoration
+
+Open **Upscale Video** in the media library and choose **FlashVSR+** or **H3 Regenerate**. Native setup, tensor conversion and inference run in Swift/MLX. A complete app includes both workers and their Metal kernels; no Python model environment or vpipe installation is required. Choose the shared model library in **Model setup** to reuse verified installed weights before acquiring missing pinned components.
+
+FlashVSR+ supports **Turbo/Base × Tiny/Full Wan VAE**, with the source frame rate and original audio. H3 offers the fixed three-step publisher refinement profile, explicit source precision and Released/Fast H3 decoding for 24 FPS sources. Model, memory and geometry admission stay specific to each engine. Read the [FlashVSR+ reference](studio/FLASHVSR_SETTINGS.md) and [H3 Regenerate reference](studio/H3_REGENERATE_SETTINGS.md) for controls, resource requirements and qualification limits.
+
+Clips can run finishing after generation or use **Upscale accepted take** without generating again. Choose one stage, **H3 Regenerate → FlashVSR+**, or **Native Pixel + CQ → FlashVSR+** explicitly. New finishing starts with one FlashVSR Turbo/Tiny stage. Version 2 sequences exchange verified lossless RGB, retain original source audio and cache each completed stage independently. A downstream change reuses a matching prefix. Original takes and prior results remain in Versions.
+
+Studio, Director acceptance, CLI and native v3 job exports use the same typed processor. Older native v1/v2 jobs and saved backend selections remain readable. Historical vpipe is available only through its explicit backend adapter. Portable ComfyUI templates delegate model execution to the native CLI: [Flash UI](workflows/speed/video-upscale/flashvsr_turbo_standalone.json), [Flash API](examples/flashvsr_plus_standalone_api.json), [H3 UI](workflows/speed/video-upscale/h3_regenerate_standalone.json), [H3 API](examples/h3_regenerate_standalone_api.json). Fill local paths before runtime execution.
+
+## Native Pixel Spatial + CQ upscaling
+
+H3 and LTX clips also offer **Native Pixel Spatial + CQ · 2×** through the bundled Swift/MLX LTX worker. Pixel Spatial defaults to 1.0, CQ V2 to 0.5 and refinement to 0.75, with separate controls. Select native-only or append FlashVSR deliberately. Source FPS, original audio, editorial ranges and original-take retry are retained. New sequence intermediates are lossless; earlier saved receipts remain readable.
+
+See the [native settings reference](studio/NATIVE_PIXEL_CQ_SETTINGS.md) for model setup, refinement, source limits and saved-result behavior.

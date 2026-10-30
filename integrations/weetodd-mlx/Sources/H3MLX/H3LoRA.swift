@@ -35,6 +35,9 @@ public struct H3LoRAAdapter: Sendable {
 }
 
 protocol H3LoRAApplying {
+  var requiresWeightMerge: Bool { get }
+  func projectMerged(input: MLXArray, target: String, rows: Int, columns: Int,
+    baseRows: (Range<Int>) throws -> MLXArray) throws -> MLXArray
   func prepareBlock(index: Int) throws -> H3LoRABlock?
   func apply(base: MLXArray, input: MLXArray,
     target: String, reorderQKV: Bool) throws -> MLXArray
@@ -42,6 +45,11 @@ protocol H3LoRAApplying {
     target: String, reorderQKV: Bool) throws -> MLXArray
 }
 extension H3LoRAApplying {
+  var requiresWeightMerge: Bool { false }
+  func projectMerged(input: MLXArray, target: String, rows: Int, columns: Int,
+    baseRows: (Range<Int>) throws -> MLXArray) throws -> MLXArray {
+    throw H3CheckpointError.invalid("This adapter has no weight-merge projection contract.")
+  }
   func prepareBlock(index: Int) throws -> H3LoRABlock? { nil }
   func applyQueued(base: MLXArray, input: MLXArray,
     target: String, reorderQKV: Bool) throws -> MLXArray {

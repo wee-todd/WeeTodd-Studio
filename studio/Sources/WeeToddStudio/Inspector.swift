@@ -146,6 +146,7 @@ struct ClipInspector: View {
           }
         }
       }
+      VideoProcessingInspector(clip: clip)
       if clip.engine == .movie || detail.showsAdvanced {
         DisclosureGroup("Timeline editing") { timelineSection }
       }
@@ -293,6 +294,9 @@ struct ClipInspector: View {
               HStack {
                 Image(systemName: "play.rectangle")
                 Text(v.created, style: .time)
+                if let lineage = v.processingLineage {
+                  Text(lineage.label).foregroundStyle(.secondary)
+                } else if clip.videoProcessing != nil { Text("Original").foregroundStyle(.secondary) }
                 Spacer()
                 Text("Seed \(v.seed)").foregroundStyle(.secondary)
               }

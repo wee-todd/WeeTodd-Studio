@@ -23,7 +23,15 @@ enum NativeMovieFrozenMedia {
     guard fd>=0 else { throw StudioError.invalid("Cannot hash regular movie media.") }
     let input=FileHandle(fileDescriptor:fd,closeOnDealloc:true);defer { try? input.close() }
     var hash=SHA256()
-    while let bytes=try input.read(upToCount:1024*1024),!bytes.isEmpty { try Task.checkCancellation();hash.update(data:bytes) }
+    while true {
+      let count=try autoreleasepool {
+        try Task.checkCancellation()
+        let bytes=try input.read(upToCount:1024*1024) ?? Data()
+        hash.update(data:bytes)
+        return bytes.count
+      }
+      if count==0 { break }
+    }
     guard before == (try Identity(url)) else { throw StudioError.invalid("Movie media changed during hashing.") }
     return hash.finalize().map { String(format:"%02x",$0) }.joined()
   }

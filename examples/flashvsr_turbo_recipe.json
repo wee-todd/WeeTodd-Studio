@@ -1,0 +1,26 @@
+{
+  "format": "weetodd-video-processing-v2",
+  "steps": [
+    {
+      "id": "restore",
+      "kind": "flashvsr-turbo",
+      "input": "source",
+      "settings": {
+        "version": 1,
+        "backend": "swiftMLX",
+        "variant": "turbo",
+        "decoder": "tiny",
+        "width": 1920,
+        "height": 1080,
+        "fit": "fit",
+        "seed": 0,
+        "temporalCompression": 4,
+        "temporalSigma": 1,
+        "colorFix": "wavelet",
+        "waveletLevels": 5,
+        "continuity": "stream",
+        "preserveAudio": true
+      }
+    }
+  ]
+}

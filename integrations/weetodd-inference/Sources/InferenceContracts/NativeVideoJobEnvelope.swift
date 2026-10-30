@@ -4,7 +4,7 @@ import Foundation
 /// Small, engine-neutral request identity. A worker validates this before it
 /// opens a checkpoint; the engine then validates the complete recipe itself.
 public struct NativeVideoJobEnvelope: Codable, Sendable {
-  public enum Engine: String, Codable, Sendable { case h3, ltx25 }
+  public enum Engine: String, Codable, Sendable { case h3, ltx25; case flashVSR = "flashvsr" }
 
   public let version: Int
   public let jobID: UUID

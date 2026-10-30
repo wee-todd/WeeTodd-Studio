@@ -60,6 +60,8 @@ RECOMMENDED = {
     "WeeToddLTX23Preflight",
 }
 EXPERIMENTAL = {
+    "WeeToddH3Regenerate",
+    "WeeToddFlashVSRUpscale",
     "WeeToddSwiftVideoGenerate",
     "WeeToddH3PagingSettings",
     "WeeToddDrawThingsConnection",

@@ -20,6 +20,7 @@ struct AssetBrowser: View {
       }.font(.system(size: 11)).padding(10).background(
         Theme.raised, in: RoundedRectangle(cornerRadius: 6)
       ).padding(12)
+      Button("Upscale Video…") { store.openVideoUpscale() }
       Button("Generate Music…") { store.openMusic() }
       Button("Generate Voice…") { store.openVoice() }
       Button("Production Library…") { store.showProductionLibrary = true }

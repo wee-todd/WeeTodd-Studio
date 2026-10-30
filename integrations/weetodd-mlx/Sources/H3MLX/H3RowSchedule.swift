@@ -42,4 +42,17 @@ public struct H3RowSchedule: Sendable {
     }
     indicesByStep = perStep
   }
+  public init(regenerate layout:H3PackedLayout,schedule:H3RegenerateSchedule) throws {
+    guard layout.conditionVideoRows == 0,layout.audioStart > 0,layout.videoStart > layout.audioStart else {
+      throw H3GeometryError.invalid("Regenerate row clock requires unconditioned packed text/audio/video rows.")
+    }
+    table=Set(schedule.modelTimes+[Float(1)]).sorted()
+    let lookup=Dictionary(uniqueKeysWithValues:table.enumerated().map { ($0.element,Int32($0.offset)) })
+    indicesByStep=schedule.modelTimes.map { time in
+      var rows=[Int32](repeating:lookup[time]!,count:layout.tags.count)
+      for row in layout.audioStart..<layout.videoStart { rows[row]=lookup[1]! }
+      return rows
+    }
+  }
+
 }

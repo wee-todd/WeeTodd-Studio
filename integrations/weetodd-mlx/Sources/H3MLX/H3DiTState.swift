@@ -34,6 +34,7 @@ public final class H3DiTState {
     loRAAdapters: [H3LoRAAdapter]? = nil,
     funControl: H3FunControlCondition? = nil,
     vdn:H3VDNSelection? = nil,
+    regenerate:H3RegenerateExecutionContext? = nil,
     preparationObserver: H3PreparationObservation.Observer? = nil,
     progress: (Int, Int) -> Void = { _, _ in }) throws {
     self.layout = layout
@@ -42,7 +43,7 @@ public final class H3DiTState {
       timestepTable: timestepTable, blockCount: blockCount,
       projectionMode: projectionMode, allowMPP: allowMPP, transformerWeightCacheGB:transformerWeightCacheGB, experimentalSol:experimentalSol, turboLoRAURL: turboLoRAURL,
       turboLoRAStrength: turboLoRAStrength,
-      additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters, funControl: funControl,vdn:vdn,
+      additionalLoRAs: additionalLoRAs, loRAAdapters: loRAAdapters, funControl: funControl,vdn:vdn,regenerate:regenerate,
       preparationObserver: preparationObserver, progress: progress)
   }
 

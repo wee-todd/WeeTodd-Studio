@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -19,6 +20,7 @@ FASTH3_PROFILE_NODE = "WeeToddH3FastH3ProductionProfile"
 FASTH3_SPEED_PROFILE = "Speed candidate — compact Metal + 40 layers"
 VDN_NODE = "WeeToddH3VDNCheckpoint"
 SWIFT_VIDEO_NODE = "WeeToddSwiftVideoGenerate"
+H3_REGENERATE_NODE = "WeeToddH3Regenerate"
 PATH_FIELDS = (
     "checkpoint",
     "transformer",
@@ -418,6 +420,92 @@ def _run_swift_preflight(*, worker: Path, recipe: Path, output: Path, engine: st
     )
 
 
+REGENERATE_PATH_FIELDS = {
+    "source_path", "profile_path", "model_library", "swift_cli_path",
+    "swift_worker_path", "ffmpeg_path", "ffprobe_path",
+}
+
+
+def regenerate_inputs(graph: dict[str, dict]) -> dict:
+    """Validate the literal translator controls without importing an inference runtime."""
+    from wee_todd_mlx.flashvsr_cli import validate_h3_regenerate_settings
+
+    _, node = unique_node(graph, H3_REGENERATE_NODE)
+    inputs = node["inputs"]
+    controls = {"width", "height", "decoder", "seed", "prompt", "filename_prefix"}
+    required = controls | {"source_path", "profile_path", "model_library", "swift_cli_path"}
+    if not required.issubset(inputs) or not set(inputs).issubset(controls | REGENERATE_PATH_FIELDS):
+        raise ValueError("H3 Regenerate has missing or unknown translator inputs")
+    for key in REGENERATE_PATH_FIELDS:
+        value = inputs.get(key, "")
+        if not isinstance(value, str) or any(ord(character) < 32 for character in value):
+            raise ValueError(f"H3 Regenerate {key} must be a literal local path")
+    prefix = inputs["filename_prefix"]
+    if (not isinstance(prefix, str) or not prefix
+            or any(ord(character) < 32 for character in prefix)):
+        raise ValueError("H3 Regenerate filename_prefix is missing or invalid")
+    relative = Path(prefix.replace("\\", "/"))
+    if relative.is_absolute() or ".." in relative.parts or not relative.name:
+        raise ValueError("H3 Regenerate filename_prefix must stay inside ComfyUI output")
+    validate_h3_regenerate_settings(**{key: inputs[key] for key in controls - {"filename_prefix"}})
+    return inputs
+
+
+def portable_regenerate_paths(graph: dict[str, dict]) -> dict:
+    """Blank selections/placeholders are portable templates, never runnable jobs."""
+    inputs = regenerate_inputs(graph)
+    paths = {}
+    for key in sorted(REGENERATE_PATH_FIELDS):
+        value = inputs.get(key, "")
+        if value and (not value.startswith("/REPLACE/WITH/YOUR/")
+                      or not value.removeprefix("/REPLACE/WITH/YOUR/")
+                      or ".." in Path(value).parts or "\\" in value):
+            raise ValueError(
+                f"Portable H3 Regenerate {key} requires a blank selection or explicit placeholder"
+            )
+        paths[key] = value
+    return {"engine": "h3", "task": "h3-regenerate", "paths": paths,
+            "filename_prefix": inputs["filename_prefix"]}
+
+
+def runtime_preflight_regenerate(
+    *, graph: dict[str, dict], workflow_path: Path, project: Path, comfy_root: Path
+) -> dict:
+    """Admit the same request used by the native render translator, without rendering."""
+    if not (comfy_root / "folder_paths.py").is_file() or not (comfy_root / "main.py").is_file():
+        raise ValueError(f"ComfyUI root is invalid: {comfy_root}")
+    sys.path.insert(0, str(project / "src"))
+    from wee_todd_mlx.flashvsr_cli import run_h3_regenerate_cli
+
+    inputs = regenerate_inputs(graph)
+    for key in ("source_path", "profile_path", "model_library", "swift_cli_path"):
+        if not inputs[key] or inputs[key].startswith("/REPLACE/WITH/YOUR/"):
+            raise ValueError(f"Select H3 Regenerate {key} before runtime preflight")
+    for key in REGENERATE_PATH_FIELDS:
+        if inputs.get(key, "").startswith("/REPLACE/WITH/YOUR/"):
+            raise ValueError(f"Select H3 Regenerate {key} before runtime preflight")
+    original_directory = Path.cwd()
+    try:
+        # ComfyUI executes this translator from its root. Preserve that resolution
+        # for relative choices while allowing the shared library anywhere local.
+        os.chdir(comfy_root)
+        with tempfile.TemporaryDirectory(prefix="weetodd-regenerate-preflight-") as scratch:
+            plan = run_h3_regenerate_cli(cli=inputs["swift_cli_path"], source=inputs["source_path"],
+                output=(Path(scratch) / "preflight").resolve(), profile=inputs["profile_path"],
+                model_library=inputs["model_library"],
+                ffmpeg=inputs.get("ffmpeg_path") or shutil.which("ffmpeg") or "/missing/ffmpeg",
+                ffprobe=inputs.get("ffprobe_path") or shutil.which("ffprobe") or "/missing/ffprobe",
+                width=inputs["width"], height=inputs["height"], decoder=inputs["decoder"],
+                seed=inputs["seed"], prompt=inputs["prompt"],
+                swift_worker=inputs.get("swift_worker_path", ""), preflight_only=True)
+    finally:
+        os.chdir(original_directory)
+    return {"runtime_ready": True, "portable_paths_valid": False, "workflow": str(workflow_path),
+            "workflow_sha256": hashlib.sha256(workflow_path.read_bytes()).hexdigest(),
+            "comfy_root": str(comfy_root), "engine": "h3", "task": "h3-regenerate",
+            "frames": plan.get("frames"), "preflight": plan}
+
+
 def runtime_preflight_swift_recipe(
     *, graph: dict[str, dict], workflow_path: Path, project: Path, comfy_root: Path
 ) -> dict:
@@ -497,6 +585,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     project = args.project.resolve()
+    sys.path.insert(0, str(project / "src"))
     paths = [path.resolve() for path in (args.workflow or [])]
     if args.all_api:
         paths.extend(sorted((project / "examples").glob("*_api.json")))
@@ -507,6 +596,24 @@ def main() -> int:
     reports = []
     for path in paths:
         graph = load_api_workflow(path)
+        if any(node["class_type"] == H3_REGENERATE_NODE for node in graph.values()):
+            if any(node["class_type"] in {COMPONENT_NODE, SWIFT_VIDEO_NODE}
+                   for node in graph.values()):
+                raise SystemExit(
+                    "H3 Regenerate and other H3 execution paths cannot share this preflight"
+                )
+            try:
+                if args.comfy_root is None:
+                    reports.append({"workflow": str(path), "portable_paths_valid": True,
+                                    "runtime_ready": None, **portable_regenerate_paths(graph)})
+                else:
+                    reports.append(runtime_preflight_regenerate(graph=graph, workflow_path=path,
+                        project=project, comfy_root=args.comfy_root.resolve()))
+            except (FileNotFoundError, ValueError, RuntimeError) as exc:
+                raise SystemExit(
+                    f"H3 Regenerate workflow preflight failed for {path}: {exc}"
+                ) from exc
+            continue
         swift_nodes = [node for node in graph.values()
                        if node["class_type"] == SWIFT_VIDEO_NODE]
         if swift_nodes:

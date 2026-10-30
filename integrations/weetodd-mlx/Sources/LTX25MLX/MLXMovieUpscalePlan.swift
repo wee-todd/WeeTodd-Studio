@@ -3,14 +3,21 @@ import LTX25Engine
 
 /// Model-specific source movie geometry; never creates generated DFR slots.
 public struct MLXMovieUpscalePlan: Sendable {
-  public enum Mode: String, Codable, Sendable { case latentOnly = "latent_only", refine, pixelSpatial = "pixel_spatial" }
+  public enum Mode: String, Codable, Sendable {
+    case latentOnly = "latent_only", refine, pixelSpatial = "pixel_spatial", enhance
+    /// Explicit factor-one experiment with the unmodified, factor-two Pixel IC adapter.
+    case enhancePixelSpatial = "enhance_pixel_spatial"
+    public var sameSize:Bool { self == .enhance || self == .enhancePixelSpatial }
+    public var usesPixelSpatialAdapter:Bool { self == .pixelSpatial || self == .enhancePixelSpatial }
+    public var sourceReferenceDownscaleFactor:Int? { sameSize ? 1 : self == .pixelSpatial ? 2 : nil }
+  }
   public enum SizePolicy: String, Codable, Sendable { case fitNearest = "fit_nearest_32", centerCrop = "center_crop_32", strict = "strict_32" }
   public struct Size: Sendable, Equatable {
     public let sourceWidth: Int, sourceHeight: Int, width: Int, height: Int
     public let cropLeft: Int, cropTop: Int, cropRight: Int, cropBottom: Int
-    public let resized: Bool
-    public var outputWidth: Int { width * 2 }
-    public var outputHeight: Int { height * 2 }
+    public let resized: Bool, outputScale: Int
+    public var outputWidth: Int { width * outputScale }
+    public var outputHeight: Int { height * outputScale }
   }
   public struct Chunk: Sendable, Equatable {
     public let startFrame: Int, endFrame: Int, paddedFrames: Int, reason: String
@@ -36,7 +43,10 @@ public struct MLXMovieUpscalePlan: Sendable {
     }
     self.mode = mode; self.frames = frames; self.fps = fps
     self.refinementStrength = refinementStrength
-    size = try Self.prepareSize(width: width, height: height, policy: sizePolicy)
+    // Enhancement is exactly one-to-one: an explicit fit/crop policy cannot
+    // silently change a source that does not already fit the encoder grid.
+    size = try Self.prepareSize(width: width, height: height,
+      policy: mode.sameSize ? .strict : sizePolicy, outputScale: mode.sameSize ? 1 : 2)
     paddedFrames = try Self.paddedFrameCount(frames)
     if maximumOutputFrameMegapixels > 0, outputFrameMegapixels > maximumOutputFrameMegapixels {
       throw LTXError.invalid("Movie upscale exceeds its explicit output frame-megapixel limit; this is a workload guard, not a memory estimate.")
@@ -46,23 +56,23 @@ public struct MLXMovieUpscalePlan: Sendable {
     guard frames > 0, frames <= Int.max - 8 else { throw LTXError.invalid("Invalid movie frame count.") }
     return 1 + ((frames - 1 + 7) / 8) * 8
   }
-  public static func prepareSize(width: Int, height: Int, policy: SizePolicy) throws -> Size {
-    guard width >= 32, height >= 32, width <= Int.max / 4, height <= Int.max / 4 else {
+  public static func prepareSize(width: Int, height: Int, policy: SizePolicy, outputScale: Int = 2) throws -> Size {
+    guard width >= 32, height >= 32, width <= Int.max / 4, height <= Int.max / 4, (1...2).contains(outputScale) else {
       throw LTXError.invalid("Movie input requires at least 32 pixels per axis and safe spatial arithmetic.")
     }
     if width % 32 == 0, height % 32 == 0 {
       return Size(sourceWidth: width, sourceHeight: height, width: width, height: height,
-        cropLeft: 0, cropTop: 0, cropRight: 0, cropBottom: 0, resized: false)
+        cropLeft: 0, cropTop: 0, cropRight: 0, cropBottom: 0, resized: false, outputScale: outputScale)
     }
     guard policy != .strict else { throw LTXError.invalid("Movie dimensions must be divisible by 32 under strict-grid policy.") }
     if policy == .fitNearest, let fitted = try nearestGrid(width: width, height: height) {
       return Size(sourceWidth: width, sourceHeight: height, width: fitted.0, height: fitted.1,
-        cropLeft: 0, cropTop: 0, cropRight: 0, cropBottom: 0, resized: true)
+        cropLeft: 0, cropTop: 0, cropRight: 0, cropBottom: 0, resized: true, outputScale: outputScale)
     }
     let w = width / 32 * 32, h = height / 32 * 32
     let left = (width - w) / 2, top = (height - h) / 2
     return Size(sourceWidth: width, sourceHeight: height, width: w, height: h,
-      cropLeft: left, cropTop: top, cropRight: width - w - left, cropBottom: height - h - top, resized: false)
+      cropLeft: left, cropTop: top, cropRight: width - w - left, cropBottom: height - h - top, resized: false, outputScale: outputScale)
   }
   private static func nearestGrid(width: Int, height: Int) throws -> (Int, Int)? {
     let low = max(32, Int(floor(Double(height) * 0.65 / 32)) * 32)

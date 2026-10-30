@@ -2,6 +2,7 @@ import AVFoundation
 import Darwin
 import Foundation
 import LTX25Engine
+import InferenceMedia
 
 /// Durable native chunks. The executor runs each missing chunk exactly once;
 /// only verified completed media are reused. Failure never publishes a partial
@@ -20,10 +21,11 @@ public enum MLXMovieChunkCoordinator {
   public struct Receipt:Codable,Sendable {
     public let version:Int,binding:Binding,index:Int,startFrame:Int,endFrame:Int,paddedFrames:Int,width:Int,height:Int
     public let fps:Double,videoSHA256:String
+    public let rgbSHA256:String?
   }
   public struct Completed:Sendable { public let video:URL,receipt:Receipt,reused:Bool }
   public static func execute(request:MLXMovieUpscaleRequest,chunks:[MLXMovieUpscalePlan.Chunk],binding:Binding,
-    directory:URL,progress:(String,Int,Int)throws->Void={ _,_,_ in },
+    directory:URL,ffmpeg:URL?=nil,progress:(String,Int,Int)throws->Void={ _,_,_ in },
     render:(MLXMovieUpscalePlan.Chunk,Int,URL) async throws -> Void) async throws -> [Completed] {
     guard binding.contractSHA256==request.contractSHA256,binding.sourceSHA256==request.source.sha256,
       binding.rgbSHA256==request.source.rgbSHA256,directory.isFileURL,
@@ -50,10 +52,11 @@ public enum MLXMovieChunkCoordinator {
     let lock=directory.appendingPathComponent(".execution.lock"),fd=Darwin.open(lock.path,O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0o600)
     guard fd>=0 else { throw LTXError.invalid("Another movie chunk execution owns this output, or an interrupted lock needs inspection.") }
     Darwin.close(fd);defer { try? fm.removeItem(at:lock) }
+    let filename=ffmpeg == nil ? "video.mp4" : "restored.mkv"
     var completed:[Completed]=[]
     for (index,chunk) in chunks.enumerated() {
       try checkSources()
-      let name=String(format:"chunk-%06d",index),output=directory.appendingPathComponent(name),video=output.appendingPathComponent("video.mp4")
+      let name=String(format:"chunk-%06d",index),output=directory.appendingPathComponent(name),video=output.appendingPathComponent(filename)
       let receiptURL=output.appendingPathComponent("chunk.json")
       if fm.fileExists(atPath:output.path) {
         guard request.resume else { throw LTXError.invalid("Movie chunk reuse requires explicit resume.") }
@@ -61,12 +64,12 @@ public enum MLXMovieChunkCoordinator {
         guard values.isDirectory==true,values.isSymbolicLink != true else { throw LTXError.invalid("Movie chunk escapes its output directory.") }
         let bytes=try MLXMovieFiles.metadata(receiptURL,maximumBytes:65536)
         let receipt=try JSONDecoder().decode(Receipt.self,from:bytes)
-        guard receipt.version==1,receipt.binding==binding,receipt.index==index,
+        guard receipt.version==(ffmpeg == nil ? 1 : 2),receipt.binding==binding,receipt.index==index,
           receipt.startFrame==chunk.startFrame,receipt.endFrame==chunk.endFrame,receipt.paddedFrames==chunk.paddedFrames,
           receipt.width==request.plan.size.outputWidth,receipt.height==request.plan.size.outputHeight,receipt.fps==request.plan.fps else {
           throw LTXError.invalid("Completed movie chunk belongs to a different source, renderer or generation recipe.")
         }
-        try await validate(video,frames:chunk.frames,width:receipt.width,height:receipt.height,fps:receipt.fps,sha256:receipt.videoSHA256)
+        try await validate(video,frames:chunk.frames,width:receipt.width,height:receipt.height,fps:receipt.fps,sha256:receipt.videoSHA256,ffmpeg:ffmpeg,rgbSHA256:receipt.rgbSHA256)
         completed.append(Completed(video:video,receipt:receipt,reused:true))
         try progress("movie_chunk_reused",index+1,chunks.count)
         continue
@@ -76,11 +79,15 @@ public enum MLXMovieChunkCoordinator {
       do {
         try progress("movie_chunk_started",index,chunks.count)
         try await render(chunk,index,staging);try Task.checkCancellation()
-        let stagedVideo=staging.appendingPathComponent("video.mp4"),sha=try MLXMovieFiles.digest(stagedVideo)
-        try await validate(stagedVideo,frames:chunk.frames,width:request.plan.size.outputWidth,height:request.plan.size.outputHeight,fps:request.plan.fps,sha256:sha)
+        let stagedVideo=staging.appendingPathComponent(filename),sha=try MLXMovieFiles.digest(stagedVideo)
+        let rgbSHA:String?
+        if ffmpeg != nil {
+          rgbSHA=try JSONDecoder().decode(LosslessVideoVerifier.Proof.self,from:MLXMovieFiles.metadata(staging.appendingPathComponent("lossless.json"),maximumBytes:4096)).rgbSHA256
+        } else { rgbSHA=nil }
+        try await validate(stagedVideo,frames:chunk.frames,width:request.plan.size.outputWidth,height:request.plan.size.outputHeight,fps:request.plan.fps,sha256:sha,ffmpeg:ffmpeg,rgbSHA256:rgbSHA)
         try checkSources()
-        let receipt=Receipt(version:1,binding:binding,index:index,startFrame:chunk.startFrame,endFrame:chunk.endFrame,
-          paddedFrames:chunk.paddedFrames,width:request.plan.size.outputWidth,height:request.plan.size.outputHeight,fps:request.plan.fps,videoSHA256:sha)
+        let receipt=Receipt(version:ffmpeg == nil ? 1 : 2,binding:binding,index:index,startFrame:chunk.startFrame,endFrame:chunk.endFrame,
+          paddedFrames:chunk.paddedFrames,width:request.plan.size.outputWidth,height:request.plan.size.outputHeight,fps:request.plan.fps,videoSHA256:sha,rgbSHA256:rgbSHA)
         let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
         try encoder.encode(receipt).write(to:staging.appendingPathComponent("chunk.json"),options:.withoutOverwriting)
         try fm.moveItem(at:staging,to:output)
@@ -91,9 +98,14 @@ public enum MLXMovieChunkCoordinator {
     try checkSources()
     return completed
   }
-  private static func validate(_ url:URL,frames:Int,width:Int,height:Int,fps:Double,sha256:String) async throws {
+  private static func validate(_ url:URL,frames:Int,width:Int,height:Int,fps:Double,sha256:String,ffmpeg:URL?,rgbSHA256:String?) async throws {
     guard MLXMovieUpscaleRequest.validSHA(sha256),try MLXMovieFiles.digest(url)==sha256 else {
       throw LTXError.invalid("Completed movie chunk bytes changed.")
+    }
+    if let ffmpeg {
+      guard let rgbSHA256 else { throw LTXError.invalid("Lossless chunk has no decoder RGB proof.") }
+      _ = try LosslessVideoVerifier.verify(ffmpeg:ffmpeg,video:url,width:width,height:height,frames:frames,fps:fps,expectedRGBSHA256:rgbSHA256)
+      return
     }
     let clock=try await MLXMovieFiles.videoClock(url,maximumFrames:frames)
     guard clock.width==width,clock.height==height,clock.times.count==frames,abs(clock.fps-fps)<0.001,

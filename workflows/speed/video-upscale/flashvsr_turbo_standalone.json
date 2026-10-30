@@ -1,0 +1,108 @@
+{
+  "last_node_id": 2,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "WeeToddFlashVSRUpscale",
+      "pos": [
+        60,
+        80
+      ],
+      "size": [
+        640,
+        540
+      ],
+      "flags": {
+      },
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+
+      ],
+      "outputs": [
+        {
+          "name": "video_path",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 0
+        },
+        {
+          "name": "upscale_info",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WeeToddFlashVSRUpscale"
+      },
+      "widgets_values": [
+        "",
+        "tiny",
+        1280,
+        720,
+        0,
+        "fixed",
+        true,
+        4,
+        "wavelet",
+        "",
+        "",
+        "",
+        "WeeTodd/FlashVSR",
+        "",
+        "",
+        "swiftMLX",
+        "turbo",
+        ""
+      ]
+    },
+    {
+      "id": 2,
+      "type": "MarkdownNote",
+      "pos": [
+        760,
+        80
+      ],
+      "size": [
+        580,
+        360
+      ],
+      "flags": {
+      },
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+
+      ],
+      "outputs": [
+
+      ],
+      "properties": {
+      },
+      "title": "Setup and model downloads",
+      "widgets_values": [
+        "# Native FlashVSR+ standalone setup\n\nConnect WeeToddCLI, existing FFmpeg/FFprobe and the source movie. Select Swift/MLX, Turbo or Base, and Tiny or Full Wan VAE. The vpipe field can remain empty for native execution. Historical API prompts without a backend retain legacy vpipe selection.\n\nUse Studio’s Model setup or `WeeToddCLI models download` to acquire checksum-pinned components into the shared AI model library. Compatible installed files are reused. Setup, archive conversion and inference use Swift/MLX; no Python model environment is required.\n\nThis portable workflow needs local paths before queueing. Source FPS/audio and exact target dimensions are preserved. See studio/FLASHVSR_SETTINGS.md.\n\nOfficial model source: https://huggingface.co/ruchangyao/FlashVSR_plus\n\nQueue the workflow only after connecting local paths. ComfyUI/models/ may link to the shared model library; keep weights out of project checkouts."
+      ]
+    }
+  ],
+  "links": [
+
+  ],
+  "groups": [
+
+  ],
+  "config": {
+  },
+  "extra": {
+    "ds": {
+      "scale": 1,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  },
+  "version": 0.4
+}

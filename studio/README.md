@@ -1283,8 +1283,8 @@ hardlinked on the same volume or linked across volumes; keep the original files 
 Cancellation preserves partial downloads without publishing an incomplete package. Progress
 and **Cancel** appear in the setup window. The native path uses a Studio Keychain token or
 `HF_TOKEN`; it never writes the token into download state, provenance or logs.
-The merged native catalog has 25 pinned packages, including FastH3 Omni, the duration head, raw Dev transformer,
-distilled refinement adapter, one-step Diffusion VAE and MSR V2 adapter.
+The merged native catalog includes pinned FastH3 Omni, duration head, raw Dev transformer,
+distilled refinement adapter, one-step Diffusion VAE and MSR V2 packages, plus native H3 regeneration and FlashVSR+ components.
 It also includes direct H3 transformer/support, Qwen, video VAE, folded audio VAE and tokenizer, plus
 supported task adapters. This field coverage does not establish every checkpoint/task combination;
 source terms, gating and structural admission still apply to every file. H3 image/endpoint tasks
@@ -4111,3 +4111,21 @@ queue resumed in 0.022 seconds. Native scene PCM matched all 192,000 original st
 after the mixer correction, the final AAC export had zero measured sample offset on both channels.
 These are one local qualification run, not a general throughput guarantee. Rendering quality and
 musical gesture/lip synchronization remain model-dependent.
+
+## Native H3 and FlashVSR+ upscalers
+
+Open **Upscale Video** in the media library. Select **FlashVSR+** for Turbo/Base with Tiny/Full Wan decoding, or **H3 Regenerate** for its fixed three-step refinement and Released/Fast H3 decoder. The app's bundled Swift/MLX workers perform inference, native model preparation and conversion. Connect the shared model library through **Model setup**, reuse installed components, and acquire only missing pinned files. FFmpeg/FFprobe provide media transport. No Python model runtime or vpipe is required for native upscaling.
+
+FlashVSR preserves constant source cadence, including rational FPS. H3 accepts 24 FPS and has separate publisher preprocessing, source-precision and memory limits. Original audio remains independent of model-generated/encoded silence. Both tools retain the original movie, recorded settings and a separate result. Use **Check setup** to validate source, selected components, geometry and resources before inference.
+
+Read the [FlashVSR+ setup/settings reference](FLASHVSR_SETTINGS.md) and [H3 Regenerate reference](H3_REGENERATE_SETTINGS.md). Functional model execution, visual quality and hardware/shape qualification are recorded separately; neither a successful process nor a decoder speed label proves every workload.
+
+In a clip inspector, enable **Upscale after generation** and select the desired model or explicit ordered combination. Enabling starts with one native FlashVSR Turbo/Tiny stage. H3 → FlashVSR and Pixel/CQ → FlashVSR are deliberate choices. **Upscale accepted take** retries from the original without source generation. Completed-stage caches bind input RGB/clock, settings, model/importer/layout and worker identities. A changed suffix reuses a verified prefix; an interrupted stateful stage restarts. Version 2 sequences use lossless interstage video and preserve the original soundtrack once. Stale background results cannot replace a changed document or clip.
+
+Native H3/LTX 2.5 exports use a v3 job envelope for these sequences and keep v1/v2 readers. Manual generation, Director acceptance and CLI processing reuse the same settings/executor. Interactive Draw Things/LTX 2.3 takes share the processor; unsupported legacy exporters reject pending processing explicitly. Historical vpipe jobs retain their recorded backend and limits.
+
+## Native Pixel Spatial + CQ recipe step
+
+Select **Native Pixel Spatial + CQ · 2×** for native-only enhancement, or choose **Native Pixel + CQ → FlashVSR+ Turbo** to append Flash. Pixel Spatial strength defaults to 1.0 and CQ V2 to 0.5, independently editable; advanced refinement defaults to 0.75. The bundled LTX worker applies both adapters in the existing three-evaluation movie pass.
+
+The native intermediate is exactly 2× the admitted source grid. New sequences receive verified lossless pixels; Flash then uses its explicit delivery target. Original cadence/audio, editorial ranges, prior takes and independent generation checkpoints are retained. Read the [native settings/retry reference](NATIVE_PIXEL_CQ_SETTINGS.md).

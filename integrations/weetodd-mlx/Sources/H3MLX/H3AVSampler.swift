@@ -76,4 +76,31 @@ public enum H3AVSampler {
     }
     return Result(video: video, audio: audio)
   }
+  /// Publisher regeneration fixes encoded silence at audio sigma zero and
+  /// ignores predicted audio. Original source audio is an independent export.
+  public static func runRegenerate<P:H3VelocityPredictor>(predictor:P,schedule:H3RegenerateSchedule,
+    source:MLXArray,noise:MLXArray,encodedSilence:MLXArray,
+    progress:(Int,Int)->Void={_,_ in},blockProgress:(Int,Int,Int)->Void={_,_,_ in}) throws -> Result {
+    let layout=predictor.layout
+    guard layout.conditionVideoRows == 0,
+      source.shape == [1,layout.tags.count-layout.videoStart,96],
+      encodedSilence.shape == [1,layout.videoStart-layout.audioStart,32],encodedSilence.dtype == .bfloat16,
+      all(isFinite(encodedSilence)).item(Bool.self) else {
+      throw H3CheckpointError.invalid("Regeneration requires complete video rows and fixed BF16 encoded-silence context.")
+    }
+    let rows=try H3RowSchedule(regenerate:layout,schedule:schedule)
+    var video=try schedule.initialize(source:source,noise:noise)
+    for index in 0..<schedule.evaluations {
+      try Task.checkCancellation()
+      let velocity=try predictor.predict(videoLatents:video.asType(.bfloat16),audioLatents:encodedSilence,
+        timestepIndices:rows.indicesByStep[index],progress:{ blockProgress(index+1,$0,$1) })
+      guard velocity.video.shape == video.shape,velocity.audio.shape == encodedSilence.shape else {
+        throw H3CheckpointError.invalid("Regenerate predictor returned incompatible AV shapes.")
+      }
+      video=try schedule.advance(sample:video,velocity:velocity.video,index:index)
+      eval(video);progress(index+1,schedule.evaluations);try Task.checkCancellation()
+    }
+    return Result(video:video,audio:encodedSilence)
+  }
+
 }

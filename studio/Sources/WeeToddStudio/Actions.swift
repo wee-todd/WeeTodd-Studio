@@ -337,6 +337,9 @@ enum ClipState: String {
           try await exportNativeHeadlessJob(body: body, to: url, clipOnly: clipOnly)
           notice = "Exported native headless job. Run it with WeeToddCLI --job; Python is not required."
         } else {
+          guard !(clipOnly ? project.clips.filter { $0.id == clipID } : project.clips).contains(where: { $0.videoProcessing != nil }) else {
+            throw StudioError.invalid("Upscale recipe export currently requires native H3/LTX 2.5 or imported takes. Other engines can generate and upscale in Studio; the legacy exporter cannot execute this processing step.")
+          }
           _ = try await bridge.invoke("export-job", runtime: runtime, payload: body, output: url)
           notice = "Exported resumable headless job. Run it with render_headless.py --job."
         }

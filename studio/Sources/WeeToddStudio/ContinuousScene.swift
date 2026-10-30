@@ -241,6 +241,11 @@ struct PendingContinuousSceneTake: Identifiable {
       changed()
       pendingContinuousScene = nil; showContinuousSceneReview = false; showPrompt = false
       refreshPreview()
+      if let first = take.clips.first, let current = project.clips.first(where: { $0.id == first.id }) {
+        let destination = videoProcessingDestination(for: current)
+        let plan = try await preflightClipVideoProcessing(current)
+        try await processAcceptedClipVideo(destination, plan: plan)
+      }
       notice = "Accepted the complete scene. All \(take.clips.count) shots use the same movie; prior takes remain in Versions."
     } catch { self.error = error.localizedDescription }
   }

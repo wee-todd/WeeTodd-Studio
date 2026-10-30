@@ -192,6 +192,7 @@ public enum LTXAdapterCompatibility {
   }
 
   public static func normalize(_ source: String) -> String? {
+    if source.hasPrefix("lora_unet_") { return flattenedTargets[source] }
     var key = source
     let prefixes = ["base_model.model.model.diffusion_model.", "base_model.model.diffusion_model.",
       "base_model.model.transformer.", "base_model.model.", "model.diffusion_model.",
@@ -208,6 +209,29 @@ public enum LTXAdapterCompatibility {
     key.removeLast()
     return key
   }
+
+  /// Flattened names retain underscores inside projection names. Resolve only
+  /// aliases of known destinations rather than guessing underscore boundaries.
+  private static let flattenedTargets: [String:String] = {
+    var result:[String:String]=[:], ambiguous:Set<String>=[]
+    for target in targetShapes.keys {
+      var exported=target
+      for (before,after) in [(".to_out", ".to_out.0"),
+        (".audio_ff.proj_in", ".audio_ff.net.0.proj"),
+        (".audio_ff.proj_out", ".audio_ff.net.2"),
+        (".ff.proj_in", ".ff.net.0.proj"), (".ff.proj_out", ".ff.net.2"),
+        (".linear1", ".linear_1"), (".linear2", ".linear_2")] {
+        exported=exported.replacingOccurrences(of:before,with:after)
+      }
+      for name in [target,exported] {
+        let alias="lora_unet_"+name.replacingOccurrences(of:".",with:"_")
+        if let prior=result[alias],prior != target { ambiguous.insert(alias) }
+        else { result[alias]=target }
+      }
+    }
+    for alias in ambiguous { result.removeValue(forKey:alias) }
+    return result
+  }()
 
   public static let targetShapes: [String: [UInt64]] = {
     var result = blockTargetShapes

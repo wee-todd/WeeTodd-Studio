@@ -2,6 +2,32 @@ import AVFoundation
 import XCTest
 @testable import StudioCore
 final class NativeLTXMoviePreparationTests:XCTestCase {
+  func testCQOnlyEnhancementKeepsSizeClockAndSeparatesDenoiseFromAmount() async throws {
+    let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+    defer { try? FileManager.default.removeItem(at:root) }
+    let backend=try VideoProcessingFixture(root:root),source=try backend.source(fps:25)
+    var settings=LTX25MovieUpscaleSettings();settings.experimentalEnabled=true
+    settings.mode = try XCTUnwrap(LTX25MovieUpscaleSettings.Mode(rawValue:"enhance"))
+    settings.refinementStrength=0.5;settings.sizePolicy = .strict
+    let components=["video_checkpoint":"/models/video.safetensors","gemma_root":"/models/gemma","connector_checkpoint":"/models/fixed.safetensors","transformer_root":"/models/pages","audio_checkpoint":"/models/audio.safetensors"]
+    let result=try await NativeLTXMoviePreparation.prepare(source:URL(fileURLWithPath:source.path),settings:settings,
+      components:components,prompt:"Preserve the source.",seed:1,ffmpeg:try ffmpeg(),
+      destination:root.appendingPathComponent("prepared"),outputDirectory:root.appendingPathComponent("render"),
+      refinementLoRAs:[.init(path:"/models/cq.safetensors",strength:1)])
+    let recipe=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:result["recipePath"] as! String))) as? [String:Any])
+    let body=try XCTUnwrap(recipe["movie_upscale"] as? [String:Any]),frozen=try XCTUnwrap(body["source"] as? [String:Any])
+    let report=try XCTUnwrap(result["report"] as? [String:Any])
+    XCTAssertEqual(body["mode"] as? String,"enhance")
+    XCTAssertEqual(body["refinement_strength"] as? Double,0.5)
+    XCTAssertEqual((body["refinement_loras"] as? [[String:Any]])?.first?["strength"] as? Double,1)
+    XCTAssertNil((body["components"] as? [String:String])?["spatial_upscaler_checkpoint"])
+    XCTAssertNil((body["components"] as? [String:String])?["pixel_spatial_adapter"])
+    XCTAssertEqual(report["width"] as? Int,frozen["width"] as? Int)
+    XCTAssertEqual(report["height"] as? Int,frozen["height"] as? Int)
+    XCTAssertEqual(frozen["fps"] as? Double,25)
+    XCTAssertEqual(body["audio_policy"] as? String,"source")
+  }
   func testMovieUpscaleRejectsH3PrecisionAndWeightCacheBeforeMedia() throws {
     var clip = Clip(engine: .ltx25)
     var settings = LTX25MovieUpscaleSettings(); settings.experimentalEnabled = true
@@ -70,6 +96,29 @@ final class NativeLTXMoviePreparationTests:XCTestCase {
     let descriptor=try JSONDecoder().decode(GenerationDescriptor.self,from:JSONSerialization.data(withJSONObject:report["generation"]!))
     XCTAssertEqual(descriptor.controls.evaluations,3);XCTAssertFalse(descriptor.controls.stepsEditable)
     XCTAssertFalse(fm.fileExists(atPath:prepared.appendingPathComponent("audio.wav").path))
+  }
+  func testPixelCQWirePreserves25FPSAndOriginalAudioPolicy() async throws {
+    let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+    defer { try? FileManager.default.removeItem(at:root) }
+    let backend=try VideoProcessingFixture(root:root),source=try backend.source(fps:25)
+    var settings=LTX25MovieUpscaleSettings();settings.experimentalEnabled=true;settings.mode = .pixelSpatial
+    settings.refinementStrength=0.75;settings.sizePolicy = .strict
+    let components=["video_checkpoint":"/models/video.safetensors","spatial_upscaler_checkpoint":"/models/spatial.safetensors","gemma_root":"/models/gemma","connector_checkpoint":"/models/fixed.safetensors","transformer_root":"/models/pages","audio_checkpoint":"/models/audio.safetensors","pixel_spatial_adapter":"/models/pixel.safetensors"]
+    let extra=NativeLTXMoviePreparation.RefinementLoRA(path:"/models/cq.safetensors",strength:0.5)
+    let result=try await NativeLTXMoviePreparation.prepare(source:URL(fileURLWithPath:source.path),settings:settings,
+      components:components,prompt:"Preserve the source.",seed:1,ffmpeg:try ffmpeg(),
+      destination:root.appendingPathComponent("prepared"),outputDirectory:root.appendingPathComponent("render"),refinementLoRAs:[extra])
+    let recipe=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:result["recipePath"] as! String))) as? [String:Any])
+    let body=try XCTUnwrap(recipe["movie_upscale"] as? [String:Any])
+    XCTAssertEqual((body["source"] as? [String:Any])?["fps"] as? Double,25)
+    XCTAssertEqual((body["source"] as? [String:Any])?["frames"] as? Int,25)
+    XCTAssertEqual(body["audio_policy"] as? String,"source")
+    XCTAssertEqual(body["pixel_strength"] as? Double,1)
+    let adapters=try XCTUnwrap(body["refinement_loras"] as? [[String:Any]])
+    XCTAssertEqual(adapters.count,1);XCTAssertEqual(adapters[0]["strength"] as? Double,0.5)
+    XCTAssertEqual(adapters[0]["path"] as? String,"/models/cq.safetensors")
+    XCTAssertEqual(adapters[0]["enabled"] as? Bool,true)
   }
   func testGridMatchesFrozenNativePreparationAndExperimentalRejectsBeforeSourceIO() async throws {
     let grid=try NativeLTXMoviePreparation.grid(width:1280,height:720,policy:.fitNearest)

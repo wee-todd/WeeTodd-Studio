@@ -2,7 +2,7 @@
 import PackageDescription
 let package = Package(
   name: "WeeToddMLX", platforms: [.macOS(.v14)],
-  products: [.executable(name: "WeeToddH3MLXWorker", targets: ["WeeToddH3MLXWorker"]), .executable(name: "WeeToddMLXDecodeProbe", targets: ["WeeToddMLXDecodeProbe"]), .executable(name: "WeeToddMLXPipelineProbe", targets: ["WeeToddMLXPipelineProbe"]), .executable(name: "WeeToddMLXDenoiserProbe", targets: ["WeeToddMLXDenoiserProbe"]), .executable(name: "WeeToddMLXStackProbe", targets: ["WeeToddMLXStackProbe"]), .executable(name: "WeeToddMLXBlockProbe", targets: ["WeeToddMLXBlockProbe"]), .library(name: "LTX25MLX", targets: ["LTX25MLX"]), .library(name: "H3MLX", targets: ["H3MLX"])],
+  products: [.executable(name: "WeeToddFlashVSRWorker", targets: ["WeeToddFlashVSRWorker"]), .executable(name: "WeeToddH3MLXWorker", targets: ["WeeToddH3MLXWorker"]), .executable(name: "WeeToddMLXDecodeProbe", targets: ["WeeToddMLXDecodeProbe"]), .executable(name: "WeeToddMLXPipelineProbe", targets: ["WeeToddMLXPipelineProbe"]), .executable(name: "WeeToddMLXDenoiserProbe", targets: ["WeeToddMLXDenoiserProbe"]), .executable(name: "WeeToddMLXStackProbe", targets: ["WeeToddMLXStackProbe"]), .executable(name: "WeeToddMLXBlockProbe", targets: ["WeeToddMLXBlockProbe"]), .library(name: "LTX25MLX", targets: ["LTX25MLX"]), .library(name: "H3MLX", targets: ["H3MLX"]), .library(name: "FlashVSRMLX", targets: ["FlashVSRMLX"])],
   dependencies: [
     .package(path: "../weetodd-inference"),
     .package(url: "https://github.com/ml-explore/mlx-swift.git", revision: "901941965d82e4a216d4d117231d847d194c563d"),
@@ -11,6 +11,11 @@ let package = Package(
     .executableTarget(name: "WeeToddH3MLXWorker", dependencies: ["H3MLX",
       .product(name: "InferenceContracts", package: "weetodd-inference"),
       .product(name: "InferenceMedia", package: "weetodd-inference"),
+      .product(name: "MLX", package: "mlx-swift"),
+      .product(name: "MLXRandom", package: "mlx-swift")],
+      swiftSettings: [.unsafeFlags(["-parse-as-library"])]),
+    .executableTarget(name: "WeeToddFlashVSRWorker", dependencies: ["FlashVSRMLX",
+      .product(name: "InferenceContracts", package: "weetodd-inference"),
       .product(name: "MLX", package: "mlx-swift")],
       swiftSettings: [.unsafeFlags(["-parse-as-library"])]),
     .executableTarget(name: "WeeToddLTXWorker", dependencies: ["LTX25MLX",
@@ -36,6 +41,13 @@ let package = Package(
       .product(name: "MLX", package: "mlx-swift"),
       .product(name: "MLXRandom", package: "mlx-swift"),
       .product(name: "MLXNN", package: "mlx-swift")]),
+    .target(name: "FlashVSRMLX", dependencies: [
+      .product(name: "TensorIO", package: "weetodd-inference"),
+      .product(name: "InferenceContracts", package: "weetodd-inference"),
+      .product(name: "MLX", package: "mlx-swift"),
+      .product(name: "MLXNN", package: "mlx-swift"),
+      .product(name: "MLXRandom", package: "mlx-swift")]),
+    .testTarget(name: "FlashVSRMLXTests", dependencies: ["FlashVSRMLX"]),
     .testTarget(name: "H3MLXTests", dependencies: ["H3MLX"], resources: [.copy("Fixtures")]),
     .target(name: "InferenceTestSupport", path: "Tests/Support"),
     .testTarget(name: "LTX25MLXTests", dependencies: ["LTX25MLX", "InferenceTestSupport"], resources: [.copy("Fixtures")]),

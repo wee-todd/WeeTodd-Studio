@@ -725,3 +725,13 @@ soft word-interior cut penalties. `analysis_vocal_mode` defaults to `mixed`; opt
 with neural analysis and the optional UMX-HQ model to feed estimated vocals to English word
 evidence. Beats and the soundtrack retain the original mix. Musical sections and sung timing
 remain provisional and need review. Earlier definitions and `music.analyze@1`/`@2` remain executable.
+
+## Native video finishing
+
+Accepted generated takes can use the shared native processing recipe: FlashVSR+ Turbo/Base with Tiny/Full Wan, H3 Regenerate, native Pixel/CQ, or an explicitly selected ordered combination. Studio's ordinary clip controls configure these stages without a JSON editor. Enabling finishing starts with one FlashVSR stage; H3→Flash and Pixel/CQ→Flash are deliberate selections.
+
+Version 2 sequences share the same typed settings/executor across manual generation, Director acceptance, CLI and native v3 job export. Models stay isolated behind their native adapters. Interstage video uses verified lossless RGB with the original source clock; H3 latents never enter FlashVSR. Original audio and editorial ranges remain independent of model stages. H3 requires a 24 FPS source; Flash preserves other admitted constant rates. Source/frame-rate conversion is explicit.
+
+All selected stages pass setup/resource admission before generation. The original take is accepted first. Failure/cancellation leaves it available, and **Upscale accepted take** resumes processing without another generation. Completed stages have independent identities, so suffix/codec changes reuse a verified prefix. An interrupted stateful stage restarts, and changed source/model/worker identities invalidate affected results. A stale document/clip revision cannot receive a background result.
+
+Native setup, archive preparation and inference use Swift/MLX and require no Python model environment. See the [FlashVSR+ guide](../../studio/FLASHVSR_SETTINGS.md), [H3 guide](../../studio/H3_REGENERATE_SETTINGS.md), and [Pixel/CQ guide](../../studio/NATIVE_PIXEL_CQ_SETTINGS.md) for component selection, fixed schedules, memory and qualification limits. Older saved workflows/jobs retain their recorded backend and supported readers.

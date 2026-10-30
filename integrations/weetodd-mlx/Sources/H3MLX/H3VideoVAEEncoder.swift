@@ -13,6 +13,47 @@ public enum H3VideoVAEEncoder {
   private static let temporalFactors = [1, 2, 2, 1, 1, 1]
   private static let spatialFactors = [2, 2, 2, 2, 1, 1]
 
+  static var encoderShapes:[String:[Int]] {
+    var result:[String:[Int]]=[:]
+    func conv(_ name:String,_ input:Int,_ output:Int,_ kernel:Int) {
+      result[name+".weight"]=[output,kernel,kernel,kernel,input];result[name+".bias"]=[output]
+    }
+    func norm(_ name:String,_ count:Int) { result[name+".weight"]=[count];result[name+".bias"]=[count] }
+    conv("encoder.conv_in",3,128,3)
+    for index in channels.indices {
+      let input=index == 0 ? channels[0]:channels[index-1],out=channels[index]
+      for layer in 0..<2 {
+        let source=layer == 0 ? input:out,p="encoder.down.\(index).block.\(layer)"
+        norm(p+".norm1",source);conv(p+".conv1",source,out,3)
+        norm(p+".norm2",out);conv(p+".conv2",out,out,3)
+        if source != out { conv(p+".nin_shortcut",source,out,1) }
+      }
+      if temporalFactors[index]*spatialFactors[index] > 1 { conv("encoder.down.\(index).downsample.conv",out,out,3) }
+    }
+    norm("encoder.norm_out",1024);conv("encoder.conv_out",1024,48,3);conv("quant_conv",48,48,1)
+    return result
+  }
+
+  /// Explicit F32 sampled-posterior preparation. The injected noise, source
+  /// component identity and full-frame spatial normalization must be recorded;
+  /// this precision profile alone is not a CUDA/tiled-reference parity claim.
+  public static func encodePublisherVideoRows(checkpointURL:URL,rgb8:[UInt8],frameCount:Int,width:Int,height:Int,
+    posteriorNoise:MLXArray,progress:(Int,Int)->Void={_,_ in}) throws -> MLXArray {
+    guard (5...362).contains(frameCount) else { throw H3CheckpointError.invalid("Publisher source frame count is out of bounds.") }
+    let latentFrames=(frameCount-5)/17*5+2
+    guard (frameCount-5).isMultiple(of:17),
+      (32...2048).contains(width),(32...2048).contains(height),width.isMultiple(of:32),height.isMultiple(of:32),
+      width*height <= H3Geometry.maximumCanvasPixels,
+      posteriorNoise.shape == [1,latentFrames,height/16,width/16,24],posteriorNoise.dtype == .float32,
+      all(isFinite(posteriorNoise)).item(Bool.self) else {
+      throw H3CheckpointError.invalid("Publisher source encoder requires bounded exact frames/grid and explicit posterior noise.")
+    }
+    let layout=try H3PublisherEncoderLayout(url:checkpointURL)
+    let latents=try encodeFrames(checkpointURL:checkpointURL,rgb8:rgb8,frameCount:frameCount,width:width,height:height,
+      samplePosterior:true,progress:progress,publisherFP32:true,posteriorNoise:posteriorNoise)
+    return try H3LatentCodec.videoEncoderRows(latents:latents,mean:layout.mean,standardDeviation:layout.standardDeviation)
+  }
+
   /// Validate all spatial-encoder tensors from the safetensors directory
   /// before any weighted Qwen, VAE or transformer stage begins.
   public static func preflight(checkpointURL: URL) throws {
@@ -93,7 +134,8 @@ public enum H3VideoVAEEncoder {
     samplePosterior: Bool,
     progress: (Int, Int) -> Void = { _, _ in },
     releaseTemporalConvolutionTerms: Bool = false,
-    maximumPixels: Int = H3Geometry.maximumCanvasPixels) throws -> MLXArray {
+    maximumPixels: Int = H3Geometry.maximumCanvasPixels,
+    publisherFP32:Bool=false,posteriorNoise:MLXArray?=nil) throws -> MLXArray {
     guard checkpointURL.isFileURL,
       (32...2048).contains(width), (32...2048).contains(height),
       width * height <= maximumPixels,
@@ -102,18 +144,19 @@ public enum H3VideoVAEEncoder {
       rgb8.count == frameCount * width * height * 3 else {
       throw H3CheckpointError.invalid("H3 video encoder requires bounded 16-pixel RGB geometry.")
     }
-    try H3VideoVAELayout(url: checkpointURL).validateVideoUse()
+    if publisherFP32 { _ = try H3PublisherEncoderLayout(url:checkpointURL) }
+    else { try H3VideoVAELayout(url:checkpointURL).validateVideoUse() }
     let file = try SafeTensorFile(url: checkpointURL)
-    try validateEncoderHeader(file)
+    try validateEncoderHeader(file,dtype:publisherFP32 ? "F32":"F16")
     try Task.checkCancellation()
 
     func read(_ name: String, shape: [Int]) throws -> MLXArray {
-      guard let record = file.tensors[name], record.dtype == "F16",
+      guard let record = file.tensors[name], record.dtype == (publisherFP32 ? "F32":"F16"),
         record.shape == shape.map(UInt64.init) else {
         throw H3CheckpointError.invalid("Missing H3 video encoder tensor: \(name)")
       }
       let value = try file.withTensorBytes(named: name) { bytes in
-        MLXArray(bytes, shape, type: Float16.self)
+        publisherFP32 ? MLXArray(bytes,shape,type:Float.self):MLXArray(bytes, shape, type: Float16.self)
       }
       eval(value)
       return value
@@ -159,6 +202,11 @@ public enum H3VideoVAEEncoder {
           .map { Float($0) / 255 })
       }
       let pixels = MLXArray(floats, [1, count, height, width, 3])
+      if publisherFP32 {
+        let value=try H3PublisherEncoderOps.clip((pixels-mean)/std,read:{ try read($0,shape:$1) })
+        guard value.shape == [1,5,height/16,width/16,48] else { throw H3CheckpointError.invalid("Publisher source encoder produced wrong moments.") }
+        moments.append(value);eval(value);progress(clipIndex+1,clipCount);continue
+      }
       var value = ((pixels - mean) / std).asType(.float16)
       value = try conv(value, name: "encoder.conv_in", out: channels[0],
         kernel: 3, spatialPadding: 1, temporalPadding: 2)
@@ -207,7 +255,11 @@ public enum H3VideoVAEEncoder {
     let latentMean = joined[0..<1, 0..<latentFrames, 0..<(height / 16),
       0..<(width / 16), 0..<24].asType(.float32)
     let latent: MLXArray
-    if samplePosterior {
+    if publisherFP32 {
+      guard let posteriorNoise else { throw H3CheckpointError.invalid("Publisher encoder cannot infer posterior noise from a seed.") }
+      latent=try H3PublisherEncoderOps.posterior(mean:latentMean,
+        logVariance:joined[0..<1,0..<latentFrames,0..<(height/16),0..<(width/16),24..<48].asType(.float32),noise:posteriorNoise)
+    } else if samplePosterior {
       let logVariance = clip(joined[0..<1, 0..<latentFrames, 0..<(height / 16),
         0..<(width / 16), 24..<48].asType(.float32), min: -30, max: 20)
       let deviation = exp(0.5 * logVariance)
@@ -248,9 +300,9 @@ public enum H3VideoVAEEncoder {
     return result
   }
 
-  private static func validateEncoderHeader(_ file: SafeTensorFile) throws {
+  private static func validateEncoderHeader(_ file: SafeTensorFile,dtype:String="F16") throws {
     func require(_ name: String, _ shape: [Int]) throws {
-      guard let record = file.tensors[name], record.dtype == "F16",
+      guard let record = file.tensors[name], record.dtype == dtype,
         record.shape == shape.map(UInt64.init) else {
         throw H3CheckpointError.invalid("Missing H3 video encoder tensor: \(name)")
       }

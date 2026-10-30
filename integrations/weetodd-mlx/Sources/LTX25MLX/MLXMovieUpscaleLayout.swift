@@ -2,15 +2,16 @@ import Foundation
 import MLX
 import LTX25Engine
 
-/// One full-resolution movie canvas, optional complete half-resolution Pixel
-/// guide, then the true visible last image. There are no generated slots.
+/// One movie canvas, an optional complete source guide at the admitted spatial
+/// scale, then the true visible last image. There are no generated slots.
 public struct MLXMovieUpscaleLayout: Sendable {
   public let geometry: AVGeometry, sourceGeometry: AVGeometry
   public let visibleFrames: Int, pixelReference: Bool
+  public let sourceReferenceScale: Int?
   public let firstStrength: Float?, lastStrength: Float?
   public let positions: [Float], groupRows: [Int], mask: [Float], attentionTemplates: [Float]
   public var frameTokens: Int { geometry.latentHeight * geometry.latentWidth }
-  public var referenceTokens: Int { pixelReference ? sourceGeometry.videoTokens : 0 }
+  public var referenceTokens: Int { sourceReferenceScale == nil ? 0 : sourceGeometry.videoTokens }
   public var endpointTokens: Int { lastStrength == nil ? 0 : frameTokens }
   public var videoTokens: Int { geometry.videoTokens + referenceTokens + endpointTokens }
   public init(plan: MLXMovieUpscalePlan, firstStrength: Float?, lastStrength: Float?) throws {
@@ -23,16 +24,18 @@ public struct MLXMovieUpscaleLayout: Sendable {
       frames:plan.paddedFrames,fps:plan.fps)
     sourceGeometry = try AVGeometry(width:plan.size.width,height:plan.size.height,
       frames:plan.paddedFrames,fps:plan.fps)
-    visibleFrames=plan.frames; pixelReference=plan.mode == .pixelSpatial
+    visibleFrames=plan.frames; pixelReference=plan.mode.usesPixelSpatialAdapter
+    let referenceScale=plan.mode.sourceReferenceDownscaleFactor
+    sourceReferenceScale=referenceScale
     self.firstStrength=firstStrength; self.lastStrength=lastStrength
-    let mainRows=geometry.videoTokens, guideRows=pixelReference ? sourceGeometry.videoTokens : 0
+    let mainRows=geometry.videoTokens, guideRows=referenceScale == nil ? 0 : sourceGeometry.videoTokens
     let imageRows=lastStrength == nil ? 0 : geometry.latentHeight*geometry.latentWidth
     let count=mainRows+guideRows+imageRows
     guard count <= 131072 else { throw LTXError.invalid("Movie canvas and references exceed native token admission.") }
     var values=geometry.videoPositions
-    if pixelReference {
-      let guide=sourceGeometry.videoPositions
-      for row in 0..<guideRows { values += [guide[row*3],guide[row*3+1]*2,guide[row*3+2]*2] }
+    if let referenceScale {
+      let guide=sourceGeometry.videoPositions,scale=Float(referenceScale)
+      for row in 0..<guideRows { values += [guide[row*3],guide[row*3+1]*scale,guide[row*3+2]*scale] }
     }
     if lastStrength != nil {
       let time=Float((Double(plan.frames-1)+0.5)/plan.fps)
@@ -67,7 +70,7 @@ public struct MLXMovieUpscaleLayout: Sendable {
       value.map { $0.dtype == .float32 && $0.shape == [rows,128] && MLX.isFinite($0).all().item(Bool.self) } ?? false
     }
     guard valid(generated,rows:geometry.videoTokens),
-      pixelReference ? valid(source,rows:sourceGeometry.videoTokens) : source == nil,
+      referenceTokens > 0 ? valid(source,rows:sourceGeometry.videoTokens) : source == nil,
       firstStrength != nil ? valid(first,rows:frameTokens) : first == nil,
       lastStrength != nil ? valid(last,rows:frameTokens) : last == nil else {
       throw LTXError.invalid("Movie reference latents differ from frozen canvas, guide or endpoint admission.")

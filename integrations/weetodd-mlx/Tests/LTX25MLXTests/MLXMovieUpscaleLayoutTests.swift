@@ -1,8 +1,30 @@
 import XCTest
+import MLX
 import LTX25Engine
 @testable import LTX25MLX
 
 final class MLXMovieUpscaleLayoutTests:XCTestCase {
+  func testEnhanceFullSourceGuideIsFrozenAtOneToOnePositions() throws {
+    let mode=try XCTUnwrap(MLXMovieUpscalePlan.Mode(rawValue:"enhance"))
+    let plan=try MLXMovieUpscalePlan(mode:mode,width:64,height:32,frames:2,fps:24,sizePolicy:.strict)
+    let layout=try MLXMovieUpscaleLayout(plan:plan,firstStrength:nil,lastStrength:nil)
+    XCTAssertEqual(layout.geometry.width,64);XCTAssertEqual(layout.geometry.height,32)
+    XCTAssertEqual(layout.groupRows,[4,4]);XCTAssertEqual(layout.referenceTokens,4)
+    XCTAssertEqual(layout.mask,[1,1,1,1,0,0,0,0])
+    XCTAssertEqual(Array(layout.positions[0..<12]),Array(layout.positions[12..<24]))
+    XCTAssertEqual(layout.positions[13],16);XCTAssertEqual(layout.positions[14],16)
+    XCTAssertEqual(layout.positions[17],48)
+    let source=MLXArray(Array(0..<512).map { Float($0)/1000 },[4,128])
+    let prepared=try layout.prepare(generated:.ones([4,128])*(-1),source:source,first:nil,last:nil)
+    XCTAssertEqual(prepared.latent.shape,[8,128])
+    XCTAssertEqual(prepared.latent[0,0].item(Float.self),-1)
+    XCTAssertEqual(prepared.latent[4,0].item(Float.self),0)
+    XCTAssertEqual(prepared.latent[7,127].item(Float.self),0.511)
+    XCTAssertEqual(prepared.condition.clean[0,0].item(Float.self),0)
+    XCTAssertEqual(prepared.condition.clean[7,127].item(Float.self),0.511)
+    XCTAssertThrowsError(try layout.prepare(generated:.zeros([4,128]),source:nil,first:nil,last:nil))
+    XCTAssertThrowsError(try layout.prepare(generated:.zeros([4,128]),source:.zeros([16,128]),first:nil,last:nil))
+  }
   func testPixelMovieTailThenTrueLastFrameWithIndependentReferencesAndNoSlots() throws {
     let plan=try MLXMovieUpscalePlan(mode:.pixelSpatial,width:64,height:32,frames:98,fps:24,sizePolicy:.strict)
     let layout=try MLXMovieUpscaleLayout(plan:plan,firstStrength:0.7,lastStrength:0.9)

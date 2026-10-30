@@ -14,11 +14,11 @@ struct MovieUpscaleInspector:View {
   }
   var body:some View {
     VStack(alignment:.leading,spacing:8) {
-      Text("Source movie 2× upscale").font(.headline)
+      Text(settings.mode == .enhance ? "Source movie enhancement" : "Source movie 2× upscale").font(.headline)
       Toggle("Enable experimental movie upscaling",isOn:binding(\.experimentalEnabled))
-      Text("Uses the Reference movie's selected interval, original frame rate and audio. Output dimensions are twice the prepared source grid.").font(.caption2).foregroundStyle(.secondary)
+      Text(settings.mode == .enhance ? "Uses the Reference movie’s selected interval, original frame rate and audio. Output dimensions match the prepared source grid." : "Uses the Reference movie’s selected interval, original frame rate and audio. Output dimensions are twice the prepared source grid.").font(.caption2).foregroundStyle(.secondary)
       Picker("Mode",selection:binding(\.mode)) {
-        ForEach(LTX25MovieUpscaleSettings.Mode.allCases) { Text($0.label).tag($0) }
+        ForEach(LTX25MovieUpscaleSettings.Mode.allCases.filter { $0 != .enhance || settings.mode == .enhance }) { Text($0.label).tag($0) }
       }
       Picker("Source grid",selection:binding(\.sizePolicy)) {
         Text("Nearest grid preserving aspect").tag(LTX25MovieUpscaleSettings.SizePolicy.fitNearest)

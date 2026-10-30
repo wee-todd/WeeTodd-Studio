@@ -1,0 +1,37 @@
+{
+  "format": "weetodd-video-processing-v2",
+  "steps": [
+    {
+      "id": "restore",
+      "kind": "native-pixel-cq",
+      "input": "source",
+      "pixelCQ": {
+        "pixelStrength": 1.0,
+        "cqStrength": 0.5,
+        "refinementStrength": 0.75,
+        "profileID": "auto"
+      }
+    },
+    {
+      "id": "flash",
+      "kind": "flashvsr-turbo",
+      "input": "restore",
+      "settings": {
+        "version": 1,
+        "backend": "swiftMLX",
+        "variant": "turbo",
+        "decoder": "tiny",
+        "width": 1920,
+        "height": 1080,
+        "fit": "fit",
+        "seed": 0,
+        "temporalCompression": 4,
+        "temporalSigma": 1,
+        "colorFix": "wavelet",
+        "waveletLevels": 5,
+        "continuity": "stream",
+        "preserveAudio": true
+      }
+    }
+  ]
+}

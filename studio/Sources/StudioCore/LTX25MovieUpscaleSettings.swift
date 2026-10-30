@@ -3,9 +3,9 @@ import Foundation
 /// Explicit source-movie workflow; ordinary manual generation defaults stay unchanged.
 public struct LTX25MovieUpscaleSettings:Codable,Equatable,Sendable {
   public enum Mode:String,Codable,CaseIterable,Identifiable,Sendable {
-    case latentOnly="latent_only",refine,pixelSpatial="pixel_spatial"
+    case latentOnly="latent_only",refine,pixelSpatial="pixel_spatial",enhance
     public var id:String { rawValue }
-    public var label:String { self == .latentOnly ? "Learned 2× only" : self == .refine ? "Learned 2× + refine" : "Pixel-Spatial guided 2× + refine" }
+    public var label:String { self == .enhance ? "Same-size source enhancement" : self == .latentOnly ? "Learned 2× only" : self == .refine ? "Learned 2× + refine" : "Pixel-Spatial guided 2× + refine" }
   }
   public enum SizePolicy:String,Codable,CaseIterable,Identifiable,Sendable {
     case fitNearest="fit_nearest_32",centerCrop="center_crop_32",strict="strict_32"

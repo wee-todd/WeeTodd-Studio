@@ -554,3 +554,49 @@ audiovisual approval on 2026-10-04, and the retained fifty-step take passed huma
 2026-10-05. Numerical checks and those samples do not establish full-checkpoint parity, broad
 quality or a measured speedup over
 another backend.
+
+## Movie refinement adapter stacks
+
+Native LTX 2.5 source-movie requests accept an optional `refinement_loras` array of ordered
+`path`, `strength`, and `enabled` selections. Pixel Spatial keeps its typed task adapter in
+`components.pixel_spatial_adapter`; selected refinement adapters run alongside it in the same
+existing native denoiser. Legacy requests default to an empty additional stack. Latent-only
+mode rejects additional adapters because it has no transformer pass.
+
+The native reader resolves flattened `lora_unet_` names against known LTX targets and retains
+matrix-shape, duplicate-target and alpha/rank checks. Active additional checkpoints participate
+in preflight, execution and resume identity. Output metadata lists `applied_refinement_adapters`.
+Format admission does not establish visual quality for arbitrary adapters or combinations.
+
+`pixel_strength` and each additional adapter's `strength` control adapter influence.
+`refinement_strength` controls the source-latent/noise initialization and scales the existing
+three-evaluation schedule. It does not change the evaluation count. Source FPS, visible frame
+count and original-audio publication retain the movie contract. CQ enhancement should be
+qualified on a short source section before a complete clip.
+
+The explicit `enhance` movie mode keeps the source width and height. It requires an already
+32-aligned source and rejects any request that would resize or crop it, including a nonaligned
+source paired with a fit/crop policy. Its exact component set contains `video_checkpoint`,
+`gemma_root`, `connector_checkpoint`, `transformer_root` and `audio_checkpoint`.
+It omits both `spatial_upscaler_checkpoint` and `pixel_spatial_adapter`: the normalized source
+latents initialize refinement directly, and the complete clean source is appended as a frozen
+video guide at spatial factor one. Existing `latent_only`, `refine` and `pixel_spatial` modes
+retain their two-times output behavior.
+
+For a CQ-only extra pass, select CQ through `refinement_loras` at strength 1.0 and set
+`refinement_strength` to 0.5. This retains the native distilled three-evaluation schedule and
+frozen source-audio conditioning. The full source guide matches the publisher's strength-one,
+`latent_downscale_factor=1` guide contract; the base model, sampler and evaluation count differ
+from the publisher's Dev workflow. This mode does not claim exact publisher output parity.
+A 1920 × 1088, 120-frame source remains 1920 × 1088 and 120 frames at its original 24 fps;
+causal padding is trimmed before publication. Qualification requires a short native render
+before a complete clip. No model downloads or external inference runtime are required by this mode.
+
+
+### Experimental same-size Pixel Spatial plus CQ
+
+The explicit `enhance_pixel_spatial` worker mode retains source dimensions and initializes from source latents. It uses the full clean source guide at factor one, loads Pixel Spatial as a typed task adapter, and accepts CQ through the refinement stack. It omits the learned spatial upscaler. Ordinary IC-adapter restrictions remain unchanged.
+
+The Pixel checkpoint remains a factor-two checkpoint. This opt-in mode intentionally uses factor-one guidance and records the difference in `experimental_conditioning`; it does not claim publisher recipe parity. Checkpoint metadata is not modified. The exact components are the five `enhance` components plus `pixel_spatial_adapter`. `pixel_strength` sets Pixel amount, while `refinement_loras` sets CQ amount independently.
+
+One existing five-second FlashVSR source completed at unchanged 1920 × 1088 and 24 FPS with Pixel 1.0, CQ 1.0 and denoise 0.5. Two 60-frame windows shared three evaluations each. The one-second test took 210.83 seconds; the full render took 1316.83 seconds. Published delivery copied original audio packets and verified decoded PCM identity. All 120 frames decoded completely. Sampled poses and join frames remain coherent; human quality approval remains separate. These measurements do not establish general throughput or quality.

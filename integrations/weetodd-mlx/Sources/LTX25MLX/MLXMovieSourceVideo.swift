@@ -31,7 +31,7 @@ public struct MLXMovieSourceVideo:Sendable {
   public func prepare(ffmpeg:URL,directory:URL) async throws -> Prepared {
     let range=try await preflight(),fm=FileManager.default
     guard directory.isFileURL,directory.path.hasPrefix("/"),!fm.fileExists(atPath:directory.path),
-      plan.size.width<=2048,plan.size.height<=2048 else { throw LTXError.invalid("Movie preparation needs a new directory and an admitted 2× canvas.") }
+      plan.size.width<=2048,plan.size.height<=2048 else { throw LTXError.invalid("Movie preparation needs a new directory and an admitted encoder canvas.") }
     try fm.createDirectory(at:directory.deletingLastPathComponent(),withIntermediateDirectories:true)
     let staging=directory.deletingLastPathComponent().appendingPathComponent(".movie-rgb-"+UUID().uuidString)
     try fm.createDirectory(at:staging,withIntermediateDirectories:false);defer { try? fm.removeItem(at:staging) }

@@ -30,10 +30,13 @@ def test_readme_catalogs_every_shipped_ui_workflow():
     assert not missing
 
 
-def test_readme_h3_node_count_matches_registration():
-    match = re.search(r"- (\d+) composable nodes under `WeeTodd/H3`", README)
+def test_readme_h3_category_count_matches_registration():
+    match = re.search(r"- (\d+) composable nodes in the `WeeTodd/H3` category tree", README)
     assert match is not None
-    registered = sum(name.startswith("WeeToddH3") for name in NODE_CLASS_MAPPINGS)
+    registered = sum(
+        node.CATEGORY == "WeeTodd/H3" or node.CATEGORY.startswith("WeeTodd/H3/")
+        for node in NODE_CLASS_MAPPINGS.values()
+    )
     assert int(match.group(1)) == registered
 
 

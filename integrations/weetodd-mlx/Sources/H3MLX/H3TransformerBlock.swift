@@ -43,7 +43,7 @@ public enum H3TransformerBlock {
 
   private static func prepareRotaryAngles(file: SafeTensorFile,
     prefix: String, positions: MLXArray, maximumRows: Int = 40_000) throws -> H3RotaryAngles {
-    guard positions.ndim == 2, [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(positions.shape[0]),
+    guard positions.ndim == 2, [40_000,64_000,H3RegenerateAdmission.maximumPackedRows].contains(maximumRows), (1...maximumRows).contains(positions.shape[0]),
       positions.shape[1] == 3, positions.dtype == .float32 else {
       throw H3CheckpointError.invalid("Invalid H3 rotary positions.")
     }
@@ -66,7 +66,7 @@ public enum H3TransformerBlock {
 
   private static func prepareRotaryAngles(inverse: MLXArray,
     positions: MLXArray, maximumRows: Int = 40_000) throws -> H3RotaryAngles {
-    guard positions.ndim == 2, [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(positions.shape[0]),
+    guard positions.ndim == 2, [40_000,64_000,H3RegenerateAdmission.maximumPackedRows].contains(maximumRows), (1...maximumRows).contains(positions.shape[0]),
       positions.shape[1] == 3, positions.dtype == .float32 else {
       throw H3CheckpointError.invalid("Invalid H3 rotary positions.")
     }
@@ -100,6 +100,9 @@ public enum H3TransformerBlock {
     modulationIndices: MLXArray, positions: MLXArray,
     projectionMode: H3ProjectionMode = .weightDecoded,
     lora: (any H3LoRAApplying)? = nil,
+    sharp: H3SharpCurve? = nil, modelTimes: [Float]? = nil,
+    regenerateAdmission:H3RegenerateAdmission? = nil,
+    regenerateAttentionPlan:H3RegenerateAttentionPlan? = nil,
     rotaryAngles: H3RotaryAngles? = nil, maximumRows: Int = 40_000,
     rowWindow: Int = 16384, vdn: H3VDNRuntime? = nil,fastTiles:H3FastTiles? = nil,
     preparedWeights: H3PreparedBlock? = nil,
@@ -108,7 +111,7 @@ public enum H3TransformerBlock {
     onAttentionBackend: @escaping (H3FastAttention.Consumer) -> Void = { _ in },
     observe: (String, MLXArray) throws -> Void) throws -> MLXArray {
     guard (0..<50).contains(index), input.ndim == 3,
-      input.shape[0] == 1, [40_000,64_000].contains(maximumRows), (1...maximumRows).contains(input.shape[1]),
+      input.shape[0] == 1, [40_000,64_000,H3RegenerateAdmission.maximumPackedRows].contains(maximumRows), (1...maximumRows).contains(input.shape[1]),
       input.shape[2] == 5376, input.dtype == .bfloat16,
       modulation.ndim == 2, (1...128).contains(modulation.shape[0]),
       modulation.shape[1] == 96768, modulation.dtype == .bfloat16,
@@ -117,6 +120,10 @@ public enum H3TransformerBlock {
       positions.shape == [input.shape[1], 3],
       positions.dtype == .float32, [8192,16_384].contains(preparedFeedRowChunk) else {
       throw H3CheckpointError.invalid("Invalid H3 diffusion block inputs.")
+    }
+    guard maximumRows != H3RegenerateAdmission.maximumPackedRows ||
+      (regenerateAdmission?.packedRows == input.shape[1] && lora?.requiresWeightMerge == true) else {
+      throw H3CheckpointError.invalid("Large-row execution requires the explicit regenerate admission and adapter.")
     }
     if let preparedWeights {
       guard preparedWeights.checkpointURL == checkpointURL, preparedWeights.index == index,
@@ -134,11 +141,24 @@ public enum H3TransformerBlock {
         throw H3CheckpointError.invalid("Experimental attended-only override requires ordinary prepared attention.")
       }
     }
+    guard lora?.requiresWeightMerge != true || projectionMode == .weightDecoded else {
+      throw H3CheckpointError.invalid("Regenerate premerge requires weight-decoded projection mode.")
+    }
     let blockLoRA = try preparedWeights?.prepareLoRA(lora) ?? lora
     let layout = try preparedWeights?.layout ?? H3CheckpointLayout(url: checkpointURL)
     try validateTrainedAttentionGeometry(variant:layout.fastVariant,tiles:fastTiles,rows:input.shape[1])
     if attendedOverride != nil {
       try validateAttendedOverrideLayout(fastVariant: layout.fastVariant, curveRank: layout.curveRank)
+    }
+    let effectiveModulation: MLXArray
+    if let sharp {
+      guard let modelTimes, modelTimes.count == modulation.shape[0] else {
+        throw H3CheckpointError.invalid("Sharp requires the actual scalar model time for every base modulation row.")
+      }
+      effectiveModulation = try H3SharpCurve.add(delta: sharp.modulationDelta(block:index,times:modelTimes),to:modulation)
+    } else {
+      guard modelTimes == nil else { throw H3CheckpointError.invalid("Sharp model times require an explicit Sharp provider.") }
+      effectiveModulation = modulation
     }
     let indices = modulationIndices.asArray(Int32.self)
     guard indices.allSatisfy({ (0..<(modulation.shape[0] * 3)).contains(Int($0)) }) else {
@@ -180,6 +200,36 @@ public enum H3TransformerBlock {
       rows: Int, columns: Int, qkv: Bool = false) throws -> MLXArray {
       let base: MLXArray
       let name = prefix + suffix + ".weight"
+      if let adapter = blockLoRA, adapter.requiresWeightMerge {
+        let baseRows: (Range<Int>) throws -> MLXArray
+        // Cache hits must not decode or copy the pristine source projection.
+        // The closure loads it lazily only on the first merged row window.
+        var parameters:[MLXArray]?
+        var dense:MLXArray?
+        baseRows = { range in
+          if file.tensors[name]?.dtype == "U32" {
+            if parameters == nil {
+              if let preparedWeights { parameters = try preparedWeights.readAffineProjectionParameters(suffix) }
+              else { parameters = try H3QwenQ8Projection(file:file,name:name).parametersToMaterialize }
+            }
+            return try H3RegenerateProjection.affineRows(parameters:parameters!,range:range)
+          }
+          if dense == nil {
+            if let preparedWeights { dense = try preparedWeights.readDenseProjectionWeight(suffix) }
+            else if layout.curveRank != nil { dense = try read(name,shape:[rows,columns]) }
+            else {
+              dense = try H3ComfyDecodedProjection.load(file:file,checkpointURL:checkpointURL,
+                name:name,rows:rows,columns:columns,reorderQKV:qkv,rowWindow:rowWindow)
+            }
+          }
+          return dense![range]
+        }
+        let output = try adapter.projectMerged(input:activation,target:"diffusion_model.blocks.\(index).\(suffix)",
+          rows:rows,columns:columns,baseRows:baseRows)
+        eval(output)
+        try Task.checkCancellation()
+        return output
+      }
       if let preparedWeights {
         base = try preparedWeights.project(suffix,activation:activation,
           rows:rows,columns:columns,qkv:qkv)
@@ -256,12 +306,14 @@ public enum H3TransformerBlock {
           project:{ try project($0,"attn.out_proj",rows:5376,columns:7168) })
       }
     } else { hybrid = nil }
-    let output = try evaluateKernel(input: input, modulation: modulation,
+    let output = try evaluateKernel(input: input, modulation: effectiveModulation,
       modulationIndices: modulationIndices, angles: angles,
       read: { try read(prefix + $0, shape: $1) },
       project: { try project($0, $1, rows: $2, columns: $3, qkv: $4) },
       hybridAttention:hybrid, attendedOverride: attendedOverride,
-      feedRowChunk: preparedWeights != nil && count >= 16_384 ? preparedFeedRowChunk:nil,
+      feedRowChunk: regenerateAdmission != nil ? 8192 : preparedWeights != nil && count >= 16_384 ? preparedFeedRowChunk:nil,
+      regenerateMaximumStageBytes:regenerateAdmission?.maximumStageBytes,
+      regenerateAttentionPlan:regenerateAttentionPlan,
       drainAttentionInputs: preparedWeights != nil && fastTiles == nil,
       queueBranches: preparedWeights != nil && layout.fastVariant != nil && count <= 16_384,
       retireQKV: { preparedWeights?.retireProjection("attn.qkv_proj") },
@@ -270,6 +322,9 @@ public enum H3TransformerBlock {
         preparedWeights?.retireProjection("attn.out_proj")
       },
       observe: { name,value in
+        if let admission=regenerateAdmission,UInt64(Memory.activeMemory) > admission.maximumStageBytes {
+          throw H3CheckpointError.invalid("Regenerate block exceeded its explicit stage memory budget.")
+        }
         if maximumRows == 64_000, UInt64(Memory.activeMemory) > H3CanvasAdmission.maximumStageBytes {
           throw H3CheckpointError.invalid("H3 spatial block exceeded its 32 GiB active-memory budget.")
         }
@@ -319,6 +374,8 @@ public enum H3TransformerBlock {
     hybridAttention: ((MLXArray, MLXArray, MLXArray, MLXArray, MLXArray) throws -> MLXArray)? = nil,
     attendedOverride: ((MLXArray, MLXArray, MLXArray) throws -> MLXArray)? = nil,
     feedRowChunk: Int? = nil,
+    regenerateMaximumStageBytes:UInt64? = nil,
+    regenerateAttentionPlan:H3RegenerateAttentionPlan? = nil,
     drainAttentionInputs: Bool = false,
     queueBranches: Bool = false,
     retireQKV: () -> Void = {},
@@ -333,6 +390,19 @@ public enum H3TransformerBlock {
       H3Rotary.apply(value, cosine: angles.cosine, sine: angles.sine, rotaryWidth: rotaryWidth)
     }
     func runAttention() throws -> MLXArray {
+      if let budget=regenerateMaximumStageBytes {
+        guard hybridAttention == nil,attendedOverride == nil else {
+          throw H3CheckpointError.invalid("Regenerate dense attention cannot combine another attention adapter.")
+        }
+        let firstNorm=try read("norm1.weight",[hiddenWidth])
+        let first=H3Modulation.scaleShift(MLXFast.rmsNorm(input,weight:firstNorm,eps:1e-5),
+          table:mod,indices:modulationIndices,shift:0,scale:1)
+        return try H3RegenerateAttention.projected(first:first,angles:angles,
+          qNorm:read("attn.q_norm.weight",[headWidth]),kNorm:read("attn.k_norm.weight",[headWidth]),
+          heads:heads,headWidth:headWidth,rotaryWidth:rotaryWidth,maximumStageBytes:budget,
+          executionPlan:regenerateAttentionPlan,project:project)
+      }
+
       func prepareInputs() throws -> (MLXArray?, MLXArray?, MLXArray, MLXArray, MLXArray) {
         let firstNorm = try read("norm1.weight", [hiddenWidth])
         let first = H3Modulation.scaleShift(MLXFast.rmsNorm(input, weight: firstNorm, eps: 1e-5),

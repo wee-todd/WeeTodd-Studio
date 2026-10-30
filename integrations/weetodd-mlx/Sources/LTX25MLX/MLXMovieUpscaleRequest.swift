@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import LTX25Engine
 import InferenceContracts
+import AdapterRuntime
 
 /// Dedicated movie contract. Parsing/admission never invokes a second sampler
 /// or relabels a movie as DFR. Prepared RGB is frozen independently of its movie.
@@ -46,7 +47,9 @@ public struct MLXMovieUpscaleRequest: Sendable {
   }
 
   private struct Body: Decodable {
+    let intermediateOnly:Bool
     let diffusionVAE:MLXDiffusionVideoSettings?
+    let refinementLoras:[LoRAAdapter]
     let version:Int,engine:String,task:String
     let source:Source,components:[String:String],mode:MLXMovieUpscalePlan.Mode
     let sizePolicy:MLXMovieUpscalePlan.SizePolicy,outputDirectory:String,prompt:String,seed:UInt64
@@ -55,7 +58,9 @@ public struct MLXMovieUpscaleRequest: Sendable {
     let audioPolicy:AudioPolicy,audioSource:AudioSource?,referenceImageSHA256:[String:String]
     let chunking:Bool,chunkFrameMegapixelBudget:Double,resume:Bool,keepChunks:Bool
     enum CodingKeys:String,CodingKey,CaseIterable {
+      case intermediateOnly="intermediate_only"
       case diffusionVAE="diffusion_vae"
+      case refinementLoras="refinement_loras"
       case version,engine,task,source,components,mode,prompt,seed,anchors,resume
       case audioPolicy="audio_policy",audioSource="audio_source",referenceImageSHA256="reference_image_sha256"
       case sizePolicy="size_policy",outputDirectory="output_directory",refinementStrength="refinement_strength"
@@ -63,9 +68,11 @@ public struct MLXMovieUpscaleRequest: Sendable {
       case maximumAudioDriftSeconds="maximum_audio_drift_seconds",chunking,chunkFrameMegapixelBudget="chunk_frame_megapixel_budget",keepChunks="keep_chunks"
     }
     init(from decoder:Decoder) throws {
-      try MLXMovieUpscaleRequest.exactKeys(decoder,CodingKeys.allCases.map(\.rawValue),optional:["audio_policy","audio_source","reference_image_sha256","diffusion_vae"])
+      try MLXMovieUpscaleRequest.exactKeys(decoder,CodingKeys.allCases.map(\.rawValue),optional:["intermediate_only","audio_policy","audio_source","reference_image_sha256","diffusion_vae","refinement_loras"])
       let c=try decoder.container(keyedBy:CodingKeys.self)
+      intermediateOnly=try c.decodeIfPresent(Bool.self,forKey:.intermediateOnly) ?? false
       diffusionVAE=try c.decodeIfPresent(MLXDiffusionVideoSettings.self,forKey:.diffusionVAE)
+      refinementLoras=try c.decodeIfPresent([LoRAAdapter].self,forKey:.refinementLoras) ?? []
       audioPolicy=try c.decodeIfPresent(AudioPolicy.self,forKey:.audioPolicy) ?? .source
       audioSource=try c.decodeIfPresent(AudioSource.self,forKey:.audioSource)
       referenceImageSHA256=try c.decodeIfPresent([String:String].self,forKey:.referenceImageSHA256) ?? [:]
@@ -97,7 +104,32 @@ public struct MLXMovieUpscaleRequest: Sendable {
   public let outputDirectory:String,prompt:String,seed:UInt64,anchors:Anchors,anchorStrength:Float,pixelStrength:Float
   public let referenceImages:[MLXImageReference],maximumAudioDriftSeconds:Double,chunking:Bool,chunkFrameMegapixelBudget:Double,resume:Bool,keepChunks:Bool
   public let audioPolicy:AudioPolicy,audioSource:AudioSource?,referenceImageSHA256:[String:String]
+  public let intermediateOnly:Bool
   public let diffusionVAE:MLXDiffusionVideoSettings?
+  public let refinementLoras:[LoRAAdapter]
+  /// A typed task role, never an ordinary refinement LoRA or rewritten checkpoint.
+  public var pixelSpatialAdapter:LoRAAdapter? {
+    guard plan.mode.usesPixelSpatialAdapter else { return nil }
+    return LoRAAdapter(path:components["pixel_spatial_adapter"]!,strength:pixelStrength)
+  }
+  /// This same ordered selection feeds the native denoiser and its provenance.
+  public var refinementAdapters:[LoRAAdapter] {
+    let pixel=pixelSpatialAdapter.map { [$0] } ?? []
+    return pixel+refinementLoras.filter { $0.enabled && $0.strength != 0 }
+  }
+  var experimentalConditioningMetadata:[String:Any]? {
+    guard plan.mode == .enhancePixelSpatial else { return nil }
+    return ["adapter_role":"pixel_spatial","checkpoint_reference_downscale_factor":2,
+      "execution_reference_downscale_factor":1,"checkpoint_metadata_modified":false,
+      "publisher_recipe_parity":false]
+  }
+  public var componentIdentityPaths:[String:String] {
+    var result=components
+    for (index,adapter) in refinementLoras.enumerated() where adapter.enabled && adapter.strength != 0 {
+      result["refinement_lora_\(index)"]=adapter.path
+    }
+    return result
+  }
   public let contractSHA256:String
   public init(data:Data,outputDirectory:URL) throws {
     guard data.count<=1024*1024 else { throw LTXError.invalid("Movie request exceeds its 1 MiB metadata bound.") }
@@ -117,15 +149,23 @@ public struct MLXMovieUpscaleRequest: Sendable {
       !body.resume || body.chunking else {
       throw LTXError.invalid("Movie upscale version, source, output, endpoint or explicit chunk settings are invalid.")
     }
-    let common:Set<String>=["video_checkpoint","spatial_upscaler_checkpoint"]
+    let common:Set<String> = body.mode.sameSize ? ["video_checkpoint"] : ["video_checkpoint","spatial_upscaler_checkpoint"]
     let refinement:Set<String>=["gemma_root","connector_checkpoint","transformer_root","audio_checkpoint"]
-    let needed=common.union(body.mode == .latentOnly ? [] : refinement).union(body.mode == .pixelSpatial ? ["pixel_spatial_adapter"] : [])
+    let needed=common.union(body.mode == .latentOnly ? [] : refinement).union(body.mode.usesPixelSpatialAdapter ? ["pixel_spatial_adapter"] : [])
     guard Set(body.components.keys)==needed,body.components.values.allSatisfy(Self.validPath),
       body.mode != .latentOnly || (body.prompt.isEmpty && body.anchors == .none && body.referenceImages.isEmpty),
       body.mode == .latentOnly || !body.prompt.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else {
       throw LTXError.invalid("Movie mode requires its exact native components; latent-only cannot silently ignore prompt or anchors.")
     }
+    guard body.mode != .latentOnly || body.refinementLoras.isEmpty,
+      body.refinementLoras.count <= (body.mode.usesPixelSpatialAdapter ? 15 : 16),
+      Set(body.refinementLoras.map(\.path)).count == body.refinementLoras.count,
+      body.refinementLoras.allSatisfy({ abs($0.strength)<=3 && $0.path != body.components["pixel_spatial_adapter"] }) else {
+      throw LTXError.invalid("Movie refinement adapters must be bounded, distinct and executable by the selected weighted mode.")
+    }
+    intermediateOnly=body.intermediateOnly
     diffusionVAE=body.diffusionVAE
+    refinementLoras=body.refinementLoras
     source=body.source;components=body.components
     plan=try MLXMovieUpscalePlan(mode:body.mode,width:source.width,height:source.height,frames:source.frames,fps:source.fps,
       sizePolicy:body.sizePolicy,refinementStrength:body.refinementStrength)
@@ -141,14 +181,20 @@ public struct MLXMovieUpscaleRequest: Sendable {
     contractSHA256=SHA256.hash(data:try JSONSerialization.data(withJSONObject:json,options:[.sortedKeys])).map { String(format:"%02x",$0) }.joined()
   }
   public func chunkPlans(cutFrames:[Int]=[]) throws -> [MLXMovieUpscalePlan.Chunk] {
-    let nativeAudioMaximum=Int(floor(min(4097,1501*plan.fps/25)))
-    let nativePaddedMaximum=1+8*max(0,(nativeAudioMaximum-1)/8)
-    let perFrame=Double(plan.size.outputWidth)*Double(plan.size.outputHeight)/1_000_000
-    // Workload partitioning must also obey the trained audio clock. Padding is
-    // included; a long low-resolution source must not bypass this stage bound.
-    let audioBudget=perFrame*(Double(nativePaddedMaximum)+0.25)
-    let budget=chunking ? min(chunkFrameMegapixelBudget,audioBudget) : max(1,plan.outputFrameMegapixels)
-    let chunks=try plan.chunks(frameMegapixelBudget:budget,cutFrames:cutFrames)
+    let chunks:[MLXMovieUpscalePlan.Chunk]
+    if chunking {
+      let nativeAudioMaximum=Int(floor(min(4097,1501*plan.fps/25)))
+      let nativePaddedMaximum=1+8*max(0,(nativeAudioMaximum-1)/8)
+      let perFrame=Double(plan.size.outputWidth)*Double(plan.size.outputHeight)/1_000_000
+      // Workload partitioning must also obey the trained audio clock. Padding is
+      // included; a long low-resolution source must not bypass this stage bound.
+      let audioBudget=perFrame*(Double(nativePaddedMaximum)+0.25)
+      chunks=try plan.chunks(frameMegapixelBudget:min(chunkFrameMegapixelBudget,audioBudget),cutFrames:cutFrames)
+    } else {
+      // A frozen whole-clip interval is already exact. Reconstructing it from
+      // a floating megapixel quotient can lose one frame and invent a split.
+      chunks=[.init(startFrame:0,endFrame:plan.frames,paddedFrames:plan.paddedFrames,reason:"complete clip")]
+    }
     guard chunks.allSatisfy({ $0.paddedFrames<=4097 && (try? AVGeometry(width:plan.size.outputWidth,height:plan.size.outputHeight,frames:$0.paddedFrames,fps:plan.fps)) != nil }) else {
       throw LTXError.invalid("Movie chunks exceed native padded video/audio token admission. Enable a smaller chunk budget before inference.")
     }

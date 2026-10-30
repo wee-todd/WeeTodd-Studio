@@ -151,6 +151,8 @@ def test_every_shipped_h3_api_workflow_has_portable_component_paths():
         document = MODULE.load_api_workflow(path)
         if any(node["class_type"] == MODULE.SWIFT_VIDEO_NODE for node in document.values()):
             MODULE.portable_swift_recipe_paths(document)
+        elif any(node["class_type"] == "WeeToddH3Regenerate" for node in document.values()):
+            MODULE.portable_regenerate_paths(document)
         else:
             MODULE.portable_component_paths(document)
             MODULE.validate_fasth3_profile_wiring(document)
@@ -317,3 +319,162 @@ def test_portable_swift_template_rejects_malformed_or_machine_paths(key, value):
     template["1"]["inputs"][key] = value
     with pytest.raises(ValueError):
         MODULE.portable_swift_recipe_paths(template)
+
+
+def regenerate_graph(**overrides):
+    document = MODULE.load_api_workflow(ROOT / "examples/h3_regenerate_standalone_api.json")
+    document["1"]["inputs"].update(overrides)
+    return document
+
+
+def test_portable_regenerate_template_is_reported_without_runtime_admission(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--project", str(ROOT), "--all-api"])
+    assert MODULE.main() == 0
+    report = next(r for r in json.loads(capsys.readouterr().out)
+                  if r["workflow"].endswith("h3_regenerate_standalone_api.json"))
+    assert report["portable_paths_valid"] is True
+    assert report["runtime_ready"] is None
+    assert report["task"] == "h3-regenerate"
+    assert report["paths"]["source_path"] == ""
+
+
+def test_portable_regenerate_accepts_explicit_unselected_placeholders():
+    document = regenerate_graph(source_path="/REPLACE/WITH/YOUR/source.mov",
+        profile_path="/REPLACE/WITH/YOUR/ref2va.json",
+        model_library="/REPLACE/WITH/YOUR/shared-library",
+        swift_cli_path="/REPLACE/WITH/YOUR/WeeToddCLI")
+    report = MODULE.portable_regenerate_paths(document)
+    assert report["paths"]["model_library"] == "/REPLACE/WITH/YOUR/shared-library"
+
+
+@pytest.mark.parametrize("key,value", [
+    ("source_path", "/Users/private/movie.mov"), ("model_library", "../models"),
+    ("swift_cli_path", ["2", 0]), ("width", 255), ("seed", True),
+    ("decoder", "unknown"), ("prompt", ""), ("filename_prefix", "../escape"),
+    ("unknown", "setting"),
+])
+def test_portable_regenerate_rejects_machine_paths_and_ignored_controls(key, value):
+    with pytest.raises(ValueError):
+        MODULE.portable_regenerate_paths(regenerate_graph(**{key: value}))
+
+
+def regenerate_runtime_fixture(tmp_path, terminal="preflight"):
+    comfy = tmp_path / "comfy"
+    comfy.mkdir()
+    (comfy / "main.py").write_text("")
+    (comfy / "folder_paths.py").write_text("")
+    selected = tmp_path / "selected-outside-comfy"
+    selected.mkdir()
+    source = selected / "source.mov"
+    source.write_bytes(b"frozen source")
+    profile = selected / "ref2va.json"
+    profile.write_text("{}")
+    library = selected / "shared-model-library"
+    library.mkdir()
+    captured = selected / "captured.json"
+    cli = selected / "WeeToddCLI"
+    cli.write_text(
+        f"#!{sys.executable}\n"
+        "import json,pathlib,sys\n"
+        "assert sys.argv[1:3] == ['regenerate','--request']\n"
+        "assert sys.argv[4]=='--output-directory' and sys.argv[6:]==['--preflight-only']\n"
+        "request=json.loads(pathlib.Path(sys.argv[3]).read_text())\n"
+        "assert not pathlib.Path(sys.argv[5]).exists()\n"
+        f"pathlib.Path({str(captured)!r}).write_text(json.dumps(request))\n"
+        "plan={'request':request,'frames':17,'media':{'fps':{'numerator':24,'denominator':1}}}\n"
+        f"mode={terminal!r}\n"
+        "if mode=='published':pathlib.Path(sys.argv[5]).mkdir()\n"
+        "result=({'status':'success','preflight':True,'plan':plan}\n"
+        "        if mode in {'preflight','published'} else\n"
+        "        {'status':'success','result':{'video':{'path':'never-rendered'}}}\n"
+        "        if mode=='render' else\n"
+        "        {'status':'success','preflight':False,'plan':plan})\n"
+        "print(json.dumps(result),flush=True)\n"
+    )
+    cli.chmod(0o700)
+    document = regenerate_graph(source_path=str(source), profile_path=str(profile),
+        model_library=str(library), swift_cli_path=str(cli), ffmpeg_path=str(cli),
+        ffprobe_path=str(cli), width=1920, height=1080, decoder="fastH3", seed=17,
+        prompt="Preserve the source.")
+    workflow = tmp_path / "h3-regenerate-api.json"
+    workflow.write_text(json.dumps(document))
+    return comfy, workflow, document, captured
+
+
+def test_regenerate_runtime_dispatch_preflights_the_render_translator_payload(
+    tmp_path, monkeypatch, capsys
+):
+    import hashlib
+
+    comfy, workflow, document, captured = regenerate_runtime_fixture(tmp_path)
+    original = workflow.read_bytes()
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--project", str(ROOT),
+        "--workflow", str(workflow), "--comfy-root", str(comfy)])
+    assert MODULE.main() == 0
+    report, = json.loads(capsys.readouterr().out)
+    request = json.loads(captured.read_text())
+    assert report["runtime_ready"] is True
+    assert report["portable_paths_valid"] is False
+    assert report["task"] == "h3-regenerate"
+    assert report["frames"] == 17
+    assert request["sourceSHA256"] == hashlib.sha256(b"frozen source").hexdigest()
+    assert request["settings"]["schedule"] == "publisherThreeStep"
+    assert request["settings"]["posteriorSeed"] == 0
+    assert request["settings"]["targetWidth"] == 1920
+    assert request["settings"]["targetHeight"] == 1080
+    assert request["settings"]["decoder"] == "fastH3"
+    assert request["settings"]["seed"] == 17
+    assert request["settings"]["baseProfilePath"] == document["1"]["inputs"]["profile_path"]
+    assert request["settings"]["modelLibraryRoot"] == document["1"]["inputs"]["model_library"]
+    assert report["preflight"]["request"] == request
+    assert workflow.read_bytes() == original
+
+
+@pytest.mark.parametrize("terminal", ["render", "not-admitted", "published"])
+def test_regenerate_runtime_rejects_nonpreflight_completion(tmp_path, terminal):
+    comfy, workflow, document, _ = regenerate_runtime_fixture(tmp_path, terminal)
+    with pytest.raises(RuntimeError, match="preflight"):
+        MODULE.runtime_preflight_regenerate(graph=document, workflow_path=workflow,
+            project=ROOT, comfy_root=comfy)
+
+
+def test_regenerate_runtime_rejects_unselected_and_missing_inputs_before_cli(tmp_path):
+    comfy, workflow, document, captured = regenerate_runtime_fixture(tmp_path)
+    inputs = document["1"]["inputs"]
+    selected_source = inputs["source_path"]
+    inputs["source_path"] = ""
+    with pytest.raises(ValueError, match="source_path"):
+        MODULE.runtime_preflight_regenerate(graph=document, workflow_path=workflow,
+            project=ROOT, comfy_root=comfy)
+    inputs["source_path"] = selected_source
+    Path(inputs["profile_path"]).unlink()
+    with pytest.raises(FileNotFoundError):
+        MODULE.runtime_preflight_regenerate(graph=document, workflow_path=workflow,
+            project=ROOT, comfy_root=comfy)
+    assert not captured.exists()
+
+
+def test_regenerate_render_and_preflight_freeze_identical_requests(tmp_path, monkeypatch):
+    from wee_todd_mlx import flashvsr_cli
+
+    _, _, document, _ = regenerate_runtime_fixture(tmp_path)
+    inputs = document["1"]["inputs"]
+    requests = []
+
+    def capture(**kwargs):
+        requests.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(flashvsr_cli, "_run_cli_request", capture)
+    for preflight in (False, True):
+        flashvsr_cli.run_h3_regenerate_cli(cli=inputs["swift_cli_path"],
+            source=inputs["source_path"],
+            output=tmp_path / ("preflight" if preflight else "render"),
+            profile=inputs["profile_path"], model_library=inputs["model_library"],
+            ffmpeg=inputs["ffmpeg_path"], ffprobe=inputs["ffprobe_path"],
+            width=inputs["width"], height=inputs["height"], decoder=inputs["decoder"],
+            seed=inputs["seed"], prompt=inputs["prompt"], preflight_only=preflight)
+    assert requests[0]["request"] == requests[1]["request"]
+    assert requests[0]["command"] == requests[1]["command"] == "regenerate"
+    assert requests[0]["preflight_only"] is False
+    assert requests[1]["preflight_only"] is True

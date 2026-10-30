@@ -54,6 +54,7 @@ public struct MediaAsset: Codable, Identifiable, Equatable {
   public var refmodKind: String?
   public var refmodTokenCount: Int?
   public var refmodSHA256: String?
+  public var upscaleReceipt: String?
   public var generation: ImageGeneration?
   public var musicGeneration: MusicGeneration?
   public var voiceGeneration: VoiceGeneration?
@@ -160,6 +161,7 @@ public struct RenderVersion: Codable, Identifiable, Equatable {
   public var usableDuration: Double?
   public var continuationArtifact: ContinuationArtifact?
   public var jointLatentArtifact:H3JointLatentArtifact?
+  public var processingLineage: VideoProcessingLineage?
   /// All member takes point into one movie and must be activated together.
   public var sceneMembers: [ContinuousSceneMember]?
   public var sceneTakeID: UUID?
@@ -216,6 +218,7 @@ public struct Clip: Codable, Identifiable, Equatable {
   public var rippleDraft: RippleDraft?
   public var rippleTakes: [RippleTake]?
   public var motionFidelity: MotionFidelitySettings?
+  public var videoProcessing: VideoProcessingRecipe?
   public var h3PagingCacheGB: Double?
   public var motionResult: MotionFidelityResult?
   public var motionRecipeID: String?
@@ -459,6 +462,7 @@ public struct StudioProject: Codable, Equatable {
           "Clip duration must be positive and its in point cannot be negative.")
       }
       try c.settings(in: self).validate()
+      try c.videoProcessing?.validate()
     }
   }
 }
@@ -486,6 +490,7 @@ public enum ProjectStorage {
     project.mapMusicReferencePaths(transform)
     for i in project.assets.indices {
       project.assets[i].path = transform(project.assets[i].path)
+      if let receipt = project.assets[i].upscaleReceipt { project.assets[i].upscaleReceipt = transform(receipt) }
       if let artifacts = project.assets[i].musicGeneration?.artifacts {
         project.assets[i].musicGeneration?.artifacts = transform(artifacts)
       }
@@ -523,6 +528,11 @@ public enum ProjectStorage {
       for j in project.clips[i].versions.indices {
         project.clips[i].versions[j].path = transform(project.clips[i].versions[j].path)
         project.clips[i].versions[j].recipePath = transform(project.clips[i].versions[j].recipePath)
+        if var lineage = project.clips[i].versions[j].processingLineage {
+          lineage.source = FlashVSRFile(path: transform(lineage.source.path), sha256: lineage.source.sha256, bytes: lineage.source.bytes)
+          lineage.receiptPath = transform(lineage.receiptPath)
+          project.clips[i].versions[j].processingLineage = lineage
+        }
         if let manifest=project.clips[i].versions[j].jointLatentArtifact?.manifest {
           project.clips[i].versions[j].jointLatentArtifact?.manifest=transform(manifest)
         }
@@ -542,6 +552,12 @@ public enum ProjectStorage {
 }
 
 extension Clip {
+  /// Processing can change while generation runs without rejecting its accepted original.
+  public func matchesGenerationSubmission(_ other: Clip) -> Bool {
+    var current = self, submitted = other
+    current.videoProcessing = nil; submitted.videoProcessing = nil
+    return current == submitted
+  }
   public var reuseFingerprint: String {
     planningDigest([generationFingerprint, sourcePath, String(sourceIn)])
   }
@@ -554,6 +570,7 @@ extension Clip {
     c.rippleDraft = nil
     c.rippleTakes = nil
     c.motionFidelity = nil
+    c.videoProcessing = nil
     c.savedNativeGenerations = nil
     c.lastLocalEngine = nil
     c.motionResult = nil

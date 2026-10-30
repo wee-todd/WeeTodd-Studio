@@ -141,7 +141,9 @@ def _widget_schema(node):
             # Current ComfyUI serializes this dynamic widget immediately after a seed INT.
             # Omitting it shifts every later saved value into the preceding field.
             if (
-                node["type"] == "WeeToddLTX25VideoUpscale"
+                node["type"] in {
+                    "WeeToddLTX25VideoUpscale", "WeeToddFlashVSRUpscale", "WeeToddH3Regenerate"
+                }
                 and name == "seed"
                 and input_type == "INT"
             ):

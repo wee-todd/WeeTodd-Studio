@@ -1,0 +1,16 @@
+{
+  "format": "weetodd-video-processing-v1",
+  "steps": [
+    {
+      "id": "upscale",
+      "kind": "native-pixel-cq",
+      "input": "source",
+      "pixelCQ": {
+        "pixelStrength": 1.0,
+        "cqStrength": 0.5,
+        "refinementStrength": 0.75,
+        "profileID": "auto"
+      }
+    }
+  ]
+}
