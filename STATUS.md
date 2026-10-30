@@ -25,8 +25,15 @@ These are individual short-job observations, not a balanced whole-video benchmar
 decoded original stereo PCM and native RGB matched the previous result byte-for-byte; all
 weighted stages returned active residency to zero. Core/Studio/workflows validation passed:
 3,596 development tests and Swift suites of 245/1,269/1,317/25 tests, with only the documented
-optional skips and zero failures. Interactive qualification of this rebuilt bundle is pending
-manual Mac unlock; the earlier bundle's UI qualification below remains separate.
+optional skips and zero failures.
+
+After manual unlock, this rebuilt bundle also completed the same UI-initiated restoration in
+32.93 s, excluding initial setup. Its movie, native RGB and original stereo PCM matched the
+CLI result exactly, with zero weighted residency after every stage. Comparison playback,
+result retention across model-family changes, project saving and explicit saved-file reopening
+passed. H3 Fast preflight passed at an admitted 2× target and rejected an unsupported direct
+4× target before inference. Drama 3 remained visible in the native voice-family picker.
+No H3 generation or full five-second 2K test was started during these checks.
 
 ## October 29 native restoration and exact attention optimization
 
