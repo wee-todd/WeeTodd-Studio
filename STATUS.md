@@ -1,5 +1,38 @@
 # WeeTodd Studio implementation status
 
+## October 30 H3 attention scheduling optimization
+
+Native Swift/MLX H3 regeneration now omits four execution-only SIMD fences from its pinned
+Steel dense kernel, retaining every shared-memory barrier, full-key traversal, FP32 arithmetic,
+BF16 output and the original 256-row output projections. The path is restricted to the tested
+g15d / macOS 27.0.1 combination; other software/hardware retains the prior fused or conservative
+route. Policy version 3 records the selected kernel. No Python dependency or setup/conversion
+requirement was added.
+
+On M3 Ultra / 256 GiB, four balanced warm pairs at 133,718 keys / 8,192 queries measured
+1.621835 → 1.540453 seconds median, 5.02% less attention time, with complete raw BF16 equality.
+A matched single installed-weight block pair measured 32.813659 → 31.211611 seconds, 4.88% less
+time. All 1,437,735,936 output bytes matched SHA256
+`e42481bb526f8e765712c37fd67b3ff6ef6508ab34523425ade27fa70c9cb6a4`;
+peak MLX allocation remained 14,663,871,488 bytes and final owned allocation returned to zero.
+The bounded probe binds the frozen Metal library before device/allocator access, uses the shared
+inference lease, checks a 48 GiB admission/phase budget and compares literal bytes including signed
+zeros. Tiny regressions include ragged keys/queries, nonzero offsets, subnormals, cancellation-sensitive
+values, unsupported precision and insufficient budgets, including the vector tail.
+
+Larger query/key tiles and BF16 Q/K fragments were slower. Split-key execution's small operator
+gain did not survive the installed block and failed its declared numerical gate, so it was removed.
+These are operator/single-block measurements, not a full restoration speed claim. The full five-second
+2K test was not restarted and the production gate above 64,000 packed rows remains closed.
+
+Core/Studio/workflows validation passed: 3,596 development tests with 18 optional skips; Swift
+inference/MLX/Studio/Drama 3 suites executed 245/1,273/1,317/25 tests with 11/208/59/3 optional
+skips and zero failures. The explicit bounded GPU and installed-block checks above ran separately.
+An isolated Release bundle passed deep/strict signature verification. Its packaged H3 worker passed
+the short-job preflight with Python environment variables removed and no executable search path,
+and rejected the full-size request at the closed large-row gate. Both reported no inference; no
+new UI render or full-clip restoration was performed.
+
 ## October 30 Flash attention submission optimization
 
 Native FlashVSR+ now groups up to eight equal-length query windows into each GPU submission,

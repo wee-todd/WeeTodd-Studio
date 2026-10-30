@@ -22,8 +22,14 @@ final class H3RegenerateInstalledBlockProbeTests:XCTestCase {
       referenceOutput == nil || iterations == 1 else {
       throw H3CheckpointError.invalid("Block activation comparison requires exactly one bounded block.")
     }
-    GPU.metallib=try NativeMLXMetalLibrary.resolve(executable:URL(fileURLWithPath:worker))
+    _ = worker // Probe context verifies and binds the explicitly frozen library.
+    try H3BoundedProbeGPUContext.run { error in
     let job=try H3RegenerateJob.decode(Data(contentsOf:URL(fileURLWithPath:fixture)))
+    let tokenizer=try H3QwenTokenizer(url:URL(fileURLWithPath:job.qwen.tokenizer.path))
+    let request=try H3QwenRequest.text(job.prompt,tokenizer:tokenizer)
+    let admission=try H3RegenerateAdmission(width:2560,height:1440,visibleFrames:121,paddedFrames:124,fps:24,
+      textRows:request.tags.count,maximumStageBytes:UInt64(H3BoundedProbeGPUContext.activeLimit),availableTemporaryBytes:64*1024*1024*1024)
+    try admission.validateExecution(qualificationProbe:true)
     for component in [job.components.transformer,job.components.refiner,job.components.sharpInput,job.components.sharpCurve] {
       let handle=try FileHandle(forReadingFrom:URL(fileURLWithPath:component.path));defer{try? handle.close()}
       var hash=SHA256()
@@ -35,11 +41,6 @@ final class H3RegenerateInstalledBlockProbeTests:XCTestCase {
         throw H3CheckpointError.invalid("Probe component differs from the frozen whole-file identity.")
       }
     }
-    let tokenizer=try H3QwenTokenizer(url:URL(fileURLWithPath:job.qwen.tokenizer.path))
-    let request=try H3QwenRequest.text(job.prompt,tokenizer:tokenizer)
-    let admission=try H3RegenerateAdmission(width:2560,height:1440,visibleFrames:121,paddedFrames:124,fps:24,
-      textRows:request.tags.count,maximumStageBytes:96*1024*1024*1024,availableTemporaryBytes:64*1024*1024*1024)
-    try admission.validateExecution(qualificationProbe:true)
     let layout=try H3PackedLayout(geometry:admission.geometry,textTags:request.tags,anchors:[])
     let attentionPlan=try H3RegenerateAttentionPlan.runtime(rows:admission.packedRows,heads:56,headWidth:128,dtype:.bfloat16)
     let clock=try H3RowSchedule(regenerate:layout,schedule:.publisherThreeStep)
@@ -67,16 +68,17 @@ final class H3RegenerateInstalledBlockProbeTests:XCTestCase {
       "fullModelExecution":false,"allKeysVisible":true,"attentionExecution":attentionPlan.metadata])
     for iteration in 0..<iterations {
       // A fresh stage also redoes all merges, matching a new production block.
+      try H3BoundedProbeGPUContext.checkBudget(error)
       let start=Date();Memory.peakMemory = Memory.activeMemory
       try adapter.withStage(.regenerate) {
         let result=try H3TransformerBlock.evaluate(checkpointURL:base,index:0,input:input,modulation:modulation,
           modulationIndices:indices,positions:positions,lora:adapter,sharp:sharp,modelTimes:clock.table,
           regenerateAdmission:admission,regenerateAttentionPlan:attentionPlan,rotaryAngles:angles,maximumRows:H3RegenerateAdmission.maximumPackedRows,
           observe:{ name,value in
-            eval(value)
+            eval(value);try H3BoundedProbeGPUContext.checkBudget(error)
             try record(["event":"phase","iteration":iteration,"phase":name,"seconds":Date().timeIntervalSince(start),"activeBytes":Memory.activeMemory,"peakBytes":Memory.peakMemory])
           })
-        eval(result);XCTAssertTrue(all(isFinite(result)).item(Bool.self))
+        eval(result);try H3BoundedProbeGPUContext.checkBudget(error);XCTAssertTrue(all(isFinite(result)).item(Bool.self))
         var usage=rusage();getrusage(RUSAGE_SELF,&usage)
         try record(["event":"complete","iteration":iteration,"seconds":Date().timeIntervalSince(start),
           "peakBytes":Memory.peakMemory,"processMaximumResidentBytes":usage.ru_maxrss,"outputShape":result.shape])
@@ -110,7 +112,7 @@ final class H3RegenerateInstalledBlockProbeTests:XCTestCase {
                 maximum=max(maximum,MLX.max(abs(delta)).item(Float.self))
                 squaredError += Double(sum(delta*delta).item(Float.self))
                 squaredReference += Double(sum(expected32*expected32).item(Float.self))
-                identical = identical && all(actual .== expected).item(Bool.self)
+                identical = identical && data == expectedBytes
                 XCTAssertTrue(all(isFinite(expected)).item(Bool.self))
               }
             }
@@ -132,6 +134,8 @@ final class H3RegenerateInstalledBlockProbeTests:XCTestCase {
       XCTAssertEqual(adapter.mergedWeights.count,0)
       try record(["event":"weights_released","iteration":iteration,"mergedProjectionCount":adapter.mergedWeights.count,
         "activeMLXBytes":Memory.activeMemory])
+    }
+    try error.check()
     }
   }
 }

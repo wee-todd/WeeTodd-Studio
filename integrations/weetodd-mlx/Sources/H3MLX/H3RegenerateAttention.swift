@@ -110,7 +110,10 @@ enum H3RegenerateAttention {
       for group in 0..<groups {
         let headCount=query[group].shape[1]
         let attended:MLXArray
-        if forceFused {
+        if forceFused && plan.useUnfencedKernel {
+          attended=try H3UnfencedAttention.evaluate(query:query[group],key:key[group],value:value[group],
+            range:range,maximumStageBytes:maximumStageBytes)
+        } else if forceFused {
           attended=try forcedAttend(queryOwner:query[group],keysOwner:key[group],valuesOwner:value[group],range:range)
         } else {
           attended=try attend(query:query[group][0..<1,0..<headCount,range,0..<headWidth],
@@ -135,6 +138,23 @@ enum H3RegenerateAttention {
   /// logical size cannot stand in for the bounds of its strided owner storage.
   static func forcedAttend(queryOwner:MLXArray,keysOwner:MLXArray,valuesOwner:MLXArray,
     range:Range<Int>) throws -> MLXArray {
+    let query=try validatedQuery(queryOwner:queryOwner,keysOwner:keysOwner,valuesOwner:valuesOwner,range:range)
+    // The full-kernel indexing audit does not replace vector-tail admission.
+    if range.count <= 8 { return try attend(query:query,keys:keysOwner,values:valuesOwner) }
+    let result=try MLX.withError { error in
+      let output=MLXFast.scaledDotProductAttention(queries:query,keys:keysOwner,values:valuesOwner,
+        scale:1/Float(128).squareRoot(),mask:nil,forceFused:true)
+      try error.check()
+      eval(output)
+      try error.check()
+      return output
+    }
+    try Task.checkCancellation();return result
+  }
+
+  /// Validate complete storage before slicing a small strided query window.
+  static func validatedQuery(queryOwner:MLXArray,keysOwner:MLXArray,valuesOwner:MLXArray,
+    range:Range<Int>) throws -> MLXArray {
     try Task.checkCancellation()
     guard queryOwner.ndim == 4,queryOwner.shape[0] == 1,queryOwner.shape[1] == 56,
       queryOwner.shape[3] == 128,keysOwner.shape == queryOwner.shape,valuesOwner.shape == queryOwner.shape,
@@ -153,17 +173,7 @@ enum H3RegenerateAttention {
         throw H3CheckpointError.invalid("Forced regenerate attention owner storage is not canonical or exceeds real buffer bounds.")
       }
     }
-    let query=queryOwner[0..<1,0..<56,range,0..<128]
-    // The full-kernel indexing audit does not replace vector-tail admission.
-    if range.count <= 8 { return try attend(query:query,keys:keysOwner,values:valuesOwner) }
-    let result=try MLX.withError { error in
-      let output=MLXFast.scaledDotProductAttention(queries:query,keys:keysOwner,values:valuesOwner,
-        scale:1/Float(128).squareRoot(),mask:nil,forceFused:true)
-      try error.check()
-      eval(output)
-      try error.check()
-      return output
-    }
-    try Task.checkCancellation();return result
+    return queryOwner[0..<1,0..<56,range,0..<128]
   }
+
 }

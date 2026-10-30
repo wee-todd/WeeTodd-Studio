@@ -6,13 +6,22 @@ import XCTest
 @testable import H3MLX
 
 final class H3RegenerateAttentionPlanTests: XCTestCase {
+  func testQualifiedRouteOmitsExecutionOnlySIMDFences() throws {
+    let plan=try H3RegenerateAttentionPlan.resolve(rows:133_718,heads:56,headWidth:128,
+      isMetalGPU:true,isBF16:true,architecture:"applegpu_g15d")
+    XCTAssertEqual(plan.metadata["simdExecutionFencesRemoved"] as? Bool,true)
+    XCTAssertEqual(plan.route,"metal-steel-unfenced-bf16-d128")
+    XCTAssertEqual(plan.outputProjectionChunk,256)
+    XCTAssertEqual(plan.metadata["allKeysVisible"] as? Bool,true)
+  }
+
   func testQualifiedPinnedMetalRouteSelectsWideQueriesAndAuditableMetadata() throws {
     let plan=try H3RegenerateAttentionPlan.resolve(rows:133_727,heads:56,headWidth:128,
       isMetalGPU:true,isBF16:true,architecture:"applegpu_g15d")
     XCTAssertEqual(plan.queryChunk,8192);XCTAssertEqual(plan.headsPerGroup,56)
     XCTAssertEqual(plan.outputProjectionChunk,256)
-    XCTAssertTrue(plan.forceFused);XCTAssertEqual(plan.policyVersion,2)
-    XCTAssertEqual(plan.route,"metal-steel-bf16-d128")
+    XCTAssertTrue(plan.forceFused);XCTAssertEqual(plan.policyVersion,3)
+    XCTAssertEqual(plan.route,"metal-steel-unfenced-bf16-d128")
     XCTAssertEqual(plan.metadata["queryChunk"] as? Int,8192)
     XCTAssertEqual(plan.metadata["outputProjectionChunk"] as? Int,256)
     XCTAssertEqual(plan.metadata["attentionQueryChunk"] as? Int,8192)
@@ -24,16 +33,35 @@ final class H3RegenerateAttentionPlanTests: XCTestCase {
     XCTAssertTrue(JSONSerialization.isValidJSONObject(plan.metadata))
   }
 
+  func testUntestedCompilerKeepsPriorFusedRouteAndOSAdmissionIsExact() throws {
+    let plan=try H3RegenerateAttentionPlan.resolve(rows:133_718,heads:56,headWidth:128,
+      isMetalGPU:true,isBF16:true,architecture:"applegpu_g15d",supportsUnfenced:false)
+    XCTAssertFalse(plan.useUnfencedKernel);XCTAssertEqual(plan.route,"metal-steel-bf16-d128")
+    XCTAssertTrue(plan.forceFused);XCTAssertEqual(plan.queryChunk,8192)
+    XCTAssertEqual(plan.metadata["simdExecutionFencesRemoved"] as? Bool,false)
+    for (major,minor,patch) in [(26,0,1),(27,0,0),(27,0,2),(27,1,0),(28,0,1)] {
+      XCTAssertFalse(H3RegenerateAttentionPlan.unfencedRuntimeIsQualified(.init(majorVersion:major,minorVersion:minor,patchVersion:patch)))
+    }
+    XCTAssertTrue(H3RegenerateAttentionPlan.unfencedRuntimeIsQualified(.init(majorVersion:27,minorVersion:0,patchVersion:1)))
+  }
+
+  func testBoundedBlockProbeBudgetAdmitsItsConservativeGeometry() throws {
+    let admission=try H3RegenerateAdmission(width:2560,height:1440,visibleFrames:121,paddedFrames:124,fps:24,
+      textRows:104,maximumStageBytes:UInt64(H3BoundedProbeGPUContext.activeLimit),availableTemporaryBytes:64*1024*1024*1024)
+    XCTAssertEqual(admission.packedRows,133_718)
+    XCTAssertLessThanOrEqual(admission.estimatedStageBytes,UInt64(H3BoundedProbeGPUContext.activeLimit))
+  }
+
   func testUnknownHardwareCPUOtherPrecisionAndDimensionsKeepLegacyQueryGuard() throws {
     for architecture in ["applegpu_g14d","applegpu_g16p","applegpu_g17p","unknown",""] {
       let plan=try H3RegenerateAttentionPlan.resolve(rows:133_727,heads:56,headWidth:128,
         isMetalGPU:true,isBF16:true,architecture:architecture)
-      XCTAssertEqual(plan.queryChunk,256);XCTAssertFalse(plan.forceFused)
+      XCTAssertEqual(plan.queryChunk,256);XCTAssertFalse(plan.forceFused);XCTAssertFalse(plan.useUnfencedKernel)
     }
     for (gpu,bf16,heads,width) in [(false,true,56,128),(true,false,56,128),(true,true,4,128),(true,true,56,8)] {
       let plan=try H3RegenerateAttentionPlan.resolve(rows:133_727,heads:heads,headWidth:width,
         isMetalGPU:gpu,isBF16:bf16,architecture:"applegpu_g15d")
-      XCTAssertEqual(plan.queryChunk,256);XCTAssertFalse(plan.forceFused)
+      XCTAssertEqual(plan.queryChunk,256);XCTAssertFalse(plan.forceFused);XCTAssertFalse(plan.useUnfencedKernel)
     }
   }
 
@@ -42,7 +70,7 @@ final class H3RegenerateAttentionPlanTests: XCTestCase {
       let plan=try H3RegenerateAttentionPlan.resolve(rows:rows,heads:56,headWidth:128,
         isMetalGPU:true,isBF16:true,architecture:"applegpu_g15d")
       XCTAssertEqual(plan.queryChunk,256);XCTAssertEqual(plan.headsPerGroup,14)
-      XCTAssertFalse(plan.forceFused)
+      XCTAssertFalse(plan.forceFused);XCTAssertFalse(plan.useUnfencedKernel)
     }
   }
 
@@ -57,7 +85,7 @@ final class H3RegenerateAttentionPlanTests: XCTestCase {
     for rows in [1,8] {
       let plan=try H3RegenerateAttentionPlan.resolve(rows:rows,heads:56,headWidth:128,
         isMetalGPU:true,isBF16:true,architecture:"applegpu_g15d")
-      XCTAssertEqual(plan.queryChunk,256);XCTAssertFalse(plan.forceFused)
+      XCTAssertEqual(plan.queryChunk,256);XCTAssertFalse(plan.forceFused);XCTAssertFalse(plan.useUnfencedKernel)
     }
   }
 
