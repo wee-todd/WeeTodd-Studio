@@ -62,6 +62,8 @@ Disk admission includes projection/latent spools, decoder carry state, media pre
 
 Actual-weight checks cover all four model/decoder pairs at compression 4, 2 and 1, multiple groups, partial tails, 24 and 30000/1001 FPS, exact output hashes/counts and zero active MLX bytes at weighted-stage release. These are functional qualification cells, not a universal quality, 4K, OS or throughput claim. Native sparse attention uses bounded routing/score storage; CUDA numerical or speed parity is not claimed. Native AdaIN uses its recorded population-variance convention.
 
+For the released 128-token, 128-channel attention windows, the worker groups up to eight independent windows per GPU submission. Each window retains its original rank-two matrix operations, selected-key order and eight-key-window slabs. Scratch remains below the existing 64 MiB attention reserve; other geometries and custom slab sizes keep serial scheduling. M3 Ultra synthetic operator checks retained every Float32/BF16 output bit and measured 3.32–3.51× warm operator speedups. These measurements exclude model loading, projection, other transformer operations and decoding; they do not establish whole-video throughput.
+
 ## Retry, ordered processing and saved jobs
 
 Enable **Upscale after generation** and choose FlashVSR+, H3 Regenerate, native Pixel/CQ or an explicit ordered combination. Enabling the control starts with one FlashVSR stage. H3 → FlashVSR and Pixel/CQ → FlashVSR are selected deliberately. Existing saved recipes retain their recorded settings/backend.

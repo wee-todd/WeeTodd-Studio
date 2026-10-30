@@ -16,42 +16,76 @@ public enum FlashVSRAttention {
     }
   }
 
-  /// Windows [B,H,blocks,128,D]. One query block and at most keySlabBlocks key
-  /// blocks are materialized at a time. Online softmax preserves the selected mask.
+  /// Windows [B,H,blocks,128,D]. Up to eight canonical query windows share
+  /// submissions, each with at most keySlabBlocks key blocks. Other geometry
+  /// stays serial. Online softmax preserves the selected mask and key order.
   public static func attend(queries:MLXArray, keys:MLXArray, values:MLXArray, selection:[[[[Int]]]], keySlabBlocks:Int = 8) throws -> MLXArray {
+    try attend(queries:queries,keys:keys,values:values,selection:selection,keySlabBlocks:keySlabBlocks,
+      checkCancellation:{ try Task.checkCancellation() })
+  }
+
+  static func attend(queries:MLXArray,keys:MLXArray,values:MLXArray,selection:[[[[Int]]]],
+    keySlabBlocks:Int=8,checkCancellation:()throws->Void)throws->MLXArray {
     guard queries.ndim == 5, keys.ndim == 5, values.shape == keys.shape,
+      queries.shape.allSatisfy({$0>0}),keys.shape.allSatisfy({$0>0}),
+      keys.shape[2] <= Int(Int32.max),
       queries.shape[0..<2] == keys.shape[0..<2], queries.shape[3...] == keys.shape[3...],
       keySlabBlocks > 0, selection.count == queries.shape[0] else { throw FlashVSRError.invalid("Invalid sparse attention windows.") }
     let batch=queries.shape[0], heads=queries.shape[1], blocks=queries.shape[2], tokens=queries.shape[3], dim=queries.shape[4]
+    // Group submissions only for the released geometry. Keeping every QK/PV
+    // rank2 preserves MLX's split-K kernel and its original reduction order.
+    // At most8 windows use <64MiB scratch, reserved by FlashVSRMemoryPlan.
+    let grouped=tokens == 128 && dim == 128 && keySlabBlocks == 8
+      && (queries.dtype == .bfloat16 || queries.dtype == .float32)
+      && queries.dtype == keys.dtype && queries.dtype == values.dtype
+    struct WindowState {
+      let query:MLXArray
+      var peak:MLXArray,denominator:MLXArray,numerator:MLXArray
+    }
     var batches=[MLXArray]()
     for b in 0..<batch {
       guard selection[b].count == heads else { throw FlashVSRError.invalid("Missing head routing.") }
       var headOutputs=[MLXArray]()
       for h in 0..<heads {
         guard selection[b][h].count == blocks else { throw FlashVSRError.invalid("Missing block routing.") }
-        var blockOutputs=[MLXArray]()
-        for block in 0..<blocks {
-          try Task.checkCancellation()
-          let indices=selection[b][h][block]
-          guard !indices.isEmpty, Set(indices).count == indices.count, indices.allSatisfy({ $0 >= 0 && $0 < keys.shape[2] }) else { throw FlashVSRError.invalid("Empty or invalid attention selection.") }
-          let q=queries[b,h,block].asType(.float32)
-          var peak=MLXArray.full([tokens,1],values: MLXArray(-Float.infinity))
-          var denominator=MLXArray.zeros([tokens,1]), numerator=MLXArray.zeros([tokens,dim])
-          for start in stride(from:0,to:indices.count,by:keySlabBlocks) {
-            let ids=MLXArray(indices[start..<min(start+keySlabBlocks,indices.count)].map(Int32.init))
-            let k=take(keys[b,h],ids,axis:0).reshaped([-1,dim]).asType(.float32)
-            let v=take(values[b,h],ids,axis:0).reshaped([-1,dim]).asType(.float32)
-            let scores=matmul(q,k.transposed()) / sqrt(Float(dim))
-            let nextPeak=maximum(peak,max(scores,axis:1,keepDims:true))
-            let correction=exp(peak-nextPeak), probabilities=exp(scores-nextPeak)
-            numerator=numerator*correction+matmul(probabilities,v)
-            denominator=denominator*correction+sum(probabilities,axis:1,keepDims:true)
-            peak=nextPeak
-            eval(numerator,denominator,peak)
-          }
-          let result=(numerator/denominator).asType(queries.dtype); eval(result); blockOutputs.append(result)
+        for indices in selection[b][h] {
+          guard !indices.isEmpty, Set(indices).count == indices.count,
+            indices.allSatisfy({$0 >= 0 && $0 < keys.shape[2]}) else { throw FlashVSRError.invalid("Empty or invalid attention selection.") }
         }
-        headOutputs.append(stacked(blockOutputs,axis:0))
+        let plan=try FlashVSRAttentionSubmissionPlan(selectedCounts:selection[b][h].map(\.count),maximumWindows:grouped ? 8:1)
+        var blockOutputs=Array<MLXArray?>(repeating:nil,count:blocks)
+        for group in plan.groups {
+          try checkCancellation()
+          var states=group.map { block in
+            WindowState(query:queries[b,h,block].asType(.float32),
+              peak:MLXArray.full([tokens,1],values:MLXArray(-Float.infinity)),
+              denominator:MLXArray.zeros([tokens,1]),numerator:MLXArray.zeros([tokens,dim]))
+          }
+          let selectedCount=selection[b][h][group[0]].count
+          for start in stride(from:0,to:selectedCount,by:keySlabBlocks) {
+            try checkCancellation()
+            for local in states.indices {
+              try checkCancellation()
+              let indices=selection[b][h][group[local]]
+              let ids=MLXArray(indices[start..<min(start+keySlabBlocks,indices.count)].map(Int32.init))
+              let k=take(keys[b,h],ids,axis:0).reshaped([-1,dim]).asType(.float32)
+              let v=take(values[b,h],ids,axis:0).reshaped([-1,dim]).asType(.float32)
+              let old=states[local]
+              let scores=matmul(old.query,k.transposed()) / sqrt(Float(dim))
+              let nextPeak=maximum(old.peak,max(scores,axis:1,keepDims:true))
+              let correction=exp(old.peak-nextPeak),probabilities=exp(scores-nextPeak)
+              states[local].numerator=old.numerator*correction+matmul(probabilities,v)
+              states[local].denominator=old.denominator*correction+sum(probabilities,axis:1,keepDims:true)
+              states[local].peak=nextPeak
+            }
+            eval(states.flatMap{[$0.numerator,$0.denominator,$0.peak]})
+          }
+          let results=states.map{($0.numerator/$0.denominator).asType(queries.dtype)}
+          eval(results)
+          for (local,block) in group.enumerated() { blockOutputs[block]=results[local] }
+        }
+        try checkCancellation()
+        headOutputs.append(stacked(blockOutputs.map{$0!},axis:0))
       }
       batches.append(stacked(headOutputs,axis:0))
     }

@@ -1,5 +1,33 @@
 # WeeTodd Studio implementation status
 
+## October 30 Flash attention submission optimization
+
+Native FlashVSR+ now groups up to eight equal-length query windows into each GPU submission,
+retaining the original rank-two QK/PV operations, selected-key order, online softmax and casts.
+The released 128-token/128-channel Float32 and BF16 geometry uses this path with less than
+64 MiB scratch; other geometries and custom key slabs retain serial scheduling. Cancellation
+is checked between key slabs and before each window's work.
+
+On M3 Ultra, model-free `[1,12,24,128,128]` attention checks with 24/36/48 key windows passed
+18 complete output-bit comparisons. Four balanced warm pairs per dtype/key geometry measured
+3.32–3.51× operator speedups, with all 24 pairs retaining every output bit. Six additional
+production-router-generated synthetic masks passed the same comparison. These are attention
+operator measurements, not whole-video speed claims. Rank-three matrix batching changed
+rounding and was rejected. Full five-second 2K H3 qualification remains incomplete and its
+high-row production gate remains closed; that expensive test has not been restarted.
+
+A rebuilt isolated Release bundle passed deep/strict signature verification. Its native CLI
+completed the same 17-frame, 24 FPS Turbo/Tiny, compression-4, seed-42 restoration from
+256×144 to 512×288 with Python environment variables removed and no executable search path.
+The restoration receipt recorded 26.73 s, excluding initial setup; the complete command took
+35.65 s. The prior receipt was 38.91 s, and transformer time changed from 30.04 to 19.91 s.
+These are individual short-job observations, not a balanced whole-video benchmark. The movie,
+decoded original stereo PCM and native RGB matched the previous result byte-for-byte; all
+weighted stages returned active residency to zero. Core/Studio/workflows validation passed:
+3,596 development tests and Swift suites of 245/1,269/1,317/25 tests, with only the documented
+optional skips and zero failures. Interactive qualification of this rebuilt bundle is pending
+manual Mac unlock; the earlier bundle's UI qualification below remains separate.
+
 ## October 29 native restoration and exact attention optimization
 
 Studio's Upscale Video tool now exposes H3 Regenerate and FlashVSR+ through native Swift/MLX
