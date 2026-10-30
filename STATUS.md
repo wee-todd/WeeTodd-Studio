@@ -49,11 +49,21 @@ proofs above were run separately. Final packaging and app qualification are reco
 this entry does not claim a completed long 2K render.
 
 The optimized isolated Release app built successfully and passed deep/strict signature verification.
-Its bundled CLI and Flash worker completed a fresh 17-frame, 512×288, 24 FPS native job in
-38.91 s with the executable search path unavailable and Python environment variables removed.
+Its bundled CLI and Flash worker completed a fresh 17-frame, 512×288, 24 FPS native job; its
+restoration receipt recorded 38.91 s with the executable search path unavailable and Python
+environment variables removed.
 Decoded original stereo PCM matched byte-for-byte; projection, transformer and decoder residency
-returned to zero. This verifies that packaged native path without Python. Final interactive checks
-of the updated bundle remain pending while the Mac is locked.
+returned to zero. This verifies that packaged native path without Python.
+
+After the Mac was unlocked, the same app completed a UI-initiated Turbo/Tiny restoration from
+256×144 to 512×288: 17 frames at 24 FPS. Its restoration receipt recorded 42.13 s, excluding the
+initial setup check. Its output movie and original stereo PCM
+matched the native CLI result byte-for-byte, with all weighted-stage residency counters returning
+to zero. Original/restored comparison playback, H3 Fast preflight, admission reset when switching
+families, retention of the completed Flash result, and Drama 3's visible native-family control
+were checked interactively. Saving serialized the result and receipt link; relaunch/autosave
+recovery retained the asset. UI automation timed out after the subsequent Open Project dialog,
+so the explicit saved-file reopen visual check remains pending. No long H3 trial was restarted.
 
 ## October 26 experimental native FastH3 Omni
 
