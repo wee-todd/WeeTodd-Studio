@@ -29,11 +29,48 @@ feature in the current app.
 | LTX one-step Diffusion VAE | Explicit experimental complete-component decoder selection; Conv remains the default, with strict workspace and checkpoint admission | CPU/header/release checks, tiny numerical comparisons, retained 1344 × 768/89-frame decode and complete 768 × 448/49-frame Dev Euler/refinement job; no Conv pixel-parity or isolated performance claim |
 | H3 reference preparation | Optional 50–400% image pixel budget; movie match-output/native-H3 budget; full/half/quarter/automatic density; explicit frame or Last placement and replacement soundtrack | CPU tests; new policies are not a general likeness/motion-quality approval |
 | H3 LoRA composition | Up to eight distinct ordered adapters, signed strengths −10 to 10, explicit QKV layout/profile and deferred standard-adapter start | Header/CPU arithmetic checks; historical real stacks qualify only those adapters |
+| H3 Pika Flex LoRAs | Optional task-bound FL2VA and Ref2VA adapters; six Flex evaluations, strength 1, immediate activation; ordinary native video tasks | Sampler arithmetic, installed headers/imports/composition and complete native text/Ref audiovisual jobs at 832 × 480; broader quality remains unqualified |
 | H3 full latent refinement | Save complete AV latents; initialize at the same canvas or enlarge both axes by at most 2×; exact source duration/task/component identity | Full saving/initialized/interpolation packets completed; retained initialized and corrected learned 1920 × 1088/73-frame takes human-approved October 5; older interpolation failure and broader settings remain separate |
 | H3 Motion Fidelity | Experimental independent T2VA movie repair; 24 fps matching canvas/trim, at least 15 base evaluations, immediate standard adapters, bounded expansion | CPU producer/acceptance/lifecycle tests and actual native repair with exact selected source PCM; retained repair human-approved October 5; broader fidelity improvement remains unqualified |
 | H3 video decode precision | Explicit experimental FP16 for Swift lower-memory profiles; FP32 stays default | Complete 1376 × 768 saved-latent numerical/release comparison and one complete packaged 672 × 384 VSA job with exact audio, progress, previews and release; published pixels differ; the user approved that complete clip visually October 8, without all-task qualification |
 | H3 Sol attention | Explicit approximate attention for independent Swift MLX Ref2VA with ordinary signed-I8 weights, or FL2VA image/keyframes with rank-64 BF16 weights; one strength-1 BF16 Turbo adapter, four Euler evaluations and Drop AdaLN; at most 40000 packed rows | Ref2VA signed-app generation and review passed; FL installed-weight execution and complete Studio generation passed at 38937 rows; exact linked FL take human-approved October 8 |
 | H3 transformer weight cache | Explicit stage-local budget: 0, 8, 16, 32, 48, 64 or 96 GiB; ordinary signed-I8 or BF16 block projections with immediate adapters | Installed I8/BF16 projection reuse and teardown passed; complete 48 GiB FL Studio run loaded 50 blocks once and served 150 hits |
+
+### Pika H3 Flex
+
+Select Pika H3 Flex through the normal H3 LoRA library or an ordered LoRA group.
+For **Import…**, choose H3 and **Automatic**, or the matching named Pika Flex task profile. The official
+Comfy-format **FL2VA** adapter serves text generation and first/last endpoint images; **Ref2VA**
+serves ordinary visual-reference generation. Import/discovery identifies the released files by
+bounded header identity, including after a rename. It records the task profile and contiguous-QKV
+layout. With no explicit Steps/Sampler override, applying Flex resolves to **6 evaluations** and
+**Pika Flex**; disabling it restores the underlying profile. Clear conflicting explicit overrides
+or choose those exact values. Keep adapter strength at **1** and activation at evaluation **0**.
+Creative adapters may share the existing eight-adapter stack; their visual effect needs review.
+
+Kijai's reduced-rank BF16 FL2VA and Ref2VA Flex exports are also recognized automatically.
+They retain the same task, strength and sampler requirements. Their rank markers validate
+already folded scaling; they do not apply another multiplier. The smaller files save about
+72% on disk. One matched text/reference pair at 832 × 480 showed close sampled face/motion
+behavior, no speed gain and unchanged peak MLX allocation; this is not broad quality approval
+or a reason to replace the larger adapters automatically. Both remain optional choices.
+
+Saved native recipes use `config.sampling_method: "pika_flex"`, `config.steps: 7` (six model calls)
+and one adapter descriptor with `profile: "pika_flex_fl2va"` or `"pika_flex_ref2va"`.
+Flex uses its fixed video/audio ladders and fresh intermediate noise, ending with a clean
+prediction. Ordinary six-step Euler is a different algorithm. Turbo mixing, task mismatches,
+interior keyframes, continuation, stills, controls and refinement fail admission. The legacy
+Python/ComfyUI renderer reports that Flex requires Swift H3. Existing recipes and defaults are
+unchanged. Shared components, quantized/pruned bases and native reference preparation retain
+WeeTodd's contracts; this integration does not establish full Pika-runtime or PyTorch seed parity.
+The separately distributed weights retain their publisher's license and notices:
+[Pika-Labs/Pika-H3-Flex](https://huggingface.co/Pika-Labs/Pika-H3-Flex).
+
+Full native renders covered text and ordinary image-reference jobs at 832 × 480, 124 frames and
+24 FPS with stereo audio. First/last endpoint FL2VA passed installed preflight and fixed-conditioning
+sampler checks. A full endpoint render remains unqualified.
+
+### H3 attention and weight cache
 
 Use **Advanced attention → Attention → Sol · approximate / experimental** for the admitted H3
 reference or FL2VA image/keyframe workflow. Keep **Dense** for other tasks or for the existing numerical behavior. Sol

@@ -24,3 +24,10 @@ MIT-licensed MLX Steel primitives and indexed/dense attention adaptations from
 Apple Inc. The complete MIT notice is retained in those files and in the
 packaged native worker notices.
 https://github.com/ml-explore/mlx-swift/tree/901941965d82e4a216d4d117231d847d194c563d
+
+Pika-Labs/Pika-H3-Flex was consulted for native H3 Flex adapter and sampling
+contracts at revision 4bf8ea508891a432106e70f675d287c27f02306d:
+https://github.com/Pika-Labs/Pika-H3-Flex
+The Swift implementation is maintained independently. Pika weights and the
+MiniMax H3 base are distributed separately under their publisher's terms;
+weights and third-party runtime source are not included here.

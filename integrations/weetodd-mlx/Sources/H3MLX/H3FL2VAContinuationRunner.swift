@@ -18,6 +18,7 @@ public enum H3FL2VAContinuationRunner {
   public static func preflight(_ request: H3FL2VARequest,
     contextFrames: Int) throws -> Admission {
     try Task.checkCancellation()
+    try H3FlexAdapter.admit(adapters: request.base.loRAAdapters, steps: request.base.requestedSteps, method: request.base.samplingMethod, task: "continuation", specialized: true, checkpoint: request.base.transformer)
     let ordinary = try H3FL2VARunner.preflight(request)
     let layout = try H3ReferenceLayout(geometry: request.base.geometry,
       textTags: Array(ordinary.layout.tags.prefix(ordinary.textRows)),

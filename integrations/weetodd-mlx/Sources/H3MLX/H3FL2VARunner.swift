@@ -69,6 +69,11 @@ public enum H3FL2VARunner {
     }
     try Task.checkCancellation()
     let base = request.base
+    let endpointOnly = request.anchors.allSatisfy { anchor in
+      switch anchor { case .first, .last: return true; case .frame(let i): return i == 0 || i == base.geometry.frames - 1 }
+    }
+    try H3FlexAdapter.admit(adapters: base.loRAAdapters, steps: base.requestedSteps, method: base.samplingMethod,
+      task: "fl2va", specialized: refinement != nil || base.geometry.stillImageMode != nil || !endpointOnly, checkpoint: base.transformer)
     let experimentalSol=request.attentionPolicy == .solExperimental ? try H3SolTaskPolicy() : nil
     if experimentalSol != nil {
       try H3SolTaskPolicy.validateTask(task:"fl2va",contextFrames:0,isRefinement:refinement != nil,ordinaryCanvas:base.geometry.canvasAdmission == .ordinary,mlxBackend:true,hasFast:false,hasVDN:false,hasFun:false,hasMotion:false)
@@ -81,8 +86,8 @@ public enum H3FL2VARunner {
     let layout = try H3PackedLayout(geometry: base.geometry,
       textTags: qwen.tags, anchors: request.anchors)
     let grids = try refinement?.schedules(requestedSteps: base.requestedSteps)
-    let video = try grids?.video ?? H3Schedule(requestedSteps: base.requestedSteps, shift: 12)
-    let audio = try grids?.audio ?? H3Schedule(requestedSteps: base.requestedSteps, shift: 3)
+    let video = try grids?.video ?? H3Schedule(requestedSteps: base.requestedSteps, shift: 12, samplingMethod: base.samplingMethod)
+    let audio = try grids?.audio ?? H3Schedule(requestedSteps: base.requestedSteps, shift: 3, samplingMethod: base.samplingMethod)
     let rows = try H3RowSchedule(layout: layout, video: video, audio: audio,
       visualConditionStrength: request.referenceNoise?.visual ?? 0.999)
     guard rows.table.count <= 128, layout.tags.count <= base.geometry.maximumPackedRows else {

@@ -18,6 +18,7 @@ public enum H3ContinuationRunner {
   public static func preflight(_ request: H3T2VARequest,
     contextFrames: Int) throws -> Admission {
     try Task.checkCancellation()
+    try H3FlexAdapter.admit(adapters: request.loRAAdapters, steps: request.requestedSteps, method: request.samplingMethod, task: "continuation", specialized: true, checkpoint: request.transformer)
     guard request.funControl == nil, request.vdn == nil else {
       throw H3CheckpointError.invalid("H3 continuation cannot combine Fun control or experimental VDN.")
     }

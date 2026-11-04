@@ -248,6 +248,9 @@ one GPU block and one CPU prefetch; MLX keeps conditioning, sampling and VAE dec
 initial supported combination is a Comfy INT8 Ref2VA checkpoint plus the BF16 four-step Turbo
 LoRA at strength 1. Existing recipes remain on MLX. See [requirements and limits](studio/README.md#native-h3-nnc-core).
 
+**Pika H3 Flex** adds optional six-evaluation native H3 video LoRAs for text, endpoint and
+visual-reference workflows. See [Pika Flex setup and qualification](studio/README.md#pika-h3-flex).
+
 **Native Qwen-Image-2.1** adds local image generation and editing to the existing image workspace.
 Choose **Local MLX · Qwen**, prepare the 8-bit model, and use up to ten ordered image inputs (including
 the canvas), with live previews and stage/step progress. Studio owns inference and staged model

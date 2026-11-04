@@ -1,14 +1,16 @@
 import Foundation
 import MLX
+import MLXRandom
 
 public enum H3SamplingMethod: String, Sendable, Codable {
   case euler
   case resMultistep = "res_multistep"
+  case pikaFlex = "pika_flex"
 }
 
 /// Run-local, target-only history. This independently implements the owned
-/// Python H3 scheduler's float32 coefficients and operation order; it adds no
-/// stochastic draws and does not change the historical Euler update.
+/// Python H3 scheduler's float32 coefficients and operation order. Flex adds
+/// intermediate noise; historical Euler and Res updates retain their RNG behavior.
 struct H3SamplingStepper {
   let schedule: H3Schedule
   let method: H3SamplingMethod
@@ -22,7 +24,7 @@ struct H3SamplingStepper {
   }
 
   mutating func advance(sample: MLXArray, velocity: MLXArray,
-    index: Int) throws -> MLXArray {
+    index: Int, freshNoise: MLXArray? = nil) throws -> MLXArray {
     guard index == nextIndex, schedule.timesteps.indices.contains(index),
       sample.shape == velocity.shape, sample.dtype == .float32,
       velocity.dtype == .float32,
@@ -30,6 +32,24 @@ struct H3SamplingStepper {
       throw H3CheckpointError.invalid("Invalid H3 sequential sampling state or target rows.")
     }
     try Task.checkCancellation()
+    if method == .pikaFlex {
+      let nextSigma = schedule.sigmas[index + 1]
+      if let freshNoise {
+        guard nextSigma > 0, freshNoise.shape == sample.shape, freshNoise.dtype == .float32 else {
+          throw H3CheckpointError.invalid("Invalid Pika Flex intermediate noise.")
+        }
+      }
+      let clean = sample + schedule.sigmas[index] * velocity
+      let result: MLXArray
+      if nextSigma == 0 { result = clean }
+      else {
+        let noise = freshNoise ?? MLXRandom.normal(sample.shape).asType(.float32)
+        result = (Float(1) - nextSigma) * clean + nextSigma * noise
+      }
+      nextIndex += 1
+      return result.asType(.float32)
+    }
+    guard freshNoise == nil else { throw H3CheckpointError.invalid("Intermediate noise requires Pika Flex sampling.") }
     if method == .euler {
       let result = try schedule.advance(sample: sample, velocity: velocity, index: index)
       nextIndex += 1

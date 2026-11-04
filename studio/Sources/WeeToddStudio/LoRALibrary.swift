@@ -8,7 +8,7 @@ struct LoRALibrary: View {
   @Environment(\.dismiss) private var dismiss
   @State private var browsingEngine: Engine = .ltx25
   @State private var importModel: LoRAModel = .ltx25
-  @State private var importProfile = "standard"
+  @State private var importProfile = NativeLoRAImport.defaultH3Profile
   @State private var importLayout = "auto"
   @State private var importGrid: String?
   @State private var draft: LoRAGroup?
@@ -169,15 +169,23 @@ struct LoRALibrary: View {
         }
         Button("Import…") {
           store.chooseLoRAImports(model: importModel,
-            profile: importModel == .h3 ? importProfile : "standard",
+            profile: importModel == .h3 ? (importProfile == "auto" && !store.runtime.usesNativeH3 ? "standard" : importProfile) : "standard",
             layout: importModel == .h3 ? importLayout : "auto",
             adalnInputGrid: importModel == .h3 && importProfile == "turbo" ? importGrid : nil)
         }
       }.controlSize(.small)
       if importModel == .h3 {
         Picker("Adapter", selection: $importProfile) {
+          Text("Automatic · checkpoint metadata").tag("auto")
           Text("Standard").tag("standard")
           Text("H3 Turbo (4 steps)").tag("turbo")
+          if store.runtime.usesNativeH3 {
+            Text(H3LoRAProfile.pikaFlexFL2VA.label).tag("pika_flex_fl2va")
+            Text(H3LoRAProfile.pikaFlexRef2VA.label).tag("pika_flex_ref2va")
+          }
+        }
+        if H3LoRAProfile(rawValue:importProfile)?.isFlex == true {
+          Text("Video only · six Pika Flex evaluations, strength 1 and immediate activation. Use the adapter matching your task.").font(.caption2).foregroundStyle(.secondary)
         }
         if importProfile == "turbo" {
           Text("Turbo requires its four-step schedule. Validation checks task compatibility and any auxiliary weights before generation.")
@@ -222,6 +230,10 @@ struct LoRALibrary: View {
       }
       if asset.loraProfile == "turbo" {
         Text("H3 Turbo · requires 4 steps").font(.caption).foregroundStyle(.orange)
+      }
+      if let raw=asset.loraProfile,let profile=H3LoRAProfile(rawValue:raw),profile.isFlex {
+        Text(profile.label + " · 6 Flex evaluations · strength 1 · video only")
+          .font(.caption).foregroundStyle(.orange)
       }
       if !compatible, store.selectedClip != nil {
         Text(engine == .drawThings ? "Local file · install in Draw Things to use with that connection" : "Choose a matching model to use this LoRA")
@@ -417,6 +429,10 @@ struct ClipLoRAInspector: View {
           }
           if asset?.loraProfile == "turbo" {
             Text(attachment.isEnabled ? "H3 Turbo · requires 4 steps" : "H3 Turbo · disabled")
+              .font(.caption2).foregroundStyle(.secondary)
+          }
+          if let raw=asset?.loraProfile,let profile=H3LoRAProfile(rawValue:raw),profile.isFlex {
+            Text(profile.label + (attachment.isEnabled ? " · 6 Flex evaluations · strength 1" : " · disabled"))
               .font(.caption2).foregroundStyle(.secondary)
           }
           if let group = attachment.loraGroupName, let groupID = attachment.loraGroupID {

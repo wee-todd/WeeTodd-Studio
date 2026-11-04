@@ -91,6 +91,11 @@ final class H3StudioRecipeTests: XCTestCase {
       XCTAssertEqual(anchor.width, 128)
       XCTAssertEqual(anchor.height, 64)
     } else { XCTFail("External extension did not preserve the seam anchor") }
+    config["sampling_method"] = "pika_flex"; config["steps"] = 7; root["config"] = config
+    resolved = false
+    XCTAssertThrowsError(try compile(), "External continuation must not enter ordinary Flex Ref2VA")
+    XCTAssertFalse(resolved, "Reject Flex extension before decoding media")
+    config["sampling_method"] = recipeSamplingMethod; root["config"] = config
     anchorWidth = Int.max
     XCTAssertThrowsError(try compile(), "Validate the canvas before RGB byte-count arithmetic")
     anchorWidth = 160

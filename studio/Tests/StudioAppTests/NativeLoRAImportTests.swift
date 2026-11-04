@@ -5,6 +5,28 @@ import StudioCore
 @testable import WeeToddStudio
 
 final class NativeLoRAImportTests: XCTestCase {
+  @MainActor func testDefaultNativeFlexImportLinksBothTasksAndPreservesGroupProfile() async throws {
+    guard let models=ProcessInfo.processInfo.environment["WEETODD_H3_FLEX_MODELS"] else { throw XCTSkip("Optional installed Flex import qualification") }
+    let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+    defer {try? FileManager.default.removeItem(at:root)}
+    let store=StudioStore(dataDirectory:root,restoreSession:false,
+      invocation:{_,_,_,_ in throw StudioError.invalid("Unexpected Python bridge")})
+    store.runtime.nativeH3Enabled=true
+    for task in ["fl2va","ref2va"] {
+      let url=URL(fileURLWithPath:models).appendingPathComponent("pika_h3_flex_\(task)_comfy_bf16.safetensors")
+      await store.importURLs([url],scope:.global,loraModel:.h3,loraProfile:NativeLoRAImport.defaultH3Profile)
+      XCTAssertNil(store.error)
+      let asset=try XCTUnwrap(store.globalAssets.last)
+      XCTAssertEqual(asset.path,url.path);XCTAssertEqual(asset.loraProfile,"pika_flex_\(task)")
+      XCTAssertEqual(asset.loraLayout,"contiguous_qkv")
+      let group=LoRAGroup(name:"Flex",engine:.h3,members:[LoRAMember(asset:asset)])
+      let restored=try JSONDecoder().decode(LoRAGroup.self,from:JSONEncoder().encode(group))
+      XCTAssertEqual(restored.members.first?.asset.loraProfile,"pika_flex_\(task)")
+    }
+    XCTAssertEqual(store.globalAssets.count,2)
+  }
+
   @MainActor func testNativeRefModImportRejectsBeforeBridgeOrLibraryMutation() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

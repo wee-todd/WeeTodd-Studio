@@ -172,13 +172,15 @@ public enum H3T2VARunner {
       throw H3CheckpointError.invalid("Expanded H3 canvas requires explicit initialized spatial refinement.")
     }
     try Task.checkCancellation()
+    try H3FlexAdapter.admit(adapters: request.loRAAdapters, steps: request.requestedSteps, method: request.samplingMethod,
+      task: "t2va", specialized: refinement != nil || request.geometry.stillImageMode != nil || request.funControl != nil || request.vdn != nil || request.fastVariant != nil, checkpoint: request.transformer)
     let tokenizer = try H3QwenTokenizer(url: request.tokenizer)
     let qwen = try H3QwenRequest.text(request.prompt, tokenizer: tokenizer)
     let layout = try H3PackedLayout(geometry: request.geometry,
       textTags: qwen.tags, anchors: [])
     let grids = try refinement?.schedules(requestedSteps: request.requestedSteps)
-    let video = try grids?.video ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 12)
-    let audio = try grids?.audio ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 3)
+    let video = try grids?.video ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 12, samplingMethod: request.samplingMethod)
+    let audio = try grids?.audio ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 3, samplingMethod: request.samplingMethod)
     let rows = try H3RowSchedule(layout: layout, video: video, audio: audio)
     guard rows.table.count <= 128, layout.tags.count <= request.geometry.maximumPackedRows else {
       throw H3CheckpointError.invalid("H3 timestep table or packed rows exceed engine admission.")

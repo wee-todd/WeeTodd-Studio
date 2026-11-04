@@ -9,9 +9,18 @@ public struct H3Schedule: Sendable {
   public let timesteps: [Float]
 
   /// Matches the saved H3 `steps` setting: N grid points make N-1 model calls.
-  public init(requestedSteps: Int, shift: Float) throws {
+  public init(requestedSteps: Int, shift: Float, samplingMethod: H3SamplingMethod = .euler) throws {
     guard (2...2001).contains(requestedSteps), shift.isFinite, shift > 0 else {
       throw H3GeometryError.invalid("H3 requires at least two bounded sigma grid points and a positive shift.")
+    }
+    if samplingMethod == .pikaFlex {
+      guard requestedSteps == 7, shift == 12 || shift == 3 else {
+        throw H3GeometryError.invalid("Pika H3 Flex requires six evaluations (seven schedule points) and its video/audio shifts.")
+      }
+      let knots: [Float] = [1, 0.75, 0.5, 0.25, 0.1, 0.04, 0]
+      sigmas = knots.map { (shift * $0) / (Float(1) + (shift - 1) * $0) }
+      timesteps = sigmas.dropLast().map { Float(1) - $0 }
+      return
     }
     let evaluations = requestedSteps - 1
     let step = Float(-1) / Float(evaluations)

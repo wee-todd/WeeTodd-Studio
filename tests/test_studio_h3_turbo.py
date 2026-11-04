@@ -44,6 +44,42 @@ def ordinary_recipe():
     }
 
 
+def test_flex_cannot_fall_through_to_legacy_euler(tmp_path):
+    from wee_todd_nodes.lora import H3LoRASpec
+
+    metadata = {
+        "converted_for": "comfyui-minimax-h3", "base_model": "MiniMaxAI/MiniMax-H3",
+        "base_revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "modified_by": "Mellis, Inc.", "source_adapter": "adapter.safetensors", "format": "pt",
+    }
+    source = adapter(tmp_path, metadata=metadata)
+    for profile in ("auto", "pika_flex_fl2va", "pika_flex_ref2va"):
+        with pytest.raises(ValueError, match="Swift H3"):
+            turbo.resolve_studio_h3_turbo(
+                ordinary_recipe(), [{"path": str(source), "profile": profile}], "t2v"
+            )
+        with pytest.raises(ValueError, match="Swift H3"):
+            H3LoRASpec(str(source), profile=profile).validate()
+
+
+def test_reduced_flex_cannot_fall_through_to_legacy_euler(tmp_path):
+    from wee_todd_nodes.lora import H3LoRASpec
+
+    source = adapter(tmp_path, metadata={
+        "converted_layout": "comfyui_minimax_h3", "format": "pt", "baked_scale": "1.0",
+        "base_model": "MiniMaxAI/MiniMax-H3",
+        "base_revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "modified_by": "Mellis, Inc.", "ss_network_dim": "Dynamic",
+        "ss_network_alpha": "Dynamic",
+        "conversion": "qkv block-diag fused (contiguous q|k|v); mlp.fc1 swiglu halves "
+        "swapped; alpha folded into lora_B; scale 1.0 baked as a flat multiplier",
+    })
+    with pytest.raises(ValueError, match="Swift H3"):
+        turbo.resolve_studio_h3_turbo(ordinary_recipe(), [{"path": str(source)}], "t2v")
+    with pytest.raises(ValueError, match="Swift H3"):
+        H3LoRASpec(str(source)).validate()
+
+
 def attached(tmp_path, **kwargs):
     return {
         "path": str(adapter(tmp_path, **kwargs)),

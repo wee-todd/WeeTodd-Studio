@@ -1,5 +1,47 @@
 # WeeTodd Studio implementation status
 
+## November 1 optional Pika H3 Flex LoRAs
+
+Native Swift H3 supports the separately installed Pika Flex Comfy-format FL2VA and Ref2VA
+adapters through Studio's existing LoRA library, ordered groups and saved recipes. Automatic
+import/discovery identifies the released task adapter from a bounded header fingerprint;
+explicit task profiles and requirements are visible in the library. Applying Flex without
+conflicting clip overrides resolves to six Flex evaluations, strength 1 and immediate activation.
+Disabling it restores the underlying profile. Existing recipes and generation defaults are unchanged.
+The sampler uses the released seven-point audiovisual ladders, fresh intermediate noise and a
+terminal clean prediction. Wrong base partitions/tasks, Turbo mixing and unsupported specialized
+routes fail admission. Legacy Python/ComfyUI execution clearly requires the Swift H3 renderer.
+
+Both installed adapters passed complete native 832 × 480, 124-frame, 24 FPS audiovisual jobs
+with full FP32 video VAE, stereo audio and staged release. Text/FL and image-reference/Ref jobs
+took 337.57 and 369.74 seconds; builds/tests overlapped, so these are observations, not a controlled
+speed comparison. Sampled robot motion was coherent in both clips. This does not establish general
+face/likeness quality, official Pika pipeline parity or PyTorch seed parity. Endpoint FL has installed
+preflight and fixed-conditioning sampler coverage; a complete endpoint render was not run here.
+Focused adapter/sampler/import/group/composition and regression tests pass. Combined core/Studio
+validation passed: Python 3,050 passed with seven skips; native inference, native MLX and Studio
+ran 212/1,086/1,175 tests with 10/184/54 optional skips and zero failures. Isolated release packaging,
+signature verification and ten packaged admission checks passed. Live Studio verified both library
+entries, automatic individual import, six-evaluation preparation and restoration to the underlying
+Euler settings when disabled.
+
+## November 1 reduced-rank Pika Flex comparison
+
+Swift H3 and Studio also recognize the released Kijai reduced-rank BF16 Flex FL2VA/Ref2VA
+exports, including after rename. Variable per-target ranks and exact BF16 alpha=rank markers
+retain unit scaling and contiguous-QKV conversion. Conflicting extra execution declarations
+fail admission. Larger adapters, all existing recipes and generation defaults are retained.
+
+Four serial fresh-process audiovisual jobs used matching seeds, prompts and components within
+text and reference pairs at 832 × 480, 124 frames, 24 FPS, with full FP32 video decode. Large/small
+text jobs took 332.32/341.13 seconds; reference jobs took 383.79/388.39 seconds. All peaked at
+5.167 GB of MLX allocations. These single-run observations establish no speed or peak-memory
+benefit; file sizes are about 72% smaller. Sampled frames show similar head turns, blinks and
+hand waves, with changed text-generated room detail. Output audio is present, finite and
+unclipped; acoustic intelligibility was not independently assessed. Broader likeness, temporal
+and perceptual quality remains separate. No default promotion is made from these two cases.
+Installed native/import/composition checks and focused contradictory-metadata regressions pass.
+
 ## October 30 H3 attention scheduling optimization
 
 Native Swift/MLX H3 regeneration now omits four execution-only SIMD fences from its pinned

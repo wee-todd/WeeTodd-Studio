@@ -21,12 +21,13 @@ final class H3AVSamplerTests: XCTestCase {
 
   func testJointSchedulesKeepReferenceRowsFixed() throws {
     try Device.withDefaultDevice(.cpu) {
-      for method in [H3SamplingMethod.euler, .resMultistep] {
+      for method in [H3SamplingMethod.euler, .resMultistep, .pikaFlex] {
+      let count = method == .pikaFlex ? 6 : 2
       let geometry = try H3Geometry(width: 32, height: 32, durationSeconds: 2.5)
       let layout = try H3PackedLayout(geometry: geometry,
         textTags: [1, 1], anchors: [.first])
-      let video = try H3Schedule(requestedSteps: 3, shift: 12)
-      let audio = try H3Schedule(requestedSteps: 3, shift: 3)
+      let video = try H3Schedule(requestedSteps: count + 1, shift: 12, samplingMethod: method)
+      let audio = try H3Schedule(requestedSteps: count + 1, shift: 3, samplingMethod: method)
       let rows = try H3RowSchedule(layout: layout, video: video, audio: audio)
       let videoCount = layout.conditionVideoRows + geometry.videoRows
       let condition = MLXArray([Float](repeating: 5,
@@ -46,17 +47,19 @@ final class H3AVSamplerTests: XCTestCase {
       } blockProgress: { step, done, total in
         blocks.append((step, done, total))
       }
-      XCTAssertEqual(predictor.calls, 2)
-      XCTAssertEqual(progress.map(\.0), [1, 2])
-      XCTAssertEqual(blocks.map(\.0), [1, 1, 2, 2])
-      XCTAssertEqual(blocks.map(\.1), [1, 2, 1, 2])
+      XCTAssertEqual(predictor.calls, count)
+      XCTAssertEqual(progress.map(\.0), Array(1...count))
+      XCTAssertEqual(blocks.map(\.0), (1...count).flatMap { [$0, $0] })
+      XCTAssertEqual(blocks.map(\.1), (1...count).flatMap { _ in [1, 2] })
       XCTAssertEqual(result.video.shape, [1, videoCount, 96])
       XCTAssertEqual(result.audio.shape, [1, geometry.audioRows, 32])
       XCTAssertEqual(result.video[0, 0, 0].item(Float.self), 5)
+      if method != .pikaFlex {
       XCTAssertEqual(result.video[0, layout.conditionVideoRows, 0].item(Float.self), 1,
         accuracy: 0.000001)
       XCTAssertEqual(result.audio[0, 0, 0].item(Float.self), 1,
         accuracy: 0.000001)
+      } else { XCTAssertTrue(result.video.asArray(Float.self).allSatisfy(\.isFinite)); XCTAssertTrue(result.audio.asArray(Float.self).allSatisfy(\.isFinite)) }
     }
     }
   }

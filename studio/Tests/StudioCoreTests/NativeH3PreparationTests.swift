@@ -543,6 +543,26 @@ func testReferenceDensitySidecarAndAudioCapMatchWorkerAdmission() throws {
     XCTAssertThrowsError(try NativeH3Preparation.compose(request: request(original, runtime)))
   }
 
+  func testInstalledFlexAttachmentComposesAndDisablingRestoresOldProfile() throws {
+    guard let models=ProcessInfo.processInfo.environment["WEETODD_H3_FLEX_MODELS"] else { throw XCTSkip("Optional installed Flex qualification") }
+    let(_,original,runtime)=try fixture();var project=original
+    let url=URL(fileURLWithPath:models).appendingPathComponent("pika_h3_flex_fl2va_comfy_bf16.safetensors")
+    attachLoRA(url,profile:nil,to:&project)
+    let recipe=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    let config=recipe["config"] as! [String:Any]
+    XCTAssertEqual(config["steps"] as? Int,7);XCTAssertEqual(config["sampling_method"] as? String,"pika_flex")
+    let entries=(recipe["loras"] as! [String:Any])["adapters"] as! [[String:Any]]
+    XCTAssertEqual(entries.first?["profile"] as? String,"pika_flex_fl2va")
+    XCTAssertNil(project.clips[0].generationSelection?.steps)
+    project.clips[0].generationSelection?.steps=4
+    XCTAssertThrowsError(try NativeH3Preparation.compose(request:request(project,runtime)))
+    project.clips[0].generationSelection?.steps=nil
+    project.clips[0].attachments[0].enabled=false
+    let restored=try NativeH3Preparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
+    let old=restored["config"] as! [String:Any]
+    XCTAssertEqual(old["steps"] as? Int,5);XCTAssertEqual(old["sampling_method"] as? String,"euler")
+  }
+
   private func fixture() throws -> (URL, StudioProject, [String: Any]) {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

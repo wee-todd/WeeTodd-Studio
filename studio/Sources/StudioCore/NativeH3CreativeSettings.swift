@@ -51,7 +51,19 @@ public struct H3ReferencePlacement:Codable,Equatable {
     self.videoSizePolicy=videoSizePolicy;self.videoTemporalDensity=videoTemporalDensity
   }
 }
-public enum H3LoRAProfile:String,Codable,CaseIterable { case auto,standard,turbo }
+public enum H3LoRAProfile:String,Codable,CaseIterable {
+  case auto,standard,turbo,pikaFlexFL2VA="pika_flex_fl2va",pikaFlexRef2VA="pika_flex_ref2va"
+  public var isFlex:Bool { self == .pikaFlexFL2VA || self == .pikaFlexRef2VA }
+  public var label:String {
+    switch self {
+    case .auto:return "Automatic"
+    case .standard:return "Standard"
+    case .turbo:return "Turbo · 4 Euler evaluations"
+    case .pikaFlexFL2VA:return "Pika Flex · text / endpoint frames"
+    case .pikaFlexRef2VA:return "Pika Flex · references"
+    }
+  }
+}
 public enum H3LoRAQKVLayout:String,Codable,CaseIterable {
   case auto,nativeInterleaved="native_interleaved",contiguousQKV="contiguous_qkv"
 }
@@ -65,6 +77,12 @@ public struct H3LoRASettings:Codable,Equatable {
   public func validate(strength:Double,evaluations:Int,samplingMethod:String) throws {
     guard strength.isFinite,(-10...10).contains(strength),(0...99).contains(startAfterEvaluations),
       startAfterEvaluations<evaluations else { throw StudioError.invalid("H3 LoRA needs signed strength −10 to 10 and an activation inside the actual evaluation schedule.") }
+    if profile.isFlex {
+      guard evaluations == 6, samplingMethod == "pika_flex", strength == 1,
+        startAfterEvaluations == 0, qkvLayout != .nativeInterleaved else {
+        throw StudioError.invalid("Pika Flex requires its six-evaluation sampler, strength 1, contiguous QKV and immediate activation.")
+      }
+    }
     guard profile != .turbo || (evaluations==4 && samplingMethod=="euler" && startAfterEvaluations==0) else {
       throw StudioError.invalid("H3 Turbo requires Euler, four evaluations and immediate activation.")
     }

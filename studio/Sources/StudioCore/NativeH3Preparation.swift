@@ -780,12 +780,17 @@ public enum NativeH3Preparation {
     let adapterStack=try NativeH3LoRAComposition.compose(componentPairs:profileLoRAs,rootStack:profileStack,
       attachments:clip.attachments,assets:availableAssets,schedulePoints:steps,
       explicitEvaluations:twoStage?.useTurboDraft == true ? 4:clip.generationSelection?.steps,samplingMethod:config["sampling_method"] as? String ?? "euler",
+      task:clip.inferredTask,explicitSamplingMethod:clip.generationSelection?.h3SamplingMethod?.rawValue,
+      specialized:motion != nil || continuity != nil || twoStage != nil || clip.generationSelection?.h3Joint?.refinement != nil
+        || recipe["joint_refinement"] != nil || recipe["two_stage"] != nil || recipe["vdn"] != nil || recipe["fasth3"] != nil
+        || recipe["motion_fidelity"] != nil || !["t2v","i2v","fflf","ref2va"].contains(clip.inferredTask),
       requireTurbo:twoStage?.useTurboDraft == true,defaultTurboPath:twoStage?.draftTurboPath)
     if !adapterStack.pairs.isEmpty {
       if let descriptors=adapterStack.descriptors {
         components.removeValue(forKey:"loras");recipe["loras"]=descriptors
       } else { components["loras"]=adapterStack.pairs }
       steps=adapterStack.schedulePoints;config["steps"]=steps
+      config["sampling_method"]=adapterStack.samplingMethod
     }
     try validateAttentionExecution(config,stack:adapterStack,profileStack:profileStack,clip:clip,assets:availableAssets)
     if let controls=clip.generationSelection?.h3Reference {

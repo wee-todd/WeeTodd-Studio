@@ -3,7 +3,11 @@ import MLX
 import TensorIO
 
 public enum H3LoRAQKVLayout: String, Sendable { case auto, nativeInterleaved = "native_interleaved", contiguousQKV = "contiguous_qkv" }
-public enum H3LoRAProfile: String, Sendable { case auto, standard, turbo }
+public enum H3LoRAProfile: String, Sendable {
+  case auto, standard, turbo
+  case pikaFlexFL2VA = "pika_flex_fl2va", pikaFlexRef2VA = "pika_flex_ref2va"
+  var isFlex: Bool { self == .pikaFlexFL2VA || self == .pikaFlexRef2VA }
+}
 
 public struct H3LoRAAdapter: Sendable {
   public let url: URL
@@ -24,6 +28,11 @@ public struct H3LoRAAdapter: Sendable {
     self.startAfterEvaluations = startAfterEvaluations
   }
   func validate(requestedSteps: Int, samplingMethod: H3SamplingMethod) throws {
+    if profile.isFlex {
+      guard requestedSteps == 7, samplingMethod == .pikaFlex, strength == 1, startAfterEvaluations == 0 else {
+        throw H3CheckpointError.invalid("Pika Flex requires six evaluations, its own sampler, strength 1 and immediate activation.")
+      }
+    }
     guard startAfterEvaluations < requestedSteps - 1,
       profile != .turbo || (requestedSteps == 5 && samplingMethod == .euler && startAfterEvaluations == 0) else {
       throw H3CheckpointError.invalid("H3 LoRA activation must occur before the final evaluation; explicit Turbo needs the complete four-evaluation Euler schedule.")
@@ -213,6 +222,7 @@ final class H3LoRAFile: H3LoRAApplying {
     case perTargetAlpha
     case bakedIntoB
     case nativeUnitScale
+    case bakedWithRankMarkers
   }
   let url: URL
   let strength: Float
@@ -229,13 +239,19 @@ final class H3LoRAFile: H3LoRAApplying {
       throw H3CheckpointError.invalid("Invalid H3 LoRA path or strength.")
     }
     let file = try SafeTensorFile(url: url)
+    let resolvedProfile = try H3FlexAdapter.resolvedProfile(url: url, selected: profile)
     let isTurbo = try Self.validateSampling(metadata: file.metadata, requestedSteps: requestedSteps,
-      samplingMethod: samplingMethod, profile: profile, startAfterEvaluations: startAfterEvaluations)
-    guard !requiresStandardProfile || !isTurbo else {
+      samplingMethod: samplingMethod, profile: resolvedProfile, startAfterEvaluations: startAfterEvaluations)
+    guard !requiresStandardProfile || (!isTurbo && !resolvedProfile.isFlex) else {
       throw H3CheckpointError.invalid("Initialized partial H3 refinement requires ordinary full-schedule adapters, not Turbo metadata.")
     }
     let explicitAlpha = file.metadata["target_format"] == "ComfyUI generic LoRA"
       && file.metadata["qkv_fusion"]?.contains("block diagonal B") == true
+    let flexUnitScale = resolvedProfile.isFlex && H3FlexAdapter.isNativeFormat(file.metadata)
+    let reducedFlex = resolvedProfile.isFlex && H3FlexAdapter.isReducedNativeFormat(file.metadata)
+    guard !(flexUnitScale || reducedFlex) || (strength == 1 && qkvLayout != .nativeInterleaved) else {
+      throw H3CheckpointError.invalid("Pika Flex uses strength 1 and contiguous QKV.")
+    }
     let conversion = file.metadata["conversion"] ?? ""
     let bakedScale = file.metadata["converted_layout"] == "comfyui_minimax_h3"
       && file.metadata["format"] == "pt"
@@ -252,7 +268,7 @@ final class H3LoRAFile: H3LoRAApplying {
       && file.metadata["source_adaln_input_dimension"] == "2688"
       && file.metadata["target_adaln_input_dimension"] == "8"
       && file.metadata["application"] == "W_eff = W + lora_B @ lora_A"
-    guard [explicitAlpha, bakedScale, nativeUnitScale].filter({ $0 }).count == 1 else {
+    guard [explicitAlpha, bakedScale, nativeUnitScale, flexUnitScale, reducedFlex].filter({ $0 }).count == 1 else {
       throw H3CheckpointError.invalid("H3 LoRA metadata or QKV layout is unsupported.")
     }
     guard !nativeUnitScale || (qkvLayout != .contiguousQKV
@@ -260,7 +276,7 @@ final class H3LoRAFile: H3LoRAApplying {
       && (file.metadata["qkv_layout"] == nil || file.metadata["qkv_layout"] == "native_interleaved")) else {
       throw H3CheckpointError.invalid("Prefix-only H3 unit-scale conversion retains native interleaved QKV.")
     }
-    let layout: ScaleLayout = explicitAlpha ? .perTargetAlpha : nativeUnitScale ? .nativeUnitScale : .bakedIntoB
+    let layout: ScaleLayout = reducedFlex ? .bakedWithRankMarkers : explicitAlpha ? .perTargetAlpha : nativeUnitScale ? .nativeUnitScale : .bakedIntoB
     var supported: [String: (rows: Int, columns: Int)] = [:]
     for group in 0..<52 {
       let prefix = group < 50
@@ -285,6 +301,11 @@ final class H3LoRAFile: H3LoRAApplying {
           throw H3CheckpointError.invalid("Unsupported H3 LoRA target or down projection: \(target)")
         }
         let rank = Int(rankValue)
+        if flexUnitScale {
+          guard rank == (target.hasSuffix("attn.qkv_proj") ? 384 : 128) else {
+            throw H3CheckpointError.invalid("Pika Flex adapter rank differs from the released native layout.")
+          }
+        }
         let bName = target + ".lora_B.weight"
         let alphaName = target + ".alpha"
         guard let b = file.tensors[bName], b.dtype == "BF16",
@@ -293,6 +314,17 @@ final class H3LoRAFile: H3LoRAApplying {
         }
         let alpha: Float
         switch layout {
+        case .bakedWithRankMarkers:
+          guard let descriptor=file.tensors[alphaName],descriptor.dtype == "BF16",descriptor.shape.isEmpty else {
+            throw H3CheckpointError.invalid("Reduced Flex requires one BF16 rank marker per projection.")
+          }
+          let marker = try H3TensorPayload.withTensorBytes(file:file,name:alphaName,maximumBufferedBytes:4*1024*1024) {
+            Float(bitPattern:UInt32(UInt16(littleEndian:$0.loadUnaligned(as:UInt16.self))) << 16)
+          }
+          guard marker == Float(rank) else {
+            throw H3CheckpointError.invalid("Reduced Flex alpha must equal its projection rank; scaling is already baked into B.")
+          }
+          alpha=Float(rank)
         case .perTargetAlpha:
           guard let descriptor = file.tensors[alphaName],
             descriptor.dtype == "F32", descriptor.shape.isEmpty else {
@@ -315,7 +347,7 @@ final class H3LoRAFile: H3LoRAApplying {
         }
         targets[target] = (rank, alpha)
     }
-    let tensorsPerTarget = layout == .perTargetAlpha ? 3 : 2
+    let tensorsPerTarget = layout == .perTargetAlpha || layout == .bakedWithRankMarkers ? 3 : 2
     guard !targets.isEmpty, file.tensors.count == targets.count * tensorsPerTarget else {
       throw H3CheckpointError.invalid("H3 LoRA contains unsupported extra targets.")
     }
@@ -351,6 +383,13 @@ final class H3LoRAFile: H3LoRAApplying {
 
   private static func validateSampling(metadata: [String: String],
     requestedSteps: Int?, samplingMethod: H3SamplingMethod, profile: H3LoRAProfile, startAfterEvaluations: Int) throws -> Bool {
+    if profile.isFlex {
+      guard startAfterEvaluations == 0,
+        requestedSteps == nil || (requestedSteps == 7 && samplingMethod == .pikaFlex) else {
+        throw H3CheckpointError.invalid("Pika Flex requires the complete six-evaluation stochastic schedule.")
+      }
+      return false
+    }
     func normalized(_ key: String) -> String? {
       metadata[key]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }

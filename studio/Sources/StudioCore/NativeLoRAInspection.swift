@@ -1,4 +1,5 @@
 import CoreFoundation
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -25,7 +26,7 @@ public enum NativeLoRAInspection {
       && a.st_mtimespec.tv_sec == b.st_mtimespec.tv_sec && a.st_mtimespec.tv_nsec == b.st_mtimespec.tv_nsec
       && a.st_ctimespec.tv_sec == b.st_ctimespec.tv_sec && a.st_ctimespec.tv_nsec == b.st_ctimespec.tv_nsec
   }
-  private static func header(_ url: URL) throws -> ([String: String], [String: Tensor], stat) {
+  private static func header(_ url: URL) throws -> ([String: String], [String: Tensor], stat, String) {
     let fd = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NONBLOCK)
     guard fd >= 0 else { throw invalid("Cannot open the LoRA file.") }
     let file = FileHandle(fileDescriptor: fd, closeOnDealloc: true); defer { try? file.close() }
@@ -76,7 +77,7 @@ public enum NativeLoRAInspection {
     guard fstat(fd, &after) == 0, Darwin.lstat(url.path, &linked) == 0, same(before, after), same(before, linked) else {
       throw invalid("File changed during inspection. Refresh to retry.")
     }
-    return (metadata, tensors, before)
+    return (metadata, tensors, before, SHA256.hash(data: prefix + bytes).map { String(format: "%02x", $0) }.joined())
   }
   private static func model(_ metadata: [String: String], hint: LoRAModel?) throws -> LoRAModel? {
     var models = Set<LoRAModel>(), families = Set<String>()
@@ -164,6 +165,9 @@ public enum NativeLoRAInspection {
     if let selectedProfile, let declared = info["loraProfile"] as? String, declared != selectedProfile {
       throw invalid("The selected H3 adapter profile conflicts with its declared sampling profile.")
     }
+    if let raw = info["loraProfile"] as? String, H3LoRAProfile(rawValue: raw)?.isFlex == true {
+      guard schedulePoints == 7 else { throw invalid("Pika Flex requires 6 evaluations (7 schedule points).") }
+    }
     if selectedProfile == "turbo" || info["loraProfile"] as? String == "turbo" {
       guard schedulePoints == 5 else { throw invalid("H3 Turbo requires 4 evaluations (5 schedule points); select Steps 4.") }
       if let declared = info["h3DeclaredEvaluations"] as? Int, declared != 4 {
@@ -175,7 +179,7 @@ public enum NativeLoRAInspection {
   public static func inspect(_ url: URL, modelHint: LoRAModel? = nil, selectedH3Profile: String? = nil) throws -> [String: Any] {
     let source = url.standardizedFileURL.resolvingSymlinksInPath()
     guard source.pathExtension.lowercased() == "safetensors" else { throw invalid("Choose a SafeTensors LoRA file.") }
-    let (metadata, tensors, identity) = try header(source)
+    let (metadata, tensors, identity, headerSHA256) = try header(source)
     guard metadata["refmod_meta"] == nil else {
       throw invalid("Swift H3 does not support visual RefMods. Select the legacy H3 renderer explicitly in Runtime Settings before importing them.")
     }
@@ -209,10 +213,24 @@ public enum NativeLoRAInspection {
     if let model {
       result["loraModel"] = model.rawValue
       if model == .h3 {
-        guard selectedH3Profile == nil || ["standard", "turbo"].contains(selectedH3Profile!) else {
+        guard selectedH3Profile == nil || H3LoRAProfile(rawValue: selectedH3Profile!) != nil else {
           throw invalid("Select a supported H3 LoRA profile.")
         }
-        result.merge(try h3(metadata, targets: Array(pairs.keys), selectedProfile: selectedH3Profile)) { _, new in new }
+        let official = NativeH3FlexAdapter.profile(headerSHA256: headerSHA256, fileBytes: identity.st_size)
+        let selected = selectedH3Profile.flatMap(H3LoRAProfile.init(rawValue:))
+        if let official, let selected, selected != .auto, selected != official {
+          throw invalid("The selected H3 profile conflicts with the released Pika Flex task adapter.")
+        }
+        if let profile = official ?? selected, profile.isFlex {
+          guard NativeH3FlexAdapter.isNativeFormat(metadata) || NativeH3FlexAdapter.isReducedNativeFormat(metadata) else { throw invalid("Pika Flex requires its native Comfy-format adapter.") }
+          result["loraProfile"] = profile.rawValue
+          result["loraLayout"] = "contiguous_qkv"
+          result["h3DeclaredEvaluations"] = 6
+          result["h3RequiredSamplingMethod"] = "pika_flex"
+          result["loraRequiresAdalnGrid"] = false
+        } else {
+          result.merge(try h3(metadata, targets: Array(pairs.keys), selectedProfile: selectedH3Profile)) { _, new in new }
+        }
       }
       else { try NativeLTXLoRAMetadata.validate(path: source.path, model: model.rawValue) }
     } else {

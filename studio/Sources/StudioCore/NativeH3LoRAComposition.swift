@@ -2,7 +2,7 @@ import CoreFoundation
 import Foundation
 
 enum NativeH3LoRAComposition {
-  struct Result { let pairs:[[Any]];let descriptors:[String:Any]?;let schedulePoints:Int }
+  struct Result { let pairs:[[Any]];let descriptors:[String:Any]?;let schedulePoints:Int;let samplingMethod:String }
   private struct Item { let path:String;let strength:Double;let settings:H3LoRASettings;let explicit:Bool }
   private static func canonical(_ path:String) throws -> String {
     guard path.hasPrefix("/"),path.utf8.count<=4096,!path.utf8.contains(0) else { throw StudioError.invalid("H3 LoRAs require bounded absolute local files.") }
@@ -32,6 +32,7 @@ enum NativeH3LoRAComposition {
   }
   static func compose(componentPairs:[[Any]],rootStack:Any?,attachments:[Attachment],assets:[MediaAsset],
     schedulePoints:Int,explicitEvaluations:Int?,samplingMethod:String,
+    task:String="t2v",explicitSamplingMethod:String?=nil,specialized:Bool=false,
     requireTurbo:Bool=false,defaultTurboPath:String?=nil) throws -> Result {
     var items:[Item]=[]
     for pair in componentPairs {
@@ -75,9 +76,15 @@ enum NativeH3LoRAComposition {
     guard items.count<=8,Set(items.map(\.path)).count==items.count else { throw StudioError.invalid("Choose at most eight distinct H3 LoRAs, including profile adapters.") }
     var hasTurbo=false
     var turboItems:[Item]=[]
-    for item in items {
+    for index in items.indices {
+      var item=items[index]
       let metadata=try NativeLoRAInspection.inspect(URL(fileURLWithPath:item.path),modelHint:.h3,
         selectedH3Profile:item.settings.profile == .auto ? nil : item.settings.profile.rawValue)
+      if let raw=metadata["loraProfile"] as? String,let profile=H3LoRAProfile(rawValue:raw),profile.isFlex {
+        guard item.settings.qkvLayout != .nativeInterleaved else { throw StudioError.invalid("Pika Flex requires contiguous QKV.") }
+        var settings=item.settings;settings.profile=profile;settings.qkvLayout = .contiguousQKV
+        item=Item(path:item.path,strength:item.strength,settings:settings,explicit:true);items[index]=item
+      }
       if item.settings.profile == .turbo || metadata["loraProfile"] as? String == "turbo" {
         if requireTurbo,item.settings.qkvLayout == .nativeInterleaved || metadata["loraLayout"] as? String == "native_interleaved" {
           throw StudioError.invalid("The default two-stage component requires a contiguous-QKV Turbo adapter. Choose Current settings for a custom layout.")
@@ -101,16 +108,29 @@ enum NativeH3LoRAComposition {
       }
       guard items.count<=8 else {throw StudioError.invalid("The two-stage Turbo component and creative stack must fit eight H3 adapters.")}
     }
-    let points=requireTurbo || (hasTurbo && explicitEvaluations==nil) ? 5 : schedulePoints
-    guard !hasTurbo || (points==5 && samplingMethod=="euler") else { throw StudioError.invalid("H3 Turbo requires Euler and 4 evaluations (5 schedule points).") }
+    let flex=items.filter { $0.settings.profile.isFlex }
+    var resolvedMethod=samplingMethod
+    if let adapter=flex.first {
+      guard flex.count==1,!hasTurbo,!requireTurbo,
+        explicitEvaluations==nil || explicitEvaluations==6,
+        explicitSamplingMethod==nil || explicitSamplingMethod=="pika_flex" else {
+        throw StudioError.invalid("Use one Pika Flex adapter, six Flex evaluations and no Turbo adapter. Clear conflicting Steps or Sampler overrides.")
+      }
+      try NativeH3FlexAdapter.validate(profile:adapter.settings.profile,task:task,specialized:specialized)
+      resolvedMethod="pika_flex"
+    } else if samplingMethod=="pika_flex" {
+      throw StudioError.invalid("Pika Flex sampling requires one matching Flex adapter.")
+    }
+    let points = !flex.isEmpty ? 7 : requireTurbo || (hasTurbo && explicitEvaluations==nil) ? 5 : schedulePoints
+    guard !hasTurbo || (points==5 && resolvedMethod=="euler") else { throw StudioError.invalid("H3 Turbo requires Euler and 4 evaluations (5 schedule points).") }
     for item in items {
-      try item.settings.validate(strength:item.strength,evaluations:points-1,samplingMethod:samplingMethod)
+      try item.settings.validate(strength:item.strength,evaluations:points-1,samplingMethod:resolvedMethod)
       let metadata=try NativeLoRAInspection.validateH3Sampling(path:item.path,
         selectedProfile:item.settings.profile == .auto ? nil : item.settings.profile.rawValue,schedulePoints:points)
       guard metadata["loraModel"] as? String=="h3",metadata["loraRequiresAdalnGrid"] as? Bool != true else { throw StudioError.invalid("H3 LoRA model or AdaLN grid is incompatible.") }
       if metadata["loraProfile"] as? String == "turbo",item.settings.startAfterEvaluations != 0 { throw StudioError.invalid("Header-declared H3 Turbo requires immediate activation.") }
     }
     let explicit=requireTurbo || items.contains(where:{$0.explicit})
-    return Result(pairs:items.map {[$0.path,$0.strength]},descriptors:explicit ? ["version":1,"adapters":items.map {$0.settings.wire(path:$0.path,strength:$0.strength)}] : nil,schedulePoints:points)
+    return Result(pairs:items.map {[$0.path,$0.strength]},descriptors:explicit ? ["version":1,"adapters":items.map {$0.settings.wire(path:$0.path,strength:$0.strength)}] : nil,schedulePoints:points,samplingMethod:resolvedMethod)
   }
 }

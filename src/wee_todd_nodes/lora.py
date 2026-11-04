@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from wee_todd_mlx.adapter_contract import inspect_adapter
+from wee_todd_mlx.studio_h3_turbo import is_pika_flex_metadata
 
 from .preflight import read_safetensors_header
 
@@ -50,6 +51,10 @@ class H3LoRASpec:
             raise ValueError("MiniMax H3 LoRA files must use the `.safetensors` format.")
         if not math.isfinite(self.strength) or not -10.0 <= self.strength <= 10.0:
             raise ValueError("MiniMax H3 LoRA strength must be finite and between -10 and 10.")
+        if self.profile in {"pika_flex_fl2va", "pika_flex_ref2va"}:
+            raise ValueError(
+                "Pika Flex requires the Swift H3 renderer and its six-evaluation sampler."
+            )
         if self.profile not in {"auto", "standard", "turbo"}:
             raise ValueError("MiniMax H3 LoRA profile must be auto, standard, or turbo.")
         if self.qkv_layout not in {"auto", "native_interleaved", "contiguous_qkv"}:
@@ -63,6 +68,11 @@ class H3LoRASpec:
         # The common contract rejects mixed schemas, malformed ranks, and unknown
         # tensor fields before either the paged or resident engine can allocate.
         contract = inspect_adapter(path, allow_exact_deltas=True)
+        metadata = contract["metadata"]
+        if is_pika_flex_metadata(metadata):
+            raise ValueError(
+                "Pika Flex requires the Swift H3 renderer and its six-evaluation sampler."
+            )
         names = header.tensor_names
         targets = {str(pair["target"]) for pair in contract["pairs"]}
         if not targets:

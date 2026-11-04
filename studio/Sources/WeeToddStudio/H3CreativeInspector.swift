@@ -96,13 +96,13 @@ struct H3LoRAInspector:View {
   var body:some View {
     DisclosureGroup("H3 adapter settings") {
       Picker("Profile",selection:Binding(get:{settings.profile},set:{v in edit {$0.profile=v}})) {
-        ForEach(H3LoRAProfile.allCases,id: \.self) { Text($0.rawValue).tag($0) }
+        ForEach(H3LoRAProfile.allCases,id: \.self) { Text($0.label).tag($0) }
       }
       Picker("QKV layout",selection:Binding(get:{settings.qkvLayout},set:{v in edit {$0.qkvLayout=v}})) {
         ForEach(H3LoRAQKVLayout.allCases,id: \.self) { Text($0.rawValue).tag($0) }
       }
       Stepper("Start after \(settings.startAfterEvaluations) evaluations",value:Binding(get:{settings.startAfterEvaluations},set:{v in edit {$0.startAfterEvaluations=v}}),in:0...99)
-      Text("Turbo requires four Euler evaluations and immediate activation.").font(.caption2).foregroundStyle(.secondary)
+      Text("Turbo: four Euler evaluations. Pika Flex: six Flex evaluations, strength 1, immediate activation; choose the adapter matching your task.").font(.caption2).foregroundStyle(.secondary)
       if attachment.h3LoRA != nil {
         Button("Use adapter defaults") { store.editClip { c in
           guard let i=c.attachments.firstIndex(where:{$0.id==attachment.id}) else {return};c.attachments[i].h3LoRA=nil

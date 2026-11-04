@@ -224,6 +224,14 @@ public enum H3Ref2VAStillRunner {
     }
     try request.omni?.checkUnchanged()
     try Task.checkCancellation()
+    try H3FlexAdapter.admit(adapters: request.loRAAdapters, steps: request.requestedSteps, method: request.samplingMethod,
+      task: "ref2va", specialized: request.omni != nil || refinement != nil || contextFrames > 0
+        || request.geometry.stillImageMode != nil || request.transformerBackend != .mlx
+        || !request.references.contains(where: { reference in
+          if case .image = reference { return true }
+          if case .video = reference { return true }
+          return false
+        }), checkpoint: request.transformer)
     if let diagnostic = H3SolTaskContext.policy {
       guard request.attentionPolicy == .solExperimental, diagnostic.tau == 0.5 else {
         throw H3CheckpointError.invalid("Diagnostic Sol policy conflicts with the fixed saved Ref attention selection.")
@@ -268,8 +276,8 @@ public enum H3Ref2VAStillRunner {
     }
     // Omni owns its PDD grid; never construct ordinary schedules for that profile.
     let grids = try refinement?.schedules(requestedSteps: request.requestedSteps)
-    let video = try request.omni == nil ? (grids?.video ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 12)) : nil
-    let audio = try request.omni == nil ? (grids?.audio ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 3)) : nil
+    let video = try request.omni == nil ? (grids?.video ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 12, samplingMethod: request.samplingMethod)) : nil
+    let audio = try request.omni == nil ? (grids?.audio ?? H3Schedule(requestedSteps: request.requestedSteps, shift: 3, samplingMethod: request.samplingMethod)) : nil
     let layout = contextFrames == 0 ? prepared.layout
       : try H3ReferenceLayout(referenceLayout: prepared.layout,
         geometry: request.geometry, contextFrames: contextFrames)

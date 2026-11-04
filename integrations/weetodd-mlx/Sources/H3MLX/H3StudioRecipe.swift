@@ -52,6 +52,9 @@ public enum H3StudioRecipe {
     root["conditioning"] = ["version": 1, "task": "t2v", "inputs": [],
       "audio_policy": "generated"]
     let base = try compile(data: JSONSerialization.data(withJSONObject: root))
+    guard base.samplingMethod != .pikaFlex else {
+      throw H3CheckpointError.invalid("Pika Flex is not qualified for H3 external extension or continuation.")
+    }
     let (source, last) = try resolveVideo(path, digest)
     guard source.audio != nil, source.frameCount >= 5 else {
       throw H3CheckpointError.invalid("H3 external extension requires a movie with soundtrack.")
@@ -651,7 +654,7 @@ public enum H3StudioRecipe {
       oneOf(config, "projection_backend", default: "mlx", ["auto", "mlx"]),
       oneOf(config, "transformer_backend", default: "mlx", ["mlx"]),
       oneOf(config, "attention_policy", default: "dense", ["dense"]),
-      oneOf(config, "sampling_method", default: "euler", ["euler", "res_multistep"]),
+      oneOf(config, "sampling_method", default: "euler", ["euler", "res_multistep", "pika_flex"]),
       let samplingMethod = H3SamplingMethod(rawValue: config["sampling_method"] as? String ?? "euler"),
       oneOf(config, "inference_optimization", default: "off", ["off"]),
       zero(config, "paging_cache_gb"),
@@ -660,7 +663,7 @@ public enum H3StudioRecipe {
       let duration = config["duration_seconds"] as? Double,
       let steps = config["steps"] as? Int,
       let seed = config["seed"] as? Int, (0...Int(UInt32.max)).contains(seed) else {
-      throw H3CheckpointError.invalid("Swift H3 currently admits only text-to-audiovisual Euler or res_multistep recipes with up to eight distinct compatible LoRAs and no unported controls.")
+      throw H3CheckpointError.invalid("Swift H3 currently admits only text-to-audiovisual Euler, res_multistep or Pika Flex recipes with up to eight distinct compatible LoRAs and no unported controls.")
     }
     let decodePrecision = H3VideoDecodePrecision(rawValue:
       config["video_decode_precision"] as? String ?? "float32")!

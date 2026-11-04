@@ -4,6 +4,7 @@ import StudioCore
 /// Keep bounded header reads and folder enumeration off the UI actor. Native
 /// library inspection does not need an installed worker or model tensor payload.
 enum NativeLoRAImport {
+  static let defaultH3Profile = "auto"
   static func usesNative(runtime: RuntimeSettings, modelHint: LoRAModel? = nil,
     selectedEngine: Engine? = nil) -> Bool {
     let engine = modelHint.map { Engine(rawValue: $0.rawValue)! } ?? selectedEngine

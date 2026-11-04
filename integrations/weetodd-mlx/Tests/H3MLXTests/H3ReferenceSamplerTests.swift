@@ -18,13 +18,14 @@ final class H3ReferenceSamplerTests: XCTestCase {
 
   func testSamplingUpdatesOnlyTargetsAndKeepsReferenceAudioAndVideoFixed() throws {
     try Device.withDefaultDevice(.cpu) {
-      for method in [H3SamplingMethod.euler, .resMultistep] {
+      for method in [H3SamplingMethod.euler, .resMultistep, .pikaFlex] {
+      let count = method == .pikaFlex ? 6 : 2
       let geometry = try H3Geometry(width: 32, height: 32, durationSeconds: 2.5)
       let layout = try H3ReferenceLayout(geometry: geometry, textTags: [1], references: [
         .image(latentHeight: 2, latentWidth: 2), .audio(latents: 2),
       ])
-      let videoSchedule = try H3Schedule(requestedSteps: 3, shift: 12)
-      let audioSchedule = try H3Schedule(requestedSteps: 3, shift: 3)
+      let videoSchedule = try H3Schedule(requestedSteps: count + 1, shift: 12, samplingMethod: method)
+      let audioSchedule = try H3Schedule(requestedSteps: count + 1, shift: 3, samplingMethod: method)
       let rows = try H3ReferenceRowSchedule(layout: layout,
         video: videoSchedule, audio: audioSchedule)
       let referenceVideo = MLXArray([Float](repeating: 7, count: 96), [1, 1, 96])
@@ -37,11 +38,13 @@ final class H3ReferenceSamplerTests: XCTestCase {
       let output = try H3ReferenceSampler.run(predictor: predictor,
         videoSchedule: videoSchedule, audioSchedule: audioSchedule,
         rowSchedule: rows, videoLatents: initialVideo, audioLatents: initialAudio, samplingMethod: method)
-      XCTAssertEqual(predictor.calls, 2)
+      XCTAssertEqual(predictor.calls, count)
       XCTAssertEqual(output.video[0, 0, 0].item(Float.self), 7)
       XCTAssertEqual(output.audio[0, 0, 0].item(Float.self), 9)
+      if method != .pikaFlex {
       XCTAssertEqual(output.video[0, 1, 0].item(Float.self), 1, accuracy: 0.000001)
       XCTAssertEqual(output.audio[0, 4, 0].item(Float.self), 1, accuracy: 0.000001)
+      } else { XCTAssertTrue(output.video.asArray(Float.self).allSatisfy(\.isFinite)); XCTAssertTrue(output.audio.asArray(Float.self).allSatisfy(\.isFinite)) }
     }
     }
   }

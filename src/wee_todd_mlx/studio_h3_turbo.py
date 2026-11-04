@@ -7,9 +7,35 @@ import re
 _STEP_FIELDS = ("inference_steps", "num_inference_steps", "steps", "transformer_evaluations")
 
 
+def is_pika_flex_metadata(metadata: dict) -> bool:
+    common = {
+        "base_model": "MiniMaxAI/MiniMax-H3",
+        "base_revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+        "modified_by": "Mellis, Inc.", "format": "pt",
+    }
+    if not all(metadata.get(key) == value for key, value in common.items()):
+        return False
+    native = metadata.get("converted_for") == "comfyui-minimax-h3" and metadata.get(
+        "source_adapter"
+    ) == "adapter.safetensors"
+    reduced = (
+        metadata.get("converted_layout") == "comfyui_minimax_h3"
+        and metadata.get("ss_network_dim") == "Dynamic"
+        and metadata.get("ss_network_alpha") == "Dynamic"
+        and metadata.get("baked_scale") == "1.0"
+        and metadata.get("conversion") == (
+            "qkv block-diag fused (contiguous q|k|v); mlp.fc1 swiglu halves swapped; "
+            "alpha folded into lora_B; scale 1.0 baked as a flat multiplier"
+        )
+    )
+    return native or reduced
+
+
 def h3_lora_metadata(report: dict) -> dict:
     """Return only explicit declarations; ambiguous metadata is never a Turbo default."""
     metadata = report["metadata"]
+    if is_pika_flex_metadata(metadata):
+        raise ValueError("Pika Flex requires the Swift H3 renderer and its six-evaluation sampler.")
     profiles = set()
     for key in ("adapter_profile", "profile", "distillation_profile"):
         declared = metadata.get(key, "").strip().lower()
@@ -169,6 +195,10 @@ def resolve_studio_h3_turbo(
             continue
         entry = {key: value for key, value in item.items() if key != "enabled"}
         profile = entry.get("profile", "auto")
+        if profile in ("pika_flex_fl2va", "pika_flex_ref2va"):
+            raise ValueError(
+                "Pika Flex requires the Swift H3 renderer and its six-evaluation sampler."
+            )
         if not isinstance(profile, str) or profile not in {"auto", "standard", "turbo"}:
             raise ValueError("Invalid Studio H3 LoRA profile.")
         report = inspect_adapter(entry["path"])

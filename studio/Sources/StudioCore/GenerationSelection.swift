@@ -104,9 +104,9 @@ public enum GenerationPreset: String, Codable, CaseIterable, Identifiable {
 }
 
 public enum NativeH3SamplingMethod: String, Codable, CaseIterable, Identifiable {
-  case euler, resMultistep = "res_multistep"
+  case euler, resMultistep = "res_multistep", pikaFlex = "pika_flex"
   public var id: String { rawValue }
-  public var label: String { self == .euler ? "Euler" : "Res multistep (experimental)" }
+  public var label: String { self == .euler ? "Euler" : self == .pikaFlex ? "Pika Flex · 6 evaluations" : "Res multistep (experimental)" }
 }
 
 public enum LTX25GuidanceMode: String, Codable, CaseIterable, Identifiable {
