@@ -6,10 +6,35 @@ import StudioCore
 /// recipe before model load, so a changed prepared job cannot be rendered.
 enum NativeVideoJobRequest {
   static func ltx(payload: [String: Any], runtime: RuntimeSettings, output: URL) throws -> [String: Any] {
-    try make(payload: payload, runtime: runtime, output: output, engine: "ltx25", label: "LTX")
+    let preview = try ltxPreview(runtime: runtime)
+    var envelope = try make(payload: payload, runtime: runtime, output: output, engine: "ltx25", label: "LTX")
+    if let preview { envelope["preview"] = preview }
+    return envelope
   }
   static func h3(payload: [String: Any], runtime: RuntimeSettings, output: URL) throws -> [String: Any] {
     try make(payload: payload, runtime: runtime, output: output, engine: "h3", label: "H3")
+  }
+  private static func ltxPreview(runtime: RuntimeSettings) throws -> [String: String]? {
+    guard let mode = runtime.ltx25PreviewDecoder, mode != "off" else { return nil }
+    let selected: String?
+    let label: String
+    switch mode {
+    case "taeltx2_3": selected = runtime.ltx25PreviewCheckpoint; label = "TAELTX2.3"
+    case "taeltx2_3_wide": selected = runtime.ltx25PreviewWideCheckpoint; label = "TAELTX2.3wide"
+    default:
+      throw StudioError.invalid("Unknown LTX live preview decoder. Select a supported preview mode in Runtime Settings.")
+    }
+    let path = selected?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard path.hasPrefix("/") else {
+      throw StudioError.invalid("Choose an absolute local \(label) preview weights path in Runtime Settings, or turn live approximate previews off.")
+    }
+    let target = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+    let attributes = try? FileManager.default.attributesOfItem(atPath: target.path)
+    guard attributes?[.type] as? FileAttributeType == .typeRegular,
+      FileManager.default.isReadableFile(atPath: target.path) else {
+      throw StudioError.invalid("The \(label) preview weights are missing or unreadable. Choose an existing local weights file in Runtime Settings, or turn live approximate previews off.")
+    }
+    return ["decoder": mode, "checkpointPath": path]
   }
   private static func make(payload: [String: Any], runtime: RuntimeSettings, output: URL,
     engine: String, label: String) throws -> [String: Any] {

@@ -25,7 +25,8 @@ enum MLXGuidedTrajectory {
   }
   static func evaluate(_ initial: [String:MLXArray], sampling: MLXGuidedSampling,
     schedule: SamplingSchedule, frozenAudio: Bool, noise: Noise,
-    predict: Prediction, progress: (MLXSamplingRunner.Progress) throws -> Void) throws -> [String:MLXArray] {
+    predict: Prediction, denoisedPreview:(([String:MLXArray],MLXSamplingRunner.Progress) throws -> Void)?=nil,
+    progress: (MLXSamplingRunner.Progress) throws -> Void) throws -> [String:MLXArray] {
     guard Set(initial.keys) == ["video","audio"] else { throw LTXError.invalid("Guided trajectory needs both AV states.") }
     let shapes=initial.mapValues(\.shape)
     var state=initial.mapValues { $0.reshaped($0.shape) }
@@ -64,8 +65,12 @@ enum MLXGuidedTrajectory {
           }
           state[name]=try checked(next.asType(.float32),name:name)
         }
-        try progress(.init(completedSteps:index+1,totalSteps:schedule.steps.count,
-          sigma:sigma,nextSigma:nextSigma))
+        let event=MLXSamplingRunner.Progress(completedSteps:index+1,totalSteps:schedule.steps.count,
+          sigma:sigma,nextSigma:nextSigma)
+        try progress(event)
+        try Task.checkCancellation()
+        try denoisedPreview?(clean.mapValues { $0.reshaped($0.shape) },event)
+        try Task.checkCancellation()
       }
       return state
     }
@@ -105,11 +110,19 @@ enum MLXGuidedTrajectory {
         state[name]=try checked(MLXGuidanceMath.res2Noise(sample:anchor[name]!,prediction:nextPrediction,
           sigma:sigma,nextSigma:next,noise:MLXGuidanceMath.normalizedNoise(draw)),name:name)
       }
-      try progress(.init(completedSteps:index+1,totalSteps:total,sigma:Double(sigma),nextSigma:Double(next)))
+      let event=MLXSamplingRunner.Progress(completedSteps:index+1,totalSteps:total,sigma:Double(sigma),nextSigma:Double(next))
+      try progress(event)
+      try Task.checkCancellation()
+      try denoisedPreview?(second.mapValues { $0.reshaped($0.shape) },event)
+      try Task.checkCancellation()
     }
     let terminal=try predict(state,0.0011)
     for name in names { state[name]=try checked(terminal[name]!.asType(.bfloat16).asType(.float32),name:name) }
-    try progress(.init(completedSteps:total,totalSteps:total,sigma:0.0011,nextSigma:0))
+    let event=MLXSamplingRunner.Progress(completedSteps:total,totalSteps:total,sigma:0.0011,nextSigma:0)
+    try progress(event)
+    try Task.checkCancellation()
+    try denoisedPreview?(terminal.mapValues { $0.reshaped($0.shape) },event)
+    try Task.checkCancellation()
     return state
   }
 }
@@ -149,6 +162,7 @@ final class MLXGuidedSamplingRunner {
     fixedWeights: MLXDenoiser.FixedProvider, blockWeights: MLXDenoiser.BlockProvider,
     fixedAdapters: MLXDenoiser.FixedAdapters, blockAdapters: (Int) throws -> [String:[MLXLoRA]],
     stageProgress: (Int,MLXDenoiser.Progress) throws -> Void,
+    denoisedPreview:(([String:MLXArray],MLXSamplingRunner.Progress) throws -> Void)?=nil,
     progress: (MLXSamplingRunner.Progress) throws -> Void) throws -> [String:MLXArray] {
     guard gate.try() else { throw LTXError.invalid("Guided sampler is already active.") }
     defer { Stream.gpu.synchronize(); Memory.clearCache(); gate.unlock() }
@@ -209,6 +223,6 @@ final class MLXGuidedSamplingRunner {
     let initial=["video":inputs["video_latent"]!,"audio":inputs["audio_latent"]!]
     return try MLXGuidedTrajectory.evaluate(initial,sampling:sampling,schedule:schedule,frozenAudio:frozenAudio,
       noise:{ MLXGuidedTrajectory.seededNoise(index:$0,substep:$1,modality:$2,shape:$3) },
-      predict:predict,progress:progress)
+      predict:predict,denoisedPreview:denoisedPreview,progress:progress)
   }
 }

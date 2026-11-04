@@ -26,6 +26,7 @@ def build_worker(root, *, swift="swift", env=None, build_arguments=("--build-sys
         shutil.copy2(binaries / name, folder / name)
     dependencies = package / ".build/checkouts/mlx-swift"
     notices = ["WeeTodd native LTX worker — independently implemented inference.\n"]
+    notices.append((package / "Notices/TAELTX.txt").read_text())
     for relative in ("LICENSE", "Source/Cmlx/mlx/LICENSE", "Source/Cmlx/mlx-c/LICENSE"):
         notices.append(f"\n--- mlx-swift/{relative} ---\n" + (dependencies / relative).read_text())
     (folder / "Notices.txt").write_text("\n".join(notices))

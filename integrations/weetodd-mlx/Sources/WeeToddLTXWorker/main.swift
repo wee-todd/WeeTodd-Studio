@@ -7,6 +7,34 @@ import InferenceMedia
 import MLX
 import CryptoKit
 
+/// Owns only an admitted checkpoint handle between display updates. No model
+/// parameters survive a decode, and this object never supplies final RGB frames.
+private final class TAEPreview {
+  private let decoder: MLXTAELTXPreviewDecoder
+  private var policy = NativeTAEPreviewPolicy()
+  private var seconds = 0.0
+  init(_ settings: NativeVideoPreviewSettings) throws {
+    decoder = try MLXTAELTXPreviewDecoder(checkpoint: URL(fileURLWithPath: settings.checkpointPath))
+    guard decoder.variant.rawValue == settings.decoder.rawValue else {
+      throw NSError(domain: "WeeToddLTXWorker", code: 1, userInfo: [NSLocalizedDescriptionKey:
+        "The selected TAE preview variant does not match its weights. Link the matching Standard or Wide checkpoint in Runtime Settings."])
+    }
+  }
+  func update(_ latent: MLXArray, completed: Int, total: Int,
+    publish: (MLXTAELTXPreviewFrame) throws -> Void, warn: (String) throws -> Void) throws {
+    try policy.attempt(completed: completed, total: total, uptime: ProcessInfo.processInfo.systemUptime,
+      render: { try decoder.decode(latent: latent) }, publish: { frame in
+        seconds += decoder.lastDecodeSeconds
+        try publish(frame)
+      }, onFailure: warn)
+  }
+  var metadata: [String: Any] {
+    ["live_preview_decoder": decoder.variant.rawValue, "live_preview_approximate": true,
+      "live_preview_count": policy.emittedCount, "live_preview_seconds": seconds,
+      "live_preview_disabled": policy.disabled]
+  }
+}
+
 private final class MovieWorkerEvents:@unchecked Sendable {
   private let lock=NSLock(),preview:URL,width:Int,height:Int,frames:Int
   private var progress:MLXMovieStudioProgress,lastPreview=Date.distantPast,revision=0
@@ -82,23 +110,35 @@ private final class MovieWorkerEvents:@unchecked Sendable {
       expectedOutputDirectory:args[4])
     let recipeData=try read(envelope.recipePath)
     try envelope.validateRecipe(recipeData)
+    // Admission is header-only and happens before any weighted stage. The
+    // envelope keeps this display preference out of the immutable recipe.
+    let taePreview=try envelope.preview.map { try TAEPreview($0) }
+    func unavailablePreview() throws {
+      guard taePreview != nil else { return }
+      try emit(["event":"progress","stage":"preview_unavailable",
+        "message":"This specialized LTX job uses decoded-frame previews. Live TAE previews apply to ordinary two-stage Distilled and Dev clips."])
+    }
     if let root=try JSONSerialization.jsonObject(with:recipeData) as? [String:Any] {
       if root["task"] as? String == "video_upscale" || root["movie_upscale"] != nil {
+        try unavailablePreview()
         try await executeMovieUpscale(recipeData:recipeData,envelope:envelope,
           outputDirectory:args[4],preflight:args[0] == "preflight",started:start,executable:executable)
         return
       }
       if root["scene"] != nil {
+        try unavailablePreview()
         try await executeScene(recipeData:recipeData,envelope:envelope,
           outputDirectory:args[4],preflight:args[0] == "preflight",started:start)
         return
       }
       if root["task"] as? String == "ripple" {
+        try unavailablePreview()
         try await executeRipple(recipeData:recipeData,envelope:envelope,ffmpegOverride:envelope.ffmpegPath,
           outputDirectory:args[4],preflight:args[0] == "preflight",started:start)
         return
       }
       if (root["conditioning"] as? [String:Any])?["task"] as? String == "extension" {
+        try unavailablePreview()
         try await executeExtension(recipeData:recipeData,envelope:envelope,
           outputDirectory:args[4],preflight:args[0] == "preflight",started:start)
         return
@@ -135,6 +175,7 @@ private final class MovieWorkerEvents:@unchecked Sendable {
       recommendedWorkingSet:UInt64(GPU.deviceInfo().maxRecommendedWorkingSetSize))
     var pipeline=try MLXMediaPipeline(request:request,videoActivationBytes:memory.videoActivationBytes,
       transformerActivationBytes:memory.transformerActivationBytes,videoBackend:.mlx,audioBackend:.mlx)
+    if !pipeline.supportsLatentPreview { try unavailablePreview() }
     try Task.checkCancellation()
     if args[0] == "preflight" {
       let publishedFrames=try request.dfr.map {
@@ -149,6 +190,7 @@ private final class MovieWorkerEvents:@unchecked Sendable {
         admission["frame_resolution"]="admitted_maximum_before_prediction"
         admission["duration_mode"]="automatic"
       }
+      if taePreview != nil { admission["live_preview"] = pipeline.supportsLatentPreview ? "approximate_tae" : "decoded_frames" }
       try emit(["status":"success","result":admission])
       return
     }
@@ -231,8 +273,24 @@ private final class MovieWorkerEvents:@unchecked Sendable {
     var lastPreview=Date.distantPast,revision=0
     var result:[String:Any]=[:]
     defer { try? FileManager.default.removeItem(at:preview) }
+    let latentPreview:((MLXArray,AVGeometry,Int,Int) throws -> Void)? =
+      taePreview != nil && pipeline.supportsLatentPreview ? { latent,_,completed,total in
+        try taePreview!.update(latent,completed:completed,total:total,publish:{ frame in
+          try MLXStudioPreview.write(rgb:frame.rgb,width:frame.width,height:frame.height,to:preview)
+          revision += 1
+          var event=progress.event(stage:"sampling",completed:completed,total:total)
+          event["message"]="Approximate TAE preview · \(completed)/\(total) steps"
+          event["previewPath"]=preview.path;event["previewRevision"]=revision;event["previewKind"]="tae"
+          event["previewSourceFrame"]=frame.frameIndex
+          try emit(event)
+        },warn:{ message in
+          var event=progress.event(stage:"preview_disabled",completed:completed,total:total)
+          event["message"]=message;try emit(event)
+        })
+      } : nil
     _ = try pipeline.run(ffmpeg:URL(fileURLWithPath:ffmpeg),preparedAudio:preparedAudio,preparedPublicationAudio:preparedPublicationAudio,preparedMSRAudio:preparedMSRAudio,
-      preparedTextLease:preparedTextLease,textPreparationBinding:textBinding,textPreparationSeconds:textPreparationSeconds,decodedPreview:{ index,bytes in
+      preparedTextLease:preparedTextLease,textPreparationBinding:textBinding,textPreparationSeconds:textPreparationSeconds,
+      latentPreview:latentPreview,decodedPreview:{ index,bytes in
       guard MLXStudioPreview.shouldEmit(index:index,total:previewFrames,
         secondsSinceLast:Date().timeIntervalSince(lastPreview)) else { return }
       try Task.checkCancellation()
@@ -243,10 +301,12 @@ private final class MovieWorkerEvents:@unchecked Sendable {
       try emit(event)
     },beforePublish:{ staging,report in
       let stages=report["stage_seconds"] as? [String:Double] ?? [:]
+      var metadata=report
+      if let taePreview, pipeline.supportsLatentPreview { metadata.merge(taePreview.metadata) { _,new in new } }
       result=["video":output.appendingPathComponent("render.mp4").path,"jobID":envelope.jobID.uuidString,
         "seconds":Date().timeIntervalSince(start),
         "sampling_seconds":stages["sampling"] ?? (stages["stage1"] ?? 0)+(stages["stage2"] ?? 0),
-        "metadata":report,"nativeRuntime":"swift-mlx",
+        "metadata":metadata,"nativeRuntime":"swift-mlx",
         "elapsed_scope":"worker initialization through completed media, before atomic publication"]
       if request.automaticDuration != nil {
         result["use_complete_duration"]=true

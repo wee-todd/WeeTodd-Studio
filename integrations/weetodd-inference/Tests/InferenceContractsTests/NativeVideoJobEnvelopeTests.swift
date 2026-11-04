@@ -6,6 +6,30 @@ final class NativeVideoJobEnvelopeTests: XCTestCase {
   private let jobID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
   private let recipe = Data("abc".utf8)
 
+  func testPreviewIsDisplayOnlyStrictlyBoundedAndLTXOnly() throws {
+    let envelope = NativeVideoJobEnvelope(jobID: jobID, engine: .ltx25,
+      recipePath: "/jobs/recipe.json", recipeData: recipe, outputDirectory: "/jobs/output", ffmpegPath: nil)
+    var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(envelope)) as! [String: Any]
+    XCTAssertNil(object["preview"])
+    object["preview"] = ["decoder": "taeltx2_3_wide", "checkpointPath": "/models/preview.safetensors"]
+    let decoded = try NativeVideoJobEnvelope.decode(JSONSerialization.data(withJSONObject: object),
+      expectedEngine: .ltx25, expectedOutputDirectory: "/jobs/output")
+    XCTAssertEqual(decoded.recipeSHA256, envelope.recipeSHA256)
+    XCTAssertNoThrow(try decoded.validateRecipe(recipe))
+    for invalid: [String: Any] in [
+      ["decoder": "conv", "checkpointPath": "/models/preview.safetensors"],
+      ["decoder": "taeltx2_3", "checkpointPath": "relative"],
+      ["decoder": "taeltx2_3", "checkpointPath": "/models/preview.safetensors", "finalVAE": true]] {
+      object["preview"] = invalid
+      XCTAssertThrowsError(try NativeVideoJobEnvelope.decode(JSONSerialization.data(withJSONObject: object),
+        expectedEngine: .ltx25, expectedOutputDirectory: "/jobs/output"))
+    }
+    object["preview"] = ["decoder": "taeltx2_3", "checkpointPath": "/models/preview.safetensors"]
+    object["engine"] = "h3"
+    XCTAssertThrowsError(try NativeVideoJobEnvelope.decode(JSONSerialization.data(withJSONObject: object),
+      expectedEngine: .h3, expectedOutputDirectory: "/jobs/output"))
+  }
+
   func testRoundTripBindsEngineOutputAndRecipeBytes() throws {
     let envelope = NativeVideoJobEnvelope(jobID: jobID, engine: .ltx25,
       recipePath: "/jobs/recipe.json", recipeData: recipe,

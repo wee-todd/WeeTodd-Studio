@@ -31,3 +31,11 @@ https://github.com/Pika-Labs/Pika-H3-Flex
 The Swift implementation is maintained independently. Pika weights and the
 MiniMax H3 base are distributed separately under their publisher's terms;
 weights and third-party runtime source are not included here.
+
+The optional native TAELTX2.3 Standard/Wide preview decoder was independently
+implemented from Ollin Boer Bohan's MIT-licensed architecture and checkpoint
+contracts, consulted at revision 32ac0146b11007cda5a57b60a3b35653361fb8a4:
+https://github.com/madebyollin/taehv
+The full notice is retained in integrations/weetodd-mlx/Notices/TAELTX.txt and
+packaged native LTX worker notices. Preview weights are downloaded separately;
+they are not included in the application or this repository.

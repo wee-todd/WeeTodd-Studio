@@ -502,6 +502,13 @@ available. Studio, exported native jobs and the recipe-backed ComfyUI node reuse
 worker. Missing workers or incompatible features fail admission without Python inference fallback.
 Existing composable ComfyUI graphs retain their Python engines and measured presets.
 
+Swift LTX 2.5 optionally uses TAELTX2.3 Standard or Wide for approximate live sampling previews.
+Enable it and link its preview weights in Studio Settings under Performance and acceleration.
+The default retains decoded-frame previews. TAE snapshots are display-only: the selected full
+video VAE and original audio still produce the final clip. Ordinary two-stage Distilled and Dev
+Euler/HQ jobs support this option; specialized jobs retain decoded previews with an explicit notice.
+See the [Studio preview controls](studio/README.md#clip-generation-controls).
+
 LTX 2.5 adds explicit experimental Dev Euler/HQ guidance, prompt-predicted duration,
 up to eight timed images and zero to eight generated keyframe slots. Ordinary generated slots
 participate in stage one only. One actual HQ/automatic-duration take with two timed images

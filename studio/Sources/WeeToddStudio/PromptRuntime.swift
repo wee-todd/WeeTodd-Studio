@@ -275,6 +275,7 @@ struct RuntimeView: View {
           Text("Automatic uses hardware-aware memory policy and the verified projection backend. The resolved settings explain the actual choice. Paged · larger workspace retains checkpoint pagination with larger working buffers; fit on 36 GB Macs has not been qualified. Resident sampling is experimental and requires high RAM; it is not qualified on 36 GB Macs. Clips can override these defaults. Legacy custom recipes keep their saved behavior.")
             .font(.caption).foregroundStyle(.secondary)
           Button("Restore automatic acceleration") { store.runtime.acceleration = AccelerationSettings() }
+          TAEPreviewSettingsView()
           Divider()
           Text("Renderer").font(.headline)
           Text(

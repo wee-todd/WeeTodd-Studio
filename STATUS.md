@@ -42,6 +42,32 @@ unclipped; acoustic intelligibility was not independently assessed. Broader like
 and perceptual quality remains separate. No default promotion is made from these two cases.
 Installed native/import/composition checks and focused contradictory-metadata regressions pass.
 
+## October 31 optional LTX sampling previews
+
+Swift LTX 2.5 has optional TAELTX2.3 Standard/Wide live preview controls in Studio Settings.
+They default off and travel in the native job envelope rather than sampling recipes. Approximate
+previews use isolated denoised predictions, at most three latent frames and a 384-pixel edge;
+parameters release after every update. The viewport distinguishes approximate TAE snapshots from
+genuine decoded frames. Final video VAE selection, audio, recipe defaults and existing configs
+remain unchanged. Ordinary two-stage Distilled and Dev Euler/HQ are supported; specialized jobs
+retain decoded-frame previews and explicitly report the live-preview limitation.
+
+Focused native and Studio contracts pass, including preview mutation transparency for Euler/HQ,
+frozen audio/noise order, runtime persistence/render identity and envelope-only transport.
+Against the pinned publisher's small Float32 fixtures, Wide RGB output is exact and Standard differs
+by at most one 8-bit level. Bounded decode checks retain no active MLX allocations or parameters.
+These establish preview implementation behavior, not final VAE equivalence or a whole-generation
+speedup. Complete Distilled FFLF and Dev/query8192 audiovisual comparisons preserved every final
+decoded video pixel and audio sample against their retained preview-off baselines. Wide's first
+approximate snapshots arrived at 13 and 22 seconds, versus 81 and 327 seconds for decoded frames.
+These are preview-latency observations, not isolated generation-overhead measurements.
+
+Combined core/Studio validation passed: Python 3,049 passed with seven skips; native inference,
+native MLX and Studio ran 212/1,078/1,171 tests with 10/184/54 optional skips and zero failures.
+Twelve installed TAELTX checks ran separately without skips. Isolated release packaging and signature
+verification passed with the MIT notice included. Live Studio verified Off/Standard/Wide controls,
+the approximate-preview image and label, and cancellation clearing the preview without a take.
+
 ## October 30 H3 attention scheduling optimization
 
 Native Swift/MLX H3 regeneration now omits four execution-only SIMD fences from its pinned

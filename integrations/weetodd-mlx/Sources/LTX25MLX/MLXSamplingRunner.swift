@@ -37,6 +37,46 @@ public final class MLXSamplingRunner {
     stageProgress:(Int,MLXDenoiser.Progress) throws -> Void = { _,_ in },
     progress:(Progress) throws -> Void = { _ in },
     preview:(([String:MLXArray],Progress) throws -> Void)?=nil) throws -> [String:MLXArray] {
+    try evaluateWithPreviews(inputs,schedule:schedule,videoConditioning:videoConditioning,
+      audioConditioning:audioConditioning,frozenAudio:frozenAudio,bfloat16State:bfloat16State,
+      unconditionalContexts:unconditionalContexts,cfgppStepIndices:cfgppStepIndices,
+      fixedWeights:fixedWeights,blockWeights:blockWeights,fixedAdapters:fixedAdapters,
+      blockAdapters:blockAdapters,noise:noise,stageProgress:stageProgress,progress:progress,
+      denoisedPreview:nil,preview:preview)
+  }
+
+  public func evaluateWithDenoisedPreview(_ inputs:[String:MLXArray],schedule:SamplingSchedule,
+    videoConditioning:MLXVideoDenoiseCondition?=nil,audioConditioning:MLXAudioDenoiseCondition?=nil,
+    frozenAudio:Bool=false,bfloat16State:Set<String>=[],
+    unconditionalContexts:[String:MLXArray]?=nil,cfgppStepIndices:Set<Int>?=nil,
+    fixedWeights:MLXDenoiser.FixedProvider,blockWeights:MLXDenoiser.BlockProvider,
+    fixedAdapters:MLXDenoiser.FixedAdapters = { _ in [] },
+    blockAdapters:(Int) throws -> [String:[MLXLoRA]] = { _ in [:] },
+    noise:Noise?=nil,
+    stageProgress:(Int,MLXDenoiser.Progress) throws -> Void = { _,_ in },
+    progress:(Progress) throws -> Void = { _ in },
+    denoisedPreview:(([String:MLXArray],Progress) throws -> Void)?,
+    preview:(([String:MLXArray],Progress) throws -> Void)?=nil) throws -> [String:MLXArray] {
+    try evaluateWithPreviews(inputs,schedule:schedule,videoConditioning:videoConditioning,
+      audioConditioning:audioConditioning,frozenAudio:frozenAudio,bfloat16State:bfloat16State,
+      unconditionalContexts:unconditionalContexts,cfgppStepIndices:cfgppStepIndices,
+      fixedWeights:fixedWeights,blockWeights:blockWeights,fixedAdapters:fixedAdapters,
+      blockAdapters:blockAdapters,noise:noise,stageProgress:stageProgress,progress:progress,
+      denoisedPreview:denoisedPreview,preview:preview)
+  }
+
+  private func evaluateWithPreviews(_ inputs:[String:MLXArray],schedule:SamplingSchedule,
+    videoConditioning:MLXVideoDenoiseCondition?=nil,audioConditioning:MLXAudioDenoiseCondition?=nil,
+    frozenAudio:Bool=false,bfloat16State:Set<String>=[],
+    unconditionalContexts:[String:MLXArray]?=nil,cfgppStepIndices:Set<Int>?=nil,
+    fixedWeights:MLXDenoiser.FixedProvider,blockWeights:MLXDenoiser.BlockProvider,
+    fixedAdapters:MLXDenoiser.FixedAdapters = { _ in [] },
+    blockAdapters:(Int) throws -> [String:[MLXLoRA]] = { _ in [:] },
+    noise:Noise?=nil,
+    stageProgress:(Int,MLXDenoiser.Progress) throws -> Void = { _,_ in },
+    progress:(Progress) throws -> Void = { _ in },
+    denoisedPreview:(([String:MLXArray],Progress) throws -> Void)?=nil,
+    preview:(([String:MLXArray],Progress) throws -> Void)?=nil) throws -> [String:MLXArray] {
     guard !active else { throw LTXError.invalid("MLX sampler already executing.") }
     guard noise != nil || !schedule.steps.contains(where:\.ancestral) else {
       throw LTXError.invalid("Ancestral sampling requires explicit noise before loading weights.")
@@ -132,6 +172,7 @@ public final class MLXSamplingRunner {
             try stageProgress(evaluation,$0)
           }
       } else { unconditionalVelocity=nil }
+      var cleanSnapshot:[String:MLXArray]=[:]
       for name in ["video","audio"] {
         if name == "audio" && frozenAudio { continue }
         let key=name+"_latent", state=current[key]!.reshaped(denoiser.inputShapes[key]!)
@@ -148,6 +189,7 @@ public final class MLXSamplingRunner {
         if let conditionedClean,let conditionedMask {
           clean=clean*conditionedMask+conditionedClean*(1-conditionedMask)
         }
+        if denoisedPreview != nil { cleanSnapshot[name]=clean.reshaped(clean.shape) }
         var next:MLXArray
         if let unconditionalVelocity {
           let cfgStep=try CFGPPAncestralStep(sigma:Double(Float(schedule.sigmas[index])),
@@ -194,6 +236,12 @@ public final class MLXSamplingRunner {
         sigma:schedule.sigmas[index],nextSigma:schedule.sigmas[index+1])
       try progress(event)
       try Task.checkCancellation()
+      if let denoisedPreview {
+        // Predictions are display-only handles. All weighted passes have
+        // returned; callbacks cannot mutate the sampler's Swift wrappers.
+        let snapshot=cleanSnapshot.mapValues { $0.reshaped($0.shape) }
+        try denoisedPreview(snapshot,event)
+      }
       if let preview {
         let snapshot=["video":current["video_latent"]!,"audio":current["audio_latent"]!]
           .mapValues { $0.reshaped($0.shape) }

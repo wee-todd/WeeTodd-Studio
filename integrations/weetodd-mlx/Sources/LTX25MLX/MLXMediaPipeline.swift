@@ -52,6 +52,10 @@ public final class MLXMediaPipeline {
   private let saveFrames:Bool
   private let extensionContextFrames:Int?
   private let gate=NSLock()
+  /// Other pipelines keep their existing decoded-frame display path.
+  public var supportsLatentPreview:Bool {
+    sampler != nil && extensionContextFrames == nil && request.unionControlGuide == nil && request.icControl == nil
+  }
 
   /// Admission and execution must use the same validated job geometry. Standalone
   /// decoder defaults are conservative probe limits, not Studio duration limits.
@@ -322,8 +326,12 @@ public final class MLXMediaPipeline {
     extensionGuideLease:ExtensionGuideLease?=nil,
     preparedTextLease:MLXPreparedTextLease?=nil,textPreparationBinding:MLXTextPreparationBinding?=nil,
     textPreparationSeconds:Double=0,
+    latentPreview:((MLXArray,AVGeometry,Int,Int) throws -> Void)?=nil,
     decodedPreview:((Int,Data) throws -> Void)?,beforePublish:((URL,[String:Any]) throws -> Void)? = nil,progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> URL {
     defer { preparedTextLease?.release() }
+    guard latentPreview == nil || supportsLatentPreview else {
+      throw LTXError.invalid("Live TAE previews are supported for ordinary two-stage LTX clips; this pipeline retains decoded-frame previews.")
+    }
     guard (request.automaticDuration != nil) == (preparedTextLease != nil),
       (preparedTextLease != nil) == (textPreparationBinding != nil),
       request.automaticDuration.map({ $0.headHeaderSHA256 != nil }) ?? true,
@@ -639,11 +647,12 @@ public final class MLXMediaPipeline {
         let count=request.referenceImages.count
         let ordinary:[[MLXArray]]=request.usesOrdinaryKeyframes ?
           [Array(preparedGuides.2.prefix(count)),Array(preparedGuides.2.dropFirst(count))] : []
-        sampled=try sampler.evaluate(videoContext:contexts.video,audioContext:contexts.audio,
+        sampled=try sampler.evaluateWithPreview(videoContext:contexts.video,audioContext:contexts.audio,
           ordinaryReferences:ordinary,references:preparedGuides.0,
           frozenAudio:frozenAudio,negativeContexts:unconditionalContexts.map { ["video_text":$0.video,"audio_text":$0.audio] },
           extensionGuides:extensionGuideLease?.guides,
-          unionGuide:preparedGuides.1,icGuides:request.icControl != nil ? preparedGuides.2 : [],progress:report)
+          unionGuide:preparedGuides.1,icGuides:request.icControl != nil ? preparedGuides.2 : [],
+          denoisedPreview:latentPreview,progress:report)
         timings.merge(sampler.stageSeconds) { _,new in new }
       }
       // One final evaluated download for existing native decoders. The contexts

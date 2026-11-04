@@ -143,11 +143,38 @@ public final class MLXDistilledSamplingRunner {
       stageOneVideoObserver:nil,progress:progress)
   }
 
+  public func evaluateWithPreview(videoContext:MLXArray,audioContext:MLXArray,
+    ordinaryReferences:[[MLXArray]]=[],sceneReferences:[[MLXArray]]=[],
+    references:[(first:MLXArray,last:MLXArray?)]=[],frozenAudio:MLXArray?=nil,negativeContexts:[String:MLXArray]?=nil,
+    extensionGuides:ExtensionGuides?=nil,unionGuide:MLXArray?=nil,icGuides:[MLXArray]=[],
+    denoisedPreview:((MLXArray,AVGeometry,Int,Int) throws -> Void)?,
+    progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> [String:MLXArray] {
+    try evaluateCaptured(videoContext:videoContext,audioContext:audioContext,
+      ordinaryReferences:ordinaryReferences,sceneReferences:sceneReferences,references:references,
+      frozenAudio:frozenAudio,negativeContexts:negativeContexts,extensionGuides:extensionGuides,
+      unionGuide:unionGuide,icGuides:icGuides,stageOneVideoObserver:nil,
+      denoisedPreview:denoisedPreview,progress:progress)
+  }
+
   public func evaluateWithStageOneCapture(videoContext:MLXArray,audioContext:MLXArray,
     ordinaryReferences:[[MLXArray]]=[],sceneReferences:[[MLXArray]]=[],
     references:[(first:MLXArray,last:MLXArray?)]=[],frozenAudio:MLXArray?=nil,negativeContexts:[String:MLXArray]?=nil,
     extensionGuides:ExtensionGuides?=nil,unionGuide:MLXArray?=nil,icGuides:[MLXArray]=[],
     stageOneVideoObserver:((MLXArray) throws -> Void)?=nil,
+    progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> [String:MLXArray] {
+    try evaluateCaptured(videoContext:videoContext,audioContext:audioContext,
+      ordinaryReferences:ordinaryReferences,sceneReferences:sceneReferences,references:references,
+      frozenAudio:frozenAudio,negativeContexts:negativeContexts,extensionGuides:extensionGuides,
+      unionGuide:unionGuide,icGuides:icGuides,stageOneVideoObserver:stageOneVideoObserver,
+      denoisedPreview:nil,progress:progress)
+  }
+
+  private func evaluateCaptured(videoContext:MLXArray,audioContext:MLXArray,
+    ordinaryReferences:[[MLXArray]]=[],sceneReferences:[[MLXArray]]=[],
+    references:[(first:MLXArray,last:MLXArray?)]=[],frozenAudio:MLXArray?=nil,negativeContexts:[String:MLXArray]?=nil,
+    extensionGuides:ExtensionGuides?=nil,unionGuide:MLXArray?=nil,icGuides:[MLXArray]=[],
+    stageOneVideoObserver:((MLXArray) throws -> Void)?=nil,
+    denoisedPreview:((MLXArray,AVGeometry,Int,Int) throws -> Void)?=nil,
     progress:@escaping (String,Int,Int) throws -> Void = { _,_,_ in }) throws -> [String:MLXArray] {
     guard gate.try() else { throw LTXError.invalid("Two-stage MLX sampler is already active.") }
     defer { Stream.gpu.synchronize(); Memory.clearCache(); gate.unlock() }
@@ -266,6 +293,16 @@ public final class MLXDistilledSamplingRunner {
           ? (frozenAudio != nil ? (stage == 1 ? ["video"] : []) : (stage == 1 ? ["video","audio"] : ["audio"])) : []
         let sampled:[String:MLXArray]
         let firstUpdates=self.guidedSampling.map { $0.steps+($0.mode == .guidedHQ ? 1 : 0) } ?? 8
+        let preview:(([String:MLXArray],MLXSamplingRunner.Progress) throws -> Void)?=denoisedPreview.map { callback in
+          { state,event in
+            guard let target=state["video"],target.ndim==2,target.shape[0]>=g.videoTokens,target.shape[1]==128 else {
+              throw LTXError.invalid("Preview prediction differs from the admitted video target.")
+            }
+            let video=target[0..<g.videoTokens].reshaped([1,g.latentFrames,g.latentHeight,g.latentWidth,128])
+              .transposed(0,4,1,2,3)
+            try callback(video,g,(stage == 1 ? 0 : firstUpdates)+event.completedSteps,firstUpdates+3)
+          }
+        }
         if stage == 1,let guidance=self.guidedSampling {
           guard let negativeContexts else { throw LTXError.invalid("Dev guidance requires encoded negative contexts before transformer loading.") }
           let sampler=try MLXGuidedSamplingRunner(configuration:Self.configuration(g,layout:layout,ordinary:ordinary),
@@ -280,11 +317,11 @@ public final class MLXDistilledSamplingRunner {
                 self.stageSeconds["stage1_block_compute",default:0] += detail.computeSeconds
               }
               try report("stage1:"+event.stage,event.completedBlocks,48)
-            },progress:{ try report("sampling",$0.completedSteps,firstUpdates+3) })
+            },denoisedPreview:preview,progress:{ try report("sampling",$0.completedSteps,firstUpdates+3) })
         } else {
           let sampler=try MLXSamplingRunner(configuration:Self.configuration(g,layout:layout,ordinary:ordinary,scene:scene,guide:guideLayout,union:union,ic:ic),maximumActivationBytes:self.maximumActivationBytes,
             keyframeMarkerRows:ordinary?.slotTokens ?? 0)
-        sampled=try sampler.evaluate(inputs,schedule:schedule,videoConditioning:conditioning,
+        sampled=try sampler.evaluateWithDenoisedPreview(inputs,schedule:schedule,videoConditioning:conditioning,
           audioConditioning:audioConditioning,
           frozenAudio:frozenAudio != nil && guideLayout == nil,bfloat16State:bf16,
           fixedWeights:source.readFixed,blockWeights:source.readBlock,
@@ -296,7 +333,8 @@ public final class MLXDistilledSamplingRunner {
             }
             try report("stage\(stage):"+event.stage,event.completedBlocks,48)
           },
-          progress:{ event in try report("sampling",(stage == 1 ? 0 : firstUpdates)+event.completedSteps,firstUpdates+3) })
+          progress:{ event in try report("sampling",(stage == 1 ? 0 : firstUpdates)+event.completedSteps,firstUpdates+3) },
+          denoisedPreview:preview)
         }
         return ["video":sampled["video"]![0..<g.videoTokens],"audio":sampled["audio"]![0..<g.audioFrames]]
       }

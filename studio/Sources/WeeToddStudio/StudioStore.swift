@@ -20,6 +20,9 @@ struct RuntimeSettings: Codable {
   var ltx25WorkerPath: String?
   var nativeLTX25Enabled: Bool?
   var usesNativeLTX25: Bool { nativeLTX25Enabled ?? true }
+  var ltx25PreviewDecoder: String?
+  var ltx25PreviewCheckpoint: String?
+  var ltx25PreviewWideCheckpoint: String?
   var h3WorkerPath: String?
   var drama3WorkerPath: String?
   var nativeH3Enabled: Bool?
@@ -38,6 +41,10 @@ struct RuntimeSettings: Codable {
     // absent saved preference distinct from an explicit legacy opt-out.
     value.nativeH3Enabled = usesNativeH3
     value.nativeLTX25Enabled = usesNativeLTX25
+    // Preview decoding affects display only, not the prepared render identity.
+    value.ltx25PreviewDecoder = nil
+    value.ltx25PreviewCheckpoint = nil
+    value.ltx25PreviewWideCheckpoint = nil
     value.loraFolders = nil
     value.automaticallyDiscoverLoRAs = nil
     value.voiceModels = nil

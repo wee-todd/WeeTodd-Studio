@@ -1435,6 +1435,25 @@ shot. Built-ins remain available. Saved configs live in Studio app data, outside
 Saving an older recipe-based setup retains its internal binding and inherited execution settings
 for compatibility. Applying a built-in config moves that clip to automatic component resolution.
 
+**Live LTX previews** are optional in **Studio Settings → Performance and acceleration →
+Swift LTX 2.5 live previews**. Choose **TAELTX2.3 · approximate** or **TAELTX2.3 Wide · approximate**
+and link its released F16 safetensors file. Standard and Wide keep separate weight links.
+The [publisher's pinned release](https://github.com/madebyollin/taehv/tree/32ac0146b11007cda5a57b60a3b35653361fb8a4/safetensors)
+provides `taeltx2_3.safetensors` and `taeltx2_3_wide.safetensors`; keep them in your shared model library.
+Generation does not download preview models. Off retains the existing decoded-frame previews.
+
+TAE displays an **approximate preview during sampling** for ordinary two-stage Distilled and Dev
+Euler/HQ clips, including ordinary image/keyframe and audio-driven clips. It reads isolated denoised
+predictions after transformer weights release, uses at most three latent frames and a 384-pixel
+edge, and limits updates by steps and elapsed time. The viewport labels these **LIVE · APPROXIMATE
+TAE PREVIEW**. The final clip still uses its selected full Conv or Diffusion VAE and original audio;
+TAE frames are never encoded into the take. Genuine decoded previews replace the approximate label.
+Preview preferences do not change saved recipes or invalidate prepared render settings. Missing or
+mismatched preview weights are rejected before generation. A preview failure during sampling stops
+further TAE updates with a visible message while final decoding continues; cancellation still stops
+the job. Specialized jobs retain decoded-frame previews and report that live TAE is unavailable.
+This preference applies to Swift LTX 2.5; the legacy Python route keeps its own preview behavior.
+
 LTX component resolution reuses registered model bindings in place, inspects transformer provenance
 to distinguish distilled from unmerged Dev pages, and builds the existing validated native schedule.
 Dev configs automatically require the official distilled refinement adapter. A compatible matching
