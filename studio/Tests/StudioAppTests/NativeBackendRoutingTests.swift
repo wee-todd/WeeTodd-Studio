@@ -191,8 +191,11 @@ final class NativeBackendRoutingTests: XCTestCase {
       store.addClip(); store.editClip { $0.engine = engine; $0.prompt = "Frozen prompt" }
       await store.prepareSelected()
       XCTAssertNil(store.preparedRecipe)
-      XCTAssertTrue(store.error?.contains(engine == .h3 ? "Swift H3" : "Swift LTX") == true,
+      XCTAssertTrue(store.error?.contains(engine == .h3 ? "Swift H3" : "Missing compatible components") == true,
         store.error ?? "Expected native admission error")
+      if engine == .ltx25 {
+        XCTAssertTrue(store.error?.contains("LTX 2.5 distilled transformer") == true)
+      }
       XCTAssertFalse(store.error?.contains("Python environment") == true)
     }
   }

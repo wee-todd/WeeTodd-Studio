@@ -7,6 +7,10 @@ struct ModelSetupCatalogView: View {
   @ObservedObject var state: ModelSetupState
   @ObservedObject var bridge: Bridge
   var rendererInstalling: Bool
+  var visiblePresets: [ModelSetupPreset] {
+    state.presets.filter { !["swift-ltx25-image", "swift-ltx25-guided_hq",
+      "swift-ltx25-auto-duration-guided_hq"].contains($0.id) }
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -18,7 +22,7 @@ struct ModelSetupCatalogView: View {
           .disabled(state.loadingCatalog || !ModelSetupState.rendererAvailable(store.runtime))
       }
       Text(
-        "Choose a preset, locate compatible models, then create a recipe. Existing model files can stay in their current folders."
+        "Link compatible installed components or download missing models. LTX 2.5 configs resolve linked components automatically; existing files stay in place."
       )
       .font(.caption).foregroundStyle(.secondary)
       if !ModelSetupState.rendererAvailable(store.runtime) {
@@ -31,10 +35,11 @@ struct ModelSetupCatalogView: View {
       if !state.catalogError.isEmpty {
         Text(state.catalogError).font(.caption).foregroundStyle(.red).textSelection(.enabled)
       }
-      ForEach(state.presets) { preset in
+      ForEach(visiblePresets) { preset in
         HStack(alignment: .top, spacing: 12) {
           VStack(alignment: .leading, spacing: 4) {
-            Text(preset.name).font(.subheadline.weight(.medium))
+            Text(preset.id == "swift-ltx25-text" ? "LTX 2.5 · Distilled components"
+              : preset.id == "swift-ltx25-guided" ? "LTX 2.5 · Dev components" : preset.name).font(.subheadline.weight(.medium))
             Text(preset.description).font(.caption).foregroundStyle(.secondary)
           }
           Spacer()
@@ -62,6 +67,7 @@ struct ModelSetupView: View {
   @State private var sourceTermsReviewed = false
   @State private var downloadsExpanded = false
   @State private var downloadFocus = 0
+  var isLTXConfigSetup: Bool { preset.engine == "ltx25" && preset.id.hasPrefix("swift-") }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
@@ -80,7 +86,7 @@ struct ModelSetupView: View {
             Text(preset.description).font(.callout).foregroundStyle(.secondary)
             existingModels
             componentChoices
-            memoryPolicy
+            if !isLTXConfigSetup { memoryPolicy }
             if !compatibleDownloads.isEmpty { downloads.id("modelDownloads") }
             if !state.error.isEmpty {
               Label(state.error, systemImage: "exclamationmark.triangle")
@@ -94,24 +100,24 @@ struct ModelSetupView: View {
               Label(warning, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
             }
             if !state.resultPath.isEmpty {
-              Label("Recipe created", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+              Label(isLTXConfigSetup ? "Components linked" : "Recipe created", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
               Text(state.resultPath).font(.caption).textSelection(.enabled)
               if let clip = store.selectedClip, preset.supports(clip) {
-                Button("Use Recipe for Selected Clip") {
+                Button(isLTXConfigSetup ? "Use Config for Selected Clip" : "Use Recipe for Selected Clip") {
                   state.useRecipeForSelectedClip(store: store)
                 }
                 .disabled(bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe || clip.profileID == state.resultPath)
                 Text(
                   clip.profileID == state.resultPath
                     ? "Selected for \(clip.name). Prepare the clip to validate its media and settings."
-                    : "Apply this recipe to \(clip.name)."
+                    : "Apply these settings to \(clip.name)."
                 )
                 .font(.caption).foregroundStyle(.secondary)
               } else {
                 Text("Select a clip with a compatible engine and media task to use this recipe.")
                   .font(.caption).foregroundStyle(.secondary)
               }
-              Button("Show recipe in Finder") {
+              Button(isLTXConfigSetup ? "Show component binding in Finder" : "Show recipe in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([
                   URL(fileURLWithPath: state.resultPath)
                 ])
@@ -150,15 +156,16 @@ struct ModelSetupView: View {
           Text("Inspecting native conversion headers…").font(.caption)
           Button("Cancel") { state.cancelTransformerConversion(bridge: bridge) }
         } else if !state.resultPath.isEmpty {
-          Label("Recipe created", systemImage: "checkmark.circle.fill")
+          Label(isLTXConfigSetup ? "Components linked" : "Recipe created", systemImage: "checkmark.circle.fill")
             .font(.caption).foregroundStyle(.green)
         } else {
-          Text("Creates a new validated recipe in your model recipes folder.")
+          Text(isLTXConfigSetup ? "Validates and links installed components for automatic config resolution."
+            : "Creates a new validated recipe in your model recipes folder.")
             .font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
         if state.preparingRecipe { ProgressView("Verifying linked model checksums…").controlSize(.small) }
-        Button("Create Recipe") { Task { await state.createRecipe(store: store) } }
+        Button(isLTXConfigSetup ? "Link Components" : "Create Recipe") { Task { await state.createRecipe(store: store) } }
           .buttonStyle(.borderedProminent)
           .disabled(
             bridge.busy || state.downloading || state.convertingTransformer || state.preparingRecipe || state.rawDevTransformer != nil || !state.selection.missingComponents(for: preset).isEmpty

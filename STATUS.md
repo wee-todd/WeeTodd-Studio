@@ -538,6 +538,18 @@ Required combined project validation and isolated packaging are recorded by the 
 This entry claims no new real-model SheetSage2, instrumental-LoRA, RefMod or caption qualification;
 existing dated native-video and music measurements below retain their original scopes.
 
+## October 14 LTX 2.5 config selection
+
+Swift LTX 2.5 uses built-in Distilled, Dev and Dev HQ configs plus a persistent user config
+library. Applying a config replaces execution settings coherently and automatically resolves
+registered model component bindings, including shared encoder/VAEs and Dev's refinement adapter.
+The inspector removes separate LTX recipe and generation-mode pickers. Save as, reset, modified
+state and saved-config deletion preserve captured clip values, prompts, media, LoRAs and timing.
+Existing specialist/legacy recipes remain compatible; no sampler or inference algorithm changed.
+Saving a legacy recipe-based setup retains its binding and inherited execution policy; applying
+a built-in config switches to automatic component resolution.
+This is configuration and UI work; no new real-model quality or performance qualification is claimed.
+
 ## October 11 generation inspector organization
 
 Studio generation now starts with **Run with**, **Model / Model profile** and LoRAs, followed by

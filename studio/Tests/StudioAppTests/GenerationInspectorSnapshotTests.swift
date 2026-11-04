@@ -30,6 +30,19 @@ final class GenerationInspectorSnapshotTests: XCTestCase {
     XCTAssertEqual(fixture.store.h3RegenerateSettings, settings)
     XCTAssertEqual(fixture.store.h3RegenerateSettings.decoder, .fastH3)
   }
+
+  @MainActor func testLTXDevConfigInspectorHostsWithoutMutatingTheCapturedShot() throws {
+    var fixture = try h3Fixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+    fixture.clip.engine = .ltx25
+    fixture.clip.attachments.removeAll { $0.role == .lora }
+    try fixture.clip.applyLTX25Config(.dev)
+    fixture.store.project.clips = [fixture.clip]
+    fixture.store.profiles = []
+    try capture(ClipInspector(clip: fixture.clip, detail: .all), fixture: fixture,
+      name: "ltx25-dev-config", height: 2600)
+  }
+
   @MainActor func testIngredientsBasicHostsWithoutChangingTheSavedRecipe() throws {
     let fixture = try ingredientsFixture()
     defer { try? FileManager.default.removeItem(at: fixture.directory) }

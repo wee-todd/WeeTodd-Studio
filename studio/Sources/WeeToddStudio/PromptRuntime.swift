@@ -72,12 +72,20 @@ struct PromptEditor: View {
                 ).font(.caption).foregroundStyle(.secondary)
               }
             } else {
+              let retainedNegative = clip.engine == .ltx25 && store.runtime.usesNativeLTX25
+                && clip.profileID == "auto" && clip.generationSelection?.ltx25ConfigID != nil
+                && clip.generationSelection?.ltx25Guidance == nil
+                && clip.generationSelection?.ltx25SingleStage?.method != .cfgpp
               DisclosureGroup("Negative prompt") {
                 TextEditor(
                   text: Binding(
                     get: { store.selectedClip?.negativePrompt ?? "" },
                     set: { v in store.editClip { $0.negativePrompt = v } })
-                ).font(.system(size: 12)).frame(height: 65)
+                ).font(.system(size: 12)).frame(height: 65).disabled(retainedNegative)
+                if retainedNegative {
+                  Text("The current config does not evaluate negative prompts. Your text is retained for Dev or CFG++ configs.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                }
               }.font(.caption)
             }
             HStack {

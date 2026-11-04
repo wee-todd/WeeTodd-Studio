@@ -97,11 +97,15 @@ struct GenerationInspector: View {
             .font(.caption2).foregroundStyle(.secondary)
         }
       }
-      if detail.showsBasic && clip.generationSelection?.isModified == true {
+      if detail.showsBasic && (clip.engine == .ltx25 && store.runtime.usesNativeLTX25
+        ? store.ltx25ConfigIsModified : clip.generationSelection?.isModified == true) {
         HStack {
           Text("Modified").foregroundStyle(.secondary)
           Spacer()
-          Button("Reset") { edit { $0.resetOverrides() } }
+          Button("Reset") {
+            if clip.engine == .ltx25 && store.runtime.usesNativeLTX25 { store.resetLTX25Config() }
+            else { edit { $0.resetOverrides() } }
+          }
         }
       }
       if detail.showsBasic {
@@ -191,7 +195,7 @@ struct GenerationInspector: View {
       ForEach(store.generationDescriptions[clip.id]?["warnings"] as? [String] ?? [], id: \.self) { warning in
         Text(warning).font(.caption2).foregroundStyle(.secondary)
       }
-      if needsAutomaticComponents {
+      if needsAutomaticComponents && !(clip.engine == .ltx25 && store.runtime.usesNativeLTX25) {
         Button("Use automatic model components") {
           store.editClip { $0.selectAutomaticModelComponents() }
         }
@@ -386,19 +390,8 @@ struct GenerationInspector: View {
     ((store.generationDescriptions[clip.id]?["generation"] as? [String: Any])?["guidance"] as? [String: Any]) ?? [:]
   }
   @ViewBuilder var guidedControls: some View {
-    Picker("Generation mode", selection: Binding(get: {
-      clip.generationSelection?.ltx25Guidance?.mode.rawValue ?? "distilled"
-    }, set: { value in edit {
-      $0.ltx25Guidance = LTX25GuidanceMode(rawValue: value).map { LTX25GuidanceSettings(mode: $0) }
-      $0.steps = nil; $0.refinementSteps = nil; $0.cfg = nil
-    } })) {
-      Text("Fast distilled").tag("distilled")
-      ForEach(LTX25GuidanceMode.allCases) { Text($0.label).tag($0.rawValue) }
-    }
     if let guidance = clip.generationSelection?.ltx25Guidance {
-      Toggle("Enable experimental Dev guidance", isOn: Binding(get: { guidance.experimentalEnabled },
-        set: { value in edit { $0.ltx25Guidance?.experimentalEnabled = value } }))
-      Text("Requires a compatible Dev profile and the official distilled refinement adapter. Quality and performance are unqualified. The negative prompt is evaluated in this mode.")
+      Text("Dev config evaluates the negative prompt and resolves its refinement adapter automatically. Quality and performance are unqualified.")
         .font(.caption2).foregroundStyle(.secondary)
       DisclosureGroup("Advanced guidance") {
         HStack { Text("Audio CFG"); TextField("Audio CFG", value: guidanceNumber(\.audioCFG, wireKey: "audio_cfg_scale", fallback: 7), format: .number) }

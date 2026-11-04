@@ -10,6 +10,29 @@ public struct NativeModelScanResult {
 public enum NativeModelSetup {
   public static let engines: Set<String> = ["h3", "ltx25"]
 
+  static func matchesLTX25Component(_ url: URL, key: String) -> Bool {
+    guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey]),
+      values.isRegularFile == true || values.isDirectory == true else { return false }
+    return (try? NativeModelInspector.matches(url, key: key, engine: "ltx25", task: "t2v")) == true
+  }
+
+  /// Distinguish training variants using checkpoint provenance, never folder names.
+  static func matchesLTX25Transformer(_ url: URL, dev: Bool) -> Bool {
+    if dev {
+      return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        && matchesLTX25Component(url, key: "dev_transformer_path")
+    }
+    guard matchesLTX25Component(url, key: "transformer_path") else { return false }
+    if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+      guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.appendingPathComponent("paged_manifest.json").path),
+        (attributes[.size] as? NSNumber)?.intValue ?? Int.max <= 2 * 1024 * 1024,
+        let bytes = try? Data(contentsOf: url.appendingPathComponent("paged_manifest.json")),
+        let manifest = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return false }
+      return manifest["source"] as? String == "ltx-2.5-22b-distilled-transformer-bf16.safetensors"
+    }
+    return url.lastPathComponent == "ltx-2.5-22b-distilled-transformer-bf16.safetensors"
+  }
+
   /// The download path shares discovery's raw Dev admission; page conversion
   /// and the shared worker retain their stricter complete-source validation.
   static func validateDevSource(at url: URL) throws {

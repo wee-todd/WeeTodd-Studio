@@ -228,7 +228,7 @@ struct ClipInspector: View {
       DisclosureGroup("Finishing and execution") {
         VStack(alignment: .leading, spacing: 10) {
           if clip.engine != .movie {
-            if clip.engine != .drawThings {
+            if clip.engine != .drawThings && !(clip.engine == .ltx25 && store.runtime.usesNativeLTX25) {
               Picker("Execution preset", selection: Binding(get: { clip.generationSelection?.preset ?? .custom }, set: { preset in
                 store.editClip { $0.selectGenerationPreset(preset) }
               })) {

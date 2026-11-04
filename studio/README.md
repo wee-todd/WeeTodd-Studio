@@ -1278,7 +1278,8 @@ configure the native MLX engines.
    separately pinned affine-Q8 transformer file and official inference contract; both also have
    a pinned native catalog download. See the [Omni setup guide](../examples/headless/README.md#experimental-fasth3-omni--eight-evaluations).
    Linking installed backbone weights keeps them in place without conversion.
-3. Use **Automatic** to select a lower-memory policy on Macs with 64 GB or less, **Lower Memory** to
+3. Swift LTX 2.5 resolves its execution policy from the clip config. Other setup routes use
+   **Automatic** to select a lower-memory policy on Macs with 64 GB or less, **Lower Memory** to
    request supported memory-saving settings, or **Custom** to retain the preset policy for later
    advanced adjustment. Memory information is advisory and does not promise fit, allocate RAM, or
    enforce a hard limit. Clip size/duration and other resident applications still matter.
@@ -1289,7 +1290,9 @@ configure the native MLX engines.
    two-block residual window. Both modes release packed video weights before audio decoding.
    Direct eager APIs retain their evaluation barriers. The worker reports the actual policy
    and cache limit; the allocation cache limit does not bound total process memory.
-4. **Create Recipe** runs the shared component/configuration preflight and writes a new recipe.
+4. Swift LTX 2.5 uses **Link Components**, followed by **Use Config for Selected Clip** when needed.
+   Its clip config resolves the linked paths automatically. Other routes use **Create Recipe**,
+   which runs the shared component/configuration preflight and writes a new recipe.
    Image/reference presets still need media attached to a clip before full render preflight can pass.
    For a Swift text-to-video preset, the selected worker runs preflight before the profile is kept;
    for a Swift image/reference preset, attach media and prepare a clip for worker preflight.
@@ -1402,7 +1405,8 @@ The [headless example/schema](../examples/headless/README.md) remains available 
 
 | Symptom | Next action |
 | --- | --- |
-| LTX clip shows **0 recipes** | Choose its built-in preset in **Studio Settings → Model setup**, scan existing components or download the prepared package, then **Create Recipe** and **Use Recipe for Selected Clip**. Downloading weights alone does not create a recipe. |
+| Swift LTX 2.5 reports missing components | Choose **Distilled components** or **Dev components** in **Studio Settings → Model setup**, scan or import installed weights, then **Link Components**. Select the clip's config; it resolves linked components automatically. Downloading weights alone does not register their paths. |
+| Legacy Python LTX clip shows **0 recipes** | Choose its preset in **Studio Settings → Model setup**, scan existing components or download the prepared package, then **Create Recipe** and **Use Recipe for Selected Clip**. |
 | **Prepare Clip** rejects the official LTX 2.5 distilled LoRA with `to_gate_logits` targets | Update the renderer and prepare again. The validator now accepts the official attention-gate weights. Existing models and prompts can be reused. For an app-managed runtime, refresh it with **Set Up Managed Renderer** from the updated app. Preparation and generation alerts now show the renderer's specific error; **Show Log** keeps the traceback. |
 | Built-in presets or preconverted downloads are missing | Use the updated app and renderer. Rebuilding the app updates its bundled source; an existing managed runtime keeps its old source snapshot. Choose **Set Up Managed Renderer** to install the updated snapshot, or connect an updated repository with a compatible Python environment. Existing media and models can be reused. |
 | Download reports denied access / 401 / 403 | Open **Model source**, accept that repository's access terms with your Hugging Face account, and save a read token for the same account under **Hugging Face access**. Review the setup log for the exact failure. |
@@ -1418,7 +1422,30 @@ For a complete CLI walkthrough, see [download and create an LTX 2.5 recipe](../e
 ## Clip generation controls
 
 Choose **Run with → WeeTodd (local) / Draw Things → Model** in the clip inspector. Local models
-include MiniMax H3, LTX 2.3 and LTX 2.5. **Model profile** lists automatic components and installed
+include MiniMax H3, LTX 2.3 and LTX 2.5. Swift LTX 2.5 replaces the separate model-profile and
+generation-mode choices with **Config**: **Distilled · Recommended**, **Dev · Recommended**,
+**Dev · HQ**, and **My configs**. **Try recommended settings** applies the model's defaults;
+the config menu offers **Save as…**, **Reset config**, and deletion of user-saved entries.
+Applying a config replaces sampling, guidance and advanced execution settings together while
+preserving the execution task, prompt, inputs, LoRA attachments, seed, canvas and shot timing.
+Switching from Dev to distilled retains negative-prompt text for later use and visibly marks it
+as inactive; the distilled job omits it.
+Configs capture their values on each clip, so deleting a library entry does not alter an existing
+shot. Built-ins remain available. Saved configs live in Studio app data, outside project source.
+Saving an older recipe-based setup retains its internal binding and inherited execution settings
+for compatibility. Applying a built-in config moves that clip to automatic component resolution.
+
+LTX component resolution reuses registered model bindings in place, inspects transformer provenance
+to distinguish distilled from unmerged Dev pages, and builds the existing validated native schedule.
+Dev configs automatically require the official distilled refinement adapter. A compatible matching
+sampling recipe is no longer needed for ordinary config-backed jobs. The resolver can share encoder,
+VAE and upscaler paths across bindings. Missing components are named individually with Model Setup
+as the link/download destination. Native worker preflight still validates the complete stack before
+inference. Generation FPS on config-backed clips comes from the clip's displayed setting.
+
+Existing clips retain their current internal recipe/settings until a config is explicitly applied;
+specialist recipes and headless exports keep their existing contracts. The explicit legacy Python
+backend retains its model-profile controls. For other native routes, **Model profile** lists automatic components and installed
 recipes, including specialist profiles; selecting one preserves authored overrides and inputs.
 LoRAs/groups appear with the model controls. Write the inline **Prompt**, or choose **Open editor…**
 for the full prompt editor, then use **Inputs → Add input** to add first/last frames, appearance
@@ -1456,9 +1483,10 @@ validation instead of being ignored.
 
 Edited controls show **Modified**; **Reset** removes generation overrides. **Use model defaults**
 explicitly clears sampling, guidance and execution overrides to inherit the selected profile, while
-preserving the prompt, inputs, seed, canvas and duration. Changing **Model profile** or the detail
-view preserves authored settings. Optional execution presets, movie overrides and MetalFX guides
-live in **Finishing and execution** under **Advanced / All**. **Timeline editing** retains source
+preserving the prompt, inputs, seed, canvas and duration. Swift LTX **Reset config** restores the
+selected config without changing those shot fields. Changing **Model profile** or the detail
+view preserves authored settings. Other engines' optional execution presets, movie overrides and
+MetalFX guides live in **Finishing and execution** under **Advanced / All**. **Timeline editing** retains source
 trim, audio/pan and transitions; **Clip actions** retains Ripple, **Upscale movie · LTX 2× copy**,
 split/duplicate and **Extend video**. Version history remains available. Choosing an execution preset
 is an explicit replacement of generation overrides. **Generate** prepares and validates the clip

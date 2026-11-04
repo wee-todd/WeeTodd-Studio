@@ -46,7 +46,10 @@ compatible runtime. FFmpeg/FFprobe and optional finishing tools still require co
 See the [build and runtime guide](studio/README.md#build-and-open).
 
 In the clip inspector, choose **Run with → WeeTodd (local) / Draw Things**, then select a model.
-Native **Model profile** selects automatic components or an installed recipe; LoRAs and groups
+Swift LTX 2.5 uses a single **Config** picker with built-in Distilled, Dev and Dev HQ settings,
+automatic installed-component resolution, and user configs saved with **Save as…**. Separate
+recipe and generation-mode choices are removed from this path. Other native **Model profile**
+controls select automatic components or an installed recipe; LoRAs and groups
 appear beside the model controls. Write the **Prompt**, add named **Inputs**, and use **Settings →
 Basic / Advanced / All** to choose the controls shown. Existing clips retain their saved recipe
 and settings when changing the view.
@@ -138,12 +141,17 @@ with exact retained audio. Published video differs; the user approved that compl
 on October 8. This is a representative quality pass, not all-task qualification. See
 [current policies, limits and measurements](studio/README.md#swift-h3-performance-follow-up).
 
-Native clips start with **Model**, **Model profile** and LoRAs, followed by **Prompt** and **Inputs**.
+Native clips start with **Model**, **Config** (Swift LTX 2.5) or **Model profile**, and LoRAs,
+followed by **Prompt** and **Inputs**. LTX configs apply sampling, guidance and execution settings
+together; **Try recommended settings**, **Save as…** and **Reset config** keep routine setup in
+the inspector. Saved configs capture execution settings; shot media, LoRAs, seed, canvas and timing
+remain with each clip. Component bindings remain internal recipes compatible with headless export.
 Use **Add input** for first/last frames, appearance references, reference sheets, audio drivers or
 motion guides. **Basic** shows ordinary sampling, size, duration, FPS and seed controls; **Advanced**
 shows specialist controls and **Execution details → Execution task**; **All** shows both sets.
-**Use model defaults** explicitly restores the selected recipe's settings while preserving the shot
-and media. Execution presets remain under **Finishing and execution**.
+**Reset config** restores the selected LTX config; other engines' **Use model defaults**
+explicitly restores the selected recipe's settings while preserving the shot
+and media. Other engines' execution presets remain under **Finishing and execution**.
 LoRA stacks support enable/disable with preserved strengths, reusable groups, and explicit Add or
 Replace actions across native and Draw Things generation. **Runtime Settings → LoRA model folders**
 manages multiple linked libraries, with optional subfolders and a default app-managed location.

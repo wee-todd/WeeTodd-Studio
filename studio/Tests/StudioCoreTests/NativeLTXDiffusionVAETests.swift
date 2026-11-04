@@ -3,7 +3,7 @@ import XCTest
 @testable import StudioCore
 
 final class NativeLTXDiffusionVAETests:XCTestCase {
-  private func fixture(wrongStep:Any=1,overlap:Bool=false) throws -> URL {
+  func fixture(wrongStep:Any=1,overlap:Bool=false) throws -> URL {
     let url=FileManager.default.temporaryDirectory.appendingPathComponent("studio-diffvae-\(UUID().uuidString).safetensors")
     addTeardownBlock { try? FileManager.default.removeItem(at:url) }
     let d:[String:Any]=["_class_name":"NADiffusionDecoder","in_channels":128,"out_channels":3,"patch_size":4,"head_dim":64,

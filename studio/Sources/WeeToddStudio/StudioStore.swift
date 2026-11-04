@@ -468,6 +468,8 @@ extension Encodable {
   @Published var zoom: Double = 42
   @Published var runtime = RuntimeSettings.defaults()
   @Published var profiles: [ModelProfile] = []
+  @Published var savedLTX25Configs: [LTX25GenerationConfig] = []
+  var ltx25ConfigLibraryError: String?
   @Published var generationDescriptions: [UUID: [String: Any]] = [:]
   @Published var projectURL: URL?
   @Published var showPrompt = false
@@ -637,6 +639,7 @@ extension Encodable {
       try? Data(contentsOf: dataDirectory.appendingPathComponent("runtime.json")),
       defaults: runtime)
     loadVideoUpscalePreferences()
+    loadLTX25Configs()
     guard restoreSession else { return }
     try? FileManager.default.createDirectory(
       at: dataDirectory.appendingPathComponent("Profiles"),
@@ -770,6 +773,7 @@ extension Encodable {
   func addClip(_ engine: Engine = .ltx25) {
     var c = Clip(name: "Shot \(project.clips.count + 1)", engine: engine)
     if engine != .movie && engine != .drawThings { c.generationSelection = GenerationSelection() }
+    if engine == .ltx25 && runtime.usesNativeLTX25 { try? c.applyLTX25Config(.distilled) }
     if engine == .drawThings {
       c.drawThings = DrawThingsSelection(profileID: drawThingsConnections.first?.id ?? "",
         modelID: "", modelFamily: "")
@@ -1290,6 +1294,22 @@ extension Encodable {
       return profile.id + "|" + String(describing: attributes?[.modificationDate])
         + "|" + String(describing: attributes?[.size])
     }.joined(separator: "\n")
+    // Automatic configs inspect bindings even when their old schedules are absent
+    // from the profile catalog. Include directory membership in readiness identity.
+    var bindingMetadata = ""
+    if clip.engine == .ltx25, runtime.usesNativeLTX25, clip.profileID == "auto",
+      !runtime.profilesDirectory.isEmpty,
+      clip.generationSelection?.ltx25ConfigID != nil,
+      let urls = try? FileManager.default.contentsOfDirectory(
+        at: URL(fileURLWithPath: runtime.profilesDirectory),
+        includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]) {
+      let bindings = urls.filter { $0.pathExtension == "json" }.sorted { $0.path < $1.path }
+      bindingMetadata = "|bindings:\(bindings.count)|" + bindings.prefix(1001).map { url in
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        return url.path + "|" + String(describing: values?.contentModificationDate?.timeIntervalSince1970)
+          + "|" + String(describing: values?.fileSize)
+      }.joined(separator: "\n")
+    }
     let referenced = Set(clip.attachments.map(\.assetID))
     let mediaMetadata = allAssets.filter { referenced.contains($0.id) }.sorted { $0.id.uuidString < $1.id.uuidString }.map { asset in
       let attributes = try? FileManager.default.attributesOfItem(atPath: asset.path)
@@ -1302,7 +1322,7 @@ extension Encodable {
       + GenerationSelection.assetFingerprint(for: clip, assets: allAssets)
       + ((try? encoder.encode(relevantProfiles).base64EncodedString()) ?? "")
       + ((try? encoder.encode(loraGroups).base64EncodedString()) ?? "")
-      + String(clip.settings(in: project).fps) + profileMetadata + mediaMetadata
+      + String(clip.settings(in: project).fps) + profileMetadata + bindingMetadata + mediaMetadata
   }
   func generationDescriptionTaskKey(for clip: Clip) -> String {
     // Reopening clears descriptions even when the selected clip's render inputs are identical.

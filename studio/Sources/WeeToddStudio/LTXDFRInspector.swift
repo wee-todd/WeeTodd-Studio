@@ -10,6 +10,12 @@ struct LTXDFRInspector: View {
     guard let settings = clip.generationSelection?.ltx25DFR else { return "profile" }
     return settings.enabled ? String(settings.temporalRounds) : "off"
   }
+  var compatible: Bool {
+    ["t2v", "i2v", "fflf"].contains(clip.inferredTask) && clip.continuityMode == "independent"
+      && !store.project.isContinuousSceneMember(clip) && clip.extensionDirection.isEmpty
+      && clip.generationSelection?.ltx25Guidance == nil && clip.generationSelection?.ltx25AutomaticDuration == nil
+      && clip.generationSelection?.ltx25SingleStage == nil && clip.generationSelection?.ltx25Keyframes == nil
+  }
   func edit(_ body: @escaping (inout GenerationSelection) -> Void) {
     store.editClip {
       var value = $0.generationSelection ?? GenerationSelection(task: $0.inferredTask, preset: .custom)
@@ -29,11 +35,11 @@ struct LTXDFRInspector: View {
           }
         }
       })) {
-        Text("Use model profile").tag("profile")
+        Text(clip.profileID == "auto" ? "Config default" : "Saved setup default").tag("profile")
         Text("Off").tag("off")
-        Text("Spatial refinement · experimental").tag("0")
-        Text("Spatial + temporal 2× · experimental").tag("1")
-        Text("Spatial + temporal 4× · experimental").tag("2")
+        Text("Spatial refinement · experimental").tag("0").disabled(!compatible)
+        Text("Spatial + temporal 2× · experimental").tag("1").disabled(!compatible)
+        Text("Spatial + temporal 4× · experimental").tag("2").disabled(!compatible)
       }
       if clip.generationSelection?.ltx25DFR?.enabled == true {
         HStack {

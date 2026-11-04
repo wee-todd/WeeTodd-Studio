@@ -262,11 +262,31 @@ import StudioCore
       return
     }
     let recipePath = resultPath
+    if preset.engine == "ltx25", store.runtime.usesNativeLTX25,
+      ["swift-ltx25-text", "swift-ltx25-image", "swift-ltx25-guided", "swift-ltx25-guided_hq",
+       "swift-ltx25-auto-duration", "swift-ltx25-auto-duration-guided", "swift-ltx25-auto-duration-guided_hq"].contains(preset.id) {
+      let config: LTX25GenerationConfig = preset.id.hasSuffix("guided_hq") ? .devHQ
+        : preset.id.hasSuffix("guided") ? .dev : .distilled
+      guard config.supports(clip, in: store.project) else {
+        error = "\(config.name) does not support this clip's inputs or continuity. Components are linked; the shot has been preserved."
+        return
+      }
+      store.applyLTX25Config(config)
+      error = ""
+      store.notice = "Model components linked. The selected config resolves them automatically."
+      return
+    }
     store.editClip {
       $0.profileID = recipePath
       if preset.id == NativeH3OmniProfile.presetID {
         if $0.generationSelection == nil { $0.generationSelection = GenerationSelection(task:"ref2va") }
         $0.generationSelection?.steps=8;$0.generationSelection?.h3SamplingMethod = .euler
+      }
+      if preset.engine == "ltx25", store.runtime.usesNativeLTX25 {
+        // Specialist bindings carry a complete execution policy. Do not leave
+        // an unrelated ordinary config or Dev overrides active on the clip.
+        $0.generationSelection = GenerationSelection(task: $0.inferredTask, preset: .custom)
+        $0.generationSelection?.ltx25ConfigName = preset.name
       }
       if preset.id.hasPrefix("swift-h3-fast-") {
         if $0.generationSelection == nil { $0.generationSelection = GenerationSelection(task:"t2v") }

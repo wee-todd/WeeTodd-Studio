@@ -25,6 +25,9 @@ struct GenerationModelInspector: View {
       })) {
         ForEach([Engine.h3, .ltx23, .ltx25]) { Text($0.label).tag($0) }
       }
+      if clip.engine == .ltx25 && store.runtime.usesNativeLTX25 {
+        if clip.inferredTask != "video_upscale" { LTX25ConfigInspector(clip: clip) }
+      } else {
       Picker("Model profile", selection: Binding(get: { clip.profileID }, set: { value in
         store.editClip { $0.selectGenerationProfile(value) }
       })) {
@@ -37,9 +40,10 @@ struct GenerationModelInspector: View {
         }
       }
       .help("Select installed model components and required adapters. Your inputs and explicit sampling settings are retained.")
+      }
       Label(GenerationPresentation.methodLabel(for: clip, referenceFamily: family), systemImage: "sparkles")
         .font(.caption).foregroundStyle(.secondary)
-      if let selectedProfile, !GenerationPresentation.canUseProfile(
+      if !(clip.engine == .ltx25 && store.runtime.usesNativeLTX25), let selectedProfile, !GenerationPresentation.canUseProfile(
         supportedTasks: selectedProfile.generation?.supportedTasks ?? [selectedProfile.task], for: clip) {
         Text("This profile needs different inputs. Add its supported references below, select another model profile, or use automatic components.")
           .font(.caption2).foregroundStyle(.orange)
@@ -65,7 +69,7 @@ struct GenerationModelInspector: View {
         }.help("Explicitly clears Turbo/two-stage, refinement, reference-noise, attention and cache overrides. Keeps all inputs, LoRAs, prompt, canvas and duration. Disable extra LoRAs or remove incompatible inputs below.")
       }
       ClipLoRAInspector(clip: clip)
-      if clip.generationSelection?.isModified == true || clip.h3PagingCacheGB != nil {
+      if !(clip.engine == .ltx25 && store.runtime.usesNativeLTX25), clip.generationSelection?.isModified == true || clip.h3PagingCacheGB != nil {
         Button("Use model defaults") { store.editClip { $0.useSelectedModelDefaults() } }
           .font(.caption)
           .help("Reset sampling, guidance and execution overrides to the selected profile. Keep the prompt, inputs, seed, canvas and duration.")

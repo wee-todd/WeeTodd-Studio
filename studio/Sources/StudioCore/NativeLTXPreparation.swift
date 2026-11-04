@@ -116,6 +116,15 @@ public enum NativeLTXPreparation {
     if task == "control",(components["msr_lora_path"] as? String ?? "").isEmpty { return "ingredients" }
     return nil
   }
+  static func controlFamily(for clip: Clip) -> String? {
+    let controls = clip.attachments.filter { $0.role == .control }.map(\.controlType)
+    guard !controls.isEmpty else { return nil }
+    return controls == ["motion_track"] ? "motion_track"
+      : controls.filter { $0 == "crossview_warp" }.count == 2
+        ? (controls.contains("ingredients_reference_sheet") ? "crossview_ingredients" : "crossview_warp")
+      : controls.allSatisfy { $0 == "ingredients_reference_sheet" } ? "ingredients"
+      : controls.allSatisfy { ["canny_edges", "depth_map", "pose_skeleton"].contains($0) } ? "union" : "unsupported"
+  }
   private static func sourceSHA256(_ path:String,maxBytes:Int64=128*1024*1024) throws -> String {
     let fd=Darwin.open(path,O_RDONLY | O_CLOEXEC | O_NONBLOCK)
     guard fd>=0 else { throw StudioError.invalid("Cannot read the reference media.") }
@@ -225,7 +234,7 @@ public enum NativeLTXPreparation {
     return true
   }
 
-  private static func guidedConfig(_ original: [String: Any], selection: GenerationSelection,
+  static func guidedConfig(_ original: [String: Any], selection: GenerationSelection,
     negativePrompt: String) throws -> [String: Any] {
     guard let settings = selection.ltx25Guidance, settings.experimentalEnabled else {
       throw unsupported("guided sampling requires explicit experimental opt-in")
@@ -288,6 +297,58 @@ public enum NativeLTXPreparation {
     return config
   }
   public static func catalog(directory: String) throws -> [[String: Any]] {
+    try componentSources(directory: directory).compactMap { source in
+      let content = source.recipe
+      let generation = descriptor(content)
+      guard !((generation["supportedTasks"] as? [String]) ?? []).isEmpty else { return nil }
+      let url = URL(fileURLWithPath: source.path)
+      return ["id": source.path, "name": url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " "),
+        "engine": "ltx25", "task": (content["conditioning"] as? [String: Any])?["task"] ?? "t2v",
+        "generation": generation]
+    }
+  }
+
+  /// Capture inherited guided values without preparing media or loading weights.
+  /// Other legacy execution policies remain in the retained component binding.
+  private static func configSelection(for clip: Clip) throws -> GenerationSelection {
+    var selection = clip.generationSelection ?? GenerationSelection(task: clip.inferredTask)
+    guard clip.profileID != "auto" else { return selection }
+    let original = try recipe(clip.profileID)["config"] as! [String: Any]
+    if var guidance = selection.ltx25Guidance {
+      let effective = try guidedConfig(original, selection: selection, negativePrompt: clip.negativePrompt)
+      selection.steps = effective["stage1_steps"] as? Int
+      selection.cfg = effective["video_cfg_scale"] as? Double
+      guidance.audioCFG = effective["audio_cfg_scale"] as? Double
+      guidance.stgScale = effective["stg_scale"] as? Double
+      guidance.videoRescale = effective["video_rescale_scale"] as? Double
+      guidance.audioRescale = effective["audio_rescale_scale"] as? Double
+      guidance.modalityScale = effective["modality_scale"] as? Double
+      guidance.stgBlocks = effective["stg_blocks"] as? [Int]
+      guidance.sigmas = effective["stage1_sigmas"] is NSNull ? [] : effective["stage1_sigmas"] as? [Double]
+      selection.ltx25Guidance = guidance
+    }
+    return selection
+  }
+
+  public static func configSnapshot(name: String, clip: Clip, request: [String: Any]) throws -> LTX25GenerationConfig {
+    if clip.profileID == "auto", clip.generationSelection?.ltx25ConfigID != nil {
+      return try LTX25GenerationConfig(name: name,
+        selection: clip.generationSelection ?? GenerationSelection(task: clip.inferredTask))
+    }
+    // Resolve older Automatic selections using their existing admission rules,
+    // before adding a config identity would activate the new resolver.
+    let profile = clip.profileID == "auto" ? try resolve(request).profile : clip.profileID
+    var bound = clip; bound.profileID = profile
+    let source = try recipe(profile), config = source["config"] as! [String: Any]
+    let generation = descriptor(source)
+    return try LTX25GenerationConfig(name: name, selection: configSelection(for: bound),
+      componentBindingID: profile, bindingSupportedTasks: generation["supportedTasks"] as? [String],
+      bindingRequiresIndependent: guidedProfile(source) || specialization(source) != nil
+        || config["dfr_enabled"] as? Bool == true || config["ic_lora_single_stage"] as? Bool == true
+        || config["duration_mode"] as? String == "automatic",
+      bindingReferenceFamily: specialization(source))
+  }
+  static func componentSources(directory: String) throws -> [(path: String, recipe: [String: Any])] {
     guard !directory.isEmpty else { return [] }
     let root = URL(fileURLWithPath: try canonical(directory))
     guard FileManager.default.fileExists(atPath: root.path) else { return [] }
@@ -297,11 +358,7 @@ public enum NativeLTXPreparation {
     return try urls.compactMap { url in
       try Task.checkCancellation()
       guard let content = try? recipe(url.path) else { return nil }
-      let generation = descriptor(content)
-      guard !((generation["supportedTasks"] as? [String]) ?? []).isEmpty else { return nil }
-      return ["id": try canonical(url.path), "name": url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " "),
-        "engine": "ltx25", "task": (content["conditioning"] as? [String: Any])?["task"] ?? "t2v",
-        "generation": generation]
+      return (try canonical(url.path), content)
     }
   }
   private struct Context {
@@ -311,6 +368,7 @@ public enum NativeLTXPreparation {
     let runtime: [String: Any]
     let profile: String
     var recipe: [String: Any]
+    let componentSources: [String]
     let task: String
     let warnings: [String]
     let frameSource: NativeLTXFrameSource?
@@ -575,7 +633,13 @@ public enum NativeLTXPreparation {
     guard clip.audioDriverSelection == nil || task == "a2v" else {
       throw unsupported("a prepared timeline audio driver requires the A2V task")
     }
-    let profiles = try catalog(directory: runtime["profilesDirectory"] as? String ?? "")
+    let directory = runtime["profilesDirectory"] as? String ?? ""
+    let resolvedConfig = selection?.ltx25ConfigID != nil && clip.profileID == "auto"
+      && ["t2v", "i2v", "fflf", "a2v", "extension"].contains(task)
+      ? try NativeLTXConfigResolution.resolve(clip: clip, project: project, sources: componentSources(directory: directory)) : nil
+    let profiles: [[String: Any]] = try resolvedConfig.map {
+      [["id": $0.profile, "task": task, "generation": descriptor($0.recipe)]]
+    } ?? catalog(directory: directory)
     var candidates = profiles.filter {
       (clip.profileID == "auto" || $0["id"] as? String == clip.profileID)
         && (($0["generation"] as? [String: Any])?["supportedTasks"] as? [String] ?? []).contains(task)
@@ -591,16 +655,8 @@ public enum NativeLTXPreparation {
           && (!dfr.enabled || dfr.temporalRounds == 0 || generation["dfrTemporalAvailable"] as? Bool == true)
       }
     }
-    if task == "control",clip.profileID == "auto" {
-      let controls=clip.attachments.filter { $0.role == .control }.map(\.controlType)
-      if !controls.isEmpty {
-        let family=controls == ["motion_track"] ? "motion_track"
-          : controls.filter { $0 == "crossview_warp" }.count == 2
-            ? (controls.contains("ingredients_reference_sheet") ? "crossview_ingredients" : "crossview_warp")
-          : controls.allSatisfy { $0 == "ingredients_reference_sheet" } ? "ingredients"
-          : controls.allSatisfy { ["canny_edges","depth_map","pose_skeleton"].contains($0) } ? "union" : "unsupported"
+    if task == "control",clip.profileID == "auto",let family = controlFamily(for: clip) {
         candidates=candidates.filter { ($0["generation"] as? [String:Any])?["referenceFamily"] as? String == family }
-      }
     }
     if selection != nil, selection?.preset != .custom, clip.profileID == "auto" {
       let nativeTask = task == "i2v" ? "fflf" : task
@@ -626,7 +682,7 @@ public enum NativeLTXPreparation {
         : "No compatible Swift Dev guided recipe is available. Use model setup to link an unmerged Dev paged pack and the distilled refinement adapter, then select Automatic.")
     }
     let assets = try JSONDecoder().decode([MediaAsset].self, from: data(request["globalAssets"] ?? []))
-    let selectedRecipe = try recipe(profile)
+    let selectedRecipe = try resolvedConfig?.recipe ?? recipe(profile)
     let selectedConfig=selectedRecipe["config"] as! [String:Any]
     if singleStage == nil,specialization(selectedRecipe) != "ingredients",
       selectedConfig["ic_lora_single_stage"] as? Bool == true,selectedConfig["stage2_steps"] as? Int == 0 {
@@ -638,7 +694,11 @@ public enum NativeLTXPreparation {
       }
       singleStage = .init(method:method,negativeSchedule:schedule,experimentalEnabled:true)
     }
-    guard guided != nil || singleStage?.method == .cfgpp || clip.negativePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    let retainedNegativePrompt = clip.profileID == "auto" && selection?.ltx25ConfigID != nil
+      && guided == nil && singleStage?.method != .cfgpp
+      && !clip.negativePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    guard guided != nil || singleStage?.method == .cfgpp || retainedNegativePrompt
+      || clip.negativePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw unsupported("distilled sampling does not evaluate negative prompts; clear the negative prompt")
     }
     if let declared=selectedConfig["generated_keyframes"] {
@@ -692,12 +752,15 @@ public enum NativeLTXPreparation {
         ? ["Ingredients single-stage sampling uses \(singleStage.method == .cfgpp ? 16:8) full-resolution transformer evaluations and no refinement stage. CFG++ uses a fixed empty unconditional context. This explicit override is experimental until real-model qualification."]
         : ["Full-resolution single-stage sampling is experimental until real-model qualification. The selected negative schedule controls actual transformer evaluations."]
     }
+    if retainedNegativePrompt {
+      warnings.append("This distilled config does not evaluate negative prompts. The saved text is retained for Dev or CFG++ configs.")
+    }
     if guided == nil,singleStage == nil, let inherited = (selectedRecipe["config"] as? [String: Any])?["negative_prompt"] as? String,
       !inherited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       warnings.append("The selected profile's negative prompt is not evaluated by distilled Swift sampling and is omitted.")
     }
     return Context(project: project, clip: clip, assets: project.assets + assets, runtime: runtime,
-      profile: profile, recipe: selectedRecipe, task: task, warnings: warnings,
+      profile: profile, recipe: selectedRecipe, componentSources: resolvedConfig?.sourcePaths ?? [profile], task: task, warnings: warnings,
       frameSource: frameSource, movieSource: movieSource,singleStage:singleStage)
   }
   /// Resolve model paths only after admitting the actual movie editor intent.
@@ -812,7 +875,7 @@ public enum NativeLTXPreparation {
       }
     }
     return ["profileID": context.profile, "generation": descriptor(content), "fingerprint": resolved,
-      "selectionFingerprint": try fingerprint(context.recipe), "sourcePaths": Array(Set([context.profile] + dependencies)).sorted(),
+      "selectionFingerprint": try fingerprint(context.recipe), "sourcePaths": Array(Set(context.componentSources + dependencies)).sorted(),
       "warnings": context.warnings, "readinessErrors": errors]
   }
   public static func compose(request: [String: Any]) throws -> [String: Any] {
