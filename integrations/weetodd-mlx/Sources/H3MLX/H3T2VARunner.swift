@@ -165,8 +165,8 @@ public enum H3T2VARunner {
   /// Inspect every installed component and all task geometry before the first
   /// weighted stage. A missing VAE cannot fail after a long transformer run.
   public static func preflight(_ request: H3T2VARequest, refinement: H3JointRefinement? = nil) throws -> Admission {
-    guard request.geometry.stillImageMode == nil || refinement == nil else {
-      throw H3CheckpointError.invalid("H3 stills cannot combine video latent refinement.")
+    guard request.geometry.stillImageMode == nil || refinement == nil || request.geometry.stillImageMode == .qualityFiveFrames else {
+      throw H3CheckpointError.invalid("H3 still refinement requires original-VAE quality mode.")
     }
     guard request.geometry.canvasAdmission == .ordinary || refinement != nil else {
       throw H3CheckpointError.invalid("Expanded H3 canvas requires explicit initialized spatial refinement.")

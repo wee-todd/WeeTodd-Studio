@@ -234,24 +234,38 @@ public enum H3LearnedLatentUpscaler {
   static let latentMean: [Float] = [0.858090341091156, -0.9606591463088989, 1.0661640167236328, -0.5090325474739075, -0.2727581858634949, -1.3675414323806763, -0.2553254961967468, -0.26907554268836975, -0.5376840829849243, -0.0464097298681736, 0.6657370328903198, 0.19690127670764923, -0.5460608005523682, -0.4035342037677765, -0.23683024942874908, 0.25928452610969543, -0.30133944749832153, 0.211341992020607, -1.1206848621368408, 0.3581933379173279, -0.04225143790245056, 0.2604829967021942, 0.22864092886447906, 0.7056031823158264]
   static let latentStandardDeviation: [Float] = [1.2223774194717407, 1.2767263650894165, 1.6831774711608887, 1.7549455165863037, 1.5636216402053833, 2.194143533706665, 0.9653137922286987, 1.0569885969161987, 0.841948926448822, 0.7729952931404114, 1.8955937623977661, 0.946841835975647, 0.7996809482574463, 0.44988900423049927, 0.7197399735450745, 0.6936293244361877, 2.961095094680786, 2.7694199085235596, 3.0496184825897217, 2.1088054180145264, 3.276226282119751, 3.1627357006073, 2.2816812992095947, 2.6127843856811523]
 
+  public static func validateGeometry(source: H3Geometry, target: H3Geometry,
+    mathProfile: H3LatentUpscalerMathProfile = .nativeF32Geometric) throws {
+    let qualityStill = source.stillImageMode == .qualityFiveFrames && target.stillImageMode == .qualityFiveFrames
+    let video = source.stillImageMode == nil && target.stillImageMode == nil
+    let expectedCanvas: H3CanvasAdmission = mathProfile == .nativeF32Geometric ? .spatialRefinement : .regenerate
+    let eligible = qualityStill ? mathProfile == .nativeF32Geometric : video && target.canvasAdmission == expectedCanvas
+    guard eligible, source.frames == target.frames,
+      target.width >= source.width, target.height >= source.height,
+      target.width > source.width || target.height > source.height,
+      mathProfile == .publisherBF16Arithmetic || (target.width > source.width && target.height > source.height),
+      target.width <= 2 * source.width, target.height <= 2 * source.height else {
+      throw H3CheckpointError.invalid("Learned H3 upscaling needs matching video or quality-still grids and a bounded enlarged target.")
+    }
+    if qualityStill {
+      try source.canvasAdmission.validatePackedRows(source.videoRows + source.audioRows + 1)
+    } else {
+      try source.canvasAdmission.validate(width: source.width, height: source.height)
+      try target.canvasAdmission.validate(width: target.width, height: target.height)
+    }
+    try target.canvasAdmission.validatePackedRows(target.videoRows + target.audioRows + 1)
+  }
+
   /// Staged before the transformer. The returned materialized normalized rows
   /// own no upscaler weights; success, failure and cancellation drop the stage.
   public static func upscale(rows: MLXArray, source: H3Geometry, target: H3Geometry,
     checkpointURL: URL, expectedHeaderSHA256: String, videoVAE: URL,
     mathProfile:H3LatentUpscalerMathProfile = .nativeF32Geometric,
     progress: (Int,Int) -> Void = { _,_ in }) throws -> Result {
-    guard source.frames == target.frames,
-      (mathProfile == .nativeF32Geometric ? target.canvasAdmission == .spatialRefinement : target.canvasAdmission == .regenerate),
-      target.width >= source.width, target.height >= source.height,
-      (target.width > source.width || target.height > source.height),
-      (mathProfile == .publisherBF16Arithmetic || (target.width > source.width && target.height > source.height)),
-      target.width <= 2*source.width, target.height <= 2*source.height,
-      rows.shape == [1,source.videoRows,96], rows.dtype == .float32 else {
-      throw H3CheckpointError.invalid("Learned H3 spatial refinement needs matching complete source video and bounded enlarged target.")
+    try validateGeometry(source: source, target: target, mathProfile: mathProfile)
+    guard rows.shape == [1, source.videoRows, 96], rows.dtype == .float32 else {
+      throw H3CheckpointError.invalid("Learned H3 upscaling requires complete normalized Float32 source rows.")
     }
-    try source.canvasAdmission.validate(width: source.width, height: source.height)
-    try target.canvasAdmission.validate(width: target.width, height: target.height)
-    try target.canvasAdmission.validatePackedRows(target.videoRows + target.audioRows + 1)
     let layout = try H3LearnedUpscalerLayout(url: checkpointURL, expectedHeaderSHA256: expectedHeaderSHA256)
     let file = try SafeTensorFile(url: checkpointURL)
     _ = try H3VideoVAELayout(url: videoVAE)

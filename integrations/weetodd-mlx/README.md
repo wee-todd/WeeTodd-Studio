@@ -600,3 +600,25 @@ The explicit `enhance_pixel_spatial` worker mode retains source dimensions and i
 The Pixel checkpoint remains a factor-two checkpoint. This opt-in mode intentionally uses factor-one guidance and records the difference in `experimental_conditioning`; it does not claim publisher recipe parity. Checkpoint metadata is not modified. The exact components are the five `enhance` components plus `pixel_spatial_adapter`. `pixel_strength` sets Pixel amount, while `refinement_loras` sets CQ amount independently.
 
 One existing five-second FlashVSR source completed at unchanged 1920 × 1088 and 24 FPS with Pixel 1.0, CQ 1.0 and denoise 0.5. Two 60-frame windows shared three evaluations each. The one-second test took 210.83 seconds; the full render took 1316.83 seconds. Published delivery copied original audio packets and verified decoded PCM identity. All 120 frames decoded completely. Sampled poses and join frames remain coherent; human quality approval remains separate. These measurements do not establish general throughput or quality.
+
+## Experimental native H3 two-stage stills
+
+The image worker accepts an explicit `two_stage` wrapper alongside `still_image` in
+`quality_five_frames` mode. It samples the calculated smaller canvas, enlarges normalized
+video latents with the selected learned 3D upscaler or interpolation, then performs the
+independent refinement budget before decoding one selected PNG. The original video VAE
+is required. No intermediate pixels, audio decode or movie export are produced. The
+single-latent image VAE remains a single-pass route. Ordinary video admission is unchanged.
+
+Use the existing version-1 two-stage fields (`draft_scale`, `strength`, `evaluations`,
+`refinement_adapter_policy: "standard"`) and either an exclusive `resize_method` or the
+learned model's absolute `learned_upscaler_path` and `learned_upscaler_header_sha256`.
+Quality-image recipes may additionally declare `draft_only_loras` as up to eight unique
+absolute paths from the active adapter stack. This explicitly omits an adapter during
+refinement without reclassifying its sampling profile or inferring behavior from a filename.
+Declared Turbo profiles still enforce their trained step requirements in the first pass.
+
+The receipt reports base and refinement evaluations separately, exact stage canvases,
+upscaler identity, omitted adapters, and measured base/upscale/refinement times. The image
+fingerprint binds the learned checkpoint as well as the other components. This is a direct
+worker contract; Studio's image controls continue to submit ordinary single-pass images.

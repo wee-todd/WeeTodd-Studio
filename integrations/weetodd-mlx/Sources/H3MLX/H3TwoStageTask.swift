@@ -23,7 +23,7 @@ public enum H3TwoStageTask {
         durationSeconds:r.durationSeconds,seed:r.seed,requestedSteps:r.requestedSteps,
         transformer:r.transformer,qwenPages:r.qwenPages,tokenizer:r.tokenizer,videoVAE:r.videoVAE,audioVAE:r.audioVAE,
         loRAAdapters:adapters,videoDecodeMemoryMode:r.videoDecodeMemoryMode,videoDecodePrecision:r.videoDecodePrecision,
-        samplingMethod:r.samplingMethod,canvasAdmission:geometry.canvasAdmission)
+        samplingMethod:r.samplingMethod,canvasAdmission:geometry.canvasAdmission,stillImageMode:geometry.stillImageMode)
     }
     switch self {
     case .text(let r):return .text(try base(r))
@@ -40,7 +40,8 @@ public enum H3TwoStageTask {
         seed:r.seed,requestedSteps:r.requestedSteps,transformer:r.transformer,qwenPages:r.qwenPages,qwenVision:r.qwenVision,
         tokenizer:r.tokenizer,videoVAE:r.videoVAE,audioVAE:r.audioVAE,loRAAdapters:adapters,
         videoDecodeMemoryMode:r.videoDecodeMemoryMode,videoDecodePrecision:r.videoDecodePrecision,
-        samplingMethod:r.samplingMethod,referenceNoise:r.referenceNoise,canvasAdmission:geometry.canvasAdmission))
+        samplingMethod:r.samplingMethod,referenceNoise:r.referenceNoise,canvasAdmission:geometry.canvasAdmission,
+        stillImageMode:geometry.stillImageMode))
     }
   }
   func preflight(refinement:H3JointRefinement? = nil) throws -> (rows:Int,evaluations:Int) {

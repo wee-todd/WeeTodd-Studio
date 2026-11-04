@@ -11,13 +11,18 @@ public enum H3SpatialLatentResize {
   public static func rows(_ rows: MLXArray, source: H3Geometry,
     target: H3Geometry, method: H3SpatialLatentResizeMethod) throws -> MLXArray {
     guard source.frames == target.frames,
-      source.width * source.height <= source.canvasAdmission.maximumPixels,
-      target.width * target.height <= target.canvasAdmission.maximumPixels,
+      source.stillImageMode == target.stillImageMode,
+      source.width * source.height <= source.maximumPixels,
+      target.width * target.height <= target.maximumPixels,
       rows.shape == [1, source.videoRows, 96], rows.dtype == .float32 else {
       throw H3CheckpointError.invalid("H3 spatial refinement requires unchanged AV duration and admitted full video rows.")
     }
-    try source.canvasAdmission.validate(width: source.width, height: source.height)
-    try target.canvasAdmission.validate(width: target.width, height: target.height)
+    if source.stillImageMode == nil {
+      try source.canvasAdmission.validate(width: source.width, height: source.height)
+      try target.canvasAdmission.validate(width: target.width, height: target.height)
+    } else if source.stillImageMode != .qualityFiveFrames {
+      throw H3CheckpointError.invalid("H3 still latent resizing requires original-VAE quality mode.")
+    }
     try target.canvasAdmission.validatePackedRows(target.videoRows + target.audioRows + 1)
     try Task.checkCancellation()
     if source.width == target.width && source.height == target.height { return rows }

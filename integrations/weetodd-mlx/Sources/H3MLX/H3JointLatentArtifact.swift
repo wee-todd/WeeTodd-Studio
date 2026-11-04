@@ -11,9 +11,14 @@ public enum H3JointLatentArtifact {
     public let audio: [Float]
     public init(video: [Float], audio: [Float]) { self.video = video; self.audio = audio }
     public func validate(geometry: H3Geometry) throws {
-      try geometry.canvasAdmission.validate(width: geometry.width, height: geometry.height)
+      guard geometry.stillImageMode == nil || geometry.stillImageMode == .qualityFiveFrames else {
+        throw H3CheckpointError.invalid("Initialized H3 still latents require original-VAE quality mode.")
+      }
+      if geometry.stillImageMode == nil {
+        try geometry.canvasAdmission.validate(width: geometry.width, height: geometry.height)
+      }
       try geometry.canvasAdmission.validatePackedRows(geometry.videoRows + geometry.audioRows + 1)
-      guard geometry.width * geometry.height <= geometry.canvasAdmission.maximumPixels,
+      guard geometry.width * geometry.height <= geometry.maximumPixels,
         video.count == geometry.videoRows * 96, audio.count == geometry.audioRows * 32,
         (video.count + audio.count) * 4 <= H3JointLatentArtifact.maximumPayloadBytes,
         video.allSatisfy(\.isFinite), audio.allSatisfy(\.isFinite) else {

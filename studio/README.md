@@ -3358,6 +3358,13 @@ temporal noise geometry prevents a decoder-only quality comparison. The robot st
 requested cup-to-teapot edit were inspected. Other canvases, nine-reference quality, fine text
 and broad identity preservation remain separate qualification.
 
+#### Two-stage H3 quality stills
+
+An explicit native recipe can combine a five-frame H3 quality still with a smaller draft,
+latent upscaling, and a full-size refinement pass. The worker decodes only the final still.
+This recipe is available through the native worker with ordinary H3 weights and the
+five-frame quality mode. See [two-stage still recipe settings](../integrations/weetodd-mlx/README.md#experimental-native-h3-two-stage-stills).
+
 ### Native Qwen-Image-2.1 — experimental
 
 Open **Generate Image…** from an asset store and set **Run with → Local MLX · Qwen**. The same image

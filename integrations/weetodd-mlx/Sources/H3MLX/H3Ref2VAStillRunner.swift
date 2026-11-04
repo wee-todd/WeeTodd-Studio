@@ -213,8 +213,9 @@ public enum H3Ref2VAStillRunner {
 
   public static func preflight(_ request: H3Ref2VAStillRequest,
     contextFrames: Int = 0, refinement: H3JointRefinement? = nil) throws -> Admission {
-    guard request.geometry.stillImageMode == nil || (contextFrames == 0 && refinement == nil) else {
-      throw H3CheckpointError.invalid("H3 stills cannot combine video continuation or refinement.")
+    guard request.geometry.stillImageMode == nil || (contextFrames == 0 &&
+      (refinement == nil || request.geometry.stillImageMode == .qualityFiveFrames)) else {
+      throw H3CheckpointError.invalid("H3 stills reject continuation; refinement requires original-VAE quality mode.")
     }
     guard request.geometry.canvasAdmission == .ordinary || refinement != nil else {
       throw H3CheckpointError.invalid("Expanded H3 canvas requires explicit initialized spatial refinement.")

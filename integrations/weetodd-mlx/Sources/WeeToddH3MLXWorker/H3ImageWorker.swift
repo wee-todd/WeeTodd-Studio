@@ -6,7 +6,8 @@ enum H3ImageWorker {
   static func execute(envelope: NativeVideoJobEnvelope, recipeData: Data, render: Bool,
     emitProgress: ([String: Any]) -> Void) throws -> [String: Any] {
     let started = Date()
-    let prepared = try H3ImageRecipe.compile(data: recipeData) { path, digest, geometry in
+    let twoStage = try H3TwoStageRecipe.prepare(data:recipeData)
+    let prepared = try H3ImageRecipe.compile(data: twoStage?.ordinaryRecipe ?? recipeData) { path, digest, geometry in
       let loaded = try H3StillReferenceMedia.load(path: path, outputGeometry: geometry, pixelBudgetPercent: 100)
       guard loaded.sourceSHA256 == digest else {
         throw H3CheckpointError.invalid("An H3 image reference changed. Check settings again.")
@@ -16,12 +17,22 @@ enum H3ImageWorker {
     let decoder = try H3VideoVAELayout(url: prepared.decoder)
     try prepared.mode.validateDecoder(imageOnly: decoder.imageOnly)
     let rows: Int, evaluations: Int
-    if let text = prepared.text {
+    let runner:H3TwoStageRunner?
+    var twoStageMetadata:[String:Any]?
+    if let twoStage {
+      let task=prepared.text.map(H3TwoStageTask.text) ?? .references(prepared.reference!)
+      let value=try H3TwoStageRunner(task:task,plan:twoStage.plan,resizeMethod:twoStage.resizeMethod,
+        learnedUpscaler:twoStage.learnedUpscaler,learnedUpscalerHeaderSHA256:twoStage.learnedUpscalerHeaderSHA256,
+        draftOnlyAdapters:twoStage.draftOnlyAdapters)
+      let checked=try value.preflight()
+      rows=checked.finalPackedRows;evaluations=checked.evaluations
+      twoStageMetadata=try value.metadata(checked);runner=value
+    } else if let text = prepared.text {
       let checked = try H3T2VARunner.preflight(text)
-      rows = checked.packedRows; evaluations = checked.evaluations
+      rows = checked.packedRows; evaluations = checked.evaluations;runner=nil
     } else {
       let checked = try H3Ref2VAStillRunner.preflight(prepared.reference!)
-      rows = checked.packedRows; evaluations = checked.evaluations
+      rows = checked.packedRows; evaluations = checked.evaluations;runner=nil
     }
     let root = try JSONSerialization.jsonObject(with: recipeData) as! [String: Any]
     let fields = root["still_image"] as! [String: Any]
@@ -36,6 +47,7 @@ enum H3ImageWorker {
     }
     if prepared.reference != nil, let path = components["vision_encoder"] as? String { paths.append(URL(fileURLWithPath: path)) }
     paths += (prepared.text?.loRAAdapters ?? prepared.reference!.loRAAdapters).map(\.url)
+    if let upscaler=twoStage?.learnedUpscaler {paths.append(upscaler)}
     let fingerprint = try H3ImageIdentity.fingerprint(recipe: root, components: paths)
     if let expected = fields["expected_fingerprint"] as? String, expected != fingerprint {
       throw H3CheckpointError.invalid("H3 model files or image settings changed after preflight. Check settings again.")
@@ -57,6 +69,7 @@ enum H3ImageWorker {
       "normalizedRequest": normalized, "packedRows": rows, "evaluations": evaluations,
       "framesSampled": geometry.frames, "audioDecoded": false,
       "preflightSeconds": Date().timeIntervalSince(started)]
+    if let twoStageMetadata {result["twoStage"]=twoStageMetadata}
     guard render else { return result }
     let output = URL(fileURLWithPath: envelope.outputDirectory)
     let manager = FileManager.default
@@ -89,16 +102,19 @@ enum H3ImageWorker {
       emitProgress(event)
     }
     let sampled: H3SampledLatents
-    if let text = prepared.text { sampled = try H3T2VARunner.sample(text, progress: progress) }
+    if let runner {
+      sampled=try runner.sample(progress:progress) {stage,seconds in timings[stage]=seconds}
+    } else if let text = prepared.text { sampled = try H3T2VARunner.sample(text, progress: progress) }
     else { sampled = try H3Ref2VAStillRunner.sample(prepared.reference!, progress: progress) }
     try Task.checkCancellation()
     emitProgress(["event": "progress", "stage": "image_decode", "fraction": 0.85, "message": "Decoding H3 still image"])
     let memory = prepared.text?.videoDecodeMemoryMode ?? prepared.reference?.videoDecodeMemoryMode
     let precision = prepared.text?.videoDecodePrecision ?? prepared.reference!.videoDecodePrecision
+    let decodeStarted=Date()
     let png = try H3ImageOutput.decode(videoRows: sampled.rows.video, geometry: geometry,
       decoder: prepared.decoder, mode: prepared.mode, selection: prepared.selection,
       memoryMode: memory, precision: precision)
-    timings["imageDecode"] = Date().timeIntervalSince(boundary)
+    timings["imageDecode"] = Date().timeIntervalSince(decodeStarted)
     try Task.checkCancellation()
     try png.write(to: staging.appendingPathComponent("image.png"), options: .withoutOverwriting)
     result["asset"] = ["path": output.appendingPathComponent("image.png").path,

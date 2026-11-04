@@ -279,6 +279,14 @@ a complete sparse decoder directory to verify these early failures without insta
 or GPU execution. Original video/reference VAEs and explicit single-image output retain their
 separate contracts. The dated real-image qualifications below retain their measured scopes.
 
+## October 26 native H3 two-stage stills
+
+The Swift H3 image worker accepts explicit two-stage recipes for five-frame quality stills.
+It enlarges the draft latents and performs full-size refinement before one final PNG decode.
+The receipt records each stage's grid, evaluation count and timing. The packaged worker
+completed a matched comparison of six 1920 × 1088 PNGs, with three two-stage runs and
+three single-stage controls. The qualified entry point is the explicit native recipe.
+
 ## October 25 full-resolution H3 reference contexts
 
 Full 1024×1024 image references now fit alongside their prompts. Native Qwen admission has

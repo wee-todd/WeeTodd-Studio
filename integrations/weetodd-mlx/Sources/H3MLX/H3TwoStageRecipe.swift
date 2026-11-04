@@ -10,6 +10,7 @@ public enum H3TwoStageRecipe {
     public let learnedUpscaler: URL?
     public let learnedUpscalerHeaderSHA256: String?
     public let saveFullLatents: Bool
+    public let draftOnlyAdapters: [URL]
   }
   private static func number(_ value:Any?) throws -> Double {
     guard let n=value as? NSNumber,CFGetTypeID(n) != CFBooleanGetTypeID(),n.doubleValue.isFinite else {
@@ -26,8 +27,13 @@ public enum H3TwoStageRecipe {
       throw H3CheckpointError.invalid("Invalid bounded H3 two-stage recipe.")
     }
     guard let raw=root.removeValue(forKey:"two_stage") else {return nil}
+    let stillFields = root["still_image"] as? [String: Any]
+    let stillMode = (stillFields?["mode"] as? String).flatMap(H3StillImageMode.init(rawValue:))
+    guard root["still_image"] == nil || stillMode == .qualityFiveFrames else {
+      throw H3CheckpointError.invalid("Two-stage H3 images require quality_five_frames mode.")
+    }
     guard let fields=raw as? [String:Any],
-      Set(fields.keys).isSubset(of:["version","draft_scale","strength","evaluations","resize_method","learned_upscaler_path","learned_upscaler_header_sha256","refinement_adapter_policy"]),
+      Set(fields.keys).isSubset(of:["version","draft_scale","strength","evaluations","resize_method","learned_upscaler_path","learned_upscaler_header_sha256","refinement_adapter_policy","draft_only_loras"]),
       try integer(fields["version"])==1,fields["refinement_adapter_policy"] as? String=="standard",
       ["refinement","joint_refinement","continuation","motion_fidelity","fasth3","fasth3_omni","vdn"].allSatisfy({root[$0]==nil}),
       let config=root["config"] as? [String:Any],let components=root["components"] as? [String:Any],
@@ -42,7 +48,14 @@ public enum H3TwoStageRecipe {
     }
     let plan=try H3TwoStagePlan(width:integer(config["width"]),height:integer(config["height"]),
       durationSeconds:number(config["duration_seconds"]),draftScale:number(fields["draft_scale"]),
-      strength:number(fields["strength"]),evaluations:integer(fields["evaluations"]))
+      strength:number(fields["strength"]),evaluations:integer(fields["evaluations"]),stillImageMode:stillMode)
+    var draftOnly:[URL]=[]
+    if let raw=fields["draft_only_loras"] {
+      guard stillMode == .qualityFiveFrames,let paths=raw as? [String],paths.count<=8,
+        Set(paths).count==paths.count,paths.allSatisfy({$0.hasPrefix("/") && $0.utf8.count<=4096 && !$0.utf8.contains(0) && !$0.contains("://")}) else {
+        throw H3CheckpointError.invalid("Explicit draft-only LoRAs are bounded absolute paths for quality stills only.")
+      };draftOnly=paths.map {URL(fileURLWithPath:$0)}
+    }
     var method:H3SpatialLatentResizeMethod?,url:URL?,hash:String?
     if let value=fields["resize_method"] {
       guard let text=value as? String,let selected=H3SpatialLatentResizeMethod(rawValue:text),
@@ -59,12 +72,13 @@ public enum H3TwoStageRecipe {
     }
     var save=false
     if let raw=root.removeValue(forKey:"joint_latents") {
+      guard stillMode == nil else {throw H3CheckpointError.invalid("H3 stills publish images without full video latent artifacts.")}
       guard let fields=raw as? [String:Any],Set(fields.keys)==["version","save_full"],try integer(fields["version"])==1,
         let flag=fields["save_full"] as? NSNumber,CFGetTypeID(flag)==CFBooleanGetTypeID(),flag.boolValue else {
         throw H3CheckpointError.invalid("H3 full-latent publication requires explicit version 1 save_full true.")
       };save=true
     }
     return Prepared(ordinaryRecipe:try JSONSerialization.data(withJSONObject:root,options:[.sortedKeys]),plan:plan,
-      resizeMethod:method,learnedUpscaler:url,learnedUpscalerHeaderSHA256:hash,saveFullLatents:save)
+      resizeMethod:method,learnedUpscaler:url,learnedUpscalerHeaderSHA256:hash,saveFullLatents:save,draftOnlyAdapters:draftOnly)
   }
 }
