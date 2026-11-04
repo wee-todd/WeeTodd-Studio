@@ -20,7 +20,7 @@ MAX_LIBRARY_FILES = 1000
 MAX_LIBRARY_VISITS = 20000
 
 
-def scan_lora_folders(folders, cache_path):
+def scan_lora_folders(folders, cache_path, file_model_hints=None):
     """Inspect headers only; never copy weights or change a project/library asset.
 
     Folder order breaks ties for overlapping roots. Symlink directories are not
@@ -29,6 +29,14 @@ def scan_lora_folders(folders, cache_path):
     """
     if not isinstance(folders, list) or len(folders) > 64:
         raise ValueError("Choose up to 64 LoRA folders.")
+    file_model_hints = file_model_hints or {}
+    if (not isinstance(file_model_hints, dict) or len(file_model_hints) > MAX_LIBRARY_FILES
+            or any(not isinstance(key, str) or value not in {"h3", "ltx23", "ltx25"}
+                   for key, value in file_model_hints.items())):
+        raise ValueError("Choose supported training models for up to 1,000 linked files.")
+    excluded = [Path(folder["path"]).expanduser().resolve() for folder in folders
+                if isinstance(folder, dict) and isinstance(folder.get("path"), str)
+                and folder["path"].strip() and folder.get("enabled", True) is False]
     cache_path = Path(cache_path)
     old = {}
     try:
@@ -77,6 +85,10 @@ def scan_lora_folders(folders, cache_path):
                             break
                         if child.name.startswith("."):
                             continue
+                        if any(
+                            Path(child.path).resolve().is_relative_to(root) for root in excluded
+                        ):
+                            continue
                         if child.is_dir(follow_symlinks=False):
                             if folder.get("recursive", True):
                                 pending.append(Path(child.path))
@@ -95,8 +107,9 @@ def scan_lora_folders(folders, cache_path):
                             continue
                         seen_files.add(key)
                         entry = dict(name=source.stem, path=key, sourceFolder=str(root))
+                        file_hint = file_model_hints.get(key, hint)
                         try:
-                            stamp = signature(source, hint)
+                            stamp = signature(source, file_hint)
                             cached = old.get(key, {})
                             if not isinstance(cached, dict):
                                 cached = {}
@@ -110,7 +123,7 @@ def scan_lora_folders(folders, cache_path):
                                 and inspection.get("path", key) == key
                             ):
                                 try:
-                                    inspection = inspect_lora(source, model_hint=hint)
+                                    inspection = inspect_lora(source, model_hint=file_hint)
                                     inspection["status"] = (
                                         "ready" if inspection.get("loraModel") else "needsModel"
                                     )
@@ -122,7 +135,7 @@ def scan_lora_folders(folders, cache_path):
                                         ),
                                         detail=message,
                                     )
-                            if signature(source, hint) != stamp:
+                            if signature(source, file_hint) != stamp:
                                 raise ValueError(
                                     "File changed during inspection. Refresh to retry."
                                 )

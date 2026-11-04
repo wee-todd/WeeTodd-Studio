@@ -18,7 +18,7 @@ enum NativeLoRAImport {
   static func inspect(_ url: URL, modelHint: LoRAModel?, profile: String? = nil) async throws -> [String: Any] {
     try await Task.detached(priority: .utility) { try NativeLoRAInspection.inspect(url, modelHint: modelHint, selectedH3Profile: profile) }.value
   }
-  static func scan(_ folders: [LoRAFolder]) async throws -> [String: Any] {
-    try await Task.detached(priority: .utility) { try NativeLoRAFolderScan.scan(folders) }.value
+  static func scan(_ folders: [LoRAFolder], modelHints: [String: LoRAModel] = [:]) async throws -> [String: Any] {
+    try await Task.detached(priority: .utility) { try NativeLoRAFolderScan.scan(folders, modelHints: modelHints) }.value
   }
 }

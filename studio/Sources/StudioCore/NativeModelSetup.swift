@@ -10,6 +10,66 @@ public struct NativeModelScanResult {
 public enum NativeModelSetup {
   public static let engines: Set<String> = ["h3", "ltx25"]
 
+  public static func libraryAdapter(at url: URL, modelHint: LoRAModel? = nil)
+    -> (kind: LTXLibraryAdapterKind, model: LoRAModel, requirements: String, supportsVoiceReferences: Bool)? {
+    guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+      let tensors = try? NativeModelInspector.header(url),
+      let metadata = tensors["__metadata__"] as? [String: String] else { return nil }
+    let model: LoRAModel?
+    do { model = try NativeLoRAInspection.model(metadata, hint: modelHint) }
+    catch { return nil }
+    guard model != .h3 else { return nil }
+    for kind in [LTXLibraryAdapterKind.distilledRefinement, .dfr, .msr, .ingredients, .union, .motionTrack, .crossview] {
+      if (try? NativeModelInspector.matches(url, key: kind.componentKey, engine: "ltx25", task: "t2v", inspectedHeader: tensors)) == true {
+        let requirements = kind == .msr && metadata["reference_audio_slot_embedding_enabled"] != "True"
+          ? "Requires appearance references and the MSR component setup. This adapter supports images."
+          : kind.requirements
+        return (kind, model ?? .ltx25, requirements,
+          kind == .msr && metadata["reference_audio_slot_embedding_enabled"] == "True")
+      }
+    }
+    return nil
+  }
+
+  public static func adapterBinding(at url: URL, kind: LTXLibraryAdapterKind) throws -> LTX25AdapterBinding {
+    let source = url.standardizedFileURL.resolvingSymlinksInPath()
+    guard let adapter = libraryAdapter(at: source), adapter.kind == kind else {
+      throw StudioError.invalid("The selected \(kind.label) file is missing or incompatible. Refresh the LoRA library and select a compatible adapter.")
+    }
+    let binding = LTX25AdapterBinding(kind: kind, path: source.path,
+      supportsVoiceReferences: adapter.supportsVoiceReferences)
+    try binding.validate()
+    return binding
+  }
+
+  /// Seed adapter setup from compatible installed bindings, preserving paths in place.
+  public static func linkedSelection(preset: ModelSetupPreset, profilesDirectory: String,
+    adapterPath: String, componentKey: String) throws -> [String: String] {
+    guard preset.engine == "ltx25", catalog().contains(where: { $0.id == preset.id }),
+      preset.components.contains(where: { $0.key == componentKey }) else {
+      throw StudioError.invalid("Choose a supported native adapter setup.")
+    }
+    let sources = try NativeLTXPreparation.componentSources(directory: profilesDirectory)
+    var selected: [String: String] = [:]
+    for field in preset.components {
+      try Task.checkCancellation()
+      let paths = field.key == componentKey ? [adapterPath] : sources.compactMap { source -> String? in
+        let components = source.recipe["components"] as? [String: Any] ?? [:]
+        return (components[field.key] ?? (field.key == "dev_transformer_path" ? components["transformer_path"] : nil)
+          ?? (source.recipe["config"] as? [String: Any])?[field.key]) as? String
+      }
+      selected[field.key] = paths.first { path in
+        guard path.hasPrefix("/") else { return false }
+        let url = URL(fileURLWithPath: path)
+        if ["transformer_path", "dev_transformer_path"].contains(field.key) {
+          return matchesLTX25Transformer(url, dev: field.key == "dev_transformer_path")
+        }
+        return matchesLTX25Component(url, key: field.key)
+      }
+    }
+    return selected
+  }
+
   static func matchesLTX25Component(_ url: URL, key: String) -> Bool {
     guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey]),
       values.isRegularFile == true || values.isDirectory == true else { return false }
@@ -411,7 +471,7 @@ private enum NativeModelInspector {
     return value
   }
 
-  private static func header(_ url: URL) throws -> [String: Any] {
+  fileprivate static func header(_ url: URL) throws -> [String: Any] {
     let file = try FileHandle(forReadingFrom: url)
     defer { try? file.close() }
     guard let prefix = try file.read(upToCount: 8), prefix.count == 8 else {
@@ -477,7 +537,8 @@ private enum NativeModelInspector {
     return targets.count == (audio ? 1152 : 480)
   }
 
-  static func matches(_ url: URL, key: String, engine: String, task: String) throws -> Bool {
+  static func matches(_ url: URL, key: String, engine: String, task: String,
+    inspectedHeader: [String: Any]? = nil) throws -> Bool {
     let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     if engine == "h3" {
       if key=="omni_contract" {
@@ -648,7 +709,7 @@ private enum NativeModelInspector {
       return manifest["kind"] as? String == "gemma" && gemma?["model_type"] as? String == "gemma4_unified"
     }
     if key == "duration_head_path" { return (try? NativeLTXAutomaticDuration.validateHead(at:url)) != nil }
-    let tensors = try header(url)
+    let tensors = try inspectedHeader ?? header(url)
     let metadata = tensors["__metadata__"] as? [String: String] ?? [:]
     let config = embedded(metadata["config"]) ?? [:]
     switch key {

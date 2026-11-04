@@ -1,6 +1,7 @@
 import Foundation
 
-/// Reusable execution settings. Installed component paths belong to model setup;
+/// Reusable execution settings and an optional selected specialized adapter.
+/// Shared installed component paths belong to model setup;
 /// authored prompts, media, seeds, canvas and timing belong to the clip.
 public struct LTX25GenerationConfig: Codable, Equatable, Identifiable {
   public var id: String
@@ -19,6 +20,15 @@ public struct LTX25GenerationConfig: Codable, Equatable, Identifiable {
   public static let dev = builtIn("dev", name: "Dev · Recommended", mode: .guided)
   public static let devHQ = builtIn("dev-hq", name: "Dev · HQ", mode: .guidedHQ)
   public static var builtIns: [Self] { [distilled, dev, devHQ] }
+
+  public static func adapter(_ binding: LTX25AdapterBinding) -> Self {
+    var selection = (binding.kind == .distilledRefinement ? dev : distilled).selection
+    selection.ltx25AdapterBinding = binding
+    if binding.kind == .dfr { selection.ltx25DFR = LTX25DFRSettings(experimentalEnabled: true) }
+    selection.task = binding.task ?? "t2v"
+    return Self(id: "builtin-ltx25-adapter-" + binding.kind.rawValue,
+      name: binding.kind.label + " · Recommended", selection: selection)
+  }
 
   private static func builtIn(_ suffix: String, name: String, mode: LTX25GuidanceMode? = nil) -> Self {
     var selection = GenerationSelection(preset: .balanced)
@@ -53,6 +63,17 @@ public struct LTX25GenerationConfig: Codable, Equatable, Identifiable {
       throw StudioError.invalid("Give the LTX 2.5 config a name of 1–120 characters and use LTX settings.")
     }
     if let dfr = selection.ltx25DFR { try dfr.validate() }
+    if let adapter = selection.ltx25AdapterBinding {
+      try adapter.validate()
+      guard componentBindingID == nil,
+        adapter.kind == .distilledRefinement ? selection.ltx25Guidance != nil
+          : selection.ltx25Guidance == nil,
+        adapter.kind == .dfr ? selection.ltx25DFR?.enabled == true
+          : selection.ltx25DFR?.enabled != true,
+        adapter.task == nil || selection.ltx25AutomaticDuration == nil else {
+        throw StudioError.invalid("This adapter needs its compatible LTX config. Select it again to restore recommended settings.")
+      }
+    }
     guard selection.shift == nil, selection.projectionBackend == nil, selection.transformerBackend == nil,
       selection.memoryPolicy == nil || selection.memoryPolicy == "recipe",
       selection.ltx25Guidance != nil || (selection.steps == nil && selection.cfg == nil && selection.refinementSteps == nil),
@@ -94,13 +115,19 @@ public struct LTX25GenerationConfig: Codable, Equatable, Identifiable {
 
   public func appliedSelection(task: String) -> GenerationSelection {
     var value = selection
-    value.task = task; value.ltx25ConfigID = id; value.ltx25ConfigName = name
+    value.task = selection.ltx25AdapterBinding?.task ?? task; value.ltx25ConfigID = id; value.ltx25ConfigName = name
     return value
   }
 
-  public func supports(_ clip: Clip, in project: StudioProject? = nil) -> Bool {
+  public func supports(_ original: Clip, in project: StudioProject? = nil) -> Bool {
+    let clip = original.ltx25ConfigContext
     let independent = clip.continuityMode == "independent" && clip.extensionDirection.isEmpty
       && project?.isContinuousSceneMember(clip) != true
+    if let adapter = selection.ltx25AdapterBinding {
+      guard independent, clip.inferredTask != "video_upscale" else { return false }
+      if adapter.task != nil { return true }
+      guard adapter.supportedTasks.contains(clip.inferredTask) else { return false }
+    }
     if let tasks = bindingSupportedTasks,
       !GenerationPresentation.canUseProfile(supportedTasks: tasks, for: clip) { return false }
     if bindingRequiresIndependent == true && !independent { return false }
@@ -128,13 +155,28 @@ public struct LTX25GenerationConfig: Codable, Equatable, Identifiable {
 }
 
 extension Clip {
+  fileprivate var ltx25ConfigContext: Clip {
+    var context = self
+    if generationSelection?.ltx25AdapterBinding?.task != nil {
+      context.generationSelection = nil
+      if context.audioDriverSelection != nil {
+        context.generationSelection = GenerationSelection(task: "a2v")
+      } else if context.inferredTask == "fflf",
+        context.attachments.filter({ [.first, .last, .keyframe].contains($0.role) }).map(\.role) == [.first] {
+        context.generationSelection = GenerationSelection(task: "i2v")
+      }
+    }
+    return context
+  }
+
   public mutating func applyLTX25Config(_ config: LTX25GenerationConfig, in project: StudioProject? = nil) throws {
     guard engine == .ltx25 else { throw StudioError.invalid("Select an LTX 2.5 clip to apply this config.") }
     try config.validate()
+    let context = ltx25ConfigContext
     guard config.supports(self, in: project) else {
       throw StudioError.invalid("\(config.name) does not support this clip's inputs or continuity. Choose a compatible config; your shot has been preserved.")
     }
-    generationSelection = config.appliedSelection(task: inferredTask)
+    generationSelection = config.appliedSelection(task: context.inferredTask)
     profileID = config.componentBindingID ?? "auto"
   }
 }

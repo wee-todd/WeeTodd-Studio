@@ -8,6 +8,7 @@ public struct ReferenceAction: Identifiable, Equatable {
   public let role: MediaRole
   public var controlType: String = "canny_edges"
   public var preparation: String? = nil
+  public var referenceRole: String? = nil
 }
 
 extension Clip {
@@ -17,6 +18,13 @@ extension Clip {
   }
 
   public func referenceActions(for asset: MediaAsset) -> [ReferenceAction] {
+    let actions = availableReferenceActions(for: asset)
+    guard engine == .ltx25, let binding = generationSelection?.ltx25AdapterBinding else { return actions }
+    let typed = [.video, .sequence].contains(asset.kind) ? binding.preparedGuideActions : []
+    return actions.filter { $0.id != "preprocessedControl" && binding.supports($0) } + typed
+  }
+
+  private func availableReferenceActions(for asset: MediaAsset) -> [ReferenceAction] {
     guard engine != .movie else { return [] }
     if engine == .drawThings {
       return asset.kind == .image && usesDrawThingsImageReferences ? [ReferenceAction(
@@ -71,7 +79,10 @@ extension Clip {
     if engine == .drawThings { return canAssignDrawThingsInput(asset, role: role) }
     guard engine != .movie else { return false }
     if role == .lora { return asset.kind == .lora }
-    if [.first, .last, .keyframe].contains(role) { return asset.kind == .image }
+    if [.first, .last].contains(role) { return asset.kind == .image && supportsEndpoint(role) }
+    if role == .keyframe {
+      return asset.kind == .image && (selectedLTX25AdapterInputTasks?.contains("fflf") ?? true)
+    }
     return referenceActions(for: asset).contains { $0.role == role && $0.preparation == nil }
   }
 
@@ -92,6 +103,7 @@ extension Clip {
     }
     var attachment = Attachment(assetID: asset.id, role: action.role)
     attachment.controlType = action.controlType
+    attachment.referenceRole = action.referenceRole
     attachment.description = asset.name
     if action.id == "msrVoice" { attachment.audioSourceStart=0;attachment.audioSourceDuration=min(5,asset.duration) }
     if action.role == .audioDriver { attachments.removeAll { $0.role == .audioDriver } }

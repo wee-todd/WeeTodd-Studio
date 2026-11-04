@@ -7,11 +7,13 @@ import StudioCore
   }
   var localLoRALibraryAssets: [MediaAsset] {
     var seen = Set<String>()
+    let managed = Set(folderLoRAEntries.filter { $0.adapterKind != nil }.map { LoRAMember(asset: $0.asset).fileKey })
     // Reimported library metadata wins; existing clip-owned snapshots remain untouched.
     let candidates = Array(globalAssets.reversed()) + project.assets
       + folderLoRAEntries.filter { ["ready", "needsModel"].contains($0.status) }.map(\.asset)
     return candidates.filter {
       $0.kind == .lora
+        && !managed.contains(LoRAMember(asset: $0).fileKey)
         && ($0.scope != .clip || $0.owner == selectedClipID)
         && seen.insert(LoRAMember(asset: $0).fileKey).inserted
     }.map { asset in

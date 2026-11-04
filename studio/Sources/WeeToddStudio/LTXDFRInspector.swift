@@ -25,6 +25,10 @@ struct LTXDFRInspector: View {
   var body: some View {
     DisclosureGroup("DFR spatial and temporal refinement") {
       Picker("DFR mode", selection: Binding(get: { mode }, set: { value in
+        if clip.generationSelection?.ltx25AdapterBinding?.kind == .dfr {
+          if value == "off" { store.applyLTX25Config(.distilled); return }
+          if value == "profile" { store.resetLTX25Config(); return }
+        }
         edit {
           if value == "profile" { $0.ltx25DFR = nil }
           else {

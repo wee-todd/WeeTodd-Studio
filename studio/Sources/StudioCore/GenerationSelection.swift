@@ -229,6 +229,7 @@ public struct GenerationSelection: Codable, Equatable {
   public var ltx25Guidance: LTX25GuidanceSettings?
   public var ltx25ConfigID: String?
   public var ltx25ConfigName: String?
+  public var ltx25AdapterBinding: LTX25AdapterBinding?
   public var ltx25AutomaticDuration: LTX25AutomaticDurationSettings?
   public var ltx25Keyframes:LTX25KeyframeSettings?
   public var ltx25SingleStage:LTX25SingleStageSettings?
@@ -241,10 +242,12 @@ public struct GenerationSelection: Codable, Equatable {
   public var isModified: Bool {
     steps != nil || refinementSteps != nil || cfg != nil || shift != nil
       || memoryPolicy != nil || projectionBackend != nil || transformerBackend != nil
+      || ltx25AdapterBinding != nil
       || ltx25DiffusionVAE != nil || h3SamplingMethod != nil || h3VideoDecodePrecision != nil || h3AttentionPolicy != nil || h3TransformerWeightCacheGB != nil || h3Reference != nil || h3Joint != nil || h3MotionFidelity != nil || ltx25Guidance != nil || ltx25AutomaticDuration != nil || ltx25Keyframes != nil || ltx25SingleStage != nil || ltx25DFR != nil || ltx25MovieUpscale != nil
   }
   public mutating func resetOverrides() {
     ltx25ConfigID = nil; ltx25ConfigName = nil
+    ltx25AdapterBinding = nil
     steps = nil; refinementSteps = nil; cfg = nil; shift = nil
     memoryPolicy = nil; projectionBackend = nil; transformerBackend = nil
     h3Reference=nil;h3Joint=nil;h3MotionFidelity=nil

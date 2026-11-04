@@ -289,6 +289,10 @@ final class ModelSetupTests: XCTestCase {
     _ = try write("misleading-msr.safetensors",msr)
     XCTAssertEqual(try NativeModelSetup.scan(presetID:"swift-ltx25-ingredients",roots:[root.path]).candidates["ingredients_lora_path"],[sheet.path])
     XCTAssertEqual(try NativeModelSetup.scan(presetID:"swift-ltx25-msr",roots:[root.path]).candidates["msr_lora_path"],[reference.path])
+    let library = try XCTUnwrap(NativeModelSetup.libraryAdapter(at: reference))
+    XCTAssertEqual(library.kind, .msr)
+    XCTAssertTrue(library.requirements.contains("supports images"))
+    XCTAssertFalse(library.requirements.contains("voice"))
   }
 
   func testNativeScanUsesHeadersAndManifestsWithoutReadingWeights() throws {

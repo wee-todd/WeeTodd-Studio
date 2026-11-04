@@ -21,6 +21,20 @@ def write_adapter(source, metadata):
     return source
 
 
+def test_linked_file_hints_do_not_label_neighbors_and_excluded_children_stay_hidden(tmp_path):
+    known = write_adapter(tmp_path / "library/known.safetensors", {})
+    unknown = write_adapter(tmp_path / "library/unknown.safetensors", {})
+    write_adapter(tmp_path / "library/private/hidden.safetensors", {"model_version": "2.5"})
+    result = lora.scan_lora_folders([
+        {"path": str(known.parent)},
+        {"path": str(known.parent / "private"), "enabled": False},
+    ], tmp_path / "cache.json", file_model_hints={str(known): "ltx25"})
+    entries = {entry["path"]: entry for entry in result["entries"]}
+    assert len(entries) == 2
+    assert entries[str(known)]["loraModel"] == "ltx25"
+    assert entries[str(unknown)]["status"] == "needsModel"
+
+
 def test_folder_scan_deduplicates_nested_roots_and_survives_missing_folder(tmp_path):
     source = write_adapter(tmp_path / "library/sub/style.safetensors", {"model_version": "2.5.0"})
     alias = tmp_path / "alias"

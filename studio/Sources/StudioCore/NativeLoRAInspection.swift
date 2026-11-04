@@ -79,7 +79,7 @@ public enum NativeLoRAInspection {
     }
     return (metadata, tensors, before, SHA256.hash(data: prefix + bytes).map { String(format: "%02x", $0) }.joined())
   }
-  private static func model(_ metadata: [String: String], hint: LoRAModel?) throws -> LoRAModel? {
+  static func model(_ metadata: [String: String], hint: LoRAModel?) throws -> LoRAModel? {
     var models = Set<LoRAModel>(), families = Set<String>()
     let pattern = try NSRegularExpression(pattern: "(?:^|[^0-9])2[._-]([0-9]+)(?:[^0-9]|$)")
     for key in ["model_version", "base_model", "base_model_name_or_path", "ss_base_model_version", "modelspec.architecture", "converted_layout"] {

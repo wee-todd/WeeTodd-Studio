@@ -8,6 +8,7 @@ struct InspectorColumn: View {
       PanelHeading(
         title: "CLIP", icon: "slider.horizontal.3",
         trailing: store.selectedClip.map { $0.engine.rawValue.uppercased() } ?? "—")
+      ScrollViewReader { proxy in
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
           if store.selectedTitleID != nil {
@@ -23,6 +24,9 @@ struct InspectorColumn: View {
               .foregroundStyle(.secondary).padding(.vertical, 20)
           }
         }.padding(16)
+      }.onChange(of: store.generationInputsFocusRequest) { _, _ in
+        withAnimation { proxy.scrollTo("generationInputs", anchor: .top) }
+      }
       }.frame(maxHeight: .infinity)
       Divider().overlay(Theme.line)
       PanelHeading(title: "MOVIE / PROJECT", icon: "film.stack", trailing: "DEFAULTS")
@@ -107,6 +111,7 @@ struct ClipInspector: View {
         }
         promptSection
         GenerationInputsInspector(clip: clip, showAdvanced: detail.showsAdvanced)
+          .id("generationInputs")
         if clip.engine != .drawThings {
           DisclosureGroup("Audio driver / timeline soundtrack") { AudioDriverInspector() }
         }

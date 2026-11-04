@@ -5,8 +5,9 @@ import UniformTypeIdentifiers
 
 extension StudioStore {
   func endpointTasks(for clip: Clip) -> [String]? {
-    let profileTasks = clip.profileID == "auto" ? nil
-      : profiles.first { $0.id == clip.profileID && $0.engine == clip.engine.rawValue }?.generation?.supportedTasks
+    let profileTasks = clip.selectedLTX25AdapterInputTasks
+      ?? (clip.profileID == "auto" ? nil
+        : profiles.first { $0.id == clip.profileID && $0.engine == clip.engine.rawValue }?.generation?.supportedTasks)
     guard clip.engine == .ltx25, runtime.usesNativeLTX25,
       let resolved = generationDescriptions[clip.id],
       resolved["studioEngine"] as? String == clip.engine.rawValue,

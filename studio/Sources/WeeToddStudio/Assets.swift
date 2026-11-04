@@ -169,7 +169,8 @@ struct AssetBrowser: View {
         )
       Button("Keyframe at playhead") {
         if let local = store.selectedClipPlayhead { store.useAsset(asset, role: .keyframe, time: local) }
-      }.disabled(store.selectedClip?.engine == .drawThings || store.selectedClipPlayhead == nil)
+      }.disabled(store.selectedClip?.engine == .drawThings || store.selectedClipPlayhead == nil
+        || store.selectedClip?.canAssignMedia(asset, role: .keyframe) != true)
     }
     if let clip = store.selectedClip {
       ForEach(clip.referenceActions(for: asset)) { action in

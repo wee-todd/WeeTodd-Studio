@@ -15,7 +15,7 @@ extension Clip {
       default: return false
       }
     case .h3, .ltx23, .ltx25:
-      guard let supportedTasks else { return true }
+      guard let supportedTasks = supportedTasks ?? selectedLTX25AdapterInputTasks else { return true }
       return supportedTasks.contains("fflf") || (role == .first && supportedTasks.contains("i2v"))
     }
   }

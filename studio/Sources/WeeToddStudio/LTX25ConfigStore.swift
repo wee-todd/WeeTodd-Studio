@@ -2,7 +2,14 @@ import Foundation
 import StudioCore
 
 @MainActor extension StudioStore {
-  var ltx25Configs: [LTX25GenerationConfig] { LTX25GenerationConfig.builtIns + savedLTX25Configs }
+  var ltx25Configs: [LTX25GenerationConfig] {
+    let adapter = selectedClip?.generationSelection?.ltx25AdapterBinding
+    return LTX25GenerationConfig.builtIns + (adapter.map { [LTX25GenerationConfig.adapter($0)] } ?? []) + savedLTX25Configs
+  }
+  func recommendedLTX25Config(for clip: Clip) -> LTX25GenerationConfig {
+    if let adapter = clip.generationSelection?.ltx25AdapterBinding { return .adapter(adapter) }
+    return clip.generationSelection?.ltx25Guidance == nil ? .distilled : .dev
+  }
   var selectedLTX25Config: LTX25GenerationConfig? {
     ltx25Configs.first { $0.id == selectedClip?.generationSelection?.ltx25ConfigID }
   }
@@ -38,10 +45,14 @@ import StudioCore
     do {
       try clip.applyLTX25Config(config, in: project)
       editClip { $0 = clip }
+      if config.selection.ltx25AdapterBinding != nil { generationInputsFocusRequest = UUID() }
     } catch { self.error = error.localizedDescription }
   }
 
   func resetLTX25Config() {
+    if let clip = selectedClip, let adapter = clip.generationSelection?.ltx25AdapterBinding {
+      applyLTX25Config(selectedLTX25Config ?? .adapter(adapter)); return
+    }
     let fallback = selectedClip?.generationSelection?.ltx25Guidance == nil
       ? LTX25GenerationConfig.distilled : selectedClip?.generationSelection?.ltx25Guidance?.mode == .guidedHQ
         ? .devHQ : .dev

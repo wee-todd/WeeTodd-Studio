@@ -12,12 +12,22 @@ enum NativeLTXConfigResolution {
   static func resolve(clip: Clip, project: StudioProject,
     sources: [(path: String, recipe: [String: Any])]) throws -> Result {
     let selection = clip.generationSelection
+    let binding = selection?.ltx25AdapterBinding
+    if let binding {
+      try LTX25GenerationConfig(name: "Selected adapter", selection: selection!).validate()
+      let current = try NativeModelSetup.adapterBinding(at: URL(fileURLWithPath: binding.path), kind: binding.kind)
+      guard current.supportsVoiceReferences == binding.supportsVoiceReferences else {
+        throw StudioError.invalid("This adapter's reference capabilities changed. Select it again from the LoRA library.")
+      }
+    }
     let mode = selection?.ltx25Guidance?.mode
     let dev = mode != nil
     let dfr = selection?.ltx25DFR
     let automatic = selection?.ltx25AutomaticDuration != nil
     let presetID: String
-    if dfr?.enabled == true {
+    if let binding, binding.task != nil {
+      presetID = binding.kind.presetID
+    } else if dfr?.enabled == true {
       presetID = dfr!.temporalRounds == 0 ? "swift-ltx25-dfr-spatial" : "swift-ltx25-dfr-temporal-\(dfr!.temporalRounds)"
     } else if automatic {
       presetID = "swift-ltx25-auto-duration" + (mode.map { "-" + $0.rawValue } ?? "")
@@ -38,6 +48,9 @@ enum NativeLTXConfigResolution {
     } ?? sources
     var linked: [String: String] = [:], used: Set<String> = [], missing: [String] = []
     for field in preset.components {
+      if let binding, field.key == binding.kind.componentKey {
+        linked[field.key] = binding.path; used.insert(binding.path); continue
+      }
       let transformer = ["transformer_path", "dev_transformer_path"].contains(field.key)
       let candidate = (transformer ? transformerSource.map { [$0] } ?? [] : ordered).first { source in
         guard let path = component(field.key, source: source.recipe), path.hasPrefix("/"),

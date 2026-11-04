@@ -635,7 +635,7 @@ public enum NativeLTXPreparation {
     }
     let directory = runtime["profilesDirectory"] as? String ?? ""
     let resolvedConfig = selection?.ltx25ConfigID != nil && clip.profileID == "auto"
-      && ["t2v", "i2v", "fflf", "a2v", "extension"].contains(task)
+      && (selection?.ltx25AdapterBinding != nil || ["t2v", "i2v", "fflf", "a2v", "extension"].contains(task))
       ? try NativeLTXConfigResolution.resolve(clip: clip, project: project, sources: componentSources(directory: directory)) : nil
     let profiles: [[String: Any]] = try resolvedConfig.map {
       [["id": $0.profile, "task": task, "generation": descriptor($0.recipe)]]

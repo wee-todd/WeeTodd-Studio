@@ -69,7 +69,7 @@ struct LoRALibrary: View {
           Text(store.notice).font(.caption).foregroundStyle(.secondary).lineLimit(2)
         }
         Text(
-          "Files stay linked. Applying a group copies its settings into the current stack. Reference and control adapters use their dedicated Model Setup options."
+          "Files stay linked. Applying a group copies its settings into the current stack. Selecting a specialized LTX adapter applies its config and shows the required clip inputs."
         )
         .font(.caption).foregroundStyle(.secondary)
       }
@@ -123,12 +123,38 @@ struct LoRALibrary: View {
               matches($0.name) && (!compatibleOnly || (store.selectedClip == nil && !imageWorkspace) || $0.loraModel?.supports(engine) == true)
             }
             ForEach(local) { asset in localRow(asset) }
+            let specialized = store.folderLoRAEntries.filter {
+              $0.adapterKind != nil && matches($0.name)
+                && (!compatibleOnly || $0.loraModel?.supports(engine) == true)
+            }
             if local.isEmpty {
-              Text(store.loraFolderScanBusy ? "Scanning local folders…" : "No matching local LoRAs. Add a folder or turn off the compatibility filter to review other files.")
+              Text(store.loraFolderScanBusy ? "Discovering installed LoRAs…" : specialized.isEmpty
+                ? "No matching local LoRAs. Check Folders or turn off the compatibility filter to review other files."
+                : "Specialized adapters are available below. Select one to apply its config and add its required inputs.")
                 .font(.caption).foregroundStyle(.secondary)
             }
+            if !specialized.isEmpty {
+              Text("Specialized adapters · \(specialized.count)").font(.headline)
+              ForEach(specialized) { entry in
+                if let kind = entry.adapterKind {
+                  VStack(alignment: .leading, spacing: 6) {
+                    Text(kind.label).font(.subheadline.bold())
+                    Text(entry.name).font(.caption).foregroundStyle(.secondary)
+                    Text(entry.detail ?? kind.requirements).font(.caption)
+                    Button(store.ltx25AdapterSelectionBusy ? "Selecting…" : "Use on selected clip") {
+                      Task { if await store.selectLTX25Adapter(entry) { dismiss() } }
+                    }
+                      .disabled(engine != .ltx25 || !store.runtime.usesNativeLTX25 || store.selectedClip == nil
+                        || store.operationBusy || store.ltx25AdapterSelectionBusy)
+                    DisclosureGroup("File details") {
+                      Text(entry.path).font(.caption2).textSelection(.enabled)
+                    }.font(.caption2)
+                  }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                }
+              }
+            }
             let needsSetup = store.folderLoRAEntries.filter {
-              !["ready", "needsModel"].contains($0.status) && matches($0.name)
+              $0.adapterKind == nil && !["ready", "needsModel"].contains($0.status) && matches($0.name)
             }
             if !needsSetup.isEmpty {
               DisclosureGroup("Adapters needing setup · \(needsSetup.count)") {

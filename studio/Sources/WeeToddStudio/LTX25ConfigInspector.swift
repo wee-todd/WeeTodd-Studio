@@ -19,7 +19,7 @@ struct LTX25ConfigInspector: View {
             .tag(clip.generationSelection?.ltx25ConfigID ?? "current")
         }
         Section("Built-in") {
-          ForEach(LTX25GenerationConfig.builtIns) { config in
+          ForEach(store.ltx25Configs.filter(\.isBuiltIn)) { config in
             Text(config.name).tag(config.id).disabled(!config.supports(clip, in: store.project))
           }
         }
@@ -34,7 +34,7 @@ struct LTX25ConfigInspector: View {
       .accessibilityIdentifier("ltx25-config-selection")
       HStack {
         Button("Try recommended settings") {
-          store.applyLTX25Config(clip.generationSelection?.ltx25Guidance == nil ? .distilled : .dev)
+          store.applyLTX25Config(store.recommendedLTX25Config(for: clip))
         }
         Spacer()
         Menu {
@@ -49,6 +49,12 @@ struct LTX25ConfigInspector: View {
         } label: { Image(systemName: "ellipsis.circle") }
         .accessibilityLabel("Manage LTX 2.5 configs")
       }.font(.caption2)
+      if let adapter = clip.generationSelection?.ltx25AdapterBinding {
+        Text("Selected adapter: " + URL(fileURLWithPath: adapter.path).lastPathComponent)
+          .font(.caption2).foregroundStyle(.secondary)
+        Text("Shared model components resolve automatically from your linked libraries.")
+          .font(.caption2).foregroundStyle(.secondary)
+      }
       if store.ltx25ConfigIsModified {
         Text("Modified · Save as a new config or reset to its saved settings.")
           .font(.caption2).foregroundStyle(.secondary)

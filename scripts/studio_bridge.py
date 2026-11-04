@@ -1694,7 +1694,8 @@ def main():
 
         if args.output is None:
             raise ValueError("Choose a LoRA metadata cache location.")
-        result = scan_lora_folders(request.get("folders", []), args.output)
+        result = scan_lora_folders(request.get("folders", []), args.output,
+                                   file_model_hints=request.get("fileModelHints"))
     elif args.command == "prepare-reference":
         from studio_references import prepare_reference
 

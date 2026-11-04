@@ -6,46 +6,61 @@ import StudioCore
   var loraFolders: [LoRAFolder] {
     runtime.loraFolders ?? [LoRAFolder(path: defaultLoRAFolder.path)]
   }
+  var automaticLoRADiscoveryEnabled: Bool {
+    runtime.automaticallyDiscoverLoRAs ?? (runtime.loraFolders?.isEmpty != true)
+  }
   var loraFolderConfigurationKey: String {
-    loraFolders.map { "\($0.path)|\($0.enabled)|\($0.recursive)|\($0.modelHint?.rawValue ?? "")" }
+    let manual = loraFolders.map { "\($0.path)|\($0.enabled)|\($0.recursive)|\($0.modelHint?.rawValue ?? "")" }
       .joined(separator: "\n")
+    guard automaticLoRADiscoveryEnabled else { return manual + "|automatic:false" }
+    let links = (allAssets.filter { $0.kind == .lora } + loraGroups.flatMap { $0.members.map(\.asset) })
+      .map { $0.path + "|" + ($0.loraModel?.rawValue ?? "") }.sorted().joined(separator: "\n")
+    return manual + "|automatic:true|" + runtime.profilesDirectory + "|" + links
+      + "|" + profiles.map(\.id).sorted().joined(separator: "\n") + "|" + (runtime.rippleAdapterPath ?? "")
   }
   var folderLoRAEntries: [LoRAFolderEntry] {
-    guard let scanned = loraFolderScanKey,
-      scanned.map({ [$0.path, String($0.enabled), String($0.recursive), $0.modelHint?.rawValue ?? ""] })
-        == loraFolders.map({ [$0.path, String($0.enabled), String($0.recursive), $0.modelHint?.rawValue ?? ""] })
-    else { return [] }
-    return scannedLoRAEntries
+    loraFolderScanKey == loraFolderConfigurationKey ? scannedLoRAEntries : []
   }
   func refreshLoRAFolders() async {
-    guard !loraFolderScanBusy else { return }
-    let folders = loraFolders
-    let key = loraFolderConfigurationKey
-    let settings = runtime
+    guard !loraFolderScanBusy else { loraFolderRefreshRequested = true; return }
     loraFolderScanBusy = true
     defer { loraFolderScanBusy = false }
-    do {
-      if folders.contains(where: { $0.enabled && $0.path == defaultLoRAFolder.path }) {
-        try FileManager.default.createDirectory(at: defaultLoRAFolder, withIntermediateDirectories: true)
+    repeat {
+      loraFolderRefreshRequested = false
+      let key = loraFolderConfigurationKey, settings = runtime, folders = loraFolders
+      let assets = allAssets, groups = loraGroups, automatic = automaticLoRADiscoveryEnabled
+      do {
+        if folders.contains(where: { $0.enabled && $0.path == defaultLoRAFolder.path }) {
+          try FileManager.default.createDirectory(at: defaultLoRAFolder, withIntermediateDirectories: true)
+        }
+        let discovery = try await Task.detached(priority: .utility) {
+          try LoRAFolderDiscovery.discover(folders: folders, profilesDirectory: settings.profilesDirectory,
+            assets: assets, groups: groups, additionalPaths: [settings.rippleAdapterPath].compactMap { $0 }, enabled: automatic)
+        }.value
+        let result: [String: Any]
+        if !discovery.folders.contains(where: \.enabled) {
+          result = ["entries": [], "warnings": []]
+        } else if NativeLoRAImport.usesNativeScan(runtime: settings) {
+          result = try await NativeLoRAImport.scan(discovery.folders, modelHints: discovery.modelHints)
+        } else {
+          let payload = try discovery.folders.map { try $0.object() }
+          result = try await descriptionBridge.independent().invoke("lora-scan", runtime: settings,
+            payload: ["folders": payload, "fileModelHints": discovery.modelHints.mapValues(\.rawValue)],
+            output: dataDirectory.appendingPathComponent("Cache/lora-index.json"))
+        }
+        if key == loraFolderConfigurationKey {
+          scannedLoRAEntries = try JSONDecoder().decode([LoRAFolderEntry].self,
+            from: JSONSerialization.data(withJSONObject: result["entries"] ?? []))
+          automaticallyDiscoveredLoRAFolders = discovery.automaticFolders
+          loraFolderScanKey = key
+          loraFolderWarnings = discovery.warnings + (result["warnings"] as? [String] ?? [])
+        } else { loraFolderRefreshRequested = true }
+      } catch {
+        if key == loraFolderConfigurationKey {
+          loraFolderWarnings = ["Could not refresh LoRA folders: \(error.localizedDescription)"]
+        } else { loraFolderRefreshRequested = true }
       }
-      let result: [String: Any]
-      if NativeLoRAImport.usesNativeScan(runtime: settings) {
-        result = try await NativeLoRAImport.scan(folders)
-      } else {
-        let payload = try folders.map { try $0.object() }
-        result = try await descriptionBridge.independent().invoke("lora-scan", runtime: settings,
-          payload: ["folders": payload], output: dataDirectory.appendingPathComponent("Cache/lora-index.json"))
-      }
-      guard key == loraFolderConfigurationKey else { return }
-      let entries = try JSONDecoder().decode([LoRAFolderEntry].self,
-        from: JSONSerialization.data(withJSONObject: result["entries"] ?? []))
-      scannedLoRAEntries = entries
-      loraFolderScanKey = folders
-      loraFolderWarnings = result["warnings"] as? [String] ?? []
-    } catch {
-      guard key == loraFolderConfigurationKey else { return }
-      loraFolderWarnings = ["Could not refresh LoRA folders: \(error.localizedDescription)"]
-    }
+    } while loraFolderRefreshRequested
   }
   func chooseLoRAFolders() {
     let panel = NSOpenPanel()

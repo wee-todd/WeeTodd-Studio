@@ -2257,12 +2257,17 @@ Optional or alternative keywords can remain in notes while the automatic trigger
 
 In **Runtime Settings → LoRA model folders** (also **Folders…** in the library):
 
-1. Use **Add folders…** to link one or more existing LoRA libraries. Files remain in place.
+1. **Discover linked model libraries automatically** starts enabled. Studio finds existing folders
+   through saved H3/LTX model setups, imported LoRAs and saved group members. Automatically discovered
+   folders can be excluded; an existing explicitly empty folder list retains its discovery opt-out.
+   Use **Add folders…** for other libraries. Files remain in place.
 2. Enable/disable each folder, choose whether to include subfolders, and optionally specify a
    training-model fallback for files without metadata. Checkpoint declarations always take precedence.
 3. Use **Refresh folders** after adding or replacing files. Opening the library also refreshes it.
    Scanning runs in the background, reads headers without loading model weights, and reuses cached
-   inspections for unchanged files. Overlapping paths and file symlinks are deduplicated.
+   inspections for unchanged files on the legacy Python route. Overlapping paths and file symlinks
+   are deduplicated. A model setup's training-model hint applies only to the adapter it links,
+   never to neighboring files; checkpoint declarations always take precedence.
 
 The default folder is `~/Library/Application Support/WeeTodd Studio/Models/LoRAs`; **Open default
 folder** creates it when needed. There is no automatic file move, download, conversion or upload.
@@ -2273,8 +2278,20 @@ links remain. Missing drives produce a notice and do not delete saved settings. 
 **Link individual files / adapter options** retains manual SafeTensors imports, including H3 Turbo
 options. Choose the **Trained model** before importing. Files with missing metadata offer **Set
 trained model** when the compatibility filter is off. Filenames never establish the model.
-Specialized or unreadable adapters remain visible under **Adapters needing setup**, with a reason;
-IC-LoRAs still require the dedicated reference/control Model Setup route.
+Recognized MSR, Ingredients, Union, Motion Track, CrossView and DFR adapters appear as
+**Specialized adapters**. **Use on selected clip** selects a recommended native LTX 2.5 config,
+pins the chosen adapter and returns to the inspector's required-input cards. MSR shows described
+images (and permits voices only for V2); Ingredients shows a described sheet; Union and Motion Track
+show their matching guides; CrossView shows its warp and original source movies. Shared encoders,
+VAEs and compatible transformer components resolve automatically from linked model setups.
+DFR and Dev refinement select their compatible ordinary-shot configs. Incompatible continuity or
+unsupported task combinations preserve the clip and report the requirement. Existing media remain
+visible so incompatible inputs can be replaced deliberately. Missing components still need linking
+or downloading in Model Setup, but routine adapter selection does not open that flow or create a
+recipe file. **Save as…** retains the adapter link; reset/recommended settings keep that choice.
+These components
+are kept out of ordinary style-LoRA stacks and groups. Other specialized or unreadable files remain
+under **Adapters needing setup**, with a reason. LTX 2.3 keeps its existing Model Setup route.
 
 For Draw Things, use **Connections…** to configure the server, then **Refresh** beside its library
 section. Local servers must advertise their installed LoRAs through Model Browsing. **Add to current

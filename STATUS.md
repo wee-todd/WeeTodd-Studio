@@ -538,6 +538,26 @@ Required combined project validation and isolated packaging are recorded by the 
 This entry claims no new real-model SheetSage2, instrumental-LoRA, RefMod or caption qualification;
 existing dated native-video and music measurements below retain their original scopes.
 
+## October 14 installed LoRA discovery
+
+Studio's local library automatically indexes folders linked by saved H3/LTX model setups,
+imported LoRAs and saved group members. It reads bounded headers in place, deduplicates paths and
+respects explicit disabled folders and discovery opt-outs. Recipe model hints apply only to their
+linked files; sibling files retain their own metadata and classification. Discovery preferences
+do not change saved generation inputs, and isolated Studio stores own their default profile folder.
+
+Recognized LTX reference/control and refinement adapters have visible library entries. Selecting
+one applies its recommended native LTX 2.5 config, pins its file and focuses the required-input
+cards without opening Model Setup or writing a new recipe. Config save/reset retains that link;
+automatic component resolution reuses compatible shared bindings and revalidates the selected
+adapter's header/capabilities before preparation. All asset/input entry points filter their actions
+against the selected adapter. Incompatible continuity/tasks preserve the shot. Specialized adapters remain
+separate from ordinary LoRA stacks/groups; MSR image-only capability is shown from its header,
+and Dev refinement remains an automatic config component. Legacy LTX 2.3 dictionary bindings
+are included in folder discovery. No sampler, tensor application or model payload behavior changed.
+An opt-in header-only installed-library check found 29 files in six linked folders, including 11
+recognized specialized adapters. This does not claim new real-model generation qualification.
+
 ## October 14 LTX 2.5 config selection
 
 Swift LTX 2.5 uses built-in Distilled, Dev and Dev HQ configs plus a persistent user config

@@ -9,6 +9,7 @@ struct GenerationModelInspector: View {
     store.profiles.first { $0.id == clip.profileID && $0.engine == clip.engine.rawValue }
   }
   var family: String? {
+    if let adapter = clip.generationSelection?.ltx25AdapterBinding { return adapter.referenceFamily }
     let result = store.generationDescriptions[clip.id]
     guard result?["studioProfile"] as? String == clip.profileID,
       result?["studioTask"] as? String == clip.inferredTask,
@@ -49,10 +50,12 @@ struct GenerationModelInspector: View {
           .font(.caption2).foregroundStyle(.orange)
       }
       if family == "ingredients" || clip.attachments.contains(where: { $0.role == .control && $0.controlType == "ingredients_reference_sheet" }) {
-        Label("Ingredients adapter · supplied by model profile", systemImage: "lock")
+        Label(clip.generationSelection?.ltx25AdapterBinding != nil
+          ? "Ingredients adapter · selected by config" : "Ingredients adapter · supplied by model profile", systemImage: "lock")
           .font(.caption2).foregroundStyle(.secondary)
       } else if let family, family != "ordinary" {
-        Label("Required \(family.uppercased()) adapter · supplied by model profile", systemImage: "lock")
+        Label("Required \(family.uppercased()) adapter · " + (clip.generationSelection?.ltx25AdapterBinding != nil
+          ? "selected by config" : "supplied by model profile"), systemImage: "lock")
           .font(.caption2).foregroundStyle(.secondary)
       }
       HStack {

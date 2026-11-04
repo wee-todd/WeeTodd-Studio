@@ -6,8 +6,34 @@ struct LoRAFolderSettings: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text("LoRA model folders").font(.headline)
-      Text("Add existing libraries, including folders on external drives. Files stay in place. Removing a folder removes it from discovery; clips and groups keep their saved links.")
+      Toggle("Discover linked model libraries automatically", isOn: Binding(get: {
+        store.automaticLoRADiscoveryEnabled
+      }, set: { enabled in
+        store.runtime.automaticallyDiscoverLoRAs = enabled
+        store.saveRuntime(reloadProfiles: false)
+        Task { await store.refreshLoRAFolders() }
+      }))
+      Text("Studio finds libraries from linked model setups and imported LoRAs. You can add other folders below. Files stay in place; clips and groups keep their saved links.")
         .font(.caption).foregroundStyle(.secondary)
+      if store.automaticLoRADiscoveryEnabled && !store.automaticallyDiscoveredLoRAFolders.isEmpty {
+        DisclosureGroup("Automatically discovered · \(store.automaticallyDiscoveredLoRAFolders.count)") {
+          ForEach(store.automaticallyDiscoveredLoRAFolders) { folder in
+            HStack {
+              Text(folder.path).font(.caption2).textSelection(.enabled)
+              Spacer()
+              Button("Exclude") {
+                guard store.loraFolders.count < 64 else {
+                  store.error = "Choose up to 64 LoRA folders. Remove a folder before adding another exclusion."; return
+                }
+                var excluded = folder; excluded.enabled = false
+                store.runtime.loraFolders = store.loraFolders + [excluded]
+                store.saveRuntime(reloadProfiles: false)
+                Task { await store.refreshLoRAFolders() }
+              }.controlSize(.small)
+            }
+          }
+        }
+      }
       ForEach(store.loraFolders) { folder in
         VStack(alignment: .leading, spacing: 6) {
           HStack {

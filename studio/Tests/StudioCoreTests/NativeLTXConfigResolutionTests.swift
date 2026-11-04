@@ -72,7 +72,7 @@ final class NativeLTXConfigResolutionTests: XCTestCase {
     }
   }
 
-  private func supportHeaders() throws -> [String: [String: Any]] {
+  func supportHeaders() throws -> [String: [String: Any]] {
     func json(_ object: [String: Any]) throws -> String {
       String(data: try JSONSerialization.data(withJSONObject: object), encoding: .utf8)!
     }

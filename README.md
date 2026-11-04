@@ -155,8 +155,12 @@ and media. Other engines' execution presets remain under **Finishing and executi
 LoRA stacks support enable/disable with preserved strengths, reusable groups, and explicit Add or
 Replace actions across native and Draw Things generation. **Runtime Settings → LoRA model folders**
 manages multiple linked libraries, with optional subfolders and a default app-managed location.
+Studio automatically discovers libraries already linked by model setups, imported LoRAs and saved
+groups. Folder discovery can be disabled, and individual libraries can be excluded.
 **LoRAs & Groups…** searches local adapters and connected Draw Things catalogs with source/model
-labels and a compatibility filter; the inspector shows the applied stack.
+labels and a compatibility filter; the inspector shows the applied stack. **Use on selected clip**
+for a recognized LTX adapter selects its recommended config and shows required inputs directly.
+Shared model components resolve automatically; saved configs retain the selected adapter link.
 See [LoRA folders and groups](studio/README.md#loras-and-groups) for setup and format limits.
 Native H3 four-step Turbo adapters can
 be imported through **LoRAs & Groups…**; enabling one resolves its required schedule and disabling

@@ -26,6 +26,7 @@ struct RuntimeSettings: Codable {
   var usesNativeH3: Bool { nativeH3Enabled ?? true }
   var acceleration: AccelerationSettings?
   var loraFolders: [LoRAFolder]?
+  var automaticallyDiscoverLoRAs: Bool?
   var voiceModels: VoiceModelSettings?
   var musicModels: MusicModelSettings?
   var rippleAdapterPath: String?
@@ -38,6 +39,7 @@ struct RuntimeSettings: Codable {
     value.nativeH3Enabled = usesNativeH3
     value.nativeLTX25Enabled = usesNativeLTX25
     value.loraFolders = nil
+    value.automaticallyDiscoverLoRAs = nil
     value.voiceModels = nil
     value.musicModels = nil
     value.rippleAdapterPath = nil
@@ -450,7 +452,9 @@ extension Encodable {
   @Published var scannedLoRAEntries: [LoRAFolderEntry] = []
   @Published var loraFolderWarnings: [String] = []
   @Published var loraFolderScanBusy = false
-  @Published var loraFolderScanKey: [LoRAFolder]?
+  @Published var loraFolderScanKey: String?
+  @Published var automaticallyDiscoveredLoRAFolders: [LoRAFolder] = []
+  var loraFolderRefreshRequested = false
   @Published var showLoRALibrary = false
   @Published var selectedClipID: UUID?
   @Published var selectedAssetID: UUID?
@@ -469,6 +473,8 @@ extension Encodable {
   @Published var runtime = RuntimeSettings.defaults()
   @Published var profiles: [ModelProfile] = []
   @Published var savedLTX25Configs: [LTX25GenerationConfig] = []
+  @Published var ltx25AdapterSelectionBusy = false
+  @Published var generationInputsFocusRequest = UUID()
   var ltx25ConfigLibraryError: String?
   @Published var generationDescriptions: [UUID: [String: Any]] = [:]
   @Published var projectURL: URL?
@@ -635,9 +641,11 @@ extension Encodable {
     }, ended: { [weak self] item in
       MainActor.assumeIsolated { self?.playbackEnded(item: item) }
     })
+    var runtimeDefaults = runtime
+    runtimeDefaults.profilesDirectory = dataDirectory.appendingPathComponent("Profiles").path
     runtime = RuntimeSettings.restoring(
       try? Data(contentsOf: dataDirectory.appendingPathComponent("runtime.json")),
-      defaults: runtime)
+      defaults: runtimeDefaults)
     loadVideoUpscalePreferences()
     loadLTX25Configs()
     guard restoreSession else { return }

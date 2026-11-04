@@ -34,6 +34,7 @@ enum GenerationInputPurpose: String, CaseIterable, Identifiable {
         matches = action.id == "ingredients" || (action.id == "movieAppearance" && action.preparation == "sheet")
       case .audioDriver: matches = action.id == "audioDriver"
       case .motionGuide: matches = ["movieMotion", "preprocessedControl"].contains(action.id)
+        || action.id.hasPrefix("prepared_")
       }
       let task = action.role == .audioDriver ? "a2v" : action.role == .control ? "control" : "ref2va"
       return matches && (supportedTasks == nil || supportedTasks!.contains(task))
@@ -152,6 +153,9 @@ enum GenerationControlPurpose: String, CaseIterable, Identifiable {
 
 extension StudioStore {
   func generationInputReferenceFamily(for clip: Clip) -> String? {
+    if let adapter = clip.generationSelection?.ltx25AdapterBinding, clip.engine == .ltx25 {
+      return adapter.referenceFamily
+    }
     if let resolved = generationDescriptions[clip.id],
       resolved["studioEngine"] as? String == clip.engine.rawValue,
       resolved["studioTask"] as? String == clip.inferredTask,
@@ -164,6 +168,7 @@ extension StudioStore {
   }
 
   func generationInputSupportedTasks(for clip: Clip) -> [String]? {
+    if let tasks = clip.selectedLTX25AdapterInputTasks { return tasks }
     guard clip.profileID != "auto" else { return nil }
     return profiles.first { $0.id == clip.profileID && $0.engine == clip.engine.rawValue }?.generation?.supportedTasks
   }
@@ -255,7 +260,29 @@ struct GenerationInputsInspector: View {
           Button("Import media…") { store.chooseImports(scope: .clip) }
         }.controlSize(.small).disabled(store.operationBusy)
       }
-      if inputs.isEmpty {
+      if let adapter = clip.generationSelection?.ltx25AdapterBinding, clip.engine == .ltx25 {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Required for " + adapter.kind.label).font(.caption.weight(.semibold))
+          let requirements = adapter.inputRequirements(for: clip, assets: store.allAssets)
+          if requirements.isEmpty {
+            Text(adapter.kind == .dfr ? "Use a prompt, with optional first or last frames."
+              : "Use a prompt, optional first/last frames or an audio driver.")
+              .font(.caption2).foregroundStyle(.secondary)
+          }
+          ForEach(requirements) { requirement in
+            Label(requirement.label + (requirement.satisfied ? " · Added" : " · Needed"),
+              systemImage: requirement.satisfied ? "checkmark.circle" : "plus.circle")
+              .font(.caption).foregroundStyle(requirement.satisfied ? .green : .orange)
+            Text(requirement.detail).font(.caption2).foregroundStyle(.secondary)
+          }
+          if !requirements.isEmpty {
+            purposeMenu(adapter.kind == .msr ? .appearance : adapter.kind == .ingredients ? .ingredients : .motionGuide)
+              .controlSize(.small).disabled(store.operationBusy)
+          }
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+          .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+      }
+      if inputs.isEmpty && clip.generationSelection?.ltx25AdapterBinding?.task == nil {
         Text("Start with a prompt, or add a first frame, appearance references, audio or a motion guide.")
           .font(.caption2).foregroundStyle(.secondary)
         if store.allAssets.isEmpty {
@@ -373,6 +400,7 @@ struct GenerationInputsInspector: View {
       }
       if let asset, let action = clip.referenceActions(for: asset).first(where: {
         $0.role == attachment.role && $0.controlType == attachment.controlType
+          && ($0.referenceRole == nil || $0.referenceRole == attachment.referenceRole)
       }) {
         Text(action.detail).font(.caption2).foregroundStyle(.secondary)
       }
