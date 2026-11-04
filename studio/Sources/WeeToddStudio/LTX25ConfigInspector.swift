@@ -70,6 +70,11 @@ struct LTX25ConfigInspector: View {
           : "Dev config · experimental. This saved setup retains its linked component binding.")
           .font(.caption2).foregroundStyle(.secondary)
       }
+      if clip.generationSelection?.ltx25ConfigID == LTX25GenerationConfig.devFast.id,
+        !store.ltx25ConfigIsModified {
+        Text("Faster Dev / Diffusion VAE decoding using query8192. Requires the Diffusion VAE. Distilled remains the recommended speed preset.")
+          .font(.caption2).foregroundStyle(.secondary)
+      }
     }
     .alert("Save LTX 2.5 config", isPresented: $saving) {
       TextField("Config name", text: $configName)

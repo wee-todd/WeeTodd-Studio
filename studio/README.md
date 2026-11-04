@@ -1424,7 +1424,7 @@ For a complete CLI walkthrough, see [download and create an LTX 2.5 recipe](../e
 Choose **Run with → WeeTodd (local) / Draw Things → Model** in the clip inspector. Local models
 include MiniMax H3, LTX 2.3 and LTX 2.5. Swift LTX 2.5 replaces the separate model-profile and
 generation-mode choices with **Config**: **Distilled · Recommended**, **Dev · Recommended**,
-**Dev · HQ**, and **My configs**. **Try recommended settings** applies the model's defaults;
+**Dev · HQ**, **Dev · Fast (query8192)**, and **My configs**. **Try recommended settings** applies the model's defaults;
 the config menu offers **Save as…**, **Reset config**, and deletion of user-saved entries.
 Applying a config replaces sampling, guidance and advanced execution settings together while
 preserving the execution task, prompt, inputs, LoRA attachments, seed, canvas and shot timing.
@@ -1434,6 +1434,20 @@ Configs capture their values on each clip, so deleting a library entry does not 
 shot. Built-ins remain available. Saved configs live in Studio app data, outside project source.
 Saving an older recipe-based setup retains its internal binding and inherited execution settings
 for compatibility. Applying a built-in config moves that clip to automatic component resolution.
+
+### Dev Fast Diffusion VAE
+
+**Dev · Fast (query8192)** is an optional experimental config with 30 guided Euler updates,
+three refinement steps, and query-tiled Metal decoding at 8,192 queries. It requires the
+compatible one-step Diffusion VAE and the standard Dev refinement adapter. Studio reports
+missing components before rendering. Applying the config preserves shot timing, canvas, seed,
+prompt, media, and LoRA attachments.
+
+On a matched 768 × 448, 49-frame, 24 FPS audiovisual fixture on an M3 Ultra, mean worker time
+was 10.1 minutes with the combined Diffusion VAE and 4.9 minutes with query8192, with two runs
+per mode. Distilled remains the recommended speed preset.
+
+### Live LTX previews
 
 **Live LTX previews** are optional in **Studio Settings → Performance and acceleration →
 Swift LTX 2.5 live previews**. Choose **TAELTX2.3 · approximate** or **TAELTX2.3 Wide · approximate**

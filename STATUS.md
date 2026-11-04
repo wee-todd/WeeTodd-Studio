@@ -68,6 +68,14 @@ Twelve installed TAELTX checks ran separately without skips. Isolated release pa
 verification passed with the MIT notice included. Live Studio verified Off/Standard/Wide controls,
 the approximate-preview image and label, and cancellation clearing the preview without a take.
 
+## October 31 optional LTX Dev Fast config
+
+Studio exposes an explicit guided Dev config with 30 Euler updates, three refinement steps and
+a one-step Diffusion VAE using query-tiled Metal decoding. Applying it preserves authored shot
+fields. Core and Studio validation, signed release packaging and an isolated Studio UI smoke
+passed. The matched worker comparison used one 768 × 448, 49-frame audiovisual fixture. The
+recommended presets retain their existing settings.
+
 ## October 30 H3 attention scheduling optimization
 
 Native Swift/MLX H3 regeneration now omits four execution-only SIMD fences from its pinned

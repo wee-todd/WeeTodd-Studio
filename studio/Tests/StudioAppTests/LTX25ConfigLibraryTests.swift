@@ -4,6 +4,34 @@ import StudioCore
 @testable import WeeToddStudio
 
 final class LTX25ConfigLibraryTests: XCTestCase {
+  @MainActor func testFastDevIsExplicitPersistsAndResetsWithoutChangingRecommendations() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = StudioStore(dataDirectory: root, restoreSession: false)
+    store.addClip()
+    XCTAssertEqual(store.selectedClip?.generationSelection?.ltx25ConfigID, LTX25GenerationConfig.distilled.id)
+    let config = try XCTUnwrap(store.ltx25Configs.first { $0.id == "builtin-ltx25-dev-fast" })
+    for original in [LTX25GenerationConfig.distilled, .dev, .devHQ] {
+      XCTAssertNil(original.selection.ltx25DiffusionVAE)
+      XCTAssertNil(original.selection.steps)
+      XCTAssertNil(original.selection.refinementSteps)
+    }
+    store.applyLTX25Config(config)
+    XCTAssertFalse(store.ltx25ConfigIsModified)
+    XCTAssertEqual(store.recommendedLTX25Config(for: try XCTUnwrap(store.selectedClip)), .dev)
+    let reopened = try JSONDecoder().decode(StudioProject.self, from: JSONEncoder().encode(store.project))
+    XCTAssertEqual(reopened.clips.first?.generationSelection, store.selectedClip?.generationSelection)
+    store.editClip { $0.generationSelection?.ltx25DiffusionVAE?.queryChunkSize = 512 }
+    XCTAssertTrue(store.ltx25ConfigIsModified)
+    store.resetLTX25Config()
+    XCTAssertEqual(store.selectedClip?.generationSelection?.ltx25DiffusionVAE?.queryChunkSize, 8192)
+    XCTAssertFalse(store.ltx25ConfigIsModified)
+    store.applyLTX25Config(.distilled)
+    XCTAssertNil(store.selectedClip?.generationSelection?.ltx25DiffusionVAE)
+    store.addClip()
+    XCTAssertEqual(store.selectedClip?.generationSelection?.ltx25ConfigID, LTX25GenerationConfig.distilled.id)
+  }
+
   @MainActor func testSavedControlConfigRejectsAnotherControlFamily() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -19,7 +19,24 @@ public struct LTX25GenerationConfig: Codable, Equatable, Identifiable {
   public static let distilled = builtIn("distilled", name: "Distilled · Recommended")
   public static let dev = builtIn("dev", name: "Dev · Recommended", mode: .guided)
   public static let devHQ = builtIn("dev-hq", name: "Dev · HQ", mode: .guidedHQ)
-  public static var builtIns: [Self] { [distilled, dev, devHQ] }
+  /// Faster decoding within the guided Dev/DiffVAE route; explicitly selected only.
+  public static let devFast: Self = {
+    var config = builtIn("dev-fast", name: "Dev · Fast (query8192)", mode: .guided)
+    config.selection.steps = 30
+    config.selection.refinementSteps = 3
+    config.selection.cfg = 3
+    config.selection.ltx25Guidance?.audioCFG = 7
+    config.selection.ltx25Guidance?.stgScale = 1
+    config.selection.ltx25Guidance?.videoRescale = 0.7
+    config.selection.ltx25Guidance?.audioRescale = 0.7
+    config.selection.ltx25Guidance?.modalityScale = 3
+    config.selection.ltx25Guidance?.stgBlocks = [28]
+    config.selection.ltx25Guidance?.sigmas = []
+    config.selection.ltx25DiffusionVAE = LTX25DiffusionVAESettings(experimentalEnabled: true,
+      optimization: .metalNA3DQueryTiled, queryChunkSize: 8192, contextWidthChunks: 4, stage4TileWidth: 0)
+    return config
+  }()
+  public static var builtIns: [Self] { [distilled, dev, devHQ, devFast] }
 
   public static func adapter(_ binding: LTX25AdapterBinding) -> Self {
     var selection = (binding.kind == .distilledRefinement ? dev : distilled).selection
