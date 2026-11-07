@@ -1,9 +1,11 @@
+import AppKit
 import StudioCore
 import SwiftUI
 
 struct MovieUpscaleInspector:View {
   @EnvironmentObject var store:StudioStore
   var clip:Clip
+  var showLTXSettings = true
   private var settings:LTX25MovieUpscaleSettings { clip.generationSelection?.ltx25MovieUpscale ?? .init() }
   private func binding<T>(_ key:WritableKeyPath<LTX25MovieUpscaleSettings,T>)->Binding<T> {
     Binding(get:{ settings[keyPath:key] },set:{ value in store.editClip {
@@ -13,8 +15,67 @@ struct MovieUpscaleInspector:View {
     } })
   }
   var body:some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(!clip.usesRelayVSR && settings.mode == .enhance ? "Source movie enhancement" : "Source movie 2× upscale").font(.headline)
+      Picker("Upscaler", selection: Binding(get: {
+        clip.generationSelection?.movieUpscaleMethod ?? .ltx25
+      }, set: { method in
+        store.editClip {
+          var selection = $0.generationSelection ?? GenerationSelection(task: "video_upscale", preset: .custom)
+          selection.movieUpscaleMethod = method == .ltx25 ? nil : method
+          if method == .ltx25 && selection.ltx25MovieUpscale == nil {
+            selection.ltx25MovieUpscale = LTX25MovieUpscaleSettings()
+            if $0.prompt.isEmpty { $0.prompt = "Preserve the source subject, motion and scene while refining detail." }
+          }
+          $0.generationSelection = selection
+        }
+      })) {
+        ForEach(MovieUpscaleMethod.allCases) { Text($0.label).tag($0) }
+      }
+      .accessibilityIdentifier("movie-upscale-method")
+      .disabled(store.operationBusy)
+      if clip.usesRelayVSR {
+        relayControls
+      } else if showLTXSettings {
+        ltxControls
+      }
+    }
+    .task(id: clip.usesRelayVSR ? store.generationDescriptionTaskKey(for: clip) : nil) {
+      if clip.usesRelayVSR { await store.describeGeneration() }
+    }
+  }
+
+  private var relayControls: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      if let reference = clip.attachments.first(where: { $0.role == .reference && $0.isEnabled }),
+        let asset = store.allAssets.first(where: { $0.id == reference.assetID }) {
+        LabeledContent("Reference movie", value: asset.name)
+        if let duration = reference.sourceDurationSeconds {
+          let start = reference.sourceStartSeconds ?? 0
+          LabeledContent("Source interval", value: "\(start.formatted(.number.precision(.fractionLength(3))))–\((start + duration).formatted(.number.precision(.fractionLength(3)))) s")
+        }
+      }
+      Text("Doubles an SDR movie’s dimensions with Swift and Metal and retains its frame timing and audio.")
+        .font(.caption).foregroundStyle(.secondary)
+      if clip.attachments.contains(where: { [.first, .last, .audioDriver].contains($0.role) && $0.isEnabled }) {
+        Text("LTX endpoint images and audio drivers apply when LTX 2× is selected.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      RelayVSRModelFolderControl()
+      if let error = store.validationErrors[clip.id] {
+        Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+      }
+      Button("Upscale clip", systemImage: "arrow.up.left.and.arrow.down.right") {
+        Task { await store.generateSelected() }
+      }
+      .buttonStyle(.borderedProminent)
+      .accessibilityIdentifier("relayvsr-upscale-clip")
+      .disabled(store.operationBusy)
+    }.font(.caption)
+  }
+
+  private var ltxControls: some View {
     VStack(alignment:.leading,spacing:8) {
-      Text(settings.mode == .enhance ? "Source movie enhancement" : "Source movie 2× upscale").font(.headline)
       Toggle("Enable experimental movie upscaling",isOn:binding(\.experimentalEnabled))
       Text(settings.mode == .enhance ? "Uses the Reference movie’s selected interval, original frame rate and audio. Output dimensions match the prepared source grid." : "Uses the Reference movie’s selected interval, original frame rate and audio. Output dimensions are twice the prepared source grid.").font(.caption2).foregroundStyle(.secondary)
       Picker("Mode",selection:binding(\.mode)) {
@@ -60,6 +121,28 @@ struct MovieUpscaleInspector:View {
         Toggle("Keep completed chunks",isOn:binding(\.keepChunks))
         Text("Resume requires the same source, recipe, model files and worker. It does not repeat completed chunks.").font(.caption2).foregroundStyle(.secondary)
       }
+    }
+  }
+}
+
+struct RelayVSRModelFolderControl: View {
+  @EnvironmentObject var store: StudioStore
+
+  var body: some View {
+    HStack {
+      Button("Choose RelayVSR model folder…") {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        if let path = store.runtime.relayVSRModelDirectory { panel.directoryURL = URL(fileURLWithPath: path) }
+        if panel.runModal() == .OK, let folder = panel.url {
+          store.runtime.relayVSRModelDirectory = folder.path
+          store.saveRuntime(reloadProfiles: false)
+        }
+      }.disabled(store.operationBusy)
+      Text(store.runtime.relayVSRModelDirectory ?? "Select the folder containing both 2× checkpoints.")
+        .font(.caption).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+        .textSelection(.enabled)
     }
   }
 }

@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import StudioCore
 
-enum NativeUpscalerTool: String, Codable, CaseIterable { case flashVSR, h3Regenerate }
+enum NativeUpscalerTool: String, Codable, CaseIterable { case flashVSR, h3Regenerate, relayVSR }
 
 @MainActor extension StudioStore {
   var h3RegenerateRuntime: H3RegenerateRuntime {

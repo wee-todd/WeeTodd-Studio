@@ -18,6 +18,8 @@ struct RuntimeSettings: Codable {
   var presentationHelperPath: String?
   var drawThingsHelperPath: String?
   var ltx25WorkerPath: String?
+  var relayVSRWorkerPath: String?
+  var relayVSRModelDirectory: String?
   var nativeLTX25Enabled: Bool?
   var usesNativeLTX25: Bool { nativeLTX25Enabled ?? true }
   var ltx25PreviewDecoder: String?
@@ -51,12 +53,16 @@ struct RuntimeSettings: Codable {
     value.musicModels = nil
     value.rippleAdapterPath = nil
     value.rippleProfileID = nil
+    value.relayVSRWorkerPath = nil
+    value.relayVSRModelDirectory = nil
     return value
   }
 
   static func restoring(_ data: Data?, defaults: Self) -> Self {
     var value = data.flatMap { try? JSONDecoder().decode(Self.self, from: $0) } ?? defaults
     if let bundled = defaults.ltx25WorkerPath { value.ltx25WorkerPath = bundled }
+    if let bundled = defaults.relayVSRWorkerPath { value.relayVSRWorkerPath = bundled }
+    if value.relayVSRModelDirectory == nil { value.relayVSRModelDirectory = defaults.relayVSRModelDirectory }
     if let bundled = defaults.h3WorkerPath { value.h3WorkerPath = bundled }
     if let bundled = defaults.drama3WorkerPath { value.drama3WorkerPath = bundled }
     value.presentationHelperPath = defaults.presentationHelperPath
@@ -83,6 +89,10 @@ struct RuntimeSettings: Codable {
     if FileManager.default.isExecutableFile(atPath: helper) { value.drawThingsHelperPath = helper }
     let ltx = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddLTXWorker").path
     if FileManager.default.isExecutableFile(atPath: ltx) { value.ltx25WorkerPath = ltx }
+    let relay = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddRelayVSR").path
+    if FileManager.default.isExecutableFile(atPath: relay) { value.relayVSRWorkerPath = relay }
+    value.relayVSRModelDirectory = ProcessInfo.processInfo.environment["WEETODD_RELAYVSR_MODELS"]
+      ?? NativeRelayVSRPreparation.discoverModels()
     let h3 = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddH3MLXWorker").path
     if FileManager.default.isExecutableFile(atPath: h3) { value.h3WorkerPath = h3 }
     let drama = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddDrama3Worker").path
@@ -209,10 +219,12 @@ struct BridgeResponseBuffer {
       return try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
     }
     let nativeH3Preparation = ["h3-native-catalog", "h3-native-describe", "h3-native-prepare"].contains(command)
-    if nativeH3Preparation || ["ltx-native-catalog", "ltx-native-describe", "ltx-native-prepare",
+    let nativeRelayPreparation = ["relay-native-describe", "relay-native-prepare"].contains(command)
+    if nativeH3Preparation || nativeRelayPreparation || ["ltx-native-catalog", "ltx-native-describe", "ltx-native-prepare",
       "ripple-native-prepare"].contains(command) {
       busy = true; cancellationRequested = false; startedAt = Date(); fraction = 0
-      message = nativeH3Preparation ? "Preparing H3 in Swift…" : "Preparing LTX in Swift…"
+      message = nativeRelayPreparation ? "Preparing RelayVSR in Swift…"
+        : nativeH3Preparation ? "Preparing H3 in Swift…" : "Preparing LTX in Swift…"
       log = ""; livePreview = nil
       defer { busy = false; preparationTask = nil }
       var body = payload; body["runtime"] = try runtime.object()
@@ -227,6 +239,10 @@ struct BridgeResponseBuffer {
           let settings = request["runtime"] as! [String: Any]
           result = ["profiles": try NativeH3Preparation.catalog(directory: settings["profilesDirectory"] as? String ?? "")]
         case "h3-native-describe": result = try NativeH3Preparation.describe(request: request)
+        case "relay-native-describe": result = try NativeRelayVSRPreparation.describe(request: request)
+        case "relay-native-prepare":
+          guard let output else { throw StudioError.invalid("Preparation requires a job directory.") }
+          result = try await NativeRelayVSRPreparation.prepare(request: request, destination: output)
         case "h3-native-prepare":
           guard let output else { throw StudioError.invalid("Preparation requires a job directory.") }
           result = try await NativeH3Preparation.prepareWithMedia(request: request, destination: output)
@@ -262,12 +278,14 @@ struct BridgeResponseBuffer {
     let nativeDrama = ["drama3-render", "drama3-preflight", "drama3-stream", "drama3-supplement-head"].contains(command)
     let nativeLTX = ["ltx-native-render", "ltx-native-preflight"].contains(command) || conversionVerb != nil
     let nativeH3 = ["h3-native-render", "h3-native-preflight"].contains(command)
-    if nativeLTX || nativeH3 || nativeDrama {
+    let nativeRelay = command == "relay-native-render"
+    let nativeWorker = nativeLTX || nativeH3 || nativeDrama || nativeRelay
+    if nativeWorker {
       workerEventsPath = nil; workerEventsTruncated = false; workerEventsArchiveError = nil
     }
-    if nativeLTX || nativeH3 || nativeDrama {
-      let workerPath = nativeDrama ? runtime.drama3WorkerPath : nativeH3 ? runtime.h3WorkerPath : runtime.ltx25WorkerPath
-      let label = nativeDrama ? "Drama 3" : nativeH3 ? "H3" : "LTX"
+    if nativeWorker {
+      let workerPath = nativeRelay ? runtime.relayVSRWorkerPath : nativeDrama ? runtime.drama3WorkerPath : nativeH3 ? runtime.h3WorkerPath : runtime.ltx25WorkerPath
+      let label = nativeRelay ? "RelayVSR" : nativeDrama ? "Drama 3" : nativeH3 ? "H3" : "LTX"
       guard let worker = workerPath, FileManager.default.isExecutableFile(atPath: worker), output != nil else {
         throw StudioError.invalid("The native \(label) worker is missing. Use a complete Studio build.")
       }
@@ -291,6 +309,10 @@ struct BridgeResponseBuffer {
     defer {
       busy = false; process = nil; livePreview = nil
       if let previewFile { try? FileManager.default.removeItem(at: previewFile) }
+      if nativeRelay, let output,
+        !FileManager.default.fileExists(atPath: output.appendingPathComponent("video.mov").path) {
+        try? FileManager.default.removeItem(at: output)
+      }
     }
     var env = ProcessInfo.processInfo.environment
     if command == "setup-download" {
@@ -332,7 +354,7 @@ struct BridgeResponseBuffer {
       to: input, options: .atomic)
     defer { try? FileManager.default.removeItem(at: input) }
     // Create the archive before launching weighted work, outside its atomic output.
-    let archive = try nativeLTX || nativeH3 || nativeDrama
+    let archive = try nativeWorker
       ? NativeWorkerEventArchive(output: output!, jobID: body["jobID"] as? String ?? UUID().uuidString) : nil
     if let archive { workerEventsPath = archive.url.path }
     defer { archive?.finish() }
@@ -340,14 +362,24 @@ struct BridgeResponseBuffer {
     startedAt = Date()
     lastOutputAt = startedAt
     fraction = 0
-    message = command.capitalized + "…"
+    message = nativeRelay ? "Upscaling with RelayVSR…" : command.capitalized + "…"
     log = ""
     let task = Process()
-    task.executableURL = URL(fileURLWithPath: nativeDrama ? runtime.drama3WorkerPath! : nativeH3 ? runtime.h3WorkerPath! : nativeLTX ? runtime.ltx25WorkerPath! : runtime.pythonPath)
-    task.arguments = nativeLTX || nativeH3 || nativeDrama ? [conversionVerb ?? (command == "drama3-supplement-head" ? "supplement-head" : command == "drama3-stream" ? "stream-text" : command.hasSuffix("render") ? "render" : "preflight"), "--request", input.path]
-      : [runtime.root + "/scripts/studio_bridge.py", command, "--request", input.path]
-    if let output { task.arguments! += ["--output", output.path] }
-    task.currentDirectoryURL = nativeLTX || nativeH3 || nativeDrama ? input.deletingLastPathComponent() : URL(fileURLWithPath: runtime.root)
+    if nativeRelay, let output, let worker = runtime.relayVSRWorkerPath,
+      let recipePath = payload["recipePath"] as? String {
+      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      task.executableURL = URL(fileURLWithPath: worker)
+      task.arguments = try NativeRelayVSRPreparation.arguments(recipePath: recipePath, worker: worker,
+        output: output.appendingPathComponent("video.mov"))
+    } else if nativeRelay {
+      throw StudioError.invalid("Prepare the RelayVSR clip before rendering.")
+    } else {
+      task.executableURL = URL(fileURLWithPath: nativeDrama ? runtime.drama3WorkerPath! : nativeH3 ? runtime.h3WorkerPath! : nativeLTX ? runtime.ltx25WorkerPath! : runtime.pythonPath)
+      task.arguments = nativeWorker ? [conversionVerb ?? (command == "drama3-supplement-head" ? "supplement-head" : command == "drama3-stream" ? "stream-text" : command.hasSuffix("render") ? "render" : "preflight"), "--request", input.path]
+        : [runtime.root + "/scripts/studio_bridge.py", command, "--request", input.path]
+      if let output { task.arguments! += ["--output", output.path] }
+    }
+    task.currentDirectoryURL = nativeWorker ? input.deletingLastPathComponent() : URL(fileURLWithPath: runtime.root)
     task.environment = env
     let pipe = Pipe()
     task.standardOutput = pipe
@@ -430,6 +462,7 @@ struct BridgeResponseBuffer {
         }
       }
     }
+    if nativeRelay && cancellationRequested { throw CancellationError() }
     message = "Ready"
     fraction = 1
     return response
@@ -497,7 +530,11 @@ extension Encodable {
     didSet {
       guard videoUpscaleTool != oldValue else { return }
       videoUpscalePlan = nil; h3RegeneratePlan = nil
-      let name = videoUpscaleTool == .h3Regenerate ? "H3 Regenerate" : "FlashVSR+"
+      let name = switch videoUpscaleTool {
+      case .flashVSR: "FlashVSR+"
+      case .h3Regenerate: "H3 Regenerate"
+      case .relayVSR: "RelayVSR 2×"
+      }
       videoUpscaleStatus = videoUpscaleSourcePath.isEmpty ? "Select a source movie." : "Check setup for " + name + "."
     }
   }
@@ -513,6 +550,7 @@ extension Encodable {
   @Published var videoUpscaleStatus = "Select a source movie."
   @Published var videoUpscalePlan: FlashVSRResolvedPlan?
   @Published var videoUpscaleResult: FlashVSRReceipt?
+  @Published var relayVSRResult: (source: String, output: String)?
   @Published var videoUpscalePresets: [VideoUpscalePreset] = []
   @Published var videoUpscalePresetName = ""
   var videoUpscaleTask: Task<Void, Never>?
@@ -1066,24 +1104,27 @@ extension Encodable {
       select(c.id)
     }
   }
-  func createLTXMovieUpscaleCopy() async {
+  func createMovieUpscaleCopy(method: MovieUpscaleMethod) async {
     guard !operationBusy, let source=selectedClip,!source.sourcePath.isEmpty else { return }
     let session=documentSessionID,projectID=project.id,requestID=UUID()
     activeNativeRequest=requestID
     defer { if activeNativeRequest==requestID { activeNativeRequest=nil } }
     do {
-      let measured=try await NativeLTXMoviePreparation.inspectSource(URL(fileURLWithPath:source.sourcePath))
+      let measured = try await method == .relayVSR
+        ? Self.inspectNativeMovie(source.sourcePath, requiresAudio: false)
+        : NativeLTXMoviePreparation.inspectSource(URL(fileURLWithPath:source.sourcePath))
       guard documentSessionID==session,project.id==projectID,selectedClipID==source.id,
         selectedClip==source else { throw StudioError.invalid("The source clip changed while inspecting its movie. Create the copy again.") }
       var media=MediaAsset(name:source.name+" source",kind:.video,path:source.sourcePath,scope:.clip,owner:source.id)
       media.duration=measured["duration"] as? Double ?? 0;media.fps=measured["fps"] as? Double ?? 0
-      let copy=try NativeLTXMovieClipCopy.create(source:source,media:media)
+      let copy=try NativeLTXMovieClipCopy.create(source:source,media:media,method:method)
       change { project in
         guard let index=project.clips.firstIndex(where:{ $0.id==source.id }) else { return }
         project.clips.insert(copy.clip,at:index+1);project.assets.append(copy.asset)
       }
       select(copy.clip.id)
-      notice="Created a separate LTX 2× copy. Enable its experimental movie controls, then prepare."
+      notice = method == .relayVSR ? "Created a RelayVSR 2× copy. Use Upscale clip to run it."
+        : "Created a separate LTX 2× copy. Enable its experimental movie controls, then prepare."
     } catch { self.error=error.localizedDescription }
   }
   func addTitle() {
@@ -1331,13 +1372,15 @@ extension Encodable {
       return asset.path + "|" + String(describing: attributes?[.modificationDate])
         + "|" + String(describing: attributes?[.size])
     }.joined(separator: "\n")
+    let relay = clip.usesRelayVSR ? [runtime.relayVSRWorkerPath, runtime.relayVSRModelDirectory]
+      .map { $0 ?? "" }.joined(separator: "|") : ""
     return clip.generationFingerprint + ((try? encoder.encode(runtime.generationSettings).base64EncodedString()) ?? "")
       + project.continuityDependencyFingerprint(for: clip)
       + continuousSceneDependencyKey(for: clip)
       + GenerationSelection.assetFingerprint(for: clip, assets: allAssets)
       + ((try? encoder.encode(relevantProfiles).base64EncodedString()) ?? "")
       + ((try? encoder.encode(loraGroups).base64EncodedString()) ?? "")
-      + String(clip.settings(in: project).fps) + profileMetadata + bindingMetadata + mediaMetadata
+      + String(clip.settings(in: project).fps) + profileMetadata + bindingMetadata + mediaMetadata + relay
   }
   func generationDescriptionTaskKey(for clip: Clip) -> String {
     // Reopening clears descriptions even when the selected clip's render inputs are identical.
@@ -1349,8 +1392,9 @@ extension Encodable {
     let key = generationRequestKey(for: clip)
     let session = documentSessionID
     do {
-      if clip.inferredTask == "video_upscale", !runtime.usesNativeLTX25 { throw StudioError.invalid("Source movie upscaling requires Swift LTX 2.5. Enable its native runtime.") }
-      let command = clip.engine == .ltx25 && runtime.usesNativeLTX25 ? "ltx-native-describe"
+      if clip.inferredTask == "video_upscale", !clip.usesRelayVSR, !runtime.usesNativeLTX25 { throw StudioError.invalid("LTX movie upscaling requires Swift LTX 2.5. Enable its native runtime.") }
+      let command = clip.usesRelayVSR ? "relay-native-describe"
+        : clip.engine == .ltx25 && runtime.usesNativeLTX25 ? "ltx-native-describe"
         : clip.engine == .h3 && runtime.usesNativeH3 ? "h3-native-describe" : "describe-generation"
       var result = try await descriptionBridge.independent().invoke(command, runtime: runtime, payload: try payload())
       guard documentSessionID == session, selectedClipID == clip.id,
@@ -1379,6 +1423,7 @@ extension Encodable {
     guard !operationBusy else { return }
     let target = selectedClipID, originalSession = documentSessionID
     if selectedClip?.audioDriverSelection != nil,
+      selectedClip?.usesRelayVSR != true,
       !(selectedClip?.engine == .ltx25 && runtime.usesNativeLTX25),
       !(selectedClip?.engine == .h3 && runtime.usesNativeH3) {
       guard await prepareAudioDriver(), selectedClipID == target,
@@ -1405,11 +1450,13 @@ extension Encodable {
         (leader.continuity?.sceneDecodeMode ?? "single") != "single" {
         throw StudioError.invalid("Bounded scene decoding requires Swift LTX 2.5. Enable it or choose Full decode.")
       }
-      if clip.inferredTask == "video_upscale", !settings.usesNativeLTX25 { throw StudioError.invalid("Source movie upscaling requires Swift LTX 2.5. Enable its native runtime.") }
+      let nativeRelay = clip.usesRelayVSR
+      if clip.inferredTask == "video_upscale", !nativeRelay, !settings.usesNativeLTX25 { throw StudioError.invalid("LTX movie upscaling requires Swift LTX 2.5. Enable its native runtime.") }
       let body = try payload()
-      let nativeLTX = clip.engine == .ltx25 && settings.usesNativeLTX25
+      let nativeLTX = !nativeRelay && clip.engine == .ltx25 && settings.usesNativeLTX25
       let nativeH3 = clip.engine == .h3 && settings.usesNativeH3
-      let describeCommand = nativeLTX ? "ltx-native-describe" : nativeH3 ? "h3-native-describe" : "describe-generation"
+      let describeCommand = nativeRelay ? "relay-native-describe"
+        : nativeLTX ? "ltx-native-describe" : nativeH3 ? "h3-native-describe" : "describe-generation"
       var description = try await descriptionBridge.invoke(describeCommand, runtime: settings, payload: body)
       guard isCurrent() else {
         notice = "Preflight stopped because its project or clip changed. Prepare the current clip again."
@@ -1422,7 +1469,8 @@ extension Encodable {
       generationDescriptions[clip.id] = description
       let snapshot = signature(for: clip)
       let destination = dataDirectory.appendingPathComponent("Jobs/\(requestID.uuidString)/prepared")
-      let prepareCommand = nativeLTX ? "ltx-native-prepare" : nativeH3 ? "h3-native-prepare" : "prepare"
+      let prepareCommand = nativeRelay ? "relay-native-prepare"
+        : nativeLTX ? "ltx-native-prepare" : nativeH3 ? "h3-native-prepare" : "prepare"
       var r = try await bridge.invoke(prepareCommand, runtime: settings, payload: body, output: destination)
       if nativeLTX || nativeH3, let recipePath = r["recipePath"] as? String {
         _ = try await bridge.invoke(nativeH3 ? "h3-native-preflight" : "ltx-native-preflight",
@@ -1445,7 +1493,8 @@ extension Encodable {
       }
       validationErrors[clip.id] = nil
       preparedFingerprint = snapshot
-      notice = "Preflight passed. Review the exact prompt, then render."
+      notice = nativeRelay ? "RelayVSR is ready to upscale the source movie."
+        : "Preflight passed. Review the exact prompt, then render."
     } catch {
       guard isCurrent() else { return }
       self.error = error.localizedDescription
@@ -1487,24 +1536,28 @@ extension Encodable {
         throw StudioError.invalid("Prepare the complete continuous scene before rendering.")
       }
       // Native publication is immutable; each take gets its own destination.
-      let nativeLTX = c.engine == .ltx25 && settings.usesNativeLTX25
+      let nativeRelay = c.usesRelayVSR
+      let nativeLTX = !nativeRelay && c.engine == .ltx25 && settings.usesNativeLTX25
       let nativeH3 = c.engine == .h3 && settings.usesNativeH3
       if nativeLTX || nativeH3 { nativePreviewOwner = (requestID, session, projectID, c.id) }
       defer { if nativePreviewOwner?.request == requestID { nativePreviewOwner = nil } }
-      let renderDestination = sceneClips.isEmpty && !nativeLTX && !nativeH3 ? destination
+      let renderDestination = sceneClips.isEmpty && !nativeLTX && !nativeH3 && !nativeRelay ? destination
         : destination.appendingPathComponent(requestID.uuidString)
       if nativeH3 {
         try FileManager.default.createDirectory(at: renderDestination.deletingLastPathComponent(),
           withIntermediateDirectories: true)
       }
       let r = try await bridge.invoke(
-        nativeLTX ? "ltx-native-render" : nativeH3 ? "h3-native-render" : "render",
+        nativeRelay ? "relay-native-render"
+          : nativeLTX ? "ltx-native-render" : nativeH3 ? "h3-native-render" : "render",
         runtime: settings, payload: ["recipePath": path], output: renderDestination)
       guard let video = r["video"] as? String else {
         throw StudioError.invalid("Renderer did not return a movie.")
       }
       let info: [String: Any]
-      if nativeLTX || nativeH3 { info = try await Self.inspectNativeMovie(video) }
+      if nativeLTX || nativeH3 || nativeRelay {
+        info = try await Self.inspectNativeMovie(video, requiresAudio: !nativeRelay)
+      }
       else { info = try await bridge.invoke("inspect", runtime: settings, payload: ["path": video]) }
       if !sceneClips.isEmpty {
         try receiveContinuousScene(result: r, media: info, prepared: sceneReport!,
@@ -1517,7 +1570,10 @@ extension Encodable {
       }
       var renderedDuration = info["duration"] as? Double ?? c.duration
       var renderedStart = 0.0
-      if let start = r["usable_source_in"] as? Double, let duration = r["usable_duration"] as? Double {
+      if nativeRelay {
+        // The exported timeline already matches the selected interval, including any leading audio.
+        renderedDuration = info["duration"] as? Double ?? 0
+      } else if let start = r["usable_source_in"] as? Double, let duration = r["usable_duration"] as? Double {
         renderedStart = start
         renderedDuration = duration
       } else if !c.extensionSource.isEmpty && !nativeH3 {
@@ -1549,13 +1605,14 @@ extension Encodable {
         measuredVideoDuration: info["videoDuration"] as? Double ?? info["duration"] as? Double ?? 0,
         measuredContainerDuration: info["duration"] as? Double ?? 0,
         measuredFPS: info["fps"] as? Double ?? 0) : nil
-      let movieDuration=try nativeLTX ? NativeLTXMovieAcceptance.duration(prepared:prepared,result:r,media:info) : nil
+      let movieDuration = try nativeRelay ? renderedDuration
+        : nativeLTX ? NativeLTXMovieAcceptance.duration(prepared:prepared,result:r,media:info) : nil
       let motionDuration=try nativeH3 ? NativeH3MotionFidelityAcceptance.duration(prepared:prepared,result:r,media:info) : nil
       if let motionDuration {renderedStart=0;renderedDuration=motionDuration}
-      let preserveEditorialDuration = (prepared?["preserveEditorialDuration"] as? Bool)
+      let preserveEditorialDuration = !nativeRelay && ((prepared?["preserveEditorialDuration"] as? Bool)
         ?? ([Engine.ltx23, .ltx25].contains(c.engine) && c.extensionSource.isEmpty
           && c.extensionDirection.isEmpty && c.continuityMode != "motion"
-          && generationConfig["duration_mode"] as? String != "automatic")
+          && generationConfig["duration_mode"] as? String != "automatic"))
       let measuredFPS = info["fps"] as? Double ?? prepared?["nativeFPS"] as? Double ?? 24
       let tolerance = 0.5 / (measuredFPS.isFinite && measuredFPS > 0 ? measuredFPS : 24)
       let mediaDuration = info["duration"] as? Double ?? renderedStart + renderedDuration
@@ -1586,6 +1643,7 @@ extension Encodable {
         var asset = MediaAsset(
           name: c.name + " render", kind: .video, path: video, scope: .clip, owner: c.id)
         asset.duration = motionDuration ?? movieDuration ?? automaticDuration ?? (preserveEditorialDuration ? mediaDuration : min(c.duration, renderedDuration))
+        if nativeRelay { asset.fps = measuredFPS }
         p.assets.append(asset)
       }
       if tooShort {

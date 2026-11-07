@@ -2,12 +2,21 @@
 import PackageDescription
 let package = Package(
   name: "WeeToddMLX", platforms: [.macOS(.v14)],
-  products: [.executable(name: "WeeToddFlashVSRWorker", targets: ["WeeToddFlashVSRWorker"]), .executable(name: "WeeToddH3MLXWorker", targets: ["WeeToddH3MLXWorker"]), .executable(name: "WeeToddMLXDecodeProbe", targets: ["WeeToddMLXDecodeProbe"]), .executable(name: "WeeToddMLXPipelineProbe", targets: ["WeeToddMLXPipelineProbe"]), .executable(name: "WeeToddMLXDenoiserProbe", targets: ["WeeToddMLXDenoiserProbe"]), .executable(name: "WeeToddMLXStackProbe", targets: ["WeeToddMLXStackProbe"]), .executable(name: "WeeToddMLXBlockProbe", targets: ["WeeToddMLXBlockProbe"]), .library(name: "LTX25MLX", targets: ["LTX25MLX"]), .library(name: "H3MLX", targets: ["H3MLX"]), .library(name: "FlashVSRMLX", targets: ["FlashVSRMLX"])],
+  products: [.executable(name: "WeeToddFlashVSRWorker", targets: ["WeeToddFlashVSRWorker"]), .executable(name: "WeeToddH3MLXWorker", targets: ["WeeToddH3MLXWorker"]), .executable(name: "WeeToddMLXDecodeProbe", targets: ["WeeToddMLXDecodeProbe"]), .executable(name: "WeeToddMLXPipelineProbe", targets: ["WeeToddMLXPipelineProbe"]), .executable(name: "WeeToddMLXDenoiserProbe", targets: ["WeeToddMLXDenoiserProbe"]), .executable(name: "WeeToddMLXStackProbe", targets: ["WeeToddMLXStackProbe"]), .executable(name: "WeeToddMLXBlockProbe", targets: ["WeeToddMLXBlockProbe"]), .library(name: "LTX25MLX", targets: ["LTX25MLX"]), .library(name: "H3MLX", targets: ["H3MLX"]), .library(name: "FlashVSRMLX", targets: ["FlashVSRMLX"]), .executable(name: "WeeToddRelayVSR", targets: ["WeeToddRelayVSR"])],
   dependencies: [
     .package(path: "../weetodd-inference"),
     .package(url: "https://github.com/ml-explore/mlx-swift.git", revision: "901941965d82e4a216d4d117231d847d194c563d"),
   ],
   targets: [
+    .executableTarget(name: "WeeToddRelayVSR", dependencies: ["RelayVSR", .product(name: "MLX", package: "mlx-swift")],
+      swiftSettings: [.unsafeFlags(["-parse-as-library"])]),
+    .target(name: "RelayVSR", dependencies: [
+      .product(name: "InferenceContracts", package: "weetodd-inference"),
+      .product(name: "TensorIO", package: "weetodd-inference"),
+      .product(name: "MLX", package: "mlx-swift"),
+      .product(name: "MLXNN", package: "mlx-swift"),
+    ]),
+    .testTarget(name: "RelayVSRTests", dependencies: ["RelayVSR"]),
     .executableTarget(name: "WeeToddH3MLXWorker", dependencies: ["H3MLX",
       .product(name: "InferenceContracts", package: "weetodd-inference"),
       .product(name: "InferenceMedia", package: "weetodd-inference"),

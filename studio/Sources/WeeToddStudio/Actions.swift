@@ -97,6 +97,13 @@ enum ClipState: String {
     }
     var result = project.continuityIssues(for: clip)
     if let message = validationErrors[clip.id] { result.append(message) }
+    if clip.usesRelayVSR {
+      if generationDescriptions[clip.id]?["studioInput"] as? String != generationRequestKey(for: clip),
+        result.isEmpty {
+        result.append("Prepare the RelayVSR source and checkpoints")
+      }
+      return result
+    }
     if clip.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       result.append("Add a prompt")
     }
@@ -191,7 +198,7 @@ enum ClipState: String {
       }
     }
     let needsPythonRenderer = project.clips.contains {
-      $0.engine != .movie && !($0.engine == .ltx25 && runtime.usesNativeLTX25)
+      $0.engine != .movie && !$0.usesRelayVSR && !($0.engine == .ltx25 && runtime.usesNativeLTX25)
         && !($0.engine == .h3 && runtime.usesNativeH3)
     }
     if needsPythonRenderer && !FileManager.default.isExecutableFile(atPath: runtime.pythonPath) {
@@ -200,7 +207,9 @@ enum ClipState: String {
           id: "runtime", priority: 0, title: "Connect the MLX renderer",
           detail: "Choose the repository and Python environment.", destination: "runtime"))
     }
-    if profiles.isEmpty && project.clips.contains(where: { $0.engine != .movie && $0.engine != .drawThings }) {
+    if profiles.isEmpty && project.clips.contains(where: {
+      $0.engine != .movie && $0.engine != .drawThings && !$0.usesRelayVSR
+    }) {
       items.append(
         ActionItem(
           id: "profiles", priority: 0, title: "Set up models",
@@ -214,7 +223,7 @@ enum ClipState: String {
           ActionItem(
             id: c.id.uuidString + "-\(i)", priority: 0, title: c.name + " · " + text,
             detail: "Resolve before generation or export.", clipID: c.id,
-            destination: c.engine == .drawThings ? "drawThings" : text.contains("recipe")
+            destination: c.usesRelayVSR ? "clip" : c.engine == .drawThings ? "drawThings" : text.contains("recipe")
               || text.localizedCaseInsensitiveContains("checkpoint")
               || text.localizedCaseInsensitiveContains("model")
               || text.localizedCaseInsensitiveContains("encoder")
@@ -234,11 +243,11 @@ enum ClipState: String {
           items.append(
             ActionItem(
               id: c.id.uuidString + "-render", priority: 1,
-              title: (state == .updated ? "Regenerate " : "Generate ") + c.name,
-              detail: state == .updated
+              title: (c.usesRelayVSR ? "Upscale " : state == .updated ? "Regenerate " : "Generate ") + c.name,
+              detail: c.usesRelayVSR ? "Upscale the selected source interval with RelayVSR." : state == .updated
                 ? "Generation settings changed since the current version."
                 : "Prepare, review the exact prompt, and render.", clipID: c.id,
-              destination: "prompt"))
+              destination: c.usesRelayVSR ? "clip" : "prompt"))
         }
       }
       let s = c.settings(in: project)
@@ -333,6 +342,11 @@ enum ClipState: String {
             && ((!$0.hasReviewedReusedTake && $0.renderedSignature != signature(for: $0))
               || !FileManager.default.fileExists(atPath: $0.sourcePath))
         }.map { $0.id.uuidString }
+        let targets = clipOnly ? project.clips.filter { $0.id == clipID } : project.clips
+        let pending = Set(body["generateIDs"] as? [String] ?? [])
+        guard !targets.contains(where: { $0.usesRelayVSR && pending.contains($0.id.uuidString) }) else {
+          throw StudioError.invalid("Upscale the pending RelayVSR clip in Studio before exporting its headless job.")
+        }
         if nativeHeadlessEligible {
           try await exportNativeHeadlessJob(body: body, to: url, clipOnly: clipOnly)
           notice = "Exported native headless job. Run it with WeeToddCLI --job; Python is not required."

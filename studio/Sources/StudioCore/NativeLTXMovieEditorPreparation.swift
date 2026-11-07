@@ -20,7 +20,11 @@ public enum NativeLTXMovieEditorPreparation {
     guard let raw=request["project"],let id=request["clipID"] as? String else { throw StudioError.invalid("Missing movie editor request.") }
     let project=try JSONDecoder().decode(StudioProject.self,from:JSONSerialization.data(withJSONObject:raw))
     guard let clip=project.clips.first(where:{ $0.id.uuidString.caseInsensitiveCompare(id) == .orderedSame }),
-      let settings=clip.generationSelection?.ltx25MovieUpscale,clip.generationSelection?.task == "video_upscale" else {
+      clip.generationSelection?.task == "video_upscale" else {
+      throw StudioError.invalid("Select source movie upscaling with explicit experimental movie settings.")
+    }
+    guard !clip.usesRelayVSR else { throw StudioError.invalid("Run RelayVSR from the Studio video upscale panel.") }
+    guard let settings=clip.generationSelection?.ltx25MovieUpscale else {
       throw StudioError.invalid("Select source movie upscaling with explicit experimental movie settings.")
     }
     try NativeLTXMoviePreparation.validateEditor(clip:clip,settings:settings,isContinuousScene:project.isContinuousSceneMember(clip))

@@ -30,7 +30,7 @@ import StudioCore
   }
   var nativeHeadlessEligible: Bool {
     !project.clips.isEmpty && project.clips.allSatisfy { clip in
-      clip.engine == .movie || clip.engine == .h3 && runtime.usesNativeH3
+      clip.engine == .movie || clip.usesRelayVSR || clip.engine == .h3 && runtime.usesNativeH3
         || clip.engine == .ltx25 && runtime.usesNativeLTX25
     }
   }

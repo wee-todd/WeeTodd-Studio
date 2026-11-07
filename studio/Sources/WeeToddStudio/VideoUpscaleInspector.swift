@@ -21,6 +21,7 @@ struct VideoUpscaleInspector: View {
       Picker("Restoration model", selection: $store.videoUpscaleTool) {
         Text("FlashVSR+").tag(NativeUpscalerTool.flashVSR)
         Text("H3 Regenerate").tag(NativeUpscalerTool.h3Regenerate)
+        Text("RelayVSR 2×").tag(NativeUpscalerTool.relayVSR)
       }.pickerStyle(.segmented).disabled(store.videoUpscaleBusy)
         .accessibilityIdentifier("native-upscaler-model")
       ScrollView {
@@ -34,8 +35,14 @@ struct VideoUpscaleInspector: View {
             .font(.caption).foregroundStyle(.secondary)
           Group {
             if store.videoUpscaleTool == .h3Regenerate { H3RegenerateInspector() }
-            else { flashControls }
-            DisclosureGroup("Model setup", isExpanded: $setupOpen) { setupControls.padding(.top, 8) }
+            else if store.videoUpscaleTool == .relayVSR {
+              Text("Doubles an SDR movie’s dimensions and preserves its frame timing and audio.")
+                .font(.caption).foregroundStyle(.secondary)
+              RelayVSRModelFolderControl()
+            } else { flashControls }
+            if store.videoUpscaleTool != .relayVSR {
+              DisclosureGroup("Model setup", isExpanded: $setupOpen) { setupControls.padding(.top, 8) }
+            }
           }.disabled(store.videoUpscaleBusy)
           if store.videoUpscaleTool == .flashVSR, let receipt = store.videoUpscaleResult {
             VideoUpscaleComparison(receipt: receipt, busy: store.videoUpscaleBusy).id(receipt.video.path)
@@ -43,11 +50,15 @@ struct VideoUpscaleInspector: View {
           } else if store.videoUpscaleTool == .h3Regenerate, let receipt = store.h3RegenerateResult {
             H3RegenerateComparison(receipt: receipt).id(receipt.video.path)
             reveal(receipt.video.path)
+          } else if store.videoUpscaleTool == .relayVSR, let receipt = store.relayVSRResult,
+            receipt.source == store.videoUpscaleSourcePath {
+            reveal(receipt.output)
           }
         }
       }
       Divider()
-      Text(store.videoUpscaleStatus).font(.callout).textSelection(.enabled).lineLimit(4).frame(maxWidth: .infinity, alignment: .leading)
+      Text(store.videoUpscaleBusy && store.videoUpscaleTool == .relayVSR && store.bridge.busy
+        ? store.bridge.message : store.videoUpscaleStatus).font(.callout).textSelection(.enabled).lineLimit(4).frame(maxWidth: .infinity, alignment: .leading)
       HStack {
         if store.videoUpscaleBusy { ProgressView().controlSize(.small); Button("Cancel") { store.cancelVideoProcessing() } }
         Spacer()
@@ -60,6 +71,7 @@ struct VideoUpscaleInspector: View {
   }
   private func run(preflightOnly: Bool = false) {
     if store.videoUpscaleTool == .h3Regenerate { store.runH3Regenerate(preflightOnly: preflightOnly) }
+    else if store.videoUpscaleTool == .relayVSR { store.runRelayVSRUpscale(preflightOnly: preflightOnly) }
     else { store.runVideoUpscale(preflightOnly: preflightOnly) }
   }
   private func reveal(_ path: String) -> some View {

@@ -235,6 +235,7 @@ public struct GenerationSelection: Codable, Equatable {
   public var ltx25SingleStage:LTX25SingleStageSettings?
   public var ltx25DFR:LTX25DFRSettings?
   public var ltx25MovieUpscale:LTX25MovieUpscaleSettings?
+  public var movieUpscaleMethod: MovieUpscaleMethod?
   public init(task: String = "t2v", preset: GenerationPreset = .balanced) {
     self.task = task
     self.preset = preset

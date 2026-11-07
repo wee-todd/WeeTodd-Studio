@@ -195,7 +195,8 @@ struct PromptActions: View {
         Task { await store.generateSelected() }
       } label: {
         Label(store.selectedContinuousScene.isEmpty ? "Generate clip" : "Generate scene", systemImage: "play.fill")
-      }.buttonStyle(.borderedProminent).disabled(store.operationBusy || store.selectedClip?.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false)
+      }.buttonStyle(.borderedProminent).disabled(store.operationBusy || (store.selectedClip?.usesRelayVSR != true
+        && store.selectedClip?.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false))
     }
   }
 }

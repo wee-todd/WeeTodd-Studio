@@ -39,6 +39,13 @@ def test_native_ltx_distribution_installs_verified_kernels_and_rejects_tampering
     assert (app / "Contents/Resources/LTXNative/mlx.metallib").is_file()
     assert not (app / "Contents/MacOS/mlx.metallib").exists()
     assert (app / "Contents/Resources/LTXNative/Notices.txt").is_file()
+    relay = source / "WeeToddRelayVSR"
+    relay.write_text("RelayVSR worker fixture")
+    relay.chmod(0o755)
+    with pytest.raises(ValueError, match="Metal library is missing for RelayVSR"):
+        packager.package_app(source, "release", relay_worker=relay)
+    app = packager.package_app(source, "release", ltx_worker=folder, relay_worker=relay)
+    assert (app / "Contents/MacOS/WeeToddRelayVSR").read_text() == "RelayVSR worker fixture"
     (folder / "mlx.metallib").write_text("tampered")
     with pytest.raises(ValueError, match="hash mismatch"):
         packager.package_app(source, "release", ltx_worker=folder)

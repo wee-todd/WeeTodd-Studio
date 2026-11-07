@@ -4,8 +4,9 @@ import StudioCore
 
 extension StudioStore {
   /// AVFoundation reads the published movie asynchronously; no Python inspection subprocess.
-  static func inspectNativeMovie(_ path: String) async throws -> [String: Any] {
-    let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+  static func inspectNativeMovie(_ path: String, requiresAudio: Bool = true) async throws -> [String: Any] {
+    let asset = AVURLAsset(url: URL(fileURLWithPath: path),
+      options: requiresAudio ? nil : [AVURLAssetPreferPreciseDurationAndTimingKey: true])
     let duration = try await asset.load(.duration).seconds
     let tracks = try await asset.loadTracks(withMediaType: .video)
     guard let track = tracks.first else { throw StudioError.invalid("Native renderer returned no video track.") }
@@ -16,7 +17,8 @@ extension StudioStore {
     let bounds = CGRect(origin:.zero,size:natural).applying(transform)
     let size = CGSize(width:abs(bounds.width),height:abs(bounds.height))
     let audio = try await asset.loadTracks(withMediaType: .audio)
-    guard duration.isFinite, duration > 0, fps.isFinite, fps > 0, size.width.isFinite,size.height.isFinite,size.width>0,size.height>0,!audio.isEmpty else {
+    guard duration.isFinite, duration > 0, fps.isFinite, fps > 0, size.width.isFinite,size.height.isFinite,size.width>0,size.height>0,
+      !requiresAudio || !audio.isEmpty else {
       throw StudioError.invalid("Native renderer returned an incomplete audiovisual movie.")
     }
     return ["duration": duration, "videoDuration": videoDuration,

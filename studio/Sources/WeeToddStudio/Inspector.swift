@@ -7,7 +7,7 @@ struct InspectorColumn: View {
     VStack(spacing: 0) {
       PanelHeading(
         title: "CLIP", icon: "slider.horizontal.3",
-        trailing: store.selectedClip.map { $0.engine.rawValue.uppercased() } ?? "—")
+        trailing: store.selectedClip.map { $0.usesRelayVSR ? "RELAYVSR" : $0.engine.rawValue.uppercased() } ?? "—")
       ScrollViewReader { proxy in
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
@@ -96,7 +96,10 @@ struct ClipInspector: View {
           ForEach(GenerationSettingsDetail.allCases) { Text($0.label).tag($0) }
         }.pickerStyle(.segmented)
       }
-      if clip.engine != .movie {
+      if clip.inferredTask == "video_upscale" {
+        MovieUpscaleInspector(clip: clip, showLTXSettings: detail.showsAdvanced && store.runtime.usesNativeLTX25)
+      }
+      if clip.engine != .movie && !clip.usesRelayVSR {
         field("RUN WITH") {
           Picker("Run with", selection: Binding(get: { clip.generationProvider }, set: { provider in
             store.editClip { $0.selectGenerationProvider(provider) }
@@ -125,7 +128,7 @@ struct ClipInspector: View {
             Text("Duration · seconds")
             TextField("Duration", value: binding(\.duration), format: .number.precision(.fractionLength(2)))
           }.textFieldStyle(.roundedBorder).font(.caption)
-          if clip.engine != .drawThings {
+          if clip.engine != .drawThings && clip.inferredTask != "video_upscale" {
             if clip.engine == .h3 {
               LabeledContent("Generation FPS", value: "24 · H3 model grid").font(.caption)
             } else {
@@ -158,8 +161,11 @@ struct ClipInspector: View {
       if !clip.sourcePath.isEmpty {
         DisclosureGroup("Clip actions") {
           RippleClipInspector(clip: clip)
-          Button("Upscale movie · LTX 2× copy") { Task { await store.createLTXMovieUpscaleCopy() } }
-            .disabled(store.operationBusy)
+          Menu("Upscale movie copy") {
+            ForEach(MovieUpscaleMethod.allCases) { method in
+              Button(method.label) { Task { await store.createMovieUpscaleCopy(method: method) } }
+            }
+          }.disabled(store.operationBusy)
           HStack {
             Button("Split") { store.split() }
             Button("Duplicate") { store.duplicateClip() }
@@ -170,7 +176,7 @@ struct ClipInspector: View {
           }.controlSize(.small)
         }
       }
-      if detail.showsAdvanced {
+      if detail.showsAdvanced && !clip.usesRelayVSR {
         if clip.engine != .drawThings { MotionFidelityInspector(clip: clip) }
         advancedSection
       }

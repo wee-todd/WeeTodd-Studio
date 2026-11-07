@@ -39,8 +39,8 @@ open "studio/.build/WeeTodd Studio.app"
 ```
 
 The app bundles the GUI, CLI and renderer source. Building does not install Python dependencies
-or download models. Native **H3 Regenerate** and **FlashVSR+** use bundled Swift/MLX helpers for
-model setup, conversion and inference, without a Python environment. For features that use the
+or download models. **H3 Regenerate**, **FlashVSR+** and **RelayVSR 2×** use bundled Swift/MLX
+workers for native video processing without a Python model runtime. For features that use the
 managed renderer, choose **Set Up Managed Renderer** in **Studio Settings** or connect an existing
 compatible runtime. FFmpeg/FFprobe and optional finishing tools still require configuration.
 See the [build and runtime guide](studio/README.md#build-and-open).
@@ -3050,9 +3050,20 @@ distribution remains pending [licensing qualification](studio/README.md#build-th
 The project is experimental and pre-release. Do not commit checkpoints, generated media,
 caches, credentials, tokens, machine-specific paths, or private information.
 
-## Native H3 and FlashVSR+ video restoration
+## Native video upscaling and restoration
 
-Open **Upscale Video** in the media library and choose **FlashVSR+** or **H3 Regenerate**. Native setup, tensor conversion and inference run in Swift/MLX. A complete app includes both workers and their Metal kernels; no Python model environment or vpipe installation is required. Choose the shared model library in **Model setup** to reuse verified installed weights before acquiring missing pinned components.
+Open **Upscale Video** in the media library and choose **RelayVSR 2×**, **FlashVSR+**, or
+**H3 Regenerate**. The app bundles the Swift/MLX workers and Metal kernels.
+
+**RelayVSR 2×** doubles the dimensions of an SDR movie while retaining its source frame timestamps,
+including variable frame timing, and copies the original audio. Choose the folder containing both
+2× checkpoints, then click **Upscale**. Studio adds the result to **Project Assets**. To upscale
+only a timeline clip's source interval, choose **Clip actions → Upscale movie copy → RelayVSR 2×**,
+then **Upscale clip**. The result appears in the copy's **Versions**. The CLI uses the same Metal
+inference and AVFoundation media pipeline. [RelayVSR setup and CLI guide](integrations/weetodd-mlx/RELAYVSR.md)
+
+For FlashVSR+ and H3, choose the shared model library in **Model setup** to reuse verified
+installed weights before acquiring missing pinned components.
 
 FlashVSR+ supports **Turbo/Base × Tiny/Full Wan VAE**, with the source frame rate and original audio. H3 offers the fixed three-step publisher refinement profile, explicit source precision and Released/Fast H3 decoding for 24 FPS sources. Model, memory and geometry admission stay specific to each engine. Read the [FlashVSR+ reference](studio/FLASHVSR_SETTINGS.md) and [H3 Regenerate reference](studio/H3_REGENERATE_SETTINGS.md) for controls, resource requirements and qualification limits.
 

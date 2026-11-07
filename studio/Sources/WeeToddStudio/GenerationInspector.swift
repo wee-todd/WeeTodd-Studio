@@ -186,8 +186,7 @@ struct GenerationInspector: View {
       }
       if detail.showsAdvanced, clip.engine == .ltx25, store.runtime.usesNativeLTX25 {
         DiffusionVAEInspector(clip:clip)
-        if clip.inferredTask == "video_upscale" { MovieUpscaleInspector(clip:clip) }
-        else {
+        if clip.inferredTask != "video_upscale" {
           LTXDFRInspector(clip: clip, generation: descriptor ?? store.profiles.first(where: { $0.id == clip.profileID })?.generation)
           guidedControls; automaticDurationControls; singleStageControls; ordinaryKeyframeControls
         }

@@ -160,7 +160,7 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
                  signing_identity: str = "-", native_worker: Path | None = None,
                  ltx_worker: Path | None = None,
                  h3_mlx_worker: Path | None = None, drama3_worker: Path | None = None,
-                 flashvsr_worker: Path | None = None) -> None:
+                 flashvsr_worker: Path | None = None, relay_worker: Path | None = None) -> None:
     """Assemble a fresh bundle without requiring ignored agent configuration."""
     binaries = root / "studio" / ".build" / configuration
     macos = app / "Contents" / "MacOS"
@@ -207,6 +207,10 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
         from build_flashvsr_worker import install_worker as install_flashvsr_worker
 
         install_flashvsr_worker(flashvsr_worker, macos, resources)
+    if relay_worker is not None:
+        if not (resources / "LTXNative/mlx.metallib").is_file():
+            raise ValueError("The shared MLX Metal library is missing for RelayVSR")
+        shutil.copy2(relay_worker, macos / "WeeToddRelayVSR")
     source = resources / "RendererSource"
     source.mkdir(parents=True, exist_ok=True)
     shutil.copy2(root / "studio/Resources/AppIcon.icns", resources / "AppIcon.icns")
@@ -292,7 +296,7 @@ def package_app(root: Path, configuration: str, drawthings: Path | None = None,
                 signing_identity: str | None = None, output: Path | None = None,
                 native_worker: Path | None = None, ltx_worker: Path | None = None,
                 h3_mlx_worker: Path | None = None, drama3_worker: Path | None = None,
-                flashvsr_worker: Path | None = None) -> Path:
+                flashvsr_worker: Path | None = None, relay_worker: Path | None = None) -> Path:
     signing_identity = resolve_signing_identity(root, signing_identity)
     build = root / "studio" / ".build"
     app = output.resolve() if output is not None else build / "WeeTodd Studio.app"
@@ -304,7 +308,8 @@ def package_app(root: Path, configuration: str, drawthings: Path | None = None,
     with tempfile.TemporaryDirectory(prefix=".studio-package-", dir=app.parent) as temporary:
         staging = Path(temporary) / app.name
         build_bundle(root, configuration, staging, drawthings, signing_identity,
-                     native_worker, ltx_worker, h3_mlx_worker, drama3_worker, flashvsr_worker)
+                     native_worker, ltx_worker, h3_mlx_worker, drama3_worker,
+                     flashvsr_worker, relay_worker)
         # The user may have launched the app while the bundle was being assembled.
         assert_app_not_running(app)
         previous = Path(temporary) / "Previous.app"
@@ -378,9 +383,17 @@ def main():
 
     flashvsr_worker = build_flashvsr_worker(root, swift=toolchain.swift, env=toolchain.env,
                                           build_arguments=toolchain.build_arguments)
+    mlx_package = root / "integrations/weetodd-mlx"
+    subprocess.run(
+        [str(toolchain.swift), "build", "--package-path", str(mlx_package), "-c", "release",
+         "--product", "WeeToddRelayVSR", "--jobs", "2", "--disable-automatic-resolution",
+         *toolchain.build_arguments, "-Xcxx", "-DNDEBUG"],
+        check=True, env=toolchain.env,
+    )
+    relay_worker = mlx_package / ".build/release/WeeToddRelayVSR"
     print(package_app(root, args.configuration, args.drawthings_distribution,
                       identity, args.output, native_worker, ltx_worker, h3_mlx_worker,
-                      drama3_worker, flashvsr_worker))
+                      drama3_worker, flashvsr_worker, relay_worker))
 
 
 if __name__ == "__main__":

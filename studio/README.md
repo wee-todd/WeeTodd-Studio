@@ -1520,7 +1520,7 @@ preserving the prompt, inputs, seed, canvas and duration. Swift LTX **Reset conf
 selected config without changing those shot fields. Changing **Model profile** or the detail
 view preserves authored settings. Other engines' optional execution presets, movie overrides and
 MetalFX guides live in **Finishing and execution** under **Advanced / All**. **Timeline editing** retains source
-trim, audio/pan and transitions; **Clip actions** retains Ripple, **Upscale movie · LTX 2× copy**,
+trim, audio/pan and transitions; **Clip actions** retains Ripple, **Upscale movie copy**,
 split/duplicate and **Extend video**. Version history remains available. Choosing an execution preset
 is an explicit replacement of generation overrides. **Generate** prepares and validates the clip
 automatically. Separate preparation and prompt/settings review remain available. Clip/movie headless
@@ -4234,7 +4234,17 @@ after the mixer correction, the final AAC export had zero measured sample offset
 These are one local qualification run, not a general throughput guarantee. Rendering quality and
 musical gesture/lip synchronization remain model-dependent.
 
-## Native H3 and FlashVSR+ upscalers
+## Native video upscaling and restoration
+
+For **RelayVSR 2×**, open **Upscale Video** in the media library, select **RelayVSR 2×**, and
+choose a source movie. If the two installed checkpoints have not been discovered, choose their
+folder. **Check setup** checks that the source movie and both checkpoint files are readable. **Upscale** processes the whole
+movie with Swift MLX on Metal and adds the HEVC result to **Project Assets**. AVFoundation
+preserves the source frame timing and copies the original audio.
+
+To process the interval selected on a timeline clip, choose **Clip actions → Upscale movie copy
+→ RelayVSR 2×**, then **Upscale clip**. The upscaled take appears in the copy's **Versions**.
+[Checkpoint files and command-line usage](../integrations/weetodd-mlx/RELAYVSR.md)
 
 Open **Upscale Video** in the media library. Select **FlashVSR+** for Turbo/Base with Tiny/Full Wan decoding, or **H3 Regenerate** for its fixed three-step refinement and Released/Fast H3 decoder. The app's bundled Swift/MLX workers perform inference, native model preparation and conversion. Connect the shared model library through **Model setup**, reuse installed components, and acquire only missing pinned files. FFmpeg/FFprobe provide media transport. No Python model runtime or vpipe is required for native upscaling.
 

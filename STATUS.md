@@ -1,5 +1,17 @@
 # WeeTodd Studio implementation status
 
+## November 7 native RelayVSR 2× upscaling
+
+Studio exposes RelayVSR 2× for complete source movies and timeline clip intervals. The native
+Swift/Metal worker reads the published 2× checkpoint pair, uses sparse Wan keyframes and Flash
+reconstruction, and publishes HEVC video with source presentation timing and audio passthrough.
+See the [RelayVSR guide](integrations/weetodd-mlx/RELAYVSR.md) for model setup and CLI usage.
+
+Installed-weight qualification covered a trimmed 23.976 FPS Studio render, exact timestamps on a
+variable-rate source, an audio lead and byte-identical AAC passthrough for a full source. A local
+M3 Ultra one-step run processed 31 synthetic frames from 960 × 540 to 1920 × 1080 in 11.6 seconds,
+including loading and encoding. Upstream pixel parity and broader visual quality remain unqualified.
+
 ## November 1 optional Pika H3 Flex LoRAs
 
 Native Swift H3 supports the separately installed Pika Flex Comfy-format FL2VA and Ref2VA
