@@ -3,6 +3,7 @@ import AppKit
 import Combine
 import Foundation
 import StudioCore
+import ImageLayout
 import InferenceContracts
 import UniformTypeIdentifiers
 
@@ -547,6 +548,14 @@ extension Encodable {
   @Published var h3ImageVAEPath = ""
   var preparedH3Image: PreparedH3Image?
   var preparedMOSSImage: PreparedMOSSImage?
+  @Published var mossModelLinks = MOSSModelLinks()
+  @Published var mossModelDiscoveryBusy = false
+  @Published var mossAnalyzerFamily: ImageLayoutVisionModel?
+  @Published var mossRecommendedGemmaDirectory: String?
+  @Published var mossSharedTokenizerAvailable = false
+  var mossModelDiscoveryAttempt = UUID()
+  var mossAnalyzerSelectionAttempt = UUID()
+  var mossModelLinksWritable = true
   @Published var scannedLoRAEntries: [LoRAFolderEntry] = []
   @Published var loraFolderWarnings: [String] = []
   @Published var loraFolderScanBusy = false
@@ -754,6 +763,7 @@ extension Encodable {
       try? Data(contentsOf: dataDirectory.appendingPathComponent("runtime.json")),
       defaults: runtimeDefaults)
     loadVideoUpscalePreferences()
+    loadMOSSModelLinks()
     loadLTX25Configs()
     guard restoreSession else { return }
     try? FileManager.default.createDirectory(

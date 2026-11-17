@@ -7,11 +7,16 @@ import UniformTypeIdentifiers
 struct MOSSLayoutAnalysisView: View {
   @EnvironmentObject var store: StudioStore
   @Environment(\.dismiss) private var dismiss
-  @AppStorage("mossLayoutAnalyzerDirectory") private var modelDirectory = ""
+  private var modelDirectory: String { store.mossModelLinks.analyzerDirectory }
+  private var needsSharedComponents: Bool {
+    store.mossAnalyzerFamily == .gemma4_12b && !store.mossSharedTokenizerAvailable
+  }
   @State private var source: URL?
   @State private var analysis: CapturedMOSSLayoutAnalysis?
   @State private var job: Task<Void, Never>?
   @State private var message = ""
+  @State private var choosingModel = false
+  @State private var modelSelectionTask: Task<Void, Never>?
   var onApplied: (CapturedMOSSLayoutAnalysis) -> Void
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
@@ -38,19 +43,29 @@ struct MOSSLayoutAnalysisView: View {
           Text("Subject-box control is enabled when you use this layout. Moving a whole subject also moves its detail boxes.").font(.caption2).foregroundStyle(.secondary)
           Divider()
           Text("Local vision model").font(.headline)
+          if store.mossModelDiscoveryBusy { ProgressView("Finding installed models…").controlSize(.small) }
           Text(modelDirectory.isEmpty ? "Choose installed MLX Qwen3.5-4B or Gemma4-12B vision weights." : modelDirectory)
             .font(.caption).textSelection(.enabled).lineLimit(3)
-          Button("Choose model folder…") { chooseModel() }.disabled(job != nil)
-          if let recommended = MOSSLayoutAnalysisPreparation.discoverModel(libraryDirectory: store.imageDraft?.mossImage?.libraryDirectory,
-            sharedDirectory: store.imageDraft?.mossImage?.sharedDirectory), recommended != modelDirectory,
-            MOSSLayoutAnalysisPreparation.visionModel(URL(fileURLWithPath: recommended)) == .gemma4_12b {
-            Button("Use installed Gemma4-12B") { modelDirectory = recommended; analysis = nil; message = "" }.disabled(job != nil)
+          Button("Choose model folder…") { chooseModel() }.disabled(job != nil || choosingModel)
+          if let recommended = store.mossRecommendedGemmaDirectory, recommended != modelDirectory {
+            Button("Use installed Gemma4-12B") {
+              store.selectMOSSAnalyzer(recommended); analysis = nil; message = ""
+              Task { await store.resolveMOSSModelLinks() }
+            }.disabled(job != nil || choosingModel)
           }
-          if MOSSLayoutAnalysisPreparation.visionModel(URL(fileURLWithPath: modelDirectory)) != .gemma4_12b {
+          if store.mossAnalyzerFamily != .gemma4_12b {
             Link("Qwen3.5-4B MLX model", destination: URL(string: "https://huggingface.co/mlx-community/Qwen3.5-4B-MLX-4bit")!).font(.caption)
           }
           Text("Swift MLX + Apple Vision. Analysis weights unload before image generation.")
             .font(.caption2).foregroundStyle(.secondary)
+          if !store.mossModelDiscoveryBusy && needsSharedComponents {
+            Text("MOSS shared components were not found. Link your MOSS model library in image settings.")
+              .font(.caption).foregroundStyle(.orange)
+          }
+          if !store.mossModelDiscoveryBusy && !modelDirectory.isEmpty && store.mossAnalyzerFamily == nil {
+            Text("The selected model folder is unavailable or incomplete. Reconnect its volume or choose another folder.")
+              .font(.caption).foregroundStyle(.orange)
+          }
           Spacer()
         }.padding(.trailing, 14).frame(minWidth: 220, idealWidth: 270, maxWidth: 310)
         VStack(alignment: .leading, spacing: 10) {
@@ -83,19 +98,18 @@ struct MOSSLayoutAnalysisView: View {
         }
         Spacer()
         Button(analysis == nil ? "Analyze image" : "Analyze again") { analyze() }
-          .disabled(job != nil || source == nil || modelDirectory.isEmpty)
+          .disabled(job != nil || source == nil || modelDirectory.isEmpty || store.mossModelDiscoveryBusy || choosingModel || store.mossAnalyzerFamily == nil || needsSharedComponents)
         Button("Use layout") { apply() }.buttonStyle(.borderedProminent).disabled(job != nil || analysis == nil)
       }
     }.padding(24).frame(minWidth: 1000, minHeight: 740)
       .interactiveDismissDisabled(job != nil)
-      .onAppear {
-        if modelDirectory.isEmpty || !MOSSLayoutAnalysisPreparation.compatibleModel(URL(fileURLWithPath: modelDirectory)) {
-          let settings = store.imageDraft?.mossImage
-          modelDirectory = MOSSLayoutAnalysisPreparation.discoverModel(libraryDirectory: settings?.libraryDirectory,
-            sharedDirectory: settings?.sharedDirectory) ?? ""
-        }
+      .task {
+        await store.resolveMOSSModelLinks(legacyAnalyzer: UserDefaults.standard.string(forKey: "mossLayoutAnalyzerDirectory"))
       }
-      .onDisappear { if job != nil { job?.cancel(); store.bridge.cancel() } }
+      .onDisappear {
+        modelSelectionTask?.cancel()
+        if job != nil { job?.cancel(); store.bridge.cancel() }
+      }
   }
   private func chooseSource() {
     let panel = NSOpenPanel(); panel.allowedContentTypes = [.image]; panel.allowsMultipleSelection = false
@@ -105,8 +119,20 @@ struct MOSSLayoutAnalysisView: View {
   private func chooseModel() {
     let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
     guard panel.runModal() == .OK, let url = panel.url else { return }
-    guard MOSSLayoutAnalysisPreparation.compatibleModel(url) else { message = "Choose complete MLX Qwen3.5-4B Q4/Q8 or Gemma4-12B unified Q8 vision weights."; return }
-    modelDirectory = url.path; analysis = nil; message = ""
+    let session = store.documentSessionID, selectionAttempt = UUID()
+    store.mossAnalyzerSelectionAttempt = selectionAttempt
+    let draftKey = store.imageDraft?.storageKey
+    modelSelectionTask?.cancel()
+    choosingModel = true
+    modelSelectionTask = Task {
+      defer { choosingModel = false; modelSelectionTask = nil }
+      let compatible = await Task.detached(priority: .utility) { MOSSLayoutAnalysisPreparation.compatibleModel(url) }.value
+      guard !Task.isCancelled else { return }
+      guard compatible else { message = "Choose complete MLX Qwen3.5-4B Q4/Q8 or Gemma4-12B unified Q8 vision weights."; return }
+      guard store.completeMOSSAnalyzerSelection(url.path, attempt: selectionAttempt, session: session, draftKey: draftKey) else { return }
+      analysis = nil; message = ""
+      await store.resolveMOSSModelLinks()
+    }
   }
   private func analyze() {
     guard let source else { return }

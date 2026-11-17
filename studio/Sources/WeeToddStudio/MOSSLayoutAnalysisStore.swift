@@ -10,6 +10,7 @@ struct CapturedMOSSLayoutAnalysis {
 
 @MainActor extension StudioStore {
   func analyzeMOSSLayout(source: URL, modelDirectory: String) async throws -> CapturedMOSSLayoutAnalysis {
+    await resolveMOSSModelLinks()
     guard let draft = imageDraft, draft.executionProvider == .nativeMOSS, !draft.hasManagedCharacterPrompt,
       !operationBusy, !preparingImageRequest else { throw StudioError.invalid("Open an idle Local MOSS image draft first.") }
     preparingImageRequest = true; defer { preparingImageRequest = false }

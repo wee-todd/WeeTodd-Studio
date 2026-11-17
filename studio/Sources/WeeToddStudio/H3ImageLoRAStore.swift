@@ -5,6 +5,10 @@ import StudioCore
   func selectImageProvider(_ provider: ImageExecutionProvider) {
     guard imageDraft != nil else { return }
     imageDraft?.selectProvider(provider)
+    if provider == .nativeMOSS, var settings = imageDraft?.mossImage {
+      mossModelLinks.applying(to: MOSSModelQuery(settings)).apply(to: &settings)
+      imageDraft?.mossImage = settings
+    }
     if provider == .nativeH3 {
       if imageDraft?.modelID.isEmpty == true, let profile = h3ImageProfiles.first {
         selectH3ImageProfile(profile.id)

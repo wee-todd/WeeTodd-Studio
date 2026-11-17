@@ -104,6 +104,7 @@ extension StudioStore {
   func persistImageWorkspace() {
     guard !restoringImageWorkspace else { return }
     if let draft = imageDraft {
+      if draft.executionProvider == .nativeMOSS, let settings = draft.mossImage { rememberMOSSComponents(settings) }
       imageWorkspaceLibrary.record(draft, preview: imagePreviewPath)
       if draft.referenceSheet != nil || draft.rippleReference != nil {
         imageWorkspaceLibrary.referenceProvider = draft.executionProvider

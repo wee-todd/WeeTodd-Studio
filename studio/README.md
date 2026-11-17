@@ -3273,8 +3273,8 @@ Use the same image workspace for the native image models below and connected Dra
 
 ### Native MOSS-Image and layout canvas
 
-Choose **Run with → Local MOSS**, select Base/SFT, then link or download its components
-in your model library. Draw text, object and character regions directly on the canvas;
+Choose **Run with → Local MOSS** and select Base/SFT. Installed components are found
+automatically; link or download them in your model library if needed. Draw text, object and character regions directly on the canvas;
 edit exact words and pixel bounds in the inspector. Layout actions import the supplied
 Pixaroma boxes workflow or official drafts, export editable layouts and copy the compiled
 prompt. Guides are editor overlays. Saved takes retain exact prompts and offer
@@ -3283,7 +3283,12 @@ Saved MOSS images in the Media panel also offer **Open layout as a new draft**
 in their context menu, including takes opened from a collected project.
 
 **Layout from image…** accepts a local source and analyzes it with an installed
-MLX Qwen3.5-4B or Gemma4-12B unified vision model plus Apple Vision OCR. Choose the image and model folder,
+MLX Qwen3.5-4B or Gemma4-12B unified vision model plus Apple Vision OCR. Studio automatically
+finds compatible Gemma and MOSS components in the configured library and known mounted
+`ai-models` folders, then remembers those links across drafts, projects and restarts.
+Manual folder choices take priority. Discovery reads metadata in the background and never
+loads or downloads weights. A fresh analyzer selection prefers installed Gemma; existing
+analyzer preferences are retained. Choose the image and, if needed, override the model folder,
 click **Analyze image**, review the proposed boxes and warnings, then choose **Use layout**.
 The canvas receives the scene prompt, subject/text regions and a source guide as one
 undoable edit. Edit descriptions, literal words and positions before **Check Settings →

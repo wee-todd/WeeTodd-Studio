@@ -21,7 +21,6 @@ struct MOSSImageSettingsView: View {
         do { try changed.selectVariant(value) } catch { setupMessage = error.localizedDescription; return }
         store.imageDraft?.mossImage = changed; store.imageEstimate = nil
         store.imageDraft?.modelID = value == "sft" ? MOSSImageSettings.sftModelID : MOSSImageSettings.baseModelID
-        if !settings.libraryDirectory.isEmpty { scan(URL(fileURLWithPath: settings.libraryDirectory)) }
       })) { Text("SFT").tag("sft"); Text("Base").tag("base") }.disabled(setupTask != nil || store.operationBusy)
       Text("Native Swift / MLX · text and layout generation").font(.caption).foregroundStyle(.secondary)
       HStack {
@@ -44,7 +43,7 @@ struct MOSSImageSettingsView: View {
         Text("Stream weights").tag(0)
         ForEach([2, 4, 8, 16], id: \.self) { Text("Up to \($0) GiB").tag($0) }
       }
-      Picker("Transformer precision", selection: binding(\.quantizationBits, nil)) {
+      Picker("Transformer precision", selection: Binding(get: { settings.quantizationBits }, set: { store.selectMOSSPrecision($0) })) {
         Text("Official BF16").tag(nil as Int?); Text("Native affine Q8").tag(Optional(8)); Text("Native affine Q4").tag(Optional(4))
       }
       if let bits = settings.quantizationBits {
@@ -87,7 +86,7 @@ struct MOSSImageSettingsView: View {
         Text("Skip applies to the negative CFG branch only. Progress runs from 0 to 1; CFG 1 uses no negative branch.").font(.caption2)
       }
       Link("MOSS model license", destination: URL(string: "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base/blob/main/LICENSE")!)
-    }
+    }.task(id: MOSSModelQuery(settings)) { await store.resolveMOSSModelLinks() }
   }
   private func folderPanel() -> URL? {
     let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
@@ -100,9 +99,7 @@ struct MOSSImageSettingsView: View {
     guard let found = MOSSModelSetup.discover(root: root, variant: settings.variant) else {
       setupMessage = "No complete component folders found. Choose the MOSS family folder or link the two component folders directly."; return
     }
-    binding(\.libraryDirectory, "").wrappedValue = found.libraryDirectory
-    binding(\.transformerDirectory, "").wrappedValue = found.transformerDirectory
-    binding(\.sharedDirectory, "").wrappedValue = found.sharedDirectory
+    store.applyMOSSComponentLinks(found)
     setupMessage = "Linked \(settings.variant.uppercased()) and shared components. Check Settings before generating."
   }
   private func chooseLibrary(download: Bool) {
@@ -125,13 +122,17 @@ struct MOSSImageSettingsView: View {
   private func convert(bits: Int) {
     let panel = NSSavePanel(); panel.title = "Choose a new model-library folder"; panel.nameFieldStringValue = "MOSS-\(settings.variant.uppercased())-Q\(bits)"
     guard panel.runModal() == .OK, let output = panel.url else { return }
-    let source = settings.transformerDirectory, session = store.documentSessionID, key = store.imageDraft?.storageKey
+    let source = store.mossModelLinks.transformerDirectories[settings.variant + ":bf16"] ?? ""
+    guard !source.isEmpty else { setupMessage = "Link the official BF16 transformer before converting it."; return }
+    let previousTransformer = settings.transformerDirectory, variant = settings.variant
+    let session = store.documentSessionID, key = store.imageDraft?.storageKey
     Task {
       do {
         let result = try await store.bridge.invoke("moss-native-convert", runtime: store.runtime,
           payload: ["source": source, "bits": bits, "component": "transformer"], output: output)
         guard store.documentSessionID == session, store.imageDraft?.storageKey == key,
-          store.imageDraft?.mossImage?.transformerDirectory == source else { return }
+          store.imageDraft?.mossImage?.transformerDirectory == previousTransformer,
+          store.imageDraft?.mossImage?.variant == variant, store.imageDraft?.mossImage?.quantizationBits == bits else { return }
         if let folder = result["componentDirectory"] as? String { binding(\.transformerDirectory, "").wrappedValue = folder }
         store.imageEstimate = nil
       } catch is CancellationError {

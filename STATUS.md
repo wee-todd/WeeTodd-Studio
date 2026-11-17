@@ -1,5 +1,14 @@
 # WeeTodd Studio implementation status
 
+## November 17 automatic MOSS and analyzer folder links
+
+MOSS folder preferences are stored independently of image drafts. Known library layouts
+on mounted model volumes are discovered in the background, including MOSS shared components,
+the selected SFT/Base transformer and an installed Gemma/Qwen analyzer. Fresh analyzer
+selection prefers Gemma; existing analyzer preferences migrate. Explicit links remain
+authoritative when a drive is disconnected, and transformer preferences are separated by
+variant and precision. Discovery does not change recipes, load weights or download files.
+
 ## November 17 editable image-to-layout recovery
 
 New image analyses create guide-only layouts with regional subject-box control. Native

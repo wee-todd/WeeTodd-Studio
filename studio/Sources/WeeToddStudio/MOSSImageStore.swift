@@ -52,6 +52,8 @@ struct PreparedMOSSImage {
     imageDraft = draft; imagePreviewPath = nil; imageEstimate = nil; preparedMOSSImage = nil
   }
   func prepareMOSSImageGeneration() async {
+    await resolveMOSSModelLinks()
+    guard !Task.isCancelled else { return }
     guard let draft = imageDraft, draft.executionProvider == .nativeMOSS,
       !operationBusy, !preparingImageRequest else { return }
     preparingImageRequest = true; defer { preparingImageRequest = false }

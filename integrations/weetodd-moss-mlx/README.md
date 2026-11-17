@@ -8,7 +8,13 @@ ComfyUI, MFLUX and Python are not runtime dependencies of this route.
 ## Studio
 
 Open **Generate Image… → Run with → Local MOSS**, choose **Base** or **SFT**, then
-**Link model library…** or **Download…**. Select a folder in your model library.
+**Link model library…** or **Download…** when needed. Studio automatically finds installed
+components in the configured library and known `ai-models` folders on mounted volumes.
+Folder selections are remembered across new drafts, projects and app restarts. Explicit
+paths take priority, including a temporarily disconnected drive. SFT/Base and BF16/Q8/Q4
+transformer selections are kept separate; discovery never changes the generation recipe.
+It reads metadata in the background without loading, copying or downloading weights.
+Select a folder in your model library to override the automatic selection.
 Setup verifies pinned SHA-256 checksums and reuses matching installed files.
 One shared Qwen3.5-9B/tokenizer/small-VAE package serves both transformers.
 **Component folders** also accepts an existing official transformer folder and
@@ -43,8 +49,11 @@ Overlong prompts fail instead of truncating their layout silently.
 ## Layout from an image
 
 Choose **Layout from image…** in the Local MOSS workspace. Select a local image and
-a complete installed **MLX Qwen3.5-4B Q4/Q8** or **Gemma4-12B unified Q8** vision-model
-folder, then **Analyze image**.
+a complete installed **MLX Qwen3.5-4B Q4/Q8** or **Gemma4-12B unified Q8** vision model,
+then **Analyze image**. A fresh selection prefers installed Gemma; your chosen analyzer
+is remembered in Studio's model-folder preferences, including the previous analyzer preference.
+The same lookup links MOSS's shared tokenizer before Gemma analysis. If discovery cannot
+find the installation, use **Choose model folder…** and **Link model library…**.
 The analyzer reuses compatible installed weights; this folder is separate from MOSS's
 Qwen3.5-9B generation text encoder. Keep these components in the model library. Analysis runs in
 the native worker using Swift MLX and Apple Vision OCR, with no cloud transmission.
