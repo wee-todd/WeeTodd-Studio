@@ -2,14 +2,21 @@ import AVFoundation
 import CryptoKit
 import Darwin
 import Foundation
+import InferenceContracts
 
 public enum MovieUpscaleMethod: String, Codable, CaseIterable, Identifiable {
-  case ltx25, relayVSR
+  case ltx25, relayVSR, reCaVSR
   public var id: String { rawValue }
-  public var label: String { self == .relayVSR ? "RelayVSR 2×" : "LTX 2×" }
+  public var label: String { self == .reCaVSR ? "ReCaVSR" : self == .relayVSR ? "RelayVSR" : "LTX 2×" }
 }
 
 extension Clip {
+  public var usesReCaVSR: Bool {
+    engine == .ltx25 && inferredTask == "video_upscale" && generationSelection?.movieUpscaleMethod == .reCaVSR
+  }
+  public var usesNativeMovieUpscaler: Bool { usesRelayVSR || usesReCaVSR }
+  public var nativeMovieUpscalerName: String { usesReCaVSR ? "ReCaVSR" : "RelayVSR" }
+
   public var usesRelayVSR: Bool {
     engine == .ltx25 && inferredTask == "video_upscale"
       && generationSelection?.movieUpscaleMethod == .relayVSR
@@ -17,17 +24,12 @@ extension Clip {
 }
 
 public enum NativeRelayVSRPreparation {
-  private static let checkpointNames = [
-    "relayvsr_x2_lightx2v_int8_convrot.safetensors",
-    "relayvsr_flash_vae_x2_fp32.safetensors",
-  ]
-
   public static func discoverModels() -> String? {
     let manager = FileManager.default
     let candidates = (manager.mountedVolumeURLs(includingResourceValuesForKeys: nil) ?? [])
       .map { $0.appendingPathComponent("ai-models/WeeTodd/RelayVSR/x2", isDirectory: true) }
     return candidates.first { folder in
-      checkpointNames.allSatisfy { manager.isReadableFile(atPath: folder.appendingPathComponent($0).path) }
+      NativeRelayVSRScale.x2.checkpointNames.allSatisfy { manager.isReadableFile(atPath: folder.appendingPathComponent($0).path) }
     }?.path
   }
 
@@ -68,16 +70,18 @@ public enum NativeRelayVSRPreparation {
     let start: Double
     let duration: Double?
     let seed: Int
+    let scale: NativeRelayVSRScale?
+    var resolvedScale: NativeRelayVSRScale { scale ?? .x2 }
 
     func verify() throws {
       guard format == "weetodd-relayvsr-v1", seed >= 0, start.isFinite, start >= 0,
         duration.map({ $0.isFinite && $0 > 0 }) ?? true,
-        checkpoints.count == checkpointNames.count else {
+        checkpoints.count == resolvedScale.checkpointNames.count else {
         throw StudioError.invalid("Invalid prepared RelayVSR job. Prepare the clip again.")
       }
       try source.verify()
       try worker.verify()
-      for (file, name) in zip(checkpoints, checkpointNames) {
+      for (file, name) in zip(checkpoints, resolvedScale.checkpointNames) {
         let path = URL(fileURLWithPath: models).appendingPathComponent(name).path
         guard try FileSnapshot(path) == file else {
           throw StudioError.invalid("The RelayVSR checkpoint changed. Prepare the clip again.")
@@ -108,23 +112,25 @@ public enum NativeRelayVSRPreparation {
     let runtime = request["runtime"] as? [String: Any] ?? [:]
     return try recipe(source: asset.path, start: attachment.sourceStartSeconds ?? 0,
       duration: attachment.sourceDurationSeconds, seed: clip.seed,
+      scale: clip.generationSelection?.relayVSRScale ?? .x2,
       worker: runtime["relayVSRWorkerPath"] as? String,
       models: runtime["relayVSRModelDirectory"] as? String)
   }
 
   private static func recipe(source: String, start: Double = 0, duration: Double? = nil,
-    seed: Int = 42, worker: String?, models: String?) throws -> Recipe {
+    seed: Int = 42, scale: NativeRelayVSRScale = .x2, worker: String?, models: String?) throws -> Recipe {
     guard let worker,
       FileManager.default.isExecutableFile(atPath: worker) else {
       throw StudioError.invalid("The native RelayVSR worker is missing. Use a complete Studio build.")
     }
     guard let models, models.hasPrefix("/") else {
-      throw StudioError.invalid("Choose the folder containing both RelayVSR 2× checkpoints.")
+      throw StudioError.invalid("Choose the matching RelayVSR checkpoint folder.")
     }
+    let folder = try scale.resolveDirectory(URL(fileURLWithPath: models))
     let value = try Recipe(format: "weetodd-relayvsr-v1", source: FileSnapshot(source),
-      worker: FileSnapshot(worker), models: models, checkpoints: checkpointNames.map {
-        try FileSnapshot(URL(fileURLWithPath: models).appendingPathComponent($0).path)
-      }, start: start, duration: duration, seed: seed)
+      worker: FileSnapshot(worker), models: folder.path, checkpoints: scale.checkpointNames.map {
+        try FileSnapshot(folder.appendingPathComponent($0).path)
+      }, start: start, duration: duration, seed: seed, scale: scale == .x2 ? nil : scale)
     try value.verify()
     return value
   }
@@ -147,8 +153,8 @@ public enum NativeRelayVSRPreparation {
   }
 
   public static func prepareMovie(source: String, worker: String?, models: String?,
-    destination: URL) async throws -> String {
-    let result = try await prepare(recipe(source: source, worker: worker, models: models),
+    scale: NativeRelayVSRScale = .x2, destination: URL) async throws -> String {
+    let result = try await prepare(recipe(source: source, scale: scale, worker: worker, models: models),
       destination: destination)
     guard let path = result["recipePath"] as? String else {
       throw StudioError.invalid("RelayVSR did not prepare a recipe.")
@@ -172,7 +178,7 @@ public enum NativeRelayVSRPreparation {
     let file = destination.appendingPathComponent("relayvsr.json")
     try encode(value).write(to: file, options: .atomic)
     return ["recipePath": file.path, "report": ["task": "video_upscale",
-      "method": "RelayVSR 2×", "nativeRuntime": "swift-mlx", "audio": "source",
+      "method": "RelayVSR \(value.resolvedScale.label)", "scale": value.resolvedScale.rawValue, "nativeRuntime": "swift-mlx", "audio": "source",
       "frameRate": "source", "source": value.source.path, "sourceStart": value.start]]
   }
 
@@ -184,6 +190,7 @@ public enum NativeRelayVSRPreparation {
     }
     var result = ["--studio", recipe.source.path, output.path, "--models", recipe.models,
       "--seed", String(recipe.seed)]
+    if recipe.resolvedScale != .x2 { result += ["--scale", String(recipe.resolvedScale.rawValue)] }
     if recipe.start > 0 || recipe.duration != nil {
       result += ["--source-start", String(recipe.start)]
       if let duration = recipe.duration { result += ["--source-duration", String(duration)] }

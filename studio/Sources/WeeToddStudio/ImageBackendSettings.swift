@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 extension ImageGenerationEditor {
   var isNative: Bool { draft?.executionProvider.isNative == true }
   var isH3Image: Bool { draft?.executionProvider == .nativeH3 }
+  var isMOSSImage: Bool { draft?.executionProvider == .nativeMOSS }
   func nativeBinding<T>(_ key: WritableKeyPath<NativeImageSettings, T>, fallback: T) -> Binding<T> {
     Binding(get: { draft?.nativeImage?[keyPath: key] ?? fallback }, set: { value in
       if store.imageDraft?.nativeImage == nil { store.imageDraft?.nativeImage = NativeImageSettings() }

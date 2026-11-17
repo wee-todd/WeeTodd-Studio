@@ -38,6 +38,19 @@ extension StudioStore {
       draft.steps = imageWorkspaceLibrary.referenceH3Steps ?? 20
       return draft
     }
+    if imageWorkspaceLibrary.referenceProvider == .nativeMOSS ||
+      (imageWorkspaceLibrary.referenceProvider == nil && previousDraft?.executionProvider == .nativeMOSS) {
+      draft.selectProvider(.nativeMOSS)
+      draft.mossImage = imageWorkspaceLibrary.referenceMOSSImage ?? previousDraft?.mossImage ?? MOSSImageSettings()
+      draft.modelID = imageWorkspaceLibrary.referenceMOSSModelID ?? previousDraft?.modelID ?? MOSSImageSettings.sftModelID
+      draft.steps = imageWorkspaceLibrary.referenceMOSSSteps ?? previousDraft?.steps ?? 50
+      if let recipe = imageWorkspaceLibrary.referenceMOSSRecipe ?? previousDraft.flatMap({ $0.executionProvider == .nativeMOSS ? MOSSRecipeSnapshot(draft: $0) : nil }) {
+        recipe.apply(to: &draft)
+      } else if draft.mossImage?.loras?.contains(where: { $0.isEnabled && $0.strength != 0 && $0.asset.loraProfile == "moss_sft_4step_v2" }) == true {
+        draft.guidance = 1; draft.shift = 5
+      }
+      return draft
+    }
     if imageWorkspaceLibrary.referenceProvider == nil, previousDraft?.executionProvider == .nativeH3 {
       draft.selectProvider(.nativeH3); draft.h3Image = previousDraft?.h3Image
       draft.h3Image?.loras = []
@@ -99,6 +112,12 @@ extension StudioStore {
           imageWorkspaceLibrary.referenceH3Image = draft.h3Image
           imageWorkspaceLibrary.referenceH3ModelID = draft.modelID
           imageWorkspaceLibrary.referenceH3Steps = draft.steps
+        }
+        if draft.executionProvider == .nativeMOSS {
+          imageWorkspaceLibrary.referenceMOSSImage = draft.mossImage
+          imageWorkspaceLibrary.referenceMOSSModelID = draft.modelID
+          imageWorkspaceLibrary.referenceMOSSSteps = draft.steps
+          imageWorkspaceLibrary.referenceMOSSRecipe = MOSSRecipeSnapshot(draft: draft)
         }
       }
     }

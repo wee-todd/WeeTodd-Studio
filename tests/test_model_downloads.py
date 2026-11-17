@@ -347,6 +347,11 @@ def test_ltx_conversion_copies_cross_volume_reused_support_files(tmp_path, monke
     assert (output / "LICENSE-2_x").read_bytes() == b"source"
 
 
+def test_native_only_recavsr_setup_is_not_offered_by_the_python_renderer():
+    assert not any(item["kind"] == "recavsr-native" for item in downloads.PRECONVERTED)
+    assert not any(item["id"].startswith("recavsr-") for item in downloads.download_catalog())
+
+
 def test_shipped_preconverted_catalog_pins_files_and_retains_terms():
     assert downloads.PRECONVERTED
     for package in downloads.PRECONVERTED:

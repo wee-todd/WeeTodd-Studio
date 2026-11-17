@@ -1,3 +1,4 @@
+import InferenceContracts
 import AppKit
 import StudioCore
 import SwiftUI
@@ -16,7 +17,7 @@ struct MovieUpscaleInspector:View {
   }
   var body:some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(!clip.usesRelayVSR && settings.mode == .enhance ? "Source movie enhancement" : "Source movie 2× upscale").font(.headline)
+      Text(clip.usesNativeMovieUpscaler ? "Source movie upscale" : settings.mode == .enhance ? "Source movie enhancement" : "Source movie 2× upscale").font(.headline)
       Picker("Upscaler", selection: Binding(get: {
         clip.generationSelection?.movieUpscaleMethod ?? .ltx25
       }, set: { method in
@@ -34,19 +35,40 @@ struct MovieUpscaleInspector:View {
       }
       .accessibilityIdentifier("movie-upscale-method")
       .disabled(store.operationBusy)
-      if clip.usesRelayVSR {
+      if clip.usesReCaVSR {
+        ReCaVSRControls(settings: Binding(get: {
+          var value = clip.generationSelection?.reCaVSRSettings ?? (try! ReCaVSRSettings())
+          value.seed = UInt64(max(0, clip.seed)); return value
+        },
+          set: { value in
+            guard value.seed <= UInt64(Int.max) else { store.error = "This clip supports seeds up to \(Int.max)."; return }
+            store.editClip {
+            var selection = $0.generationSelection ?? GenerationSelection(task: "video_upscale", preset: .custom)
+            selection.reCaVSRSettings = value; $0.seed = Int(value.seed); $0.generationSelection = selection
+          } }))
+        Button("Upscale clip") { Task { await store.generateSelected() } }
+          .buttonStyle(.borderedProminent).accessibilityIdentifier("recavsr-upscale-clip").disabled(store.operationBusy)
+      } else if clip.usesRelayVSR {
         relayControls
       } else if showLTXSettings {
         ltxControls
       }
     }
-    .task(id: clip.usesRelayVSR ? store.generationDescriptionTaskKey(for: clip) : nil) {
-      if clip.usesRelayVSR { await store.describeGeneration() }
+    .task(id: clip.usesNativeMovieUpscaler ? store.generationDescriptionTaskKey(for: clip) : nil) {
+      if clip.usesNativeMovieUpscaler { await store.describeGeneration() }
     }
   }
 
   private var relayControls: some View {
     VStack(alignment: .leading, spacing: 8) {
+      Picker("Scale", selection: Binding(get: { clip.generationSelection?.relayVSRScale ?? .x2 }, set: { scale in
+        store.editClip {
+          var selection = $0.generationSelection ?? GenerationSelection(task: "video_upscale", preset: .custom)
+          selection.relayVSRScale = scale == .x2 ? nil : scale; $0.generationSelection = selection
+        }
+      })) {
+        ForEach(NativeRelayVSRScale.allCases, id: \.self) { Text($0.label).tag($0) }
+      }.accessibilityIdentifier("relayvsr-scale")
       if let reference = clip.attachments.first(where: { $0.role == .reference && $0.isEnabled }),
         let asset = store.allAssets.first(where: { $0.id == reference.assetID }) {
         LabeledContent("Reference movie", value: asset.name)
@@ -55,13 +77,13 @@ struct MovieUpscaleInspector:View {
           LabeledContent("Source interval", value: "\(start.formatted(.number.precision(.fractionLength(3))))–\((start + duration).formatted(.number.precision(.fractionLength(3)))) s")
         }
       }
-      Text("Doubles an SDR movie’s dimensions with Swift and Metal and retains its frame timing and audio.")
+      Text("Uses the matching native 2× or 4× model and retains source frame timing and audio.")
         .font(.caption).foregroundStyle(.secondary)
       if clip.attachments.contains(where: { [.first, .last, .audioDriver].contains($0.role) && $0.isEnabled }) {
         Text("LTX endpoint images and audio drivers apply when LTX 2× is selected.")
           .font(.caption).foregroundStyle(.secondary)
       }
-      RelayVSRModelFolderControl()
+      RelayVSRModelFolderControl(scale: clip.generationSelection?.relayVSRScale ?? .x2)
       if let error = store.validationErrors[clip.id] {
         Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
       }
@@ -127,6 +149,10 @@ struct MovieUpscaleInspector:View {
 
 struct RelayVSRModelFolderControl: View {
   @EnvironmentObject var store: StudioStore
+  var scale: NativeRelayVSRScale = .x2
+  private var resolvedFolder: String? {
+    store.runtime.relayVSRModelDirectory.flatMap { try? scale.resolveDirectory(URL(fileURLWithPath: $0)).path }
+  }
 
   var body: some View {
     HStack {
@@ -140,7 +166,7 @@ struct RelayVSRModelFolderControl: View {
           store.saveRuntime(reloadProfiles: false)
         }
       }.disabled(store.operationBusy)
-      Text(store.runtime.relayVSRModelDirectory ?? "Select the folder containing both 2× checkpoints.")
+      Text(resolvedFolder ?? "Select the matching \(scale.label) checkpoint folder.")
         .font(.caption).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
         .textSelection(.enabled)
     }

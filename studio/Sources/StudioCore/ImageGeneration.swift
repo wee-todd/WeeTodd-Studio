@@ -1,4 +1,5 @@
 import Foundation
+import ImageLayout
 
 public struct ImageGeneration: Codable, Equatable {
   public var provider: String
@@ -11,6 +12,9 @@ public struct ImageGeneration: Codable, Equatable {
   public var configuration: [String: JSONValue]?
   public var inputIDs: [String]?
   public var generatedAt: Date?
+  public var mossLayout: ImageLayoutDraft?
+  public var mossStockRecipe: MOSSRecipeSnapshot?
+  public var effectivePrompt: String?
   public var referenceSheet: ReferenceSheetContext?
   public var characterPanel: CharacterPanelPromptContext?
   public var characterAssembly: CharacterAssemblyProvenance?

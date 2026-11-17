@@ -5,7 +5,9 @@ struct FlashVSRAttentionSubmissionPlan {
   let groups:[[Int]]
   // F32 Q/state/output, K/V plus gather copies, scores/probabilities, online
   // state and indices. Inputs and accumulated final output are separate.
-  static let maximumScratchBytes=8*(3*128*128*4+4*8*128*128*4+2*128*8*128*4+8*128*4+9*4)
+  // Two queued slabs remain below the existing 64 MiB attention reserve.
+  // Inputs, completed output and the independent routing reserve are separate.
+  static let maximumScratchBytes=2*8*(3*128*128*4+4*8*128*128*4+2*128*8*128*4+8*128*4+9*4)
 
   init(selectedCounts:[Int],maximumWindows:Int=8)throws {
     guard !selectedCounts.isEmpty,selectedCounts.allSatisfy({$0>0}),(1...8).contains(maximumWindows) else {

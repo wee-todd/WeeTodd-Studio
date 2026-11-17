@@ -474,6 +474,17 @@ public enum StudioError: LocalizedError {
   }
 }
 public enum ProjectStorage {
+  /// Collect regeneration inputs as media. nativeRequest remains immutable historical
+  /// execution evidence; reopening a take uses its relocated editor layout.
+  public static func collectMOSSLayoutReferences(_ project: inout StudioProject,
+    collect: (String) throws -> String) rethrows {
+    for i in project.assets.indices {
+      guard var layout = project.assets[i].generation?.mossLayout else { continue }
+      if let source = layout.sourceReconstruction { layout.sourceReconstruction?.path = try collect(source.path) }
+      if let guide = layout.guideImagePath { layout.guideImagePath = try collect(guide) }
+      project.assets[i].generation?.mossLayout = layout
+    }
+  }
   public static func read(_ url: URL) throws -> StudioProject {
     var p = try JSONDecoder().decode(StudioProject.self, from: Data(contentsOf: url))
     mapPaths(&p) { value in
@@ -491,6 +502,12 @@ public enum ProjectStorage {
     for i in project.assets.indices {
       project.assets[i].path = transform(project.assets[i].path)
       if let receipt = project.assets[i].upscaleReceipt { project.assets[i].upscaleReceipt = transform(receipt) }
+      if let source = project.assets[i].generation?.mossLayout?.sourceReconstruction?.path {
+        project.assets[i].generation?.mossLayout?.sourceReconstruction?.path = transform(source)
+      }
+      if let guide = project.assets[i].generation?.mossLayout?.guideImagePath {
+        project.assets[i].generation?.mossLayout?.guideImagePath = transform(guide)
+      }
       if let artifacts = project.assets[i].musicGeneration?.artifacts {
         project.assets[i].musicGeneration?.artifacts = transform(artifacts)
       }

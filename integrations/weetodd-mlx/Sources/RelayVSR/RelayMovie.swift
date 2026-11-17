@@ -2,10 +2,13 @@
 import CoreVideo
 import Foundation
 import InferenceContracts
+import InferenceMedia
 import Metal
 import MLX
+import TensorIO
 
 public struct RelayMovieOptions: Sendable {
+  public var scale: NativeRelayVSRScale = .x2
   public var steps: Int
   public var seed: UInt64
   public var keyframeInterval: Int
@@ -44,6 +47,36 @@ public struct RelayMovieResult: Sendable {
 }
 
 public enum RelayMovie {
+  public struct Admission: Codable, Sendable {
+    public let scale: Int, outputWidth: Int, outputHeight: Int
+    public let estimatedBytes: UInt64
+  }
+  private static func validateModels(_ root: URL, scale: NativeRelayVSRScale) throws -> URL {
+    let folder = try scale.resolveDirectory(root)
+    let wan = try SafeTensorFile(url: folder.appendingPathComponent(scale.checkpointNames[0]))
+    let flash = try SafeTensorFile(url: folder.appendingPathComponent(scale.checkpointNames[1]))
+    try scale.validateMetadata(wan: wan.metadata, flash: flash.metadata)
+    guard wan.tensors["lq_proj_in.conv1.weight"]?.shape == [768, UInt64(3 * scale.wanUnshuffle * scale.wanUnshuffle), 1, 1] else {
+      throw RelayVSRError.invalid("The RelayVSR learned LQ projection does not match the selected scale.")
+    }
+    return folder
+  }
+  public static func preflight(input: URL, modelDirectory: URL, options: RelayMovieOptions = .init()) async throws -> Admission {
+    try options.validate()
+    _ = try validateModels(modelDirectory, scale: options.scale)
+    let asset = AVURLAsset(url: input, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+    guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw RelayVSRError.invalid("Input has no video track.") }
+    let size = try await track.load(.naturalSize)
+    guard size.width.isFinite, size.height.isFinite, (1...4096).contains(size.width), (1...4096).contains(size.height) else {
+      throw RelayVSRError.invalid("Unsupported RelayVSR source dimensions.")
+    }
+    let g = try RelayGeometry(width: Int(size.width), height: Int(size.height), scale: options.scale)
+    try NativeUpscaleMovieWriter.validateRaster(width: g.outputWidth, height: g.outputHeight)
+    guard let device = MTLCreateSystemDefaultDevice() else { throw RelayVSRError.invalid("RelayVSR requires a Metal GPU.") }
+    try RelayMemoryPlan.validate(geometry: g, options: options, budget: device.recommendedMaxWorkingSetSize)
+    return .init(scale: options.scale.rawValue, outputWidth: g.outputWidth, outputHeight: g.outputHeight,
+      estimatedBytes: RelayMemoryPlan.estimatedBytes(geometry: g, options: options))
+  }
   @discardableResult
   public static func upscale(input: URL, output: URL, modelDirectory: URL,
     options: RelayMovieOptions = .init(), onWait: @Sendable () -> Void = {},
@@ -51,6 +84,7 @@ public enum RelayMovie {
     -> RelayMovieResult
   {
     try options.validate()
+    let modelDirectory = try validateModels(modelDirectory, scale: options.scale)
     guard input.isFileURL, output.isFileURL, modelDirectory.isFileURL,
       output.pathExtension.lowercased() == "mov",
       !FileManager.default.fileExists(atPath: output.path) else {
@@ -92,7 +126,8 @@ public enum RelayMovie {
       throw reader.error ?? RelayVSRError.invalid("Input has no decodable video frames.")
     }
     let geometry = try RelayGeometry(width: CVPixelBufferGetWidth(first.pixels),
-      height: CVPixelBufferGetHeight(first.pixels))
+      height: CVPixelBufferGetHeight(first.pixels), scale: options.scale)
+    try NativeUpscaleMovieWriter.validateRaster(width: geometry.outputWidth, height: geometry.outputHeight)
     try RelayMemoryPlan.validate(geometry: geometry, options: options,
       budget: device.recommendedMaxWorkingSetSize)
     let folder = output.deletingLastPathComponent()
@@ -136,6 +171,7 @@ public enum RelayMovie {
     }
     try write(pending.image, at: pending.timestamp, until: end)
     try await writer.finish(at: end)
+    try Task.checkCancellation()
     let videoStart: CMTime
     if audio.isEmpty && (!selected || first.timestamp == start) {
       try FileManager.default.moveItem(at: videoFile, to: output)
@@ -143,6 +179,7 @@ public enum RelayMovie {
     } else {
       videoStart = try await mux(videoFile, audio: audio, sourceStart: first.timestamp,
         audioStart: selected ? start : nil, previewEnd: previewEnd ?? selectionEnd, output: muxedFile)
+      try Task.checkCancellation()
       try FileManager.default.moveItem(at: muxedFile, to: output)
     }
     return RelayMovieResult(frames: count, sourceIn: videoStart.seconds, duration: end.seconds)
@@ -156,35 +193,11 @@ public enum RelayMovie {
     return RelayMovieFrame(pixels: pixels, timestamp: sample.presentationTimeStamp)
   }
 
-  static func videoContentRange(_ track: AVAssetTrack, fallback: CMTimeRange) async throws
-    -> CMTimeRange
-  {
-    // AVAssetReader synthesizes a frame for a leading empty edit when left unrestricted.
-    let media = try await track.load(.segments).filter { !$0.isEmpty }
-    guard let first = media.first, let last = media.last else { return fallback }
-    return CMTimeRange(start: first.timeMapping.target.start, end: last.timeMapping.target.end)
+  static func videoContentRange(_ track: AVAssetTrack, fallback: CMTimeRange) async throws -> CMTimeRange {
+    try await NativeUpscaleMovieIO.videoContentRange(track, fallback: fallback)
   }
-
-  private static func finalVideoEnd(_ asset: AVAsset, track: AVAssetTrack, last: CMTime,
-    editEnd: CMTime) -> CMTime
-  {
-    // Decoded samples can omit duration, and an MP4 edit can round its end to
-    // the coarser movie timescale. Query the last compressed sample for its tail.
-    guard editEnd > last, let reader = try? AVAssetReader(asset: asset) else { return editEnd }
-    reader.timeRange = CMTimeRange(start: last, end: editEnd)
-    let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
-    guard reader.canAdd(output) else { return editEnd }
-    reader.add(output)
-    guard reader.startReading() else { return editEnd }
-    defer { reader.cancelReading() }
-    while let sample = output.copyNextSampleBuffer() {
-      let duration = sample.outputDuration
-      if sample.numSamples > 0, sample.outputPresentationTimeStamp == last,
-        duration.isNumeric, duration > .zero {
-        return min(editEnd, last + duration)
-      }
-    }
-    return editEnd
+  private static func finalVideoEnd(_ asset: AVAsset, track: AVAssetTrack, last: CMTime, editEnd: CMTime) -> CMTime {
+    NativeUpscaleMovieIO.finalVideoEnd(asset, track: track, last: last, editEnd: editEnd)
   }
 
   private static func renderFrames(first: RelayMovieFrame, read: () throws -> RelayMovieFrame?,
@@ -192,9 +205,9 @@ public enum RelayMovie {
     append: (MLXArray, CMTime) throws -> Void) throws
   {
     let flash = try RelayFlash(weights: modelDirectory.appendingPathComponent(
-      "relayvsr_flash_vae_x2_fp32.safetensors"), geometry: geometry)
+      geometry.scale.checkpointNames[1]), geometry: geometry)
     let wan = try RelayWan(weights: modelDirectory.appendingPathComponent(
-      "relayvsr_x2_lightx2v_int8_convrot.safetensors"), geometry: geometry,
+      geometry.scale.checkpointNames[0]), geometry: geometry,
       steps: options.steps, seed: options.seed)
     var windows = RelayWindowBuffer<RelayMovieFrame>(interval: options.keyframeInterval)
     var start: [RelayKV]?
@@ -235,58 +248,11 @@ public enum RelayMovie {
 
   @discardableResult
   static func mux(_ videoFile: URL, audio: [AVAssetTrack], sourceStart: CMTime,
-    audioStart: CMTime? = nil, previewEnd: CMTime?, output: URL) async throws -> CMTime
-  {
-    let video = AVURLAsset(url: videoFile, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
-    guard let track = try await video.loadTracks(withMediaType: .video).first else {
-      throw RelayVSRError.invalid("The encoded video could not be opened for audio muxing.")
-    }
-    let composition = AVMutableComposition()
-    guard let movieTrack = composition.addMutableTrack(withMediaType: .video,
-      preferredTrackID: kCMPersistentTrackID_Invalid) else {
-      throw RelayVSRError.invalid("Cannot allocate a video track for muxing.")
-    }
-    var audioSegments: [(AVAssetTrack, CMTimeRange)] = []
-    for audioTrack in audio {
-      let original = try await audioTrack.load(.timeRange)
-      let end = previewEnd.map { min($0, original.end) } ?? original.end
-      let start = max(audioStart ?? original.start, original.start)
-      guard end > start else { continue }
-      audioSegments.append((audioTrack, CMTimeRange(start: start, end: end)))
-    }
-    let origin = audioStart ?? audioSegments.reduce(sourceStart) { min($0, $1.1.start) }
-    let range = try await track.load(.timeRange)
-    try movieTrack.insertTimeRange(range, of: track, at: .zero)
-    if sourceStart > origin {
-      movieTrack.insertEmptyTimeRange(CMTimeRange(start: .zero, end: sourceStart - origin))
-    }
-    movieTrack.preferredTransform = try await track.load(.preferredTransform)
-    for (track, range) in audioSegments {
-      guard range.isValid, !range.isEmpty else { continue }
-      guard let destination = composition.addMutableTrack(withMediaType: .audio,
-        preferredTrackID: kCMPersistentTrackID_Invalid) else {
-        throw RelayVSRError.invalid("Cannot allocate a source audio track for muxing.")
-      }
-      try destination.insertTimeRange(range, of: track, at: .zero)
-      if range.start > origin {
-        destination.insertEmptyTimeRange(CMTimeRange(start: .zero, end: range.start - origin))
-      }
-    }
-    guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
-      throw RelayVSRError.invalid("Cannot create an audio passthrough export session.")
-    }
-    if #available(macOS 15.0, *) {
-      try await export.export(to: output, as: .mov)
-    } else {
-      export.outputURL = output
-      export.outputFileType = .mov
-      await export.export()
-      guard export.status == .completed else {
-        throw export.error ?? RelayVSRError.invalid("Audio passthrough failed.")
-      }
-    }
-    return sourceStart - origin
+    audioStart: CMTime? = nil, previewEnd: CMTime?, output: URL) async throws -> CMTime {
+    try await NativeUpscaleMovieIO.mux(videoFile, audio: audio, sourceStart: sourceStart,
+      audioStart: audioStart, previewEnd: previewEnd, output: output)
   }
+
 }
 
 private struct RelayMovieFrame {
@@ -329,14 +295,18 @@ final class RelayMovieWriter {
   {
     self.geometry = geometry
     writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-    input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+    let outputSettings: [String: Any] = [
       AVVideoCodecKey: AVVideoCodecType.hevc,
       AVVideoWidthKey: geometry.outputWidth,
       AVVideoHeightKey: geometry.outputHeight,
       AVVideoCompressionPropertiesKey: [AVVideoAllowFrameReorderingKey: false],
-    ])
+    ]
+    guard writer.canApply(outputSettings: outputSettings, forMediaType: .video) else {
+      throw RelayVSRError.invalid("Cannot encode the exact requested RelayVSR output raster.")
+    }
+    input = AVAssetWriterInput(mediaType: .video, outputSettings: outputSettings)
     input.transform = CGAffineTransform(a: transform.a, b: transform.b, c: transform.c, d: transform.d,
-      tx: transform.tx * 2, ty: transform.ty * 2)
+      tx: transform.tx * CGFloat(geometry.scale.rawValue), ty: transform.ty * CGFloat(geometry.scale.rawValue))
     if timeScale > 0 {
       input.mediaTimeScale = timeScale
       writer.movieTimeScale = timeScale
@@ -346,7 +316,7 @@ final class RelayMovieWriter {
       kCVPixelBufferWidthKey as String: geometry.outputWidth,
       kCVPixelBufferHeightKey as String: geometry.outputHeight,
     ])
-    guard writer.canAdd(input) else { throw RelayVSRError.invalid("Cannot encode the requested 2× video dimensions.") }
+    guard writer.canAdd(input) else { throw RelayVSRError.invalid("Cannot encode the requested video dimensions.") }
     writer.add(input)
     guard writer.startWriting() else {
       throw writer.error ?? RelayVSRError.invalid("Cannot start the video encoder.")
@@ -409,9 +379,11 @@ final class RelayMovieWriter {
   }
 
   func finish(at end: CMTime) async throws {
+    try Task.checkCancellation()
     writer.endSession(atSourceTime: end)
     input.markAsFinished()
     await writer.finishWriting()
+    try Task.checkCancellation()
     guard writer.status == .completed else {
       throw writer.error ?? RelayVSRError.invalid("Could not finalize the upscaled video.")
     }

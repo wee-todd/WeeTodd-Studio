@@ -20,6 +20,10 @@ public struct ImageWorkspaceLibrary: Codable {
   public var referenceH3Image: H3ImageSettings?
   public var referenceH3ModelID: String?
   public var referenceH3Steps: Int?
+  public var referenceMOSSImage: MOSSImageSettings?
+  public var referenceMOSSModelID: String?
+  public var referenceMOSSSteps: Int?
+  public var referenceMOSSRecipe: MOSSRecipeSnapshot?
   public var referenceConnectionID: String?
   public init() {}
   public mutating func record(_ draft: DrawThingsImageDraft, preview: String?) {

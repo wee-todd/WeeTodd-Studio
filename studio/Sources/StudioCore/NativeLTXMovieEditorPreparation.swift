@@ -23,7 +23,7 @@ public enum NativeLTXMovieEditorPreparation {
       clip.generationSelection?.task == "video_upscale" else {
       throw StudioError.invalid("Select source movie upscaling with explicit experimental movie settings.")
     }
-    guard !clip.usesRelayVSR else { throw StudioError.invalid("Run RelayVSR from the Studio video upscale panel.") }
+    guard !clip.usesNativeMovieUpscaler else { throw StudioError.invalid("Run the native movie upscaler from the Studio video upscale panel.") }
     guard let settings=clip.generationSelection?.ltx25MovieUpscale else {
       throw StudioError.invalid("Select source movie upscaling with explicit experimental movie settings.")
     }

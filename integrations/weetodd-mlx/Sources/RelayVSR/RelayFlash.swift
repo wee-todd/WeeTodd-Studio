@@ -1,6 +1,7 @@
 import Foundation
 import MLX
 import MLXNN
+import InferenceContracts
 
 private let flashEpsilon: Float = 1e-5
 private let flashDimension = 512
@@ -37,7 +38,7 @@ private struct FlashBlock {
   }
 
   func callAsFunction(_ x: MLXArray, rope: RelayRotary, pastRope: RelayRotary,
-    endpoints: [RelayKV], past: RelayKV?, plan: RelayAttentionPlan) -> (MLXArray, RelayKV)
+    endpoints: [RelayKV], past: RelayKV?, plan: RelayAttentionPlan) throws -> (MLXArray, RelayKV)
   {
     let source = MLXFast.rmsNorm(x, weight: attentionNorm, eps: flashEpsilon)
     let conditioning = endpoints.isEmpty
@@ -50,7 +51,7 @@ private struct FlashBlock {
     var visible = endpoints
     if let past { visible.append(RelayKV(key: pastRope.apply(past.key), value: past.value)) }
     visible.append(rotated)
-    let attended = plan(q, visible).reshaped([-1, flashDimension])
+    let attended = try plan(q, visible).reshaped([-1, flashDimension])
     let residual = x + output(attended)
     let expanded = gateUp(MLXFast.rmsNorm(residual, weight: feedForwardNorm, eps: flashEpsilon))
     let (gate, up) = expanded.split(axis: -1)
@@ -70,6 +71,7 @@ final class RelayFlash {
   private let residual: RelayLinear
   private let height: Int
   private let width: Int
+  private let scale: NativeRelayVSRScale
   private let rope: RelayRotary
   private let pastRope: RelayRotary
   private let conditionPlan: RelayAttentionPlan
@@ -77,12 +79,13 @@ final class RelayFlash {
   private var history: [RelayKV] = []
 
   init(weights url: URL, geometry: RelayGeometry) throws {
-    let weights = try RelayWeights(url: url, format: "relayvsr-flash-x2-v1")
+    let weights = try RelayWeights(url: url, format: geometry.scale.flashFormat)
+    scale = geometry.scale
     blocks = try (0..<10).map { try FlashBlock(weights, index: $0) }
     encoder = try [
       weights.convolution("lr_encoder.layers.0", 3, 64, kernel: 3, stride: 2, padding: 1),
       weights.convolution("lr_encoder.layers.2", 64, 128, kernel: 3, stride: 2, padding: 1),
-      weights.convolution("lr_encoder.layers.4", 128, 128, kernel: 3, stride: 2, padding: 1),
+      weights.convolution("lr_encoder.layers.4", 128, 128, kernel: 3, stride: geometry.scale.flashThirdStride, padding: 1),
       weights.convolution("lr_encoder.layers.6", 128, flashDimension, kernel: 1),
     ]
     encoderNorm = try weights.tensor("lr_encoder.norm.weight", [flashDimension])
@@ -94,17 +97,17 @@ final class RelayFlash {
       .reshaped([flashDimension])
     spatialHead = try weights.linear("spatial_head.0", flashDimension, 1024)
     residual = try weights.linear("residual_projection", 1024, 768)
-    let h = geometry.paddedHeight / 8
-    let w = geometry.paddedWidth / 8
+    let h = geometry.flashHeight
+    let w = geometry.flashWidth
     height = h
     width = w
     rope = RelayRotary(height: h, width: w, time: 0, axes: [16, 24, 24])
     pastRope = RelayRotary(height: h, width: w, time: -1, axes: [16, 24, 24])
     let reference = RelayWindow(height: 48, width: 48, slidesAtEdge: false)
     let video = RelayWindow(height: 24, width: 24, slidesAtEdge: false)
-    conditionPlan = RelayAttentionPlan(height: h, width: w, windows: [reference])
+    conditionPlan = RelayAttentionPlan(height: h, width: w, windows: [reference], headDimension: 64)
     videoPlans = [[reference, reference, video], [reference, reference, video, video]].map {
-      RelayAttentionPlan(height: h, width: w, windows: $0)
+      RelayAttentionPlan(height: h, width: w, windows: $0, headDimension: 64)
     }
   }
 
@@ -114,7 +117,7 @@ final class RelayFlash {
     var endpoint: [RelayKV] = []
     for block in blocks {
       try Task.checkCancellation()
-      let (next, kv) = block(x, rope: rope, pastRope: pastRope, endpoints: [],
+      let (next, kv) = try block(x, rope: rope, pastRope: pastRope, endpoints: [],
         past: nil, plan: conditionPlan)
       eval(next, kv.key, kv.value)
       endpoint.append(kv)
@@ -134,7 +137,7 @@ final class RelayFlash {
     var nextHistory: [RelayKV] = []
     for i in blocks.indices {
       try Task.checkCancellation()
-      let (next, kv) = blocks[i](x, rope: rope, pastRope: pastRope,
+      let (next, kv) = try blocks[i](x, rope: rope, pastRope: pastRope,
         endpoints: [start[i], end[i]], past: hasPast ? history[i] : nil,
         plan: videoPlans[hasPast ? 1 : 0])
       eval(next, kv.key, kv.value)
@@ -145,20 +148,28 @@ final class RelayFlash {
     // The projection stores 16×16 subpixels per channel, with channel first.
     let rgb = residual(silu(spatialHead(x))).reshaped([height, width, 3, 16, 16])
       .transposed(0, 3, 1, 4, 2).reshaped([height * 16, width * 16, 3])
-    return RelayBicubic.upsample(input) + rgb.asType(.float32) * detail
+    return RelayBicubic.reconstruct(input, residual: rgb, scale: scale, detail: detail)
   }
 }
 
 enum RelayBicubic {
-  private static let kernel = MLXFast.metalKernel(name: "relay_bicubic_2x",
-    inputNames: ["rgb"], outputNames: ["output"],
+  static func reconstruct(_ input: MLXArray, residual: MLXArray, scale: NativeRelayVSRScale, detail: Float) -> MLXArray {
+    var base = upsample(input, scale: scale)
+    if scale == .x4 { base = base.asType(.bfloat16).asType(.float32) }
+    let output = base + residual.asType(.float32) * detail
+    return scale == .x4 ? output.asType(.bfloat16).asType(.float32) : output
+  }
+  private static let kernel = MLXFast.metalKernel(name: "relay_bicubic_scale",
+    inputNames: ["rgb", "factor"], outputNames: ["output"],
     source: """
       uint i = thread_position_in_grid.x;
       int h = rgb_shape[0], w = rgb_shape[1];
-      if (i >= uint(h * w * 12)) return;
-      int c = i % 3, x = (i / 3) % (w * 2), y = i / (w * 6);
-      float sx = (float(x) + 0.5f) * 0.5f - 0.5f;
-      float sy = (float(y) + 0.5f) * 0.5f - 0.5f;
+      int s = factor;
+      if (i >= uint(h * w * 3 * s * s)) return;
+      int c = i % 3, x = (i / 3) % (w * s), y = i / (w * s * 3);
+      float inverse = 1.0f / float(s);
+      float sx = (float(x) + 0.5f) * inverse - 0.5f;
+      float sy = (float(y) + 0.5f) * inverse - 0.5f;
       int bx = int(floor(sx)), by = int(floor(sy));
       float result = 0.0f;
       for (int dy = -1; dy <= 2; ++dy) {
@@ -181,8 +192,24 @@ enum RelayBicubic {
       }
       """)
 
-  static func upsample(_ input: MLXArray) -> MLXArray {
-    kernel([input], grid: (input.size * 4, 1, 1), threadGroup: (256, 1, 1),
-      outputShapes: [[input.dim(0) * 2, input.dim(1) * 2, 3]], outputDTypes: [.float32])[0]
+  static func upsample(_ input: MLXArray, scale: NativeRelayVSRScale = .x2) -> MLXArray {
+    let s = scale.rawValue
+    return kernel([input, MLXArray(Int32(s))], grid: (input.size * s * s, 1, 1), threadGroup: (256, 1, 1),
+      outputShapes: [[input.dim(0) * s, input.dim(1) * s, 3]], outputDTypes: [.float32])[0]
+  }
+}
+
+enum RelayResampling {
+  /// Half-pixel bilinear enlargement of the normalized BF16 LQ frame, as trained.
+  static func bilinearFourTimes(_ input: MLXArray) -> MLXArray {
+    func axis(_ x: MLXArray, _ dimension: Int) -> MLXArray {
+      let n = x.dim(dimension), positions = (0..<(n * 4)).map { (Float($0) + 0.5) * 0.25 - 0.5 }
+      let a = MLXArray(positions.map { Int32(min(n - 1, max(0, Int(floor($0))))) })
+      let b = MLXArray(positions.map { Int32(min(n - 1, max(0, Int(floor($0)) + 1))) })
+      var shape = [1, 1, 1]; shape[dimension] = n * 4
+      let fraction = MLXArray(positions.map { $0 - floor($0) }, shape)
+      return x.take(a, axis: dimension) * (1 - fraction) + x.take(b, axis: dimension) * fraction
+    }
+    return axis(axis(input.asType(.float32), 1), 0).asType(input.dtype)
   }
 }

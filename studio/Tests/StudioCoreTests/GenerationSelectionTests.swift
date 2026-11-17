@@ -37,7 +37,7 @@ final class GenerationSelectionTests: XCTestCase {
     old.ltx25MovieUpscale?.resume=true;old.ltx25MovieUpscale?.audioPolicy = .silence
     XCTAssertTrue(old.isModified)
     XCTAssertEqual(try JSONDecoder().decode(GenerationSelection.self,from:JSONEncoder().encode(old)),old)
-    XCTAssertEqual(GenerationSelection.taskLabel(old.task),"Source movie 2× upscale")
+    XCTAssertEqual(GenerationSelection.taskLabel(old.task),"Source movie upscale")
     old.resetOverrides();XCTAssertNil(old.ltx25MovieUpscale);XCTAssertFalse(old.isModified)
   }
   func testExperimentalSamplingSettingsRoundTripAndResetWithoutChangingOldDocuments() throws {

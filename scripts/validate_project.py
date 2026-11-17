@@ -103,6 +103,9 @@ def build_checks(project: Path, profiles: list[str], python: str) -> list[list[s
                        "integrations/weetodd-inference", "--jobs", "2"])
         checks.append(["bash", "integrations/weetodd-mlx/scripts/test.sh"])
     if "studio" in selected:
+        checks.append(["swift", "test", "--build-system", "native", "--package-path",
+                       "integrations/weetodd-image-layout", "--jobs", "2"])
+        checks.append(["bash", "integrations/weetodd-moss-mlx/scripts/test.sh"])
         checks.append(["swift", "test", "--build-system", "native", "--package-path", "studio",
                        "--jobs", "2"])
     if "studio" in selected:

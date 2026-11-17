@@ -15,7 +15,7 @@ import StudioCore
       if generationDescriptions[clip.id]?["studioInput"] as? String == key { continue }
       var body = try payload()
       body["clipID"] = clip.id.uuidString
-      let command = clip.usesRelayVSR ? "relay-native-describe" : "describe-generation"
+      let command = clip.usesReCaVSR ? "recavsr-native-describe" : clip.usesRelayVSR ? "relay-native-describe" : "describe-generation"
       var description = try await descriptionBridge.independent().invoke(
         command, runtime: runtime, payload: body)
       guard documentSessionID == session, project.id == projectID,

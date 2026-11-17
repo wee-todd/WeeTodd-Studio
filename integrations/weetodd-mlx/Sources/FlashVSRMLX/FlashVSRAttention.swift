@@ -20,12 +20,17 @@ public enum FlashVSRAttention {
   /// submissions, each with at most keySlabBlocks key blocks. Other geometry
   /// stays serial. Online softmax preserves the selected mask and key order.
   public static func attend(queries:MLXArray, keys:MLXArray, values:MLXArray, selection:[[[[Int]]]], keySlabBlocks:Int = 8) throws -> MLXArray {
-    try attend(queries:queries,keys:keys,values:values,selection:selection,keySlabBlocks:keySlabBlocks,
-      checkCancellation:{ try Task.checkCancellation() })
+    let architecture=Device.defaultDevice().deviceType == .gpu ? GPU.deviceInfo().architecture:nil
+    let optimized=FlashVSRCompiledAttentionSlab.supports(queries:queries,keys:keys,values:values,
+      keySlabBlocks:keySlabBlocks,architecture:architecture)
+    let slab=optimized ? FlashVSRCompiledAttentionSlab():nil
+    return try attend(queries:queries,keys:keys,values:values,selection:selection,keySlabBlocks:keySlabBlocks,
+      checkCancellation:{ try Task.checkCancellation() },compiledSlab:slab,asynchronousSlabs:optimized)
   }
 
   static func attend(queries:MLXArray,keys:MLXArray,values:MLXArray,selection:[[[[Int]]]],
-    keySlabBlocks:Int=8,checkCancellation:()throws->Void)throws->MLXArray {
+    keySlabBlocks:Int=8,checkCancellation:()throws->Void,
+    compiledSlab:FlashVSRCompiledAttentionSlab?=nil,asynchronousSlabs:Bool=false)throws->MLXArray {
     guard queries.ndim == 5, keys.ndim == 5, values.shape == keys.shape,
       queries.shape.allSatisfy({$0>0}),keys.shape.allSatisfy({$0>0}),
       keys.shape[2] <= Int(Int32.max),
@@ -38,6 +43,9 @@ public enum FlashVSRAttention {
     let grouped=tokens == 128 && dim == 128 && keySlabBlocks == 8
       && (queries.dtype == .bfloat16 || queries.dtype == .float32)
       && queries.dtype == keys.dtype && queries.dtype == values.dtype
+    let pipeline=grouped && asynchronousSlabs
+    let tracing=ProcessInfo.processInfo.environment["WEETODD_UPSCALER_TRACE"] == "1"
+    var reported=false
     struct WindowState {
       let query:MLXArray
       var peak:MLXArray,denominator:MLXArray,numerator:MLXArray
@@ -56,6 +64,10 @@ public enum FlashVSRAttention {
         var blockOutputs=Array<MLXArray?>(repeating:nil,count:blocks)
         for group in plan.groups {
           try checkCancellation()
+          var pending=[[MLXArray]]()
+          // Cancellation can interrupt graph construction after an earlier
+          // slab was queued. Drain that work before releasing owned buffers.
+          defer { if let last=pending.last { eval(last) } }
           var states=group.map { block in
             WindowState(query:queries[b,h,block].asType(.float32),
               peak:MLXArray.full([tokens,1],values:MLXArray(-Float.infinity)),
@@ -68,20 +80,40 @@ public enum FlashVSRAttention {
               try checkCancellation()
               let indices=selection[b][h][group[local]]
               let ids=MLXArray(indices[start..<min(start+keySlabBlocks,indices.count)].map(Int32.init))
-              let k=take(keys[b,h],ids,axis:0).reshaped([-1,dim]).asType(.float32)
-              let v=take(values[b,h],ids,axis:0).reshaped([-1,dim]).asType(.float32)
               let old=states[local]
-              let scores=matmul(old.query,k.transposed()) / sqrt(Float(dim))
-              let nextPeak=maximum(old.peak,max(scores,axis:1,keepDims:true))
-              let correction=exp(old.peak-nextPeak),probabilities=exp(scores-nextPeak)
-              states[local].numerator=old.numerator*correction+matmul(probabilities,v)
-              states[local].denominator=old.denominator*correction+sum(probabilities,axis:1,keepDims:true)
-              states[local].peak=nextPeak
+              if grouped,let compiledSlab {
+                let result=try compiledSlab.evaluate(query:old.query,key:keys[b,h],value:values[b,h],indices:ids,
+                  peak:old.peak,denominator:old.denominator,numerator:old.numerator)
+                states[local].numerator=result[0]
+                states[local].denominator=result[1]
+                states[local].peak=result[2]
+              } else {
+                let k=take(keys[b,h],ids,axis:0).reshaped([-1,dim]).asType(.float32)
+                let v=take(values[b,h],ids,axis:0).reshaped([-1,dim]).asType(.float32)
+                let scores=matmul(old.query,k.transposed()) / sqrt(Float(dim))
+                let nextPeak=maximum(old.peak,max(scores,axis:1,keepDims:true))
+                let correction=exp(old.peak-nextPeak),probabilities=exp(scores-nextPeak)
+                states[local].numerator=old.numerator*correction+matmul(probabilities,v)
+                states[local].denominator=old.denominator*correction+sum(probabilities,axis:1,keepDims:true)
+                states[local].peak=nextPeak
+              }
             }
-            eval(states.flatMap{[$0.numerator,$0.denominator,$0.peak]})
+            let current=states.flatMap{[$0.numerator,$0.denominator,$0.peak]}
+            if pipeline {
+              asyncEval(current)
+              if tracing && !reported {
+                let message="Flash attention compiled=\(compiledSlab != nil) async-depth=2 query-blocks=\(blocks) key-blocks=\(keys.shape[2])\n"
+                FileHandle.standardError.write(Data(message.utf8));reported=true
+              }
+              pending.append(current)
+              // At most two slabs may coexist; wait for the older one before
+              // constructing the next. The next slab's DAG can overlap GPU work.
+              if pending.count == 2 {eval(pending.removeFirst())}
+            } else {eval(current)}
           }
           let results=states.map{($0.numerator/$0.denominator).asType(queries.dtype)}
           eval(results)
+          pending.removeAll()
           for (local,block) in group.enumerated() { blockOutputs[block]=results[local] }
         }
         try checkCancellation()
@@ -92,9 +124,14 @@ public enum FlashVSRAttention {
     return stacked(batches,axis:0)
   }
 
-  /// Pool only the block axis into CPU routing. Two passes and a bounded top-k heap
-  /// avoid constructing a block-square matrix, let alone token-square scores.
+  /// GPU draft scores/ranking with the original host normalization boundary.
   static func route(q:MLXArray, k:MLXArray, rows:Int, columns:Int, localRange:Int, topK:Int) throws -> [[[[Int]]]] {
+    try FlashVSRGPURouting.route(q:q,k:k,rows:rows,columns:columns,localRange:localRange,topK:topK)
+  }
+
+  /// Conservative fallback. The pre-optimization serial Float/heap order remains
+  /// available for unsupported geometry/devices and unsafe draft input ranges.
+  static func routeReference(q:MLXArray, k:MLXArray, rows:Int, columns:Int, localRange:Int, topK:Int) throws -> [[[[Int]]]] {
     let b=q.shape[0], h=q.shape[1], nq=q.shape[2], nk=k.shape[2], d=q.shape[4]
     let qp=mean(q.asType(.float32),axis:3).asArray(Float.self), kp=mean(k.asType(.float32),axis:3).asArray(Float.self)
     let candidates=try FlashVSRBlockRouting.candidates(queryBlocks:nq,keyBlocks:nk,rows:rows,columns:columns,localRange:localRange)

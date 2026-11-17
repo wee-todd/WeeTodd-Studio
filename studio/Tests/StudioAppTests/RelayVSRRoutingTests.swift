@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import InferenceContracts
 import StudioCore
 import XCTest
 @testable import WeeToddStudio
@@ -55,6 +56,7 @@ final class RelayVSRRoutingTests: XCTestCase {
 
   @MainActor func testPackagedRelayVSRRendersTrimmedMovieThroughStudio() async throws {
     let environment = ProcessInfo.processInfo.environment
+    let scale = NativeRelayVSRScale(rawValue: Int(environment["WEETODD_TEST_RELAYVSR_SCALE"] ?? "2") ?? 0) ?? .x2
     guard let worker = environment["WEETODD_TEST_RELAYVSR_WORKER"],
       let models = environment["WEETODD_TEST_RELAYVSR_MODELS"],
       let source = environment["WEETODD_TEST_RELAYVSR_SOURCE"] else {
@@ -76,6 +78,17 @@ final class RelayVSRRoutingTests: XCTestCase {
     store.select(sourceClip.id)
     await store.createMovieUpscaleCopy(method: .relayVSR)
     XCTAssertEqual(store.selectedClip?.usesRelayVSR, true, store.error ?? "")
+    store.editClip { $0.generationSelection?.relayVSRScale = scale == .x2 ? nil : scale }
+    let preparation = directory.appendingPathComponent("prepared")
+    let recipe = try await NativeRelayVSRPreparation.prepareMovie(source: source, worker: worker,
+      models: models, scale: scale, destination: preparation)
+    let arguments = try NativeRelayVSRPreparation.arguments(recipePath: recipe, worker: worker,
+      output: directory.appendingPathComponent("unused.mov"))
+    if scale == .x4 {
+      XCTAssertEqual(arguments.suffix(2), ["--scale", "4"])
+    } else {
+      XCTAssertFalse(arguments.contains("--scale"))
+    }
     await store.generateSelected()
     let selected = try XCTUnwrap(store.selectedClip)
     let version = try XCTUnwrap(selected.versions.last, store.error ?? "")
@@ -94,7 +107,7 @@ final class RelayVSRRoutingTests: XCTestCase {
     let outputFPS = try await track.load(.nominalFrameRate)
     let size = try await track.load(.naturalSize)
     XCTAssertEqual(Double(outputFPS), fps, accuracy: 0.0001)
-    XCTAssertEqual(size, CGSize(width: 288, height: 208))
+    XCTAssertEqual(size, CGSize(width: 144 * scale.rawValue, height: 104 * scale.rawValue))
     XCTAssertEqual(audio.count, 1)
     let audioRange = try await XCTUnwrap(audio.first).load(.timeRange)
     XCTAssertEqual(audioRange.start.seconds, 0, accuracy: 0.0001)
@@ -102,13 +115,14 @@ final class RelayVSRRoutingTests: XCTestCase {
 
     store.videoUpscaleSourcePath = source
     store.videoUpscaleTool = .relayVSR
+    store.relayVSRScale = scale
     store.runRelayVSRUpscale()
     await store.videoUpscaleTask?.value
     let whole = try XCTUnwrap(store.relayVSRResult, store.videoUpscaleStatus)
     let asset = try XCTUnwrap(store.project.assets.first { $0.path == whole.output })
     XCTAssertEqual(store.project.clips.count, 2)
-    XCTAssertEqual(asset.width, 288)
-    XCTAssertEqual(asset.height, 208)
+    XCTAssertEqual(asset.width, 144 * scale.rawValue)
+    XCTAssertEqual(asset.height, 104 * scale.rawValue)
     XCTAssertEqual(asset.fps, fps, accuracy: 0.0001)
   }
 }

@@ -1,3 +1,4 @@
+import InferenceContracts
 import AppKit
 import Foundation
 import StudioCore
@@ -14,6 +15,8 @@ private struct VideoUpscalePreferences: Codable {
   var presets: [VideoUpscalePreset]
   var tool: NativeUpscalerTool?
   var h3Settings: H3RegenerateSettings?
+  var reCaSettings: ReCaVSRSettings?
+  var relayScale: NativeRelayVSRScale?
   var modelLibrary: String?
 }
 @MainActor extension StudioStore {
@@ -23,6 +26,8 @@ private struct VideoUpscalePreferences: Codable {
       videoUpscaleSettings = value.settings; videoUpscaleRuntime = value.runtime; videoUpscalePresets = value.presets
       videoUpscaleTool = value.tool ?? .flashVSR
       h3RegenerateSettings = value.h3Settings ?? .init()
+      reCaVSRSettings = value.reCaSettings ?? (try! ReCaVSRSettings())
+      relayVSRScale = value.relayScale ?? .x2
       nativeUpscalerModelLibrary = value.modelLibrary ?? h3RegenerateSettings.modelLibraryRoot
     }
     let sibling = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("WeeToddCLI").path ?? ""
@@ -49,7 +54,8 @@ private struct VideoUpscalePreferences: Codable {
     do {
       try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
       let value = VideoUpscalePreferences(settings: videoUpscaleSettings, runtime: videoUpscaleRuntime, presets: videoUpscalePresets,
-        tool: videoUpscaleTool, h3Settings: h3RegenerateSettings, modelLibrary: nativeUpscalerModelLibrary)
+        tool: videoUpscaleTool, h3Settings: h3RegenerateSettings, reCaSettings: reCaVSRSettings,
+        relayScale: relayVSRScale, modelLibrary: nativeUpscalerModelLibrary)
       try JSONEncoder().encode(value).write(to: dataDirectory.appendingPathComponent("video-upscale.json"), options: .atomic)
     } catch { self.error = error.localizedDescription }
   }
@@ -75,6 +81,14 @@ private struct VideoUpscalePreferences: Codable {
         FileManager.default.isReadableFile(atPath: receipt.source.path), FileManager.default.isReadableFile(atPath: receipt.video.path) {
         h3RegenerateResult = receipt; h3RegenerateSettings = receipt.settings; videoUpscaleTool = .h3Regenerate
         videoUpscaleSourcePath = receipt.source.path; videoUpscaleSourceAssetID = nil
+      }
+      if let saved = asset.upscaleReceipt, let data = try? Data(contentsOf: URL(fileURLWithPath: saved)),
+        let receipt = try? JSONDecoder().decode(NativeReCaVSRReceipt.self, from: data),
+        (try? receipt.validate()) != nil, receipt.video.path == asset.path,
+        FileManager.default.isReadableFile(atPath: receipt.recipe.source.path) {
+        reCaVSRSettings = receipt.recipe.settings; videoUpscaleTool = .reCaVSR
+        videoUpscaleSourcePath = receipt.recipe.source.path; videoUpscaleSourceAssetID = nil
+        reCaVSRResult = (receipt.recipe.source.path, receipt.video.path)
       }
       if let saved = asset.upscaleReceipt, let data = try? Data(contentsOf: URL(fileURLWithPath: saved)),
         let receipt = try? JSONDecoder().decode(FlashVSRReceipt.self, from: data) {

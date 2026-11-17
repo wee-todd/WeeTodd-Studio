@@ -2,6 +2,7 @@ import CoreFoundation
 import CryptoKit
 import Darwin
 import Foundation
+import ImageLayout
 
 /// Payload-free library inspection. Training provenance is a filter, not a promise
 /// that a selected checkpoint/task supports every projection or adapter profile.
@@ -85,6 +86,7 @@ public enum NativeLoRAInspection {
     for key in ["model_version", "base_model", "base_model_name_or_path", "ss_base_model_version", "modelspec.architecture", "converted_layout"] {
       let value = (metadata[key] ?? "").lowercased()
       if value.contains("minimax") && value.contains("h3") { models.insert(.h3); families.insert("h3") }
+      if value.contains("moss") && value.contains("image") { models.insert(.mossImage); families.insert("moss_image") }
       if value.contains("ltx") { families.insert("ltx") }
       if ["flux", "wan", "hunyuan", "stable-diffusion", "stable_diffusion", "sdxl"].contains(where: {
         value.range(of: "(?:^|[^a-z0-9])" + $0 + "(?:[^a-z0-9]|$)", options: .regularExpression) != nil
@@ -99,7 +101,7 @@ public enum NativeLoRAInspection {
     }
     guard models.count <= 1, families.count <= 1 else { throw invalid("LoRA has conflicting training-model metadata.") }
     if models.isEmpty, let family = families.first, let hint,
-      family != (hint == .h3 ? "h3" : "ltx") {
+      family != (hint == .h3 ? "h3" : hint == .mossImage ? "moss_image" : "ltx") {
       throw invalid("The selected training model conflicts with the declared model family.")
     }
     return models.first ?? hint
@@ -232,7 +234,18 @@ public enum NativeLoRAInspection {
           result.merge(try h3(metadata, targets: Array(pairs.keys), selectedProfile: selectedH3Profile)) { _, new in new }
         }
       }
-      else { try NativeLTXLoRAMetadata.validate(path: source.path, model: model.rawValue) }
+      else if model == .mossImage {
+        // Header inspection is a library filter; the native worker validates
+        // exact target maps, ranks, shapes and file identity before inference.
+        for key in pairs.keys { _ = try MOSSAdapterTargets.canonical(key) }
+        if pairs.count == 252, pairs.values.allSatisfy({ $0.a?.shape.first == 128 }) {
+          let stream = try FileHandle(forReadingFrom: source); defer { try? stream.close() }; var hash = SHA256()
+          while let bytes = try stream.read(upToCount: 1024 * 1024), !bytes.isEmpty { try Task.checkCancellation(); hash.update(data: bytes) }
+          if hash.finalize().map({ String(format: "%02x", $0) }).joined() == "154c7f1455c3bf9925945c2f1ea2e4f09d0d0c67256081384a094b2b585f913f" {
+            result["loraProfile"] = "moss_sft_4step_v2"
+          }
+        }
+      } else { try NativeLTXLoRAMetadata.validate(path: source.path, model: model.rawValue) }
     } else {
       guard ["adapter_profile", "profile", "distillation_profile"].allSatisfy({
         ["", "standard", "base", "quality"].contains(trim(metadata[$0] ?? ""))

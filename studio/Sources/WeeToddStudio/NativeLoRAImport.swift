@@ -7,7 +7,8 @@ enum NativeLoRAImport {
   static let defaultH3Profile = "auto"
   static func usesNative(runtime: RuntimeSettings, modelHint: LoRAModel? = nil,
     selectedEngine: Engine? = nil) -> Bool {
-    let engine = modelHint.map { Engine(rawValue: $0.rawValue)! } ?? selectedEngine
+    if modelHint == .mossImage { return true }
+    let engine = modelHint.flatMap { Engine(rawValue: $0.rawValue) } ?? selectedEngine
     if engine == .h3 && runtime.usesNativeH3 { return true }
     if (engine == .ltx23 || engine == .ltx25) && runtime.usesNativeLTX25 { return true }
     return !FileManager.default.isExecutableFile(atPath: runtime.pythonPath)

@@ -64,6 +64,50 @@ Actual-weight checks cover all four model/decoder pairs at compression 4, 2 and 
 
 For the released 128-token, 128-channel attention windows, the worker groups up to eight independent windows per GPU submission. Each window retains its original rank-two matrix operations, selected-key order and eight-key-window slabs. Scratch remains below the existing 64 MiB attention reserve; other geometries and custom slab sizes keep serial scheduling. M3 Ultra synthetic operator checks retained every Float32/BF16 output bit and measured 3.32–3.51× warm operator speedups. These measurements exclude model loading, projection, other transformer operations and decoding; they do not establish whole-video throughput.
 
+On qualified `g15d` GPUs, draft routing now computes serial Float32 dot products
+and exact strict-threshold ranking on the GPU. The original host square root,
+division, exponential and denominator order are retained. When the candidate
+count is strictly below capacity, finite-score checks prove that every candidate
+is selected. Ties retain the original first-candidate fallback. Unsupported
+layouts and unsafe numerical ranges use the original CPU route. Admission adds
+a bounded 512 MiB routing reserve, separate from attention scratch.
+
+Four balanced M3 Ultra native-size routing pairs retained every selection and
+measured about 5.7× local-window and 9.3× broad-window operator speedups. Routing
+is only part of transformer execution; these ratios are not whole-movie gains.
+
+Before compiled scheduling, a complete M3 Ultra 124-frame 1344 × 768 → 2688 × 1536 Turbo/Tiny
+job at 24 FPS measured 2628.26 → 2505.58 seconds against the earlier complete
+baseline. Every native RGB byte before encoding, delivered pixel and aligned
+PCM sample matched; peak MLX allocation remained 61.24 GB, with zero active
+bytes at each weighted-stage release. A newly paired 17-frame candidate/control
+check, exercising both GPU routing modes, measured 478.08 → 475.56 seconds
+(control → candidate). The full observation used 4.7% less time, but the paired
+prefix improved only 0.5%; a repeatable 4.7% whole-job gain is unestablished.
+These measurements qualify this source and 2× profile on M3 Ultra. FlashVSR+
+4× was excluded from this performance task.
+
+## Compiled attention scheduling
+
+Qualified `g15d` GPUs compile the existing per-slab graph and queue at most
+two attention slabs. The original rank-two Float32 matrix operations,
+maximum/sum reductions, key order, eight-key-block slabs, eight-window groups
+and final BF16 conversion are retained. Compilation state belongs to one
+attention call and releases with it; queued work drains on success and
+cancellation. The two-slab scratch bound remains within the existing 64 MiB
+reserve. Other architectures, custom slabs/geometry and unsupported dtypes
+keep the original consumer.
+
+A fresh complete M3 Ultra comparison against the GPU-routing baseline measured
+2547.05 → 1449.70 seconds (42m27s → 24m10s, 43.08% less time) for the same
+124-frame 1344 × 768 → 2688 × 1536, 24 FPS Turbo/Tiny profile. Every native RGB
+byte before encoding, delivered pixel and aligned PCM sample matched. Peak
+MLX allocation stayed at 61.24 GB, with zero active bytes at weighted-stage
+release. Full-resolution 17-frame A/B/B/A runs averaged 479.79 → 285.24 seconds
+(40.55% less time). These are measurements of one source/profile on M3 Ultra;
+broader sources, hardware, Base/Full timing and CUDA pixel parity remain
+unqualified. FlashVSR+ 4× was excluded.
+
 ## Retry, ordered processing and saved jobs
 
 Enable **Upscale after generation** and choose FlashVSR+, H3 Regenerate, native Pixel/CQ or an explicit ordered combination. Enabling the control starts with one FlashVSR stage. H3 → FlashVSR and Pixel/CQ → FlashVSR are selected deliberately. Existing saved recipes retain their recorded settings/backend.

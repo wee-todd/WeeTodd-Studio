@@ -1,11 +1,11 @@
 import Foundation
 
 public enum ImageExecutionProvider: String, Codable, CaseIterable, Identifiable {
-  case drawThings, nativeMLX, nativeH3
+  case drawThings, nativeMLX, nativeH3, nativeMOSS
   public var id: String { rawValue }
   public var isNative: Bool { self != .drawThings }
   public var label: String {
-    switch self { case .drawThings: return "Draw Things"; case .nativeMLX: return "Local MLX · Qwen"; case .nativeH3: return "Local H3" }
+    switch self { case .drawThings: return "Draw Things"; case .nativeMLX: return "Local MLX · Qwen"; case .nativeH3: return "Local H3"; case .nativeMOSS: return "Local MOSS" }
   }
 }
 
@@ -47,6 +47,9 @@ extension DrawThingsImageDraft {
   }
   public var imageInputIssue: String? {
     let inputs = activeImageInputs
+    if executionProvider == .nativeMOSS {
+      return inputs.isEmpty ? nil : "MOSS text-to-image uses layout regions. Disable canvas and mood-board inputs; add an editor guide in Layout when arranging boxes."
+    }
     if executionProvider == .nativeH3 {
       return inputs.count > 9 ? "H3 accepts nine active image references including the canvas." : nil
     }
@@ -68,14 +71,16 @@ extension DrawThingsImageDraft {
       sampler = settings.sampler; shift = settings.shift; negativePrompt = settings.negativePrompt
       loras = settings.loras
     } else {
-      modelID = value == .nativeMLX ? "Qwen/Qwen-Image-2.1" : ""
-      width = value == .nativeMLX ? 1024 : value == .nativeH3 ? 768 : 512; height = width
-      steps = value == .nativeMLX ? 40 : value == .nativeH3 ? 20 : 4; guidance = 1; strength = 1
+      modelID = value == .nativeMOSS ? MOSSImageSettings.sftModelID : value == .nativeMLX ? "Qwen/Qwen-Image-2.1" : ""
+      width = value == .nativeMOSS || value == .nativeMLX ? 1024 : value == .nativeH3 ? 768 : 512; height = width
+      steps = value == .nativeMOSS ? 50 : value == .nativeMLX ? 40 : value == .nativeH3 ? 20 : 4
+      guidance = value == .nativeMOSS ? 3 : 1; strength = 1
       sampler = nil; shift = nil; negativePrompt = ""; loras = []
     }
     providerSettings = saved; provider = value
     if value == .nativeMLX, nativeImage == nil { nativeImage = NativeImageSettings() }
     if value == .nativeH3, h3Image == nil { h3Image = H3ImageSettings() }
+    if value == .nativeMOSS, mossImage == nil { mossImage = MOSSImageSettings() }
   }
   /// File hashing belongs on a background worker operating on a captured value-type draft.
   public func nativeRequest(id: String) throws -> [String: Any] {

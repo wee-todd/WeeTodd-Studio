@@ -1,10 +1,12 @@
 import AppKit
 import ImageIO
+import ImageLayout
 import StudioCore
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct ImageGenerationEditor: View {
+  @State private var generationDetails: MediaAsset?
   @EnvironmentObject var store: StudioStore
   var onClose: (() -> Void)? = nil
   var onUseReference: ((MediaAsset) -> Void)? = nil
@@ -19,6 +21,8 @@ struct ImageGenerationEditor: View {
   @State private var connectionsOpen = false
   @State private var inspection: ImagePreviewSelection?
   @State private var promptExpanded = true
+  @State private var layoutAnalysisOpen = false
+  @State private var analysisBeforeApply: ImageLayoutDraft?
   var draft: DrawThingsImageDraft? { store.imageDraft }
   var livePreview: BridgeProgressEvent? { store.bridge.busy ? store.bridge.livePreview : nil }
   var connection: DrawThingsConnection? {
@@ -40,14 +44,14 @@ struct ImageGenerationEditor: View {
         TextField("Image name", text: binding(\.name, fallback: "Generated image")).textFieldStyle(.roundedBorder)
           .frame(minWidth: 180, maxWidth: 380)
         Spacer()
-        Button(moodboardVisible ? "Hide mood board" : "Mood board (\(draft?.moodboard.count ?? 0))") { moodboardVisible.toggle() }
+        if !isMOSSImage { Button(moodboardVisible ? "Hide mood board" : "Mood board (\(draft?.moodboard.count ?? 0))") { moodboardVisible.toggle() } }
         Menu("Tools") {
         Button("Prompt Assistant…") {
           if let draft { assistant = PromptAssistantContext(projectID: store.project.id, image: draft, documentSessionID: store.documentSessionID) }
         }.disabled(store.bridge.busy || draft?.hasManagedCharacterPrompt == true)
         Button("Import Config…") { store.configImportClipID = nil; configOpen = true }.disabled(isNative)
         Link("Draw Things presets", destination: DrawThingsConfigImport.presetsURL)
-        Button("Export Headless Job…") { store.exportDrawThingsImageJob() }.disabled(isH3Image || store.bridge.busy || store.preparingImageRequest || draft?.modelID.isEmpty != false)
+        Button("Export Headless Job…") { store.exportDrawThingsImageJob() }.disabled(isMOSSImage || isH3Image || store.bridge.busy || store.preparingImageRequest || draft?.modelID.isEmpty != false)
           .help(isH3Image ? "H3 image job export is not available yet. Generate from this workspace." : "Export a standalone image job")
         }
       }.padding(16)
@@ -61,20 +65,33 @@ struct ImageGenerationEditor: View {
         settings.frame(minWidth: 260, idealWidth: 300, maxWidth: 330)
         VStack(spacing: 12) {
           HStack {
-            Text(livePreview != nil ? "LIVE PREVIEW · APPROXIMATE" : showResult && store.imagePreviewPath != nil ? "RESULT" : "CANVAS").font(.caption.bold())
+            Text(livePreview != nil ? "LIVE PREVIEW · APPROXIMATE" : showResult && store.imagePreviewPath != nil ? "RESULT" : isMOSSImage ? "LAYOUT" : "CANVAS").font(.caption.bold())
             if store.imagePreviewPath != nil {
-              Picker("Display", selection: $showResult) { Text("Input").tag(false); Text("Result").tag(true) }.labelsHidden().pickerStyle(.segmented).frame(width: 130)
+              Picker("Display", selection: $showResult) { Text(isMOSSImage ? "Layout" : "Input").tag(false); Text("Result").tag(true) }.labelsHidden().pickerStyle(.segmented).frame(width: 130)
                 .disabled(livePreview != nil)
             }
             Spacer()
+            if isMOSSImage {
+              Button("Layout from image…") { layoutAnalysisOpen = true }
+                .disabled(store.operationBusy || draft?.hasManagedCharacterPrompt == true)
+            }
             Button("Inspect image") {
               if let path = showResult ? store.imagePreviewPath ?? draft?.canvas?.path : draft?.canvas?.path {
                 inspection = ImagePreviewSelection(path: path, title: draft?.name)
               }
             }.disabled(livePreview != nil || (store.imagePreviewPath == nil && draft?.canvas == nil))
-            Button("Fit") { zoom = 1 }
-            Slider(value: $zoom, in: 0.5...3).frame(width: 100).help("Canvas zoom")
+            if showResult, let asset = resultAsset {
+              Button("Generation details…") { generationDetails = asset }.disabled(livePreview != nil)
+            }
+            if !isMOSSImage || (showResult && store.imagePreviewPath != nil) {
+              Button("Fit") { zoom = 1 }
+              Slider(value: $zoom, in: 0.5...3).frame(width: 100).help("Canvas zoom")
+            }
           }.font(.caption)
+          if isMOSSImage && (!showResult || store.imagePreviewPath == nil) {
+            ImageLayoutEditor(layout: layoutBinding, initialAnalysisBefore: analysisBeforeApply,
+              onAnalysisRegistered: { analysisBeforeApply = nil }).id(draft?.storageKey).frame(minHeight: 320)
+          } else {
           GeometryReader { geometry in
             let path = livePreview?.previewPath ?? (showResult ? store.imagePreviewPath ?? draft?.canvas?.path : draft?.canvas?.path)
             ZStack {
@@ -100,6 +117,8 @@ struct ImageGenerationEditor: View {
             }.frame(width: geometry.size.width, height: geometry.size.height).contentShape(Rectangle()).clipped()
               .onDrop(of: [UTType.fileURL.identifier, UTType.text.identifier], isTargeted: nil) { store.dropImageInputs($0, canvas: true) }
           }.frame(minHeight: 220)
+          }
+          if !isMOSSImage {
           HStack {
             Button("Load canvas…") { store.chooseImageInputs(canvas: true); showResult = false }
             assetsMenu(canvas: true)
@@ -121,6 +140,14 @@ struct ImageGenerationEditor: View {
             Spacer()
           }.font(.caption)
           }
+          } else if draft?.activeImageInputs.isEmpty == false {
+            Text("MOSS uses text and region layouts. Retained canvas and mood-board images must be disabled; a layout guide is editor-only.").font(.caption).foregroundStyle(.orange)
+            Button("Disable retained image inputs") {
+              store.imageDraft?.canvas?.enabled = false
+              for index in store.imageDraft?.moodboard.indices ?? 0..<0 { store.imageDraft?.moodboard[index].enabled = false }
+              store.imageEstimate = nil
+            }
+          }
           HStack {
             Text("Prompt").font(.caption.bold()); Spacer()
             Button(promptExpanded ? "Hide prompt" : "Show prompt") { promptExpanded.toggle() }.font(.caption)
@@ -137,7 +164,7 @@ struct ImageGenerationEditor: View {
           }
           }
         }.padding(16).frame(minWidth: 470, maxWidth: .infinity)
-        if moodboardVisible { moodboard.frame(minWidth: 205, idealWidth: 235, maxWidth: 290) }
+        if moodboardVisible && !isMOSSImage { moodboard.frame(minWidth: 205, idealWidth: 235, maxWidth: 290) }
       }
       Divider()
       HStack {
@@ -159,9 +186,19 @@ struct ImageGenerationEditor: View {
     }.background(Theme.background).frame(maxWidth: .infinity, maxHeight: .infinity)
       .sheet(item: $assistant) { PromptAssistantView(context: $0).environmentObject(store) }
       .sheet(item: $inspection) { ImagePreview(path: $0.path, title: $0.title) }
+      .sheet(item: $generationDetails) { ImageGenerationDetailsView(asset: $0).environmentObject(store) }
       .sheet(isPresented: $configOpen) { DrawThingsConfigImportView(onClose: { configOpen = false }).environmentObject(store) }
       .sheet(isPresented: $connectionsOpen) { DrawThingsSettings(onClose: { connectionsOpen = false }).environmentObject(store) }
       .sheet(isPresented: $loraLibraryOpen) { LoRALibrary(imageWorkspace: true).environmentObject(store) }
+      .sheet(isPresented: $layoutAnalysisOpen) {
+        MOSSLayoutAnalysisView { captured in
+          var previous = captured.draft.mossLayout ?? ImageLayoutDraft(width: captured.draft.width,
+            height: captured.draft.height, caption: captured.draft.prompt)
+          previous.width = captured.draft.width; previous.height = captured.draft.height
+          previous.summary.caption = captured.draft.prompt
+          analysisBeforeApply = previous; showResult = false
+        }.environmentObject(store)
+      }
       .onAppear { moodboardVisible = draft?.moodboard.isEmpty == false }
       .onChange(of: draft?.moodboard.count) { _, count in if (count ?? 0) > 0 { moodboardVisible = true } }
       .onChange(of: showResult) { _, _ in zoom = 1 }
@@ -177,10 +214,29 @@ struct ImageGenerationEditor: View {
         && $0.generation?.rippleReference == draft?.rippleReference
     }
   }
+  private var layoutBinding: Binding<ImageLayoutDraft> {
+    let session = store.documentSessionID, key = draft?.storageKey
+    return Binding(get: {
+      var value = store.imageDraft?.mossLayout ?? ImageLayoutDraft(width: store.imageDraft?.width ?? 1024, height: store.imageDraft?.height ?? 1024, caption: store.imageDraft?.prompt ?? "")
+      value.width = store.imageDraft?.width ?? value.width; value.height = store.imageDraft?.height ?? value.height
+      value.summary.caption = store.imageDraft?.prompt ?? value.summary.caption
+      return value
+    }, set: { value in
+      guard store.documentSessionID == session, store.imageDraft?.storageKey == key else { return }
+      guard var draft = store.imageDraft else { return }
+      draft.mossLayout = value; draft.width = value.width; draft.height = value.height
+      if !draft.hasManagedCharacterPrompt { draft.prompt = value.summary.caption }
+      store.imageDraft = draft
+      store.imageEstimate = nil
+    })
+  }
+  private var resultAsset: MediaAsset? {
+    store.allAssets.first { $0.path == store.imagePreviewPath && $0.generation != nil }
+  }
   var settings: some View {
     Form {
       backendPicker
-      if isH3Image { H3ImageModelSettings() } else if isNative { nativeSettings } else {
+      if isMOSSImage { MOSSImageSettingsView() } else if isH3Image { H3ImageModelSettings() } else if isNative { nativeSettings } else {
       Section("Draw Things") {
         Picker("Connection", selection: Binding(get: { draft?.profileID ?? "" }, set: { id in
           store.selectImageConnection(id)
@@ -235,9 +291,11 @@ struct ImageGenerationEditor: View {
       Section("Generation") {
         TextField("Width", value: binding(\.width, fallback: 512), format: .number.grouping(.never))
         TextField("Height", value: binding(\.height, fallback: 512), format: .number.grouping(.never))
+        if isMOSSImage { Text("Multiples of 16 · sides up to 4096 · up to 4 MP").font(.caption2).foregroundStyle(.secondary) } else {
         Text(isH3Image ? "Multiples of 32 · sides up to 1920 · at most 2,088,960 pixels" : isNative ? "Dimensions: multiples of 32" : "Dimensions: multiples of 64").font(.caption2).foregroundStyle(.secondary)
+        }
         TextField("Steps", value: binding(\.steps, fallback: 4), format: .number.grouping(.never))
-        TextField("CFG", value: binding(\.guidance, fallback: 1), format: .number).disabled(isNative)
+        TextField("CFG", value: binding(\.guidance, fallback: 1), format: .number).disabled(isNative && !isMOSSImage)
         if !isNative, draft?.canvas?.enabled == true {
           Text("Generation strength · \(Int((draft?.strength ?? 1) * 100))%")
           Slider(value: binding(\.strength, fallback: 1), in: 0...1)
@@ -254,7 +312,7 @@ struct ImageGenerationEditor: View {
           Text("The same seed and settings reproduce the same image. Enter −1 or choose Random each generation for variations.").font(.caption2).foregroundStyle(.secondary)
           Button("New fixed seed") { store.imageDraft?.seed = Int.random(in: 0...Int(UInt32.max)); store.imageEstimate = nil }
         }
-        if isH3Image {
+        if isMOSSImage { Text("Sampler and negative guidance are in MOSS settings above.").font(.caption) } else if isH3Image {
           Text("H3 profile sampler · steps are actual evaluations. CFG 1; no negative prompt.").font(.caption)
         } else if isNative { Text("Euler · automatic shift").font(.caption) } else {
         Picker("Sampler", selection: binding(\.sampler, fallback: nil)) {
@@ -267,6 +325,7 @@ struct ImageGenerationEditor: View {
         }
       }
       if !isNative { Section("LoRAs & Groups") { loraControls } }
+      if isMOSSImage { MOSSImageLoRAControls() }
       if isH3Image { Section("LoRAs & Groups") { H3ImageLoRAControls() } }
       Section("Preflight") {
         if let estimate = store.imageEstimate {

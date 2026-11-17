@@ -2,15 +2,30 @@
 import PackageDescription
 let package = Package(
   name: "WeeToddMLX", platforms: [.macOS(.v14)],
-  products: [.executable(name: "WeeToddFlashVSRWorker", targets: ["WeeToddFlashVSRWorker"]), .executable(name: "WeeToddH3MLXWorker", targets: ["WeeToddH3MLXWorker"]), .executable(name: "WeeToddMLXDecodeProbe", targets: ["WeeToddMLXDecodeProbe"]), .executable(name: "WeeToddMLXPipelineProbe", targets: ["WeeToddMLXPipelineProbe"]), .executable(name: "WeeToddMLXDenoiserProbe", targets: ["WeeToddMLXDenoiserProbe"]), .executable(name: "WeeToddMLXStackProbe", targets: ["WeeToddMLXStackProbe"]), .executable(name: "WeeToddMLXBlockProbe", targets: ["WeeToddMLXBlockProbe"]), .library(name: "LTX25MLX", targets: ["LTX25MLX"]), .library(name: "H3MLX", targets: ["H3MLX"]), .library(name: "FlashVSRMLX", targets: ["FlashVSRMLX"]), .executable(name: "WeeToddRelayVSR", targets: ["WeeToddRelayVSR"])],
+  products: [.library(name: "ReCaVSRMLX", targets: ["ReCaVSRMLX"]), .executable(name: "WeeToddReCaVSR", targets: ["WeeToddReCaVSR"]), .executable(name: "WeeToddFlashVSRWorker", targets: ["WeeToddFlashVSRWorker"]), .executable(name: "WeeToddH3MLXWorker", targets: ["WeeToddH3MLXWorker"]), .executable(name: "WeeToddMLXDecodeProbe", targets: ["WeeToddMLXDecodeProbe"]), .executable(name: "WeeToddMLXPipelineProbe", targets: ["WeeToddMLXPipelineProbe"]), .executable(name: "WeeToddMLXDenoiserProbe", targets: ["WeeToddMLXDenoiserProbe"]), .executable(name: "WeeToddMLXStackProbe", targets: ["WeeToddMLXStackProbe"]), .executable(name: "WeeToddMLXBlockProbe", targets: ["WeeToddMLXBlockProbe"]), .library(name: "LTX25MLX", targets: ["LTX25MLX"]), .library(name: "H3MLX", targets: ["H3MLX"]), .library(name: "FlashVSRMLX", targets: ["FlashVSRMLX"]), .executable(name: "WeeToddRelayVSR", targets: ["WeeToddRelayVSR"])],
   dependencies: [
     .package(path: "../weetodd-inference"),
     .package(url: "https://github.com/ml-explore/mlx-swift.git", revision: "901941965d82e4a216d4d117231d847d194c563d"),
   ],
   targets: [
+    .target(name: "NativeMetalSupport"),
+    .executableTarget(name: "WeeToddReCaVSR", dependencies: ["ReCaVSRMLX",
+      .product(name: "InferenceContracts", package: "weetodd-inference"),
+      .product(name: "MLX", package: "mlx-swift")], swiftSettings: [.unsafeFlags(["-parse-as-library"])]),
+    .target(name: "ReCaVSRMLX", dependencies: [
+      .product(name: "InferenceContracts", package: "weetodd-inference"),
+      .product(name: "InferenceMedia", package: "weetodd-inference"),
+      .product(name: "TensorIO", package: "weetodd-inference"),
+      .product(name: "MLX", package: "mlx-swift"),
+      .product(name: "MLXNN", package: "mlx-swift"),
+      .product(name: "MLXRandom", package: "mlx-swift"),
+    ]),
+    .testTarget(name: "ReCaVSRMLXTests", dependencies: ["ReCaVSRMLX"]),
     .executableTarget(name: "WeeToddRelayVSR", dependencies: ["RelayVSR", .product(name: "MLX", package: "mlx-swift")],
       swiftSettings: [.unsafeFlags(["-parse-as-library"])]),
     .target(name: "RelayVSR", dependencies: [
+      "NativeMetalSupport",
+      .product(name: "InferenceMedia", package: "weetodd-inference"),
       .product(name: "InferenceContracts", package: "weetodd-inference"),
       .product(name: "TensorIO", package: "weetodd-inference"),
       .product(name: "MLX", package: "mlx-swift"),
@@ -45,6 +60,7 @@ let package = Package(
       .product(name: "AdapterRuntime", package: "weetodd-inference"),
       .product(name: "MLX", package: "mlx-swift")]),
     .target(name: "H3MLX", dependencies: [
+      "NativeMetalSupport",
       .product(name: "TensorIO", package: "weetodd-inference"),
       .product(name: "InferenceContracts", package: "weetodd-inference"),
       .product(name: "MLX", package: "mlx-swift"),

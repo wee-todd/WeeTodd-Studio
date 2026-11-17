@@ -7,15 +7,15 @@ public enum NativeLTXMovieClipCopy {
     guard media.kind == .video,media.path==source.sourcePath,media.path.hasPrefix("/"),
       source.sourceIn.isFinite,source.sourceIn>=0,source.duration.isFinite,source.duration>0,
       media.duration.isFinite,media.duration>0,media.fps.isFinite,media.fps > 0,
-      method == .relayVSR ? source.sourceIn < media.duration : (1...60).contains(media.fps),
+      method != .ltx25 ? source.sourceIn < media.duration : (1...60).contains(media.fps),
       source.sourceIn+source.duration<=media.duration+0.5/media.fps else {
       throw StudioError.invalid("Select a valid rendered or imported movie interval before making an upscale copy.")
     }
     var copy=Clip(name:source.name+" · "+method.label,engine:.ltx25)
-    copy.duration = method == .relayVSR ? min(source.duration, media.duration - source.sourceIn) : source.duration
+    copy.duration = method != .ltx25 ? min(source.duration, media.duration - source.sourceIn) : source.duration
     copy.seed = source.seed
     copy.generationSelection=GenerationSelection(task:"video_upscale",preset:.custom)
-    if method == .relayVSR {
+    if method != .ltx25 {
       copy.generationSelection?.movieUpscaleMethod = method
     } else {
       copy.prompt=source.prompt.isEmpty ? "Preserve the source subject, clothing, motion, camera, lighting and scene while refining detail." : source.prompt

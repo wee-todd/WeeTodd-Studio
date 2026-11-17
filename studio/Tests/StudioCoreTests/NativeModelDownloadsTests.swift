@@ -290,7 +290,12 @@ final class NativeModelDownloadsTests: XCTestCase {
     let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("src/wee_todd_mlx/model_download_catalog.json")
     let catalog = try NativeModelDownloads.catalog(at: source)
-    XCTAssertEqual(catalog.count, 33)
+    XCTAssertEqual(catalog.count, 38)
+
+    let moss = catalog.filter { $0.kind.hasPrefix("moss-image-") }
+    XCTAssertEqual(Set(moss.map { $0.descriptor.id }), ["moss-image-shared", "moss-image-base", "moss-image-sft"])
+    XCTAssertEqual(moss.filter { $0.kind == "moss-image-shared" }.count, 1)
+    XCTAssertTrue(moss.allSatisfy { $0.descriptor.engines == ["moss_image"] })
     let audio=try XCTUnwrap(catalog.first { $0.kind == "h3-audio-vae" })
     XCTAssertEqual(audio.descriptor.components,["audio_vae"])
     XCTAssertTrue(audio.files.contains { $0.filename == "audio_vae.safetensors" && $0.size == 605254808 })

@@ -18,6 +18,48 @@ final class RelayMathTests: XCTestCase {
     XCTAssertEqual(try RelaySchedule.sigmas(steps: 1), [1, 0])
     XCTAssertThrowsError(try RelaySchedule.sigmas(steps: 0))
   }
+  func testFourTimesGeometryUsesNativeQuarterResolutionFlashGrid() throws {
+    let g = try RelayGeometry(width: 33, height: 17, scale: .x4)
+    XCTAssertEqual([g.paddedWidth, g.paddedHeight], [40, 24])
+    XCTAssertEqual([g.outputWidth, g.outputHeight], [132, 68])
+    XCTAssertEqual([g.wanWidth, g.wanHeight], [5, 3])
+    XCTAssertEqual([g.flashWidth, g.flashHeight], [10, 6])
+    XCTAssertEqual(g.scale.wanUnshuffle, 16)
+    XCTAssertEqual(g.scale.flashThirdStride, 1)
+    let two = try RelayGeometry(width: 1344, height: 768)
+    let four = try RelayGeometry(width: 1344, height: 768, scale: .x4)
+    XCTAssertGreaterThan(RelayMemoryPlan.estimatedBytes(geometry: four, options: .init()),
+      RelayMemoryPlan.estimatedBytes(geometry: two, options: .init()))
+  }
+  func testFourTimesBilinearAndBicubicUseIndependentHalfPixelFixtures() {
+    Device.withDefaultDevice(.cpu) {
+      let input = MLXArray([Float(0), 0, 0, 1, 1, 1], [1, 2, 3])
+      let linear = RelayResampling.bilinearFourTimes(input)
+      XCTAssertEqual(linear.shape, [4, 8, 3])
+      XCTAssertEqual(linear[0, 0..<8, 0].asArray(Float.self), [0, 0, 0.125, 0.375, 0.625, 0.875, 1, 1])
+    }
+    let input = MLXArray([Float(0), 0, 0, 1, 1, 1], [1, 2, 3])
+    let cubic = RelayBicubic.upsample(input, scale: .x4)
+    XCTAssertEqual(cubic.shape, [4, 8, 3])
+    let expected: [Float] = [-0.10986328125, -0.07177734375, 0.1044921875, 0.3603515625,
+      0.6396484375, 0.8955078125, 1.07177734375, 1.10986328125]
+    for (a, b) in zip(cubic[0, 0..<8, 0].asArray(Float.self), expected) { XCTAssertEqual(a, b, accuracy: 1e-6) }
+  }
+  func testFourTimesPreservesReleasedBF16NormalizationAndReconstructionBoundaries() throws {
+    try Device.withDefaultDevice(.cpu) {
+      let pixels = MLXArray([UInt8(128), 129, 130], [1, 1, 3])
+      let four = try RelayGeometry(width: 1, height: 1, scale: .x4).prepare(pixels)
+      XCTAssertEqual(four.dtype, .bfloat16)
+      XCTAssertEqual(four[0, 0].asArray(Float.self), [0.0078125, 0.015625, 0.0234375])
+      let two = try RelayGeometry(width: 1, height: 1).prepare(pixels)
+      XCTAssertEqual(two.dtype, .float32)
+      XCTAssertEqual(two[0, 0, 0].item(Float.self), 128 / 127.5 - 1, accuracy: 1e-7)
+    }
+    let input = full([1, 1, 3], values: MLXArray(Float(0.10009765625))).asType(.bfloat16)
+    let residual = full([4, 4, 3], values: MLXArray(Float(0.00201416015625))).asType(.bfloat16)
+    let output = RelayBicubic.reconstruct(input, residual: residual, scale: .x4, detail: 1)
+    XCTAssertEqual(output[0, 0, 0].item(Float.self), 0.10205078125)
+  }
 
   func testMemoryPreflightAccountsForSolverHistory() throws {
     let geometry = try RelayGeometry(width: 1920, height: 1080)
@@ -74,7 +116,7 @@ final class RelayMathTests: XCTestCase {
     XCTAssertEqual(result[2], 0, accuracy: 0.001)
   }
 
-  func testTiledAttentionMatchesIndependentPerPlaneWindows() {
+  func testTiledAttentionMatchesIndependentPerPlaneWindows() throws {
     let height = 9
     let width = 17
     let tokens = height * width
@@ -87,7 +129,7 @@ final class RelayMathTests: XCTestCase {
       let grid = MLXArray((0..<tokens).map { Float(plane * tokens + $0) }, [tokens, 1, 1])
       return RelayKV(key: k, value: broadcast(grid, to: [tokens, 1, 64]))
     }
-    let output = plan(q, values)[0..<tokens, 1, 0].asArray(Float.self)
+    let output = try plan(q, values)[0..<tokens, 1, 0].asArray(Float.self)
     for token in output.indices {
       var expected: [Float] = []
       for (plane, window) in windows.enumerated() {

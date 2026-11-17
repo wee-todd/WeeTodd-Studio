@@ -21,6 +21,29 @@ dt_packager = importlib.import_module("build_drawthings_client")
 real_subprocess_run = subprocess.run
 
 
+def test_recavsr_worker_requires_and_reuses_verified_shared_metal(source, monkeypatch):
+    import build_ltx_worker
+    monkeypatch.setattr(packager.subprocess, "run", skip_codesign)
+    worker = source / "WeeToddReCaVSR"
+    worker.write_text("ReCaVSR native worker fixture")
+    worker.chmod(0o755)
+    with pytest.raises(ValueError, match="Metal library is missing for ReCaVSR"):
+        packager.package_app(source, "release", reca_worker=worker)
+    folder = source / "ltx-distribution"
+    folder.mkdir()
+    names = ("WeeToddLTXWorker", "mlx.metallib", "Notices.txt")
+    for name in names:
+        (folder / name).write_text(name + " fixture")
+    (folder / "WeeToddLTXWorker").chmod(0o755)
+    (folder / "manifest.json").write_text(json.dumps({
+        "format": "weetodd-ltx-native-worker-v1", "protocol": 1,
+        "files": {name: build_ltx_worker.digest(folder / name) for name in names}}))
+    app = packager.package_app(source, "release", ltx_worker=folder, reca_worker=worker)
+    assert (app / "Contents/MacOS/WeeToddReCaVSR").read_text() == worker.read_text()
+    assert (app / "Contents/Resources/LTXNative/mlx.metallib").is_file()
+    assert (app / "Contents/Resources/ReCaVSR/Notices.txt").is_file()
+
+
 def test_native_ltx_distribution_installs_verified_kernels_and_rejects_tampering(
         source, monkeypatch):
     import build_ltx_worker

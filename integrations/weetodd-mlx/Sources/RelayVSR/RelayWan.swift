@@ -1,6 +1,7 @@
 import Foundation
 import MLX
 import MLXNN
+import InferenceContracts
 
 private let wanWidth = 3072
 private let wanHeads = 24
@@ -56,14 +57,14 @@ private struct WanBlock {
   }
 
   func callAsFunction(_ x: MLXArray, time: MLXArray, rope: RelayRotary, cross: RelayKV,
-    past: [RelayKV], attention: RelayAttentionPlan) -> (MLXArray, RelayKV)
+    past: [RelayKV], attention: RelayAttentionPlan) throws -> (MLXArray, RelayKV)
   {
     let modulation = self.modulation + time
     let selfInput = MLXFast.layerNorm(x, weight: nil, bias: nil, eps: wanEpsilon)
       * (1 + modulation[1]) + modulation[0]
     let kv = selfAttention.keysAndValues(selfInput)
     let current = RelayKV(key: rope.apply(kv.key), value: kv.value)
-    let spatial = attention(rope.apply(selfAttention.queries(selfInput)), past + [current])
+    let spatial = try attention(rope.apply(selfAttention.queries(selfInput)), past + [current])
     let selfResult = x + selfAttention.output(spatial.reshaped([-1, wanWidth])) * modulation[2]
     let crossInput = MLXFast.layerNorm(selfResult, weight: crossNormWeight,
       bias: crossNormBias, eps: wanEpsilon)
@@ -92,25 +93,27 @@ final class RelayWan {
   private let height: Int
   private let width: Int
   private let seed: UInt64
+  private let scale: NativeRelayVSRScale
   private var index = 0
   private var history: [[[RelayKV]]]
 
   init(weights url: URL, geometry: RelayGeometry, steps: Int, seed: UInt64) throws {
-    let weights = try RelayWeights(url: url, format: "relayvsr-wan-x2-v1")
+    let weights = try RelayWeights(url: url, format: geometry.scale.wanFormat)
     let sigmas = try RelaySchedule.sigmas(steps: steps)
     self.sigmas = sigmas
     self.seed = seed
-    height = geometry.paddedHeight / 16
-    width = geometry.paddedWidth / 16
+    scale = geometry.scale
+    height = geometry.wanHeight
+    width = geometry.wanWidth
     let window = RelayWindow(height: 22, width: 40, slidesAtEdge: true)
-    plans = (1...4).map { RelayAttentionPlan(height: geometry.paddedHeight / 16,
-      width: geometry.paddedWidth / 16, windows: Array(repeating: window, count: $0)) }
+    plans = (1...4).map { RelayAttentionPlan(height: geometry.wanHeight,
+      width: geometry.wanWidth, windows: Array(repeating: window, count: $0)) }
     let rotation = RelayLinear.rotation()
     blocks = try (0..<30).map { try WanBlock(weights, index: $0, rotation: rotation) }
     history = Array(repeating: Array(repeating: [], count: blocks.count), count: steps)
     patch = try weights.convolution("patch_embedding", 48, wanWidth, kernel: 2,
       stride: 2, temporalAxis: true)
-    lqInput = try weights.convolution("lq_proj_in.conv1", 192, 768, kernel: 1)
+    lqInput = try weights.convolution("lq_proj_in.conv1", 3 * scale.wanUnshuffle * scale.wanUnshuffle, 768, kernel: 1)
     lqDown = try weights.convolution("lq_proj_in.conv2", 768, wanWidth, kernel: 3,
       stride: 2, padding: 1)
     lqNorm1 = try weights.tensor("lq_proj_in.norm1.weight", [768])
@@ -140,9 +143,11 @@ final class RelayWan {
   }
 
   func keyframe(_ lowResolution: MLXArray) throws -> MLXArray {
-    let normalized = lowResolution.asType(.bfloat16)
-    let input = normalized.reshaped([height * 2, 8, width * 2, 8, 3])
-      .transposed(0, 2, 4, 1, 3).reshaped([height * 2, width * 2, 192])
+    var normalized = lowResolution.asType(.bfloat16)
+    if scale == .x4 { normalized = RelayResampling.bilinearFourTimes(normalized) }
+    let factor = scale.wanUnshuffle, channels = 3 * factor * factor
+    let input = normalized.reshaped([height * 2, factor, width * 2, factor, 3])
+      .transposed(0, 2, 4, 1, 3).reshaped([height * 2, width * 2, channels])
     let lowFeatures = silu(MLXFast.rmsNorm(lqInput(input), weight: lqNorm1, eps: wanEpsilon))
     let lowTokens = lqOutput(silu(MLXFast.rmsNorm(lqDown(lowFeatures), weight: lqNorm2,
       eps: wanEpsilon)).reshaped([-1, wanWidth]))
@@ -155,7 +160,7 @@ final class RelayWan {
       for blockIndex in blocks.indices {
         try Task.checkCancellation()
         var past = history[step][blockIndex]
-        let (next, current) = blocks[blockIndex](x, time: time.blocks, rope: rope,
+        let (next, current) = try blocks[blockIndex](x, time: time.blocks, rope: rope,
           cross: cross[blockIndex], past: past, attention: plans[past.count])
         eval(next, current.key, current.value)
         x = next

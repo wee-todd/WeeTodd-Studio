@@ -3267,6 +3267,56 @@ in 1.07 seconds. The endpoint comparison recognized the dragon appearing but inf
 incorrect pose/setting details; review the proposed text before applying it. Broad text quality,
 small-detail/OCR accuracy and the 9B vision path remain unqualified.
 
+## Image generation
+
+Use the same image workspace for the native image models below and connected Draw Things models.
+
+### Native MOSS-Image and layout canvas
+
+Choose **Run with → Local MOSS**, select Base/SFT, then link or download its components
+in your model library. Draw text, object and character regions directly on the canvas;
+edit exact words and pixel bounds in the inspector. Layout actions import the supplied
+Pixaroma boxes workflow or official drafts, export editable layouts and copy the compiled
+prompt. Guides are editor overlays. Saved takes retain exact prompts and offer
+**Generation details… → Open layout as a new draft**.
+Saved MOSS images in the Media panel also offer **Open layout as a new draft**
+in their context menu, including takes opened from a collected project.
+
+**Layout from image…** accepts a local source and analyzes it with an installed
+MLX Qwen3.5-4B or Gemma4-12B unified vision model plus Apple Vision OCR. Choose the image and model folder,
+click **Analyze image**, review the proposed boxes and warnings, then choose **Use layout**.
+The canvas receives the scene prompt, subject/text regions and a source guide as one
+undoable edit. Edit descriptions, literal words and positions before **Check Settings →
+Generate Image**. Importing or applying a proposal never starts generation.
+
+The target is approximately **2 megapixels total**, preserving the whole source and its
+aspect ratio on the 16-pixel grid. Extreme ratios use a smaller canvas to respect the
+4096-pixel side limit. Dense analysis proposes up to 40 visual regions plus up to 32 OCR
+groups, with owned face, hand, clothing and prop details. Pose, detected-face and heading
+crops refine descriptions; review OCR corrections, small print and ambiguous objects.
+Detected faces become owned detail boxes. Native color measurements correct contradictory
+color descriptions and can add a uniform outer background as an editable region.
+New proposals use the source as an editor guide and enable **Enforce subject boxes**.
+Generation starts from noise and uses independently encoded regional descriptions and
+lettering. Moving/resizing a whole subject also transforms its owned detail boxes; deleting
+it removes those details. Literal words remain editable without stale source titles in captions.
+The scene supplies recognized medium and lighting; faces and independent props receive their own
+regional descriptions and color evidence. Edit each region for precise content.
+Applying a layout preserves sampling and adapter choices. Saved takes retain box control,
+guide and analysis provenance; Collect Media carries the guide with the project.
+Older source-reconstruction layouts retain their explicit legacy control and cannot combine
+pixel conditioning with regional subject-box control.
+Gemma uses the linked MOSS shared tokenizer to check the final prompt budget; its
+own vocabulary is used only for vision analysis. Existing Qwen analysis remains selectable.
+
+The route runs entirely in Swift/MLX, including setup, affine Q8/Q4 conversion and PNG output.
+Use **Check Settings → Generate Image**; no ComfyUI or Python runtime is required.
+Publisher Euler, attached ER-SDE/simple and the pinned four-step SFT adapter remain explicit
+recipes. LoRA stacks/groups preserve enable state and strength. See the
+[MOSS image guide](../integrations/weetodd-moss-mlx/README.md) for dimensions, model reuse,
+memory controls, recipe requirements, conversion and current qualification limits.
+Model-specific settings and reference limits follow the selected profile.
+
 ### Native H3 images
 
 Open **Generate Image…** and choose **Run with → Local H3**. Select an installed H3 model
@@ -4236,14 +4286,22 @@ musical gesture/lip synchronization remain model-dependent.
 
 ## Native video upscaling and restoration
 
-For **RelayVSR 2×**, open **Upscale Video** in the media library, select **RelayVSR 2×**, and
-choose a source movie. If the two installed checkpoints have not been discovered, choose their
+For **ReCaVSR**, choose **Upscale Video → ReCaVSR** for a complete movie or **Clip actions
+→ Upscale movie copy → ReCaVSR** for an interval. Choose scale, BF16/INT8, color correction
+and seed, connect the shared model folder, then check setup and upscale. The bundled
+Swift/MLX worker preserves source sample timing/audio and saves reproducible settings.
+Image fidelity is experimental; the original CUDA reference has not been numerically
+qualified. See the [ReCaVSR guide](../integrations/weetodd-mlx/RECAVSR.md).
+
+For **RelayVSR**, open **Upscale Video** in the media library, select **RelayVSR**, choose **2×** or
+**4×**, and choose a source movie. If the matching two installed checkpoints have not been discovered, choose their
 folder. **Check setup** checks that the source movie and both checkpoint files are readable. **Upscale** processes the whole
 movie with Swift MLX on Metal and adds the HEVC result to **Project Assets**. AVFoundation
 preserves the source frame timing and copies the original audio.
 
 To process the interval selected on a timeline clip, choose **Clip actions → Upscale movie copy
-→ RelayVSR 2×**, then **Upscale clip**. The upscaled take appears in the copy's **Versions**.
+→ RelayVSR**, select the scale, then **Upscale clip**. The upscaled take appears in the copy's **Versions**.
+Older jobs retain their 2× default. The native 4× model preserves exact scaled dimensions above 4K.
 [Checkpoint files and command-line usage](../integrations/weetodd-mlx/RELAYVSR.md)
 
 Open **Upscale Video** in the media library. Select **FlashVSR+** for Turbo/Base with Tiny/Full Wan decoding, or **H3 Regenerate** for its fixed three-step refinement and Released/Fast H3 decoder. The app's bundled Swift/MLX workers perform inference, native model preparation and conversion. Connect the shared model library through **Model setup**, reuse installed components, and acquire only missing pinned files. FFmpeg/FFprobe provide media transport. No Python model runtime or vpipe is required for native upscaling.

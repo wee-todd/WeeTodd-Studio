@@ -97,10 +97,10 @@ enum ClipState: String {
     }
     var result = project.continuityIssues(for: clip)
     if let message = validationErrors[clip.id] { result.append(message) }
-    if clip.usesRelayVSR {
+    if clip.usesNativeMovieUpscaler {
       if generationDescriptions[clip.id]?["studioInput"] as? String != generationRequestKey(for: clip),
         result.isEmpty {
-        result.append("Prepare the RelayVSR source and checkpoints")
+        result.append("Prepare the " + clip.nativeMovieUpscalerName + " source and checkpoints")
       }
       return result
     }
@@ -198,7 +198,7 @@ enum ClipState: String {
       }
     }
     let needsPythonRenderer = project.clips.contains {
-      $0.engine != .movie && !$0.usesRelayVSR && !($0.engine == .ltx25 && runtime.usesNativeLTX25)
+      $0.engine != .movie && !$0.usesNativeMovieUpscaler && !($0.engine == .ltx25 && runtime.usesNativeLTX25)
         && !($0.engine == .h3 && runtime.usesNativeH3)
     }
     if needsPythonRenderer && !FileManager.default.isExecutableFile(atPath: runtime.pythonPath) {
@@ -208,7 +208,7 @@ enum ClipState: String {
           detail: "Choose the repository and Python environment.", destination: "runtime"))
     }
     if profiles.isEmpty && project.clips.contains(where: {
-      $0.engine != .movie && $0.engine != .drawThings && !$0.usesRelayVSR
+      $0.engine != .movie && $0.engine != .drawThings && !$0.usesNativeMovieUpscaler
     }) {
       items.append(
         ActionItem(
@@ -223,7 +223,7 @@ enum ClipState: String {
           ActionItem(
             id: c.id.uuidString + "-\(i)", priority: 0, title: c.name + " · " + text,
             detail: "Resolve before generation or export.", clipID: c.id,
-            destination: c.usesRelayVSR ? "clip" : c.engine == .drawThings ? "drawThings" : text.contains("recipe")
+            destination: c.usesNativeMovieUpscaler ? "clip" : c.engine == .drawThings ? "drawThings" : text.contains("recipe")
               || text.localizedCaseInsensitiveContains("checkpoint")
               || text.localizedCaseInsensitiveContains("model")
               || text.localizedCaseInsensitiveContains("encoder")
@@ -243,11 +243,11 @@ enum ClipState: String {
           items.append(
             ActionItem(
               id: c.id.uuidString + "-render", priority: 1,
-              title: (c.usesRelayVSR ? "Upscale " : state == .updated ? "Regenerate " : "Generate ") + c.name,
-              detail: c.usesRelayVSR ? "Upscale the selected source interval with RelayVSR." : state == .updated
+              title: (c.usesNativeMovieUpscaler ? "Upscale " : state == .updated ? "Regenerate " : "Generate ") + c.name,
+              detail: c.usesNativeMovieUpscaler ? "Upscale the selected source interval with " + c.nativeMovieUpscalerName + "." : state == .updated
                 ? "Generation settings changed since the current version."
                 : "Prepare, review the exact prompt, and render.", clipID: c.id,
-              destination: c.usesRelayVSR ? "clip" : "prompt"))
+              destination: c.usesNativeMovieUpscaler ? "clip" : "prompt"))
         }
       }
       let s = c.settings(in: project)
@@ -344,8 +344,8 @@ enum ClipState: String {
         }.map { $0.id.uuidString }
         let targets = clipOnly ? project.clips.filter { $0.id == clipID } : project.clips
         let pending = Set(body["generateIDs"] as? [String] ?? [])
-        guard !targets.contains(where: { $0.usesRelayVSR && pending.contains($0.id.uuidString) }) else {
-          throw StudioError.invalid("Upscale the pending RelayVSR clip in Studio before exporting its headless job.")
+        guard !targets.contains(where: { $0.usesNativeMovieUpscaler && pending.contains($0.id.uuidString) }) else {
+          throw StudioError.invalid("Upscale the pending native movie copy in Studio before exporting its headless job.")
         }
         if nativeHeadlessEligible {
           try await exportNativeHeadlessJob(body: body, to: url, clipOnly: clipOnly)

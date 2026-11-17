@@ -1734,5 +1734,290 @@
         "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44"
       }
     ]
+  },
+  {
+    "descriptor": {
+      "id": "moss-image-shared",
+      "name": "MOSS-Image shared conditioner & VAE",
+      "description": "Official BF16 safetensors for native Swift/MLX. Compatible installed files are reused. Base and SFT share one Qwen3.5-9B/tokenizer/small-VAE package.",
+      "downloadBytes": 17055070462,
+      "requiredDiskBytes": 17323505918,
+      "sourceURL": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base",
+      "licenseURL": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base/blob/85975793d8b3d432f1b6e27f352abaa4c2a4c0d3/LICENSE",
+      "outputKind": "native-moss",
+      "engines": [
+        "moss_image"
+      ],
+      "tasks": [
+        "t2i",
+        "layout"
+      ],
+      "components": [
+        "moss_shared"
+      ],
+      "licenseNotice": "Apache-2.0 model weights; retain the included license and source provenance."
+    },
+    "kind": "moss-image-shared",
+    "files": [
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "LICENSE",
+        "size": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "target": "LICENSE",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "text_encoder/config.json",
+        "size": 2813,
+        "sha256": "b31ee18a242bcfcccbe740f825f6b1d3ae231b0655eeecb5de3e98d504b7d68c",
+        "target": "text_encoder/config.json",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "text_encoder/model-00001-of-00004.safetensors",
+        "size": 4973910744,
+        "sha256": "abfaa3d3a8612508c85ee8f6da9c734b862f10298b903765c4ad384177c32b0b",
+        "target": "text_encoder/model-00001-of-00004.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "text_encoder/model-00002-of-00004.safetensors",
+        "size": 4988364288,
+        "sha256": "9112637fa6bf4d07bafd6ae268852b18d3d0c1242f4ee901c5579006e5bd4894",
+        "target": "text_encoder/model-00002-of-00004.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "text_encoder/model-00003-of-00004.safetensors",
+        "size": 4954202112,
+        "sha256": "956f1ef51d0cfe610b0d22987c0b7821c36e3ce228abceccef523518bcf079dc",
+        "target": "text_encoder/model-00003-of-00004.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "text_encoder/model-00004-of-00004.safetensors",
+        "size": 1869001848,
+        "sha256": "9e21d20e8adde88c3e0b65d4a0d251f143d98ee9d52db36b4348361091e4e208",
+        "target": "text_encoder/model-00004-of-00004.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "text_encoder/model.safetensors.index.json",
+        "size": 64641,
+        "sha256": "0af6fa3fa36ba8dcbb6b7ad0325a36c5b1b69862a9a1f1486b1b80385bd8f5ee",
+        "target": "text_encoder/model.safetensors.index.json",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "tokenizer/tokenizer.json",
+        "size": 19989325,
+        "sha256": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523",
+        "target": "tokenizer/tokenizer.json",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "tokenizer/tokenizer_config.json",
+        "size": 1123,
+        "sha256": "bee8eba30f0eb4af73c0fe2cd06d0f89b657d7819941c438157ec42f7c80ea87",
+        "target": "tokenizer/tokenizer_config.json",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "vae/config.json",
+        "size": 838,
+        "sha256": "cc77f3f0ce0357039c71018dc19edaa4fcceb0c2f7488fdc2b9c0580d6baafa1",
+        "target": "vae/config.json",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "vae/diffusion_pytorch_model.safetensors",
+        "size": 249521372,
+        "sha256": "c3bdf94dc67ec69b30ea9fe1fa8340085679cae64d019f7c7e4a9921f1a7f17a",
+        "target": "vae/diffusion_pytorch_model.safetensors",
+        "provider": "huggingface"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "moss-image-base",
+      "name": "MOSS-Image Base transformer",
+      "description": "Official BF16 safetensors for native Swift/MLX. Compatible installed files are reused. Base and SFT share one Qwen3.5-9B/tokenizer/small-VAE package.",
+      "downloadBytes": 10164716112,
+      "requiredDiskBytes": 10433151568,
+      "sourceURL": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base",
+      "licenseURL": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base/blob/85975793d8b3d432f1b6e27f352abaa4c2a4c0d3/LICENSE",
+      "outputKind": "native-moss",
+      "engines": [
+        "moss_image"
+      ],
+      "tasks": [
+        "t2i",
+        "layout"
+      ],
+      "components": [
+        "moss_transformer"
+      ],
+      "licenseNotice": "Apache-2.0 model weights; retain the included license and source provenance."
+    },
+    "kind": "moss-image-transformer",
+    "files": [
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "LICENSE",
+        "size": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "target": "LICENSE",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "transformer/config.json",
+        "size": 240,
+        "sha256": "3291c3a1c7adc22b8182a0de25ca8ec97474d72715ce84adbab09cc0be24f666",
+        "target": "transformer/config.json",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+        "size": 4991978016,
+        "sha256": "ae085fba123b6df67daf90aa9698fadee60c73e45bcaf3f3043d15f34e7a1804",
+        "target": "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+        "size": 4983137016,
+        "sha256": "806e876d80c7fba560663a3a95580e6c7033da3f9ea3c52765245ef0e1818f75",
+        "target": "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+        "size": 189549184,
+        "sha256": "5f319b72c40324294007c270d78112425627b537fcd8769b3c00f9f070e506a9",
+        "target": "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-Base",
+        "revision": "85975793d8b3d432f1b6e27f352abaa4c2a4c0d3",
+        "filename": "transformer/diffusion_pytorch_model.safetensors.index.json",
+        "size": 40298,
+        "sha256": "b609327fc75dbe5080e7e095d8b727d74d728b4f98e8b047133b0082cfa2fb03",
+        "target": "transformer/diffusion_pytorch_model.safetensors.index.json",
+        "provider": "huggingface"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "moss-image-sft",
+      "name": "MOSS-Image SFT transformer",
+      "description": "Official BF16 safetensors for native Swift/MLX. Compatible installed files are reused. Base and SFT share one Qwen3.5-9B/tokenizer/small-VAE package.",
+      "downloadBytes": 10164716112,
+      "requiredDiskBytes": 10433151568,
+      "sourceURL": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT",
+      "licenseURL": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT/blob/f972bd4b4b9e3852133cc5da954d87bc32cd8fb9/LICENSE",
+      "outputKind": "native-moss",
+      "engines": [
+        "moss_image"
+      ],
+      "tasks": [
+        "t2i",
+        "layout"
+      ],
+      "components": [
+        "moss_transformer"
+      ],
+      "licenseNotice": "Apache-2.0 model weights; retain the included license and source provenance."
+    },
+    "kind": "moss-image-transformer",
+    "files": [
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+        "revision": "f972bd4b4b9e3852133cc5da954d87bc32cd8fb9",
+        "filename": "LICENSE",
+        "size": 11358,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "target": "LICENSE",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+        "revision": "f972bd4b4b9e3852133cc5da954d87bc32cd8fb9",
+        "filename": "transformer/config.json",
+        "size": 240,
+        "sha256": "3291c3a1c7adc22b8182a0de25ca8ec97474d72715ce84adbab09cc0be24f666",
+        "target": "transformer/config.json",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+        "revision": "f972bd4b4b9e3852133cc5da954d87bc32cd8fb9",
+        "filename": "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+        "size": 4991978016,
+        "sha256": "e40d3444940a0b0fd7cd45ba7959a5bd3d5efd7ddf87aae5ce4d87ce8aa03d01",
+        "target": "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+        "revision": "f972bd4b4b9e3852133cc5da954d87bc32cd8fb9",
+        "filename": "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+        "size": 4983137016,
+        "sha256": "d106da790ec2924ffd8af04b4ffa8f8de281a974b58e55649c3ec596dc8ef033",
+        "target": "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+        "revision": "f972bd4b4b9e3852133cc5da954d87bc32cd8fb9",
+        "filename": "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+        "size": 189549184,
+        "sha256": "11f637ab17c7093344a6110a1e87ffda8e56558dc55183d8e790222cfcdcf52d",
+        "target": "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+        "provider": "huggingface"
+      },
+      {
+        "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+        "revision": "f972bd4b4b9e3852133cc5da954d87bc32cd8fb9",
+        "filename": "transformer/diffusion_pytorch_model.safetensors.index.json",
+        "size": 40298,
+        "sha256": "b609327fc75dbe5080e7e095d8b727d74d728b4f98e8b047133b0082cfa2fb03",
+        "target": "transformer/diffusion_pytorch_model.safetensors.index.json",
+        "provider": "huggingface"
+      }
+    ]
   }
 ]

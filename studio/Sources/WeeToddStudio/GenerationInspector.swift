@@ -19,6 +19,7 @@ struct GenerationInspector: View {
       from: JSONSerialization.data(withJSONObject: object))
   }
   var ltxRendererSummary: String {
+    if clip.usesNativeMovieUpscaler { return "Renderer: Swift MLX · " + clip.nativeMovieUpscalerName + " · source timing" }
     guard store.runtime.usesNativeLTX25 else { return "Renderer: Python MLX" }
     if clip.inferredTask == "video_upscale" {
       return "Renderer: Swift MLX · source movie 2× · decoded previews"

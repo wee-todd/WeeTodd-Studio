@@ -184,7 +184,12 @@ LTX25_FILES = (
 )
 
 RESERVE_BYTES = 256 * 1024 * 1024
-PRECONVERTED = json.loads(Path(__file__).with_name("model_download_catalog.json").read_text())
+# Native-only families use Studio's Swift downloader and engine admission. They
+# must not appear as runnable packages in this Python renderer's setup catalog.
+PRECONVERTED = [
+    item for item in json.loads(Path(__file__).with_name("model_download_catalog.json").read_text())
+    if item["kind"] != "recavsr-native"
+]
 
 
 def download_catalog():

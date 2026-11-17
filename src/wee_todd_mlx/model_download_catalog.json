@@ -4560,5 +4560,155 @@
         "sha256": "3439a033d427a8b3225640fad4dc76787496982ee4565deafc556852a7af902a"
       }
     ]
+  },
+  {
+    "descriptor": {
+      "id": "recavsr-native-bf16",
+      "name": "ReCaVSR BF16 reference",
+      "description": "Native streaming movie upscaler with LR-conditioned FlashDecoder. Experimental image fidelity; preserves source timing and audio.",
+      "downloadBytes": 10836594624,
+      "requiredDiskBytes": 11105030080,
+      "sourceURL": "https://huggingface.co/kopper/ReCaVSR/tree/9c874580eedeea516f31ee1f7c562a311dbf9cf7",
+      "licenseURL": "https://huggingface.co/kopper/ReCaVSR/blob/9c874580eedeea516f31ee1f7c562a311dbf9cf7/LICENSE",
+      "licenseNotice": "Official ReCaVSR files declare Apache-2.0. The INT8 conversion card declares other and refers to the upstream model terms. Files are downloaded separately from the app.",
+      "outputKind": "directory",
+      "engines": [
+        "recavsr"
+      ],
+      "components": [
+        "transformer",
+        "prompt",
+        "decoder"
+      ]
+    },
+    "kind": "recavsr-native",
+    "files": [
+      {
+        "repo": "kopper/ReCaVSR",
+        "revision": "9c874580eedeea516f31ee1f7c562a311dbf9cf7",
+        "filename": "transformer.safetensors",
+        "size": 10603673624,
+        "sha256": "a43bc91689de37d286bfb1068e90049b2e121bbabb1cf4e6f5e9a801107e23ae",
+        "target": "official/transformer.safetensors"
+      },
+      {
+        "repo": "kopper/ReCaVSR",
+        "revision": "9c874580eedeea516f31ee1f7c562a311dbf9cf7",
+        "filename": "prompt.safetensors",
+        "size": 4194392,
+        "sha256": "325ee3b5ec7d8bd43bc7ab186be5272dec0877c04e7c01a46fd0893260c9c6a5",
+        "target": "shared/prompt.safetensors"
+      },
+      {
+        "repo": "kopper/ReCaVSR",
+        "revision": "9c874580eedeea516f31ee1f7c562a311dbf9cf7",
+        "filename": "flashdecoder.safetensors",
+        "size": 228723776,
+        "sha256": "f4feb3e7b0b65f98e15bb709a1ba28dfaada7c06bf7fc0ce4cdbcb58803034e8",
+        "target": "shared/flashdecoder.safetensors"
+      },
+      {
+        "repo": "kopperx/ReCaVSR",
+        "revision": "b98b1f2ec7fc550aed99fd7ec45a5e4b757e4306",
+        "provider": "github",
+        "filename": "checkpoints/model_config.json",
+        "size": 1145,
+        "sha256": "0b4bd69d5b05304861559cdcd079a3b0e6f72c295ab88d16293d612900d9c9bf",
+        "target": "shared/model_config.json"
+      },
+      {
+        "repo": "kopperx/ReCaVSR",
+        "revision": "b98b1f2ec7fc550aed99fd7ec45a5e4b757e4306",
+        "provider": "github",
+        "filename": "checkpoints/vae_config.json",
+        "size": 1599,
+        "sha256": "c50287da17bf094fbd67c328970725c43913ec7467affc055621cf235de48ee2",
+        "target": "shared/vae_config.json"
+      },
+      {
+        "repo": "kopperx/ReCaVSR",
+        "revision": "b98b1f2ec7fc550aed99fd7ec45a5e4b757e4306",
+        "provider": "github",
+        "filename": "checkpoints/flashdecoder_config.json",
+        "size": 88,
+        "sha256": "d89abe4c6b223d9a71fb975ac0037ef0bd792515f666a17446d8b92f9f42068c",
+        "target": "shared/flashdecoder_config.json"
+      }
+    ]
+  },
+  {
+    "descriptor": {
+      "id": "recavsr-native-int8",
+      "name": "ReCaVSR INT8 ConvRot",
+      "description": "Native streaming movie upscaler with LR-conditioned FlashDecoder. Experimental image fidelity; preserves source timing and audio.",
+      "downloadBytes": 6499856048,
+      "requiredDiskBytes": 6768291504,
+      "sourceURL": "https://huggingface.co/PedroMarinhoDev/ReCaVSR-ComfyUI/tree/2fffebd4413433ad4b8be7aec44b7fb60c897d6a",
+      "licenseURL": "https://huggingface.co/kopper/ReCaVSR/blob/9c874580eedeea516f31ee1f7c562a311dbf9cf7/LICENSE",
+      "licenseNotice": "Official ReCaVSR files declare Apache-2.0. The INT8 conversion card declares other and refers to the upstream model terms. Files are downloaded separately from the app.",
+      "outputKind": "directory",
+      "engines": [
+        "recavsr"
+      ],
+      "components": [
+        "transformer",
+        "prompt",
+        "decoder"
+      ]
+    },
+    "kind": "recavsr-native",
+    "files": [
+      {
+        "repo": "PedroMarinhoDev/ReCaVSR-ComfyUI",
+        "revision": "2fffebd4413433ad4b8be7aec44b7fb60c897d6a",
+        "filename": "recavsr/transformer_int8_convrot.safetensors",
+        "size": 6266935048,
+        "sha256": "70f77ac653a29dcab8cb8d5f5300acf27d9a3a45e9baf273fa4526fa43f66c9d",
+        "target": "int8/transformer_int8_convrot.safetensors"
+      },
+      {
+        "repo": "kopper/ReCaVSR",
+        "revision": "9c874580eedeea516f31ee1f7c562a311dbf9cf7",
+        "filename": "prompt.safetensors",
+        "size": 4194392,
+        "sha256": "325ee3b5ec7d8bd43bc7ab186be5272dec0877c04e7c01a46fd0893260c9c6a5",
+        "target": "shared/prompt.safetensors"
+      },
+      {
+        "repo": "kopper/ReCaVSR",
+        "revision": "9c874580eedeea516f31ee1f7c562a311dbf9cf7",
+        "filename": "flashdecoder.safetensors",
+        "size": 228723776,
+        "sha256": "f4feb3e7b0b65f98e15bb709a1ba28dfaada7c06bf7fc0ce4cdbcb58803034e8",
+        "target": "shared/flashdecoder.safetensors"
+      },
+      {
+        "repo": "kopperx/ReCaVSR",
+        "revision": "b98b1f2ec7fc550aed99fd7ec45a5e4b757e4306",
+        "provider": "github",
+        "filename": "checkpoints/model_config.json",
+        "size": 1145,
+        "sha256": "0b4bd69d5b05304861559cdcd079a3b0e6f72c295ab88d16293d612900d9c9bf",
+        "target": "shared/model_config.json"
+      },
+      {
+        "repo": "kopperx/ReCaVSR",
+        "revision": "b98b1f2ec7fc550aed99fd7ec45a5e4b757e4306",
+        "provider": "github",
+        "filename": "checkpoints/vae_config.json",
+        "size": 1599,
+        "sha256": "c50287da17bf094fbd67c328970725c43913ec7467affc055621cf235de48ee2",
+        "target": "shared/vae_config.json"
+      },
+      {
+        "repo": "kopperx/ReCaVSR",
+        "revision": "b98b1f2ec7fc550aed99fd7ec45a5e4b757e4306",
+        "provider": "github",
+        "filename": "checkpoints/flashdecoder_config.json",
+        "size": 88,
+        "sha256": "d89abe4c6b223d9a71fb975ac0037ef0bd792515f666a17446d8b92f9f42068c",
+        "target": "shared/flashdecoder_config.json"
+      }
+    ]
   }
 ]

@@ -1,5 +1,361 @@
 # WeeTodd Studio implementation status
 
+## November 17 editable image-to-layout recovery
+
+New image analyses create guide-only layouts with regional subject-box control. Native
+Swift/MLX analysis uses dense owned regions, overlapping OCR crops and separate pose,
+detected-face and heading inspections. Whole-subject edits transform owned detail boxes;
+literal lettering is independent of descriptive prose. The native renderer independently
+encodes regional conditioning and partitions joint attention while preserving MOSS RoPE
+and one model forward per sampling step. Source-image conditioning is excluded from this mode.
+Saved-take reopening restores the mode, and settings admission rejects older workers.
+
+The final same-seed movement gate moved the generated face from 48.16% to 75.61% canvas
+width, inside the edited subject box, with one detected face per image. The lettering gate
+changed VINTAGE to HORIZON with exact whole-page and heading-crop OCR and no old title.
+Both pairs started from noise. The actual app then analyzed a source, applied the proposal,
+moved its subject and three owned details, changed WHISPERS to HORIZON and generated the edit
+with unavailable Python/repository paths. That take moved the face to 75.66% canvas width
+and rendered HORIZON; its receipt records eight evaluations and three released native stages.
+The published 12-take project reopened with its collected guide and regional control intact.
+
+Detected faces and independent props receive separate regional descriptions; native color
+evidence corrects contradictory monochrome descriptions and uniform outer backgrounds.
+Dense-v4 uses one family-native coordinate contract for visual and additional text boxes,
+retains cropped OCR overshoot and distinguishes missing mastheads from contained subtitles
+and split-word duplicates. The previously omitted CLASSIC heading now renders correctly.
+
+All 12 supplied images completed at 1.976832–2.035200 MP, with at most 0.447% aspect error,
+11–45 editable regions, and the installed SFT v2 adapter at eight release-Euler steps, CFG 1.
+These runs qualify execution and edit control, not faithful reconstruction: visual review
+still finds altered faces/skin tones, pose errors, omitted or hallucinated props, wrong
+lettering/colors and duplicate OCR. Automatic proposals require review. No comparison
+establishes superiority over other tools or exact face-identity retention.
+Core and Studio validation passed: 3053 core tests (seven skips), 42 layout tests,
+60 native MOSS tests (two skips; the real-source heading fixture ran), and
+1218 Studio tests (57 skips). The isolated release app built and its packaged worker's
+48 code/data sections match the frozen qualification worker after signing.
+
+## November 16 native source reconstruction (historical experiment)
+
+These measurements evaluated retention of source pixels. They do not demonstrate editable
+layout control and are superseded as the default image-to-layout approach by the recovery above.
+
+Local MOSS adds explicit source reconstruction beside editable text and boxes.
+The analyzed snapshot is a separate SHA-bound input, encoded locally with the small
+FLUX.2 VAE, mixed with seeded noise at an actual starting flow sigma, and denoised
+through every requested active step. Encoder, conditioning, transformer and decoder
+stages release sequentially. No source overlays, face replacement or text painting
+are applied after generation. Text-only and legacy requests retain their behavior.
+
+Review and canvas controls expose source mode and change strength. The explicit
+Faithful reconstruction recipe chooses stock SFT/BF16, no active adapters, Euler8,
+CFG1 and shift5. Its default sigma0.08 was selected from two difficult sources at
+0.08/0.15/0.25; lower sigma preserved the sources more closely. Saved takes retain
+the exact bound source and strength, and Collect Media carries source snapshots.
+Missing/changed source input fails before expensive work. This experimental latent
+initialization is not a publisher-trained image-editing model; low change strength
+limits large prompt/box edits and cannot restore detail absent from small originals.
+
+The source-conditioned rerun completed all 12 TestImages at 1.976832–2.035200 MP,
+with aspect error below 0.447%. One common Euler8/CFG1/sigma0.08/seed42 recipe used
+the unchanged automatic Qwen proposals. Full-resolution SSIM against resized sources
+averaged 0.9877 versus 0.3726 for prior text/layout results (range 0.9741–0.9949).
+Visual review retains original facial expressions, poses, props and large lettering;
+fine texture and small print can soften. These metrics do not certify identity or OCR
+accuracy. Resize-only and zero-evaluation VAE controls are separate from the twelve
+eight-evaluation generated outputs. A real GUI run with Python/root unavailable matched
+its headless PNG exactly; saved-take reopening retained source mode and strength.
+
+## November 16 image-to-layout analysis
+
+Local MOSS adds **Layout from image…**: native Swift MLX Qwen3.5-4B vision analysis
+and Apple Vision OCR produce a reviewable proposal for the existing canvas. Applying
+it is one undoable change to prompt, dimensions, boxes and source guide. Generation
+remains explicit. Strict source/model/result identity, bounded JSON and prompt tokens,
+fixed OCR evidence slots and staged cleanup protect the handoff. Typography choices
+cannot replace literal OCR text. Changed documents/drafts reject stale proposals.
+
+The analyzer also admits the installed Gemma4-12B unified affine Q8 model through
+the same Swift MLX worker. Its turn/image tokens and packed vision tensors have
+separate admission rules. Final layout length still uses MOSS's Qwen tokenizer,
+whose identity is checked independently of the vision model. Both vision families
+completed native analysis of all 12 sources; reconstruction likeness is evaluated
+separately from these structural checks.
+
+Fresh cover/action controls compared both analyzers, then Euler50/release with
+ER-SDE25/simple on the same Qwen proposals and fixed seed. The qualification uses
+Qwen analysis and ER-SDE25: the longer recipe did not consistently improve the
+cover palette or action pose. Gemma remains selectable; more parameters did not
+eliminate incorrect prop descriptions. These are individual fidelity trials,
+rather than a statistical sampler or performance benchmark.
+
+Automatic analysis admitted all 12 supplied sources, including AVIF/WebP and dense
+covers. Targets measured 1.976832–2.0352 megapixels with at most 0.44692% aspect error;
+all 73 detected OCR lines appeared exactly once. These checks establish layout and
+geometry validity, rather than visual reconstruction accuracy. OCR can misread or
+miss lettering, and the vision model can misdescribe props or poses.
+
+All 12 automatic Qwen proposals were reconstructed directly near 2 megapixels with
+the selected BF16 SFT recipe, preserving the canvas aspect ratios within 0.45%.
+Visual review found substantial differences in faces, poses, props, illustration
+style, colors and typography. Decorative headings can be missed by OCR, and the
+renderer can omit words retained in the prompt. The workflow provides editable
+drafts and source guides; automatic source matching still requires manual review
+and correction. Geometry and successful generation do not establish close likeness.
+
+An isolated GUI check with Python unavailable completed source selection, native
+analysis, review/apply, full-layout undo/redo, description/prompt edits, a user-triggered
+1888×1072 render, saved-take reopening with its source guide, and analysis cancellation
+without replacing the draft. The GUI generation used the explicit four-step adapter
+and edited prompt as a functional check; it is separate from automatic reconstruction
+qualification. Installed model files were reused in place.
+
+The final isolated release also passed a Gemma AVIF GUI check with Python and the
+repository path unavailable: review/apply, seven-region 1872×1056 canvas, full-layout
+undo/redo, and saved subject/scene edits. Applying retained the existing asset count.
+Core and Studio validation passed with 3,053 Python tests and zero Swift failures;
+the 25 shared-layout and 43 native-MOSS cases include family-specific coordinate,
+OCR, tokenizer and bounded-result contracts. Optional external-reference and
+installed-model checks remain separate from ordinary validation.
+
+## November 15 native MOSS-Image and layout canvas
+
+Studio includes a dedicated Swift/MLX MOSS-Image Base/SFT route, shared native
+model setup, exact layout prompt compilation and an editable composition canvas.
+The canvas imports the supplied Pixaroma workflow as layout data, preserves literal
+text, supports draw/move/resize/numeric bounds/undo and stores editable layouts with
+image takes. Generation details retain the compiled prompt and open a new layout
+draft without modifying the original take. Guides are editor overlays.
+
+The native worker implements Qwen3.5-9B prefill, the 42-block MOSS transformer,
+publisher release Euler sampling, independent ER-SDE/Comfy simple sampling and the
+small VAE. Weighted stages unload in order. Fixed-prefix caches, strict FP32 LoRA
+deltas, the pinned four-step SFT adapter and separately converted native affine
+Q8/Q4 weights are explicit controls. MOSS setup/conversion/inference/PNG output
+do not invoke Python, MFLUX or ComfyUI. Other engines retain their existing routes.
+
+An isolated release bundle passed deep/strict signature verification. Native
+generation ran with Python unavailable. Actual cancellation during conditioning,
+sampling and decoding exits cleanly with a release event and no PNG; an injected
+worker crash also leaves no PNG. Studio cancellation retains the draft and shows
+a cancellation notice. Published-worker checks reject missing models, overlong
+prompts, stale preflight identities and mismatched precision before weighted work.
+The imported 896×1152 serum layout passed actual canvas
+move/resize/keyboard/literal-text/undo checks.
+
+Core plus Studio validation passed across recorded checkpoints: 3,053 Python tests
+(seven optional skips), 208 inference tests, 1,142 shared MLX tests, 12 layout tests and 1,203 Studio tests. Follow-up native tests cover
+32 cases (one optional reference skip); nine focused Studio cases cover cancellation,
+routing, immutable preparation and reopening (two optional fixture skips).
+Packaging/source-backup/validation checks passed 27 tests; documentation, catalog
+and lint checks passed. No Python environment or dependency changes were required.
+
+Matched-policy comparison with an independent pinned Swift implementation produced
+identical full conditioning. First transformer prediction RMS error was 0.005518
+against reference RMS 1.048953; VAE RMS error was 3.86e-7. This is a measured native
+comparison, not exact PyTorch or cross-runtime seed parity. See the
+[native MOSS guide](integrations/weetodd-moss-mlx/README.md) for capabilities and limits.
+
+Serialized fresh-process SFT512 qualification on M3 Ultra/256 GB measured
+69.34/66.11 seconds with a 16 GiB transformer cache versus 411.10 seconds streaming.
+The PNG, conditioning, initial noise, first prediction and final latent payloads
+matched exactly. Four-step dense probes also matched at 2/4/8/16 GiB. Filesystem
+cache was warm/uncontrolled; these are local measurements rather than cold-disk,
+persistent-engine or cross-hardware speed claims.
+
+Controlled SFT896 serum runs retained both literal text lines with dense, native
+Q8 and Q4 transformers. Dense took 137.00 seconds at 15.96 GB peak MLX; Q8/Q4
+with shared Q8 Qwen took 182.99/180.61 seconds at 9.93 GB. These are memory options;
+BF16 was faster on this machine. Two four-step adapter seeds completed in 25.98
+seconds each with correct serum text. A 2048-square, eight-step adapter run
+completed in 206.10 seconds at 16.66 GB peak MLX/19.67 GB RSS with correct text
+and no obvious decode seams. Multiline Chinese/English and accented French text
+also rendered correctly at 1024-square; decorative footer rules were added by
+the model. These are reviewed examples, not universal typography guarantees.
+
+All 19 serialized outputs passed dimensions, PNG SHA-256, immutable request and
+stage-release checks. A 520-token Base prompt rendered without truncation.
+Ordinary four-step SFT512 took 13.00 worker seconds/14.45 complete-process seconds;
+the synchronized diagnostic profiler produced identical PNG bytes. Its largest
+groups were tensor reads/uploads and transformer projections, supporting weight
+reuse as the first optimization. Nested profiling groups overlap and must not be
+summed or used as ordinary latency measurements.
+
+## November 15 ReCaVSR native RGB isolation and HEVC quality
+
+Complete native 4× synchronous/asynchronous captures on M3 Ultra match every
+RGB byte across all 124 frames at 5376 × 3072, along with source sample timing.
+Opt-in RGB24 capture now records per-frame/whole-stream hashes before encoding;
+capture-off remains the performance path. Both new capture movies also match the
+prior canonical output. The historical mismatched control has no native capture,
+and its exact trigger remains unproven; a 70-second submission pause did not
+reproduce it.
+
+ReCa export now requests explicit VideoToolbox quality 0.9. With identical raw
+frames and playback timing, the old unspecified-quality mode changed decoded pixels with
+an unset expected-FPS hint versus an explicit 24 FPS hint; the explicit quality mode matched under
+both hints and a 70-second pause at frame 60. Against native RGB, it improves
+PSNR and MAE on every frame of this clip (47.61 versus 45.65 dB overall RGB PSNR),
+at a video-only size of 84.9 versus 34.0 MB. No bitrate/QP clamp or inference
+arithmetic change is involved; the qualified async queue remains the default.
+The final capture-off pair took 1118.25 seconds synchronously and 963.07 seconds
+asynchronously with concurrent GPU activity. These are retained contended
+observations, not an updated idle-throughput qualification or a regression
+comparison with the earlier campaign.
+Other hardware/OS and clips require their own codec qualification. See the
+[ReCaVSR guide](integrations/weetodd-mlx/RECAVSR.md#native-rgb-and-hevc-qualification-november-15).
+
+## November 14 RelayVSR and ReCaVSR attention queues
+
+Qualified `g15d` GPUs now submit at most two independent groups of eight
+attention tiles, overlapping graph construction with Metal execution. Every
+pending group drains on normal return, cancellation and errors before stage
+unloading. Relay admission includes conservative gather workspace and falls
+back to synchronous execution when the queue exceeds its bound. ReCa retains
+its existing two-group workspace admission. Attention arithmetic, masks, keys,
+precision and restoration order are preserved. Call-local compiled wrappers
+were benchmarked separately and with queues; no consistent added benefit was
+established, so compilation remains disabled by default.
+
+Fresh matched complete 124-frame, 24 FPS measurements on M3 Ultra with 256 GiB
+used a 1344 × 768 source and exact 2×/native 4× outputs (2688 × 1536 and
+5376 × 3072), including checks, loading, inference and export:
+
+| Model | Scale | Current control | Async candidate | Less wall time |
+| --- | --- | ---: | ---: | ---: |
+| RelayVSR | 2× | 156.37 s | 139.77 s | 10.62% |
+| RelayVSR | 4× | 773.81 s | 738.18 s | 4.60% |
+| ReCaVSR | 2× | 430.43 s | 406.85 s | 5.48% |
+| ReCaVSR | 4× | 994.46 s | 922.42 s | 7.24% |
+
+All selected control/candidate pairs have identical decoded RGB, AAC packet
+payloads/timing and source video timestamps/durations. ReCa 4× uses an unchanged
+frozen-control repeat: the initial 1033.06-second control movie differed after
+HEVC keyframe 60, while the repeat and candidate both match the archived complete
+baseline. The inconsistent control is retained and excluded; native pre-encoding
+hashes were not collected, so its origin is unresolved. No product code was
+changed to obtain the matching repeat.
+
+Balanced 29-frame A/B/B/A means were 41.50 → 37.31 seconds (Relay 2×),
+191.17 → 189.10 (Relay 4×), 82.98 → 74.24 (ReCa 2×) and 218.71 → 199.85
+(ReCa 4×), with every preview matching. Relay 4× previews are nearly flat;
+operator and prefix gains must not be substituted for whole-movie results.
+Four-mode native operator trials retained every output word across 160 records.
+Core/Studio validation, independent source review, isolated release packaging,
+signature and packaged branch traces passed. The review records one minor
+validation follow-up in the disabled Relay compiled experiment. Qualification
+covers this source/settings on one M3 Ultra; other hardware/precision and CUDA
+image parity remain separate. FlashVSR+ 4× was excluded.
+
+## November 14 compiled FlashVSR+ attention scheduling
+
+Qualified `g15d` GPUs now compile the existing attention slab graph and queue
+at most two slabs, retaining the original rank-two Float32 QK/PV matmuls,
+maximum/sum reductions, eight-key-block slabs, eight-window groups, selected
+key order and BF16 output. A per-call owner releases compilation state;
+success and cancellation drain queued work. The 53.54 MB scratch bound fits
+the existing 64 MiB reserve. Other architectures, custom geometry/slabs and
+unsupported dtypes retain the original consumer.
+
+On M3 Ultra, a fresh complete 124-frame 1344 × 768 → 2688 × 1536 Turbo/Tiny
+comparison at 24 FPS measured 2547.05 → 1449.70 seconds (43.08% less wall time),
+against the frozen GPU-routing app. Transformer time fell from 2404.38 to
+1306.60 seconds. Every raw RGB byte before encoding, delivered pixel and
+aligned PCM sample matched, along with model/input identities, source frame
+timestamps/durations and frame count. Peak MLX allocation remained 61.24 GB;
+each weighted-stage release reported zero active bytes.
+
+Full-resolution 17-frame A/B/B/A runs averaged 479.79 → 285.24 seconds
+(40.55% less time), with the same complete equality. Four balanced native-size
+operator pairs used about 49% less local and 57% less broad attention time;
+async-only ablation confirmed compilation contributed a further 15–17%.
+Those operator figures are separate from complete movie times. Core/Studio
+validation, independent source review, isolated release packaging/signature,
+packaged preflight and executed weighted-branch traces passed. One minor
+cancellation-test follow-up is recorded in the local review; the implemented
+deferred wait drains correctly. Measurements cover this source/profile on
+one M3 Ultra; broader source/hardware and CUDA output parity remain unqualified.
+FlashVSR+ 4× was excluded.
+
+## November 13 FlashVSR+ GPU routing and RelayVSR block skipping
+
+Qualified `g15d` GPUs now run exact FlashVSR+ draft dot products and threshold
+selection on the GPU, retaining host normalization order and the original CPU
+fallback for unsafe numeric ranges or unsupported layouts. RelayVSR caches
+32-query block visibility classifications and skips provably masked work while
+retaining the pinned MLX Steel arithmetic, key order and BF16 stores. A fused
+device safety scan disables skipping for unsafe inputs. Admission accounts for
+the additional bounded buffers. Shared MIT Metal primitives were lifted
+byte-identically from H3 into a leaf module; H3 math and sampler behavior are
+unchanged.
+
+On M3 Ultra, complete 124-frame 1344 × 768, 24 FPS Relay jobs measured
+156.80 → 155.48 seconds at 2× and 800.18 → 760.99 seconds at native 4×
+(5376 × 3072), against fresh controls from the frozen current app. Every decoded
+RGB pixel, AAC packet and source frame timing matched. Balanced 29-frame
+A/B/B/A runs averaged 40.83 → 40.71 seconds at 2× and 200.42 → 188.92 seconds
+at 4×. The 2× difference is within timing noise; 4× used about 4.9% less full-job
+time and 5.7% less prefix time. The earlier archived 4× movie did not reproduce
+the current control after frame 45 and is excluded from this comparison.
+
+A full-resolution 17-frame FlashVSR+ 2× pair measured 478.08 → 475.56 seconds
+(control → candidate; candidate executed first), with every native
+RGB byte, delivered RGB pixel and aligned PCM sample unchanged. Both GPU routing
+modes were observed. This is about 0.5% less candidate time, despite routing-only
+operator speed ratios of 5.7×/9.3×. The complete 124-frame Turbo/Tiny 2× job
+measured 2628.26 → 2505.58 seconds against the earlier complete baseline, with
+every native RGB byte, delivered pixel and aligned PCM sample unchanged.
+That single full-job observation used 4.7% less time, while the newly paired
+prefix was effectively flat; a repeatable 4.7% whole-job gain is unestablished.
+Peak MLX allocation remained 61.24 GB, with zero active bytes at each weighted
+stage release. FlashVSR+ 4× was excluded. Core/Studio validation, H3 shared-header
+parity, isolated release packaging/signature and packaged Relay whole/trim routes
+passed. Broader hardware, source and CUDA pixel parity remain unqualified.
+
+## November 13 ReCaVSR GPU tile preparation
+
+ReCaVSR now forms bounded Q/K/V tile gathers and temporal masks together on the
+GPU using compact reusable spatial descriptors. The existing attention shapes,
+precision, visible keys and arithmetic are retained; memory admission includes
+the new scratch workspace. On M3 Ultra, the same complete BF16 staged 124-frame
+1344 × 768 → 2688 × 1536, 24 FPS job fell from 691.21 to 480.39 seconds (30.5%
+less time), with every decoded RGB pixel and AAC packet/timestamp unchanged.
+A balanced 29-frame replay averaged 139.68 → 89.00 seconds with the same equality.
+The complete native 4× job (5376 × 3072) fell from 1988.80 to 1023.83 seconds
+(48.5% less time), using the packaged release worker, with every decoded pixel,
+AAC packet and source frame timing unchanged. Peak MLX allocation matched the
+old path at both scales. Core/Studio validation, isolated release packaging,
+signature verification and packaged whole/trimmed ReCa routing passed. These
+measurements cover one source and M3 Ultra. Subsequent FlashVSR/Relay performance
+work is reported separately above.
+
+## November 13 native RelayVSR 4× extension
+
+RelayVSR now selects the released 2× or 4× checkpoint pair in the CLI and both Studio
+upscale routes. The 4× profile has its own learned LQ input projection, BF16 normalization,
+Flash encoder stride and native bicubic reconstruction. Existing jobs retain 2× defaults.
+Checkpoint metadata and raster/memory admission are checked before weighted inference;
+exact dimensions above 4K are retained. Independent math fixtures and installed-weight
+small renders pass. A 124-frame 1344 × 768 source produced 5376 × 3072 at 24 FPS in
+817 seconds on M3 Ultra, with every source timestamp and AAC packet payload retained.
+CUDA image parity and broader shape/quality qualification remain unverified.
+
+## November 13 experimental native ReCaVSR
+
+Native ReCaVSR now has an isolated Swift/MLX transformer, causal LQ projection,
+routed KV/recycled-latent state and its own 12+2-block FlashDecoder. The standalone
+worker supports BF16/INT8, staged or explicit resident execution, source intervals,
+color correction and exact-clock AVFoundation movie/audio export. Studio has
+whole-movie and timeline-copy routes with native setup and a packaged worker.
+Initial weighted delivery checks preserve all fractional source timestamps and
+AAC payloads; a 101-frame run exercises rolling temporal positions and anchors.
+A 124-frame 1344 × 768, 24 FPS source completed at 2688 × 1536 and 5376 × 3072
+with BF16 staged execution, in 691 and 1989 seconds respectively on M3 Ultra.
+Cross-platform CUDA image parity and broad hardware/shape qualification remain
+unverified. See [native ReCaVSR](integrations/weetodd-mlx/RECAVSR.md).
+
+
 ## November 7 native RelayVSR 2× upscaling
 
 Studio exposes RelayVSR 2× for complete source movies and timeline clip intervals. The native

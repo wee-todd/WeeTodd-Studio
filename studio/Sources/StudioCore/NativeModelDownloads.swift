@@ -45,7 +45,7 @@ public enum NativeModelDownloads {
     let kinds: Set<String> = ["h3-omni", "h3-qwen", "ltx25", "h3-video-vae", "h3-audio-vae", "h3-dt-tokenizer",
       "h3-direct-transformer", "h3-native-support", "h3-native-control", "ltx25-adapter",
       "ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae", "drama3-native",
-      "h3-regenerate", "h3-fast-vae", "h3-encoder-source", "h3-ref2va-source", "flashvsr-native"]
+      "h3-regenerate", "h3-fast-vae", "h3-encoder-source", "h3-ref2va-source", "flashvsr-native", "recavsr-native", "moss-image-shared", "moss-image-transformer"]
     var packages = try JSONDecoder().decode([NativeModelDownloadPackage].self, from: bytes)
       .filter { kinds.contains($0.kind) }
     // Direct Swift checkpoints have a different admission contract from the
@@ -289,7 +289,7 @@ public enum NativeModelDownloads {
     }
     try Task.checkCancellation()
     let provenance: [String: Any] = ["format": "weetodd-model-setup-v1", "id": id,
-      "converter": ["ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae", "h3-regenerate", "h3-fast-vae", "h3-encoder-source", "h3-ref2va-source", "flashvsr-native"].contains(package.kind) ? "none" : "preconverted",
+      "converter": package.kind.hasPrefix("moss-image-") || ["ltx25-duration-head", "ltx25-dev-source", "ltx25-distilled-adapter", "ltx25-diffusion-vae", "h3-regenerate", "h3-fast-vae", "h3-encoder-source", "h3-ref2va-source", "flashvsr-native", "recavsr-native"].contains(package.kind) ? "none" : "preconverted",
       "requiresNativePageConversion": package.kind == "ltx25-dev-source",
       "nativeRuntime": "swift", "include_vision": package.kind == "h3-qwen",
       "sources": try JSONSerialization.jsonObject(with: JSONEncoder().encode(package.files))]

@@ -3,6 +3,7 @@ import AppKit
 import Combine
 import Foundation
 import StudioCore
+import InferenceContracts
 import UniformTypeIdentifiers
 
 struct RuntimeSettings: Codable {
@@ -20,6 +21,8 @@ struct RuntimeSettings: Codable {
   var ltx25WorkerPath: String?
   var relayVSRWorkerPath: String?
   var relayVSRModelDirectory: String?
+  var reCaVSRWorkerPath: String?
+  var reCaVSRModelDirectory: String?
   var nativeLTX25Enabled: Bool?
   var usesNativeLTX25: Bool { nativeLTX25Enabled ?? true }
   var ltx25PreviewDecoder: String?
@@ -27,6 +30,7 @@ struct RuntimeSettings: Codable {
   var ltx25PreviewWideCheckpoint: String?
   var h3WorkerPath: String?
   var drama3WorkerPath: String?
+  var mossWorkerPath: String?
   var nativeH3Enabled: Bool?
   var usesNativeH3: Bool { nativeH3Enabled ?? true }
   var acceleration: AccelerationSettings?
@@ -55,16 +59,21 @@ struct RuntimeSettings: Codable {
     value.rippleProfileID = nil
     value.relayVSRWorkerPath = nil
     value.relayVSRModelDirectory = nil
+    value.reCaVSRWorkerPath = nil
+    value.reCaVSRModelDirectory = nil
     return value
   }
 
   static func restoring(_ data: Data?, defaults: Self) -> Self {
     var value = data.flatMap { try? JSONDecoder().decode(Self.self, from: $0) } ?? defaults
     if let bundled = defaults.ltx25WorkerPath { value.ltx25WorkerPath = bundled }
+    if let bundled = defaults.reCaVSRWorkerPath { value.reCaVSRWorkerPath = bundled }
+    if value.reCaVSRModelDirectory == nil { value.reCaVSRModelDirectory = defaults.reCaVSRModelDirectory }
     if let bundled = defaults.relayVSRWorkerPath { value.relayVSRWorkerPath = bundled }
     if value.relayVSRModelDirectory == nil { value.relayVSRModelDirectory = defaults.relayVSRModelDirectory }
     if let bundled = defaults.h3WorkerPath { value.h3WorkerPath = bundled }
     if let bundled = defaults.drama3WorkerPath { value.drama3WorkerPath = bundled }
+    if let bundled = defaults.mossWorkerPath { value.mossWorkerPath = bundled }
     value.presentationHelperPath = defaults.presentationHelperPath
     let savedHelper = value.drawThingsHelperPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if !FileManager.default.isExecutableFile(atPath: savedHelper) {
@@ -89,6 +98,9 @@ struct RuntimeSettings: Codable {
     if FileManager.default.isExecutableFile(atPath: helper) { value.drawThingsHelperPath = helper }
     let ltx = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddLTXWorker").path
     if FileManager.default.isExecutableFile(atPath: ltx) { value.ltx25WorkerPath = ltx }
+    let reca = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddReCaVSR").path
+    if FileManager.default.isExecutableFile(atPath: reca) { value.reCaVSRWorkerPath = reca }
+    value.reCaVSRModelDirectory = ProcessInfo.processInfo.environment["WEETODD_RECAVSR_MODELS"] ?? NativeReCaVSRPreparation.discoverModels()
     let relay = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddRelayVSR").path
     if FileManager.default.isExecutableFile(atPath: relay) { value.relayVSRWorkerPath = relay }
     value.relayVSRModelDirectory = ProcessInfo.processInfo.environment["WEETODD_RELAYVSR_MODELS"]
@@ -97,6 +109,8 @@ struct RuntimeSettings: Codable {
     if FileManager.default.isExecutableFile(atPath: h3) { value.h3WorkerPath = h3 }
     let drama = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WeeToddDrama3Worker").path
     if FileManager.default.isExecutableFile(atPath: drama) { value.drama3WorkerPath = drama }
+    let moss = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/MOSSNative/WeeToddMOSSImageWorker").path
+    if FileManager.default.isExecutableFile(atPath: moss) { value.mossWorkerPath = moss }
     return value
   }
 }
@@ -219,11 +233,11 @@ struct BridgeResponseBuffer {
       return try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
     }
     let nativeH3Preparation = ["h3-native-catalog", "h3-native-describe", "h3-native-prepare"].contains(command)
-    let nativeRelayPreparation = ["relay-native-describe", "relay-native-prepare"].contains(command)
+    let nativeRelayPreparation = ["relay-native-describe", "relay-native-prepare", "recavsr-native-describe", "recavsr-native-prepare"].contains(command)
     if nativeH3Preparation || nativeRelayPreparation || ["ltx-native-catalog", "ltx-native-describe", "ltx-native-prepare",
       "ripple-native-prepare"].contains(command) {
       busy = true; cancellationRequested = false; startedAt = Date(); fraction = 0
-      message = nativeRelayPreparation ? "Preparing RelayVSR in Swift…"
+      message = command.hasPrefix("recavsr-") ? "Preparing ReCaVSR in Swift…" : nativeRelayPreparation ? "Preparing RelayVSR in Swift…"
         : nativeH3Preparation ? "Preparing H3 in Swift…" : "Preparing LTX in Swift…"
       log = ""; livePreview = nil
       defer { busy = false; preparationTask = nil }
@@ -239,6 +253,10 @@ struct BridgeResponseBuffer {
           let settings = request["runtime"] as! [String: Any]
           result = ["profiles": try NativeH3Preparation.catalog(directory: settings["profilesDirectory"] as? String ?? "")]
         case "h3-native-describe": result = try NativeH3Preparation.describe(request: request)
+        case "recavsr-native-describe": result = try NativeReCaVSRPreparation.describe(request: request)
+        case "recavsr-native-prepare":
+          guard let output else { throw StudioError.invalid("Preparation requires a job directory.") }
+          result = try await NativeReCaVSRPreparation.prepare(request: request, destination: output)
         case "relay-native-describe": result = try NativeRelayVSRPreparation.describe(request: request)
         case "relay-native-prepare":
           guard let output else { throw StudioError.invalid("Preparation requires a job directory.") }
@@ -278,14 +296,18 @@ struct BridgeResponseBuffer {
     let nativeDrama = ["drama3-render", "drama3-preflight", "drama3-stream", "drama3-supplement-head"].contains(command)
     let nativeLTX = ["ltx-native-render", "ltx-native-preflight"].contains(command) || conversionVerb != nil
     let nativeH3 = ["h3-native-render", "h3-native-preflight"].contains(command)
+    let nativeReCa = ["recavsr-native-render", "recavsr-native-preflight"].contains(command)
     let nativeRelay = command == "relay-native-render"
-    let nativeWorker = nativeLTX || nativeH3 || nativeDrama || nativeRelay
+    let mossConversion = command == "moss-native-convert"
+    let mossAnalysis = command == "moss-layout-analyze"
+    let nativeMOSS = ["moss-native-render", "moss-native-preflight"].contains(command) || mossConversion || mossAnalysis
+    let nativeWorker = nativeLTX || nativeH3 || nativeDrama || nativeRelay || nativeReCa || nativeMOSS
     if nativeWorker {
       workerEventsPath = nil; workerEventsTruncated = false; workerEventsArchiveError = nil
     }
     if nativeWorker {
-      let workerPath = nativeRelay ? runtime.relayVSRWorkerPath : nativeDrama ? runtime.drama3WorkerPath : nativeH3 ? runtime.h3WorkerPath : runtime.ltx25WorkerPath
-      let label = nativeRelay ? "RelayVSR" : nativeDrama ? "Drama 3" : nativeH3 ? "H3" : "LTX"
+      let workerPath = nativeMOSS ? runtime.mossWorkerPath : nativeReCa ? runtime.reCaVSRWorkerPath : nativeRelay ? runtime.relayVSRWorkerPath : nativeDrama ? runtime.drama3WorkerPath : nativeH3 ? runtime.h3WorkerPath : runtime.ltx25WorkerPath
+      let label = nativeMOSS ? "MOSS" : nativeReCa ? "ReCaVSR" : nativeRelay ? "RelayVSR" : nativeDrama ? "Drama 3" : nativeH3 ? "H3" : "LTX"
       guard let worker = workerPath, FileManager.default.isExecutableFile(atPath: worker), output != nil else {
         throw StudioError.invalid("The native \(label) worker is missing. Use a complete Studio build.")
       }
@@ -309,7 +331,7 @@ struct BridgeResponseBuffer {
     defer {
       busy = false; process = nil; livePreview = nil
       if let previewFile { try? FileManager.default.removeItem(at: previewFile) }
-      if nativeRelay, let output,
+      if nativeRelay || nativeReCa, let output,
         !FileManager.default.fileExists(atPath: output.appendingPathComponent("video.mov").path) {
         try? FileManager.default.removeItem(at: output)
       }
@@ -343,6 +365,24 @@ struct BridgeResponseBuffer {
       }
     } else if nativeDrama {
       body = payload
+    } else if mossAnalysis {
+      guard let source = payload["recipePath"] as? String else { throw StudioError.invalid("Prepare the image analysis request first.") }
+      let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: source)); defer { try? file.close() }
+      let bytes = try file.read(upToCount: 2 * 1024 * 1024 + 1) ?? Data()
+      guard bytes.count <= 2 * 1024 * 1024, let root = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+        root["schema"] as? String == "weetodd-moss-layout-request-v1" else { throw StudioError.invalid("Invalid image analysis request.") }
+      body = root; body["outputDirectory"] = output!.path
+    } else if nativeMOSS && !mossConversion {
+      guard let path = payload["recipePath"] as? String else { throw StudioError.invalid("Prepare the MOSS request first.") }
+      let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
+      defer { try? file.close() }
+      let bytes = try file.read(upToCount: 2 * 1024 * 1024 + 1) ?? Data()
+      guard bytes.count <= 2 * 1024 * 1024, let root = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+        root["schema"] as? String == "weetodd-moss-image-request-v1" else { throw StudioError.invalid("Invalid MOSS request.") }
+      body = root; body["outputPath"] = output!.appendingPathComponent("image.png").path
+    } else if mossConversion {
+      guard let source = payload["source"] as? String, source.hasPrefix("/"),
+        let bits = payload["bits"] as? Int, [4, 8].contains(bits), payload["component"] as? String == "transformer" else { throw StudioError.invalid("Choose official MOSS source weights and affine Q8 or Q4.") }
     } else if nativeLTX || nativeH3 {
       body = try nativeH3
         ? NativeVideoJobRequest.h3(payload: payload, runtime: runtime, output: output!)
@@ -362,10 +402,17 @@ struct BridgeResponseBuffer {
     startedAt = Date()
     lastOutputAt = startedAt
     fraction = 0
-    message = nativeRelay ? "Upscaling with RelayVSR…" : command.capitalized + "…"
+    message = nativeReCa ? "Upscaling with ReCaVSR…" : nativeRelay ? "Upscaling with RelayVSR…" : command.capitalized + "…"
     log = ""
     let task = Process()
-    if nativeRelay, let output, let worker = runtime.relayVSRWorkerPath,
+    if nativeReCa, let output, let worker = runtime.reCaVSRWorkerPath, let recipePath = payload["recipePath"] as? String {
+      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      task.executableURL = URL(fileURLWithPath: worker)
+      task.arguments = try NativeReCaVSRPreparation.arguments(recipePath: recipePath, worker: worker,
+        output: output.appendingPathComponent("video.mov"))
+      if command == "recavsr-native-preflight" { task.arguments!.append("--preflight") }
+    } else if nativeReCa { throw StudioError.invalid("Prepare the ReCaVSR clip before rendering.") }
+    else if nativeRelay, let output, let worker = runtime.relayVSRWorkerPath,
       let recipePath = payload["recipePath"] as? String {
       try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
       task.executableURL = URL(fileURLWithPath: worker)
@@ -374,10 +421,15 @@ struct BridgeResponseBuffer {
     } else if nativeRelay {
       throw StudioError.invalid("Prepare the RelayVSR clip before rendering.")
     } else {
-      task.executableURL = URL(fileURLWithPath: nativeDrama ? runtime.drama3WorkerPath! : nativeH3 ? runtime.h3WorkerPath! : nativeLTX ? runtime.ltx25WorkerPath! : runtime.pythonPath)
-      task.arguments = nativeWorker ? [conversionVerb ?? (command == "drama3-supplement-head" ? "supplement-head" : command == "drama3-stream" ? "stream-text" : command.hasSuffix("render") ? "render" : "preflight"), "--request", input.path]
+      task.executableURL = URL(fileURLWithPath: nativeMOSS ? runtime.mossWorkerPath! : nativeDrama ? runtime.drama3WorkerPath! : nativeH3 ? runtime.h3WorkerPath! : nativeLTX ? runtime.ltx25WorkerPath! : runtime.pythonPath)
+      if mossConversion {
+        task.arguments = ["convert-model", "--input", payload["source"] as! String, "--output", output!.path,
+          "--component", "transformer", "--bits", String(payload["bits"] as! Int)]
+      } else {
+      task.arguments = nativeWorker ? [mossAnalysis ? "analyze-layout" : conversionVerb ?? (command == "drama3-supplement-head" ? "supplement-head" : command == "drama3-stream" ? "stream-text" : command.hasSuffix("render") ? "render" : "preflight"), "--request", input.path]
         : [runtime.root + "/scripts/studio_bridge.py", command, "--request", input.path]
       if let output { task.arguments! += ["--output", output.path] }
+      }
     }
     task.currentDirectoryURL = nativeWorker ? input.deletingLastPathComponent() : URL(fileURLWithPath: runtime.root)
     task.environment = env
@@ -447,6 +499,11 @@ struct BridgeResponseBuffer {
         if let archive {
           DispatchQueue.main.async {
             self.workerEventsTruncated = archiveTruncated; self.workerEventsArchiveError = archiveError
+            if nativeMOSS && self.cancellationRequested {
+              self.message = "Cancelled"
+              continuation.resume(throwing: CancellationError())
+              return
+            }
             if task.terminationStatus == 0, var result = last?["result"] as? [String: Any] {
               result["workerEventsPath"] = archive.url.path
               result["workerEventsTruncated"] = archiveTruncated
@@ -462,7 +519,7 @@ struct BridgeResponseBuffer {
         }
       }
     }
-    if nativeRelay && cancellationRequested { throw CancellationError() }
+    if (nativeRelay || nativeReCa) && cancellationRequested { throw CancellationError() }
     message = "Ready"
     fraction = 1
     return response
@@ -489,6 +546,7 @@ extension Encodable {
   @Published var h3TwoStageModels = H3TwoStageModelLinks()
   @Published var h3ImageVAEPath = ""
   var preparedH3Image: PreparedH3Image?
+  var preparedMOSSImage: PreparedMOSSImage?
   @Published var scannedLoRAEntries: [LoRAFolderEntry] = []
   @Published var loraFolderWarnings: [String] = []
   @Published var loraFolderScanBusy = false
@@ -525,6 +583,8 @@ extension Encodable {
   @Published var rippleSelectedTakeID: UUID?
   @Published var showAudioPresentation = false
   @Published var audioVisualFeatures: AudioVisualFeatures?
+  @Published var reCaVSRSettings = try! ReCaVSRSettings()
+  @Published var reCaVSRResult: (source: String, output: String)?
   @Published var showVideoUpscale = false
   @Published var videoUpscaleTool = NativeUpscalerTool.flashVSR {
     didSet {
@@ -533,7 +593,8 @@ extension Encodable {
       let name = switch videoUpscaleTool {
       case .flashVSR: "FlashVSR+"
       case .h3Regenerate: "H3 Regenerate"
-      case .relayVSR: "RelayVSR 2×"
+      case .relayVSR: "RelayVSR"
+      case .reCaVSR: "ReCaVSR"
       }
       videoUpscaleStatus = videoUpscaleSourcePath.isEmpty ? "Select a source movie." : "Check setup for " + name + "."
     }
@@ -551,6 +612,7 @@ extension Encodable {
   @Published var videoUpscalePlan: FlashVSRResolvedPlan?
   @Published var videoUpscaleResult: FlashVSRReceipt?
   @Published var relayVSRResult: (source: String, output: String)?
+  @Published var relayVSRScale: NativeRelayVSRScale = .x2
   @Published var videoUpscalePresets: [VideoUpscalePreset] = []
   @Published var videoUpscalePresetName = ""
   var videoUpscaleTask: Task<Void, Never>?
@@ -1005,6 +1067,7 @@ extension Encodable {
         if kind == .lora {
           asset.loraModel =
             (info["loraModel"] as? String).flatMap(LoRAModel.init(rawValue:)) ?? loraModel
+          if asset.loraModel == .mossImage { asset.loraProfile = info["loraProfile"] as? String }
           if asset.loraModel == .h3 {
             asset.loraProfile = info["loraProfile"] as? String ?? (loraModel == .h3 ? loraProfile : nil)
             asset.loraLayout = info["loraLayout"] as? String ?? (loraModel == .h3 ? loraLayout : nil)
@@ -1123,7 +1186,7 @@ extension Encodable {
         project.clips.insert(copy.clip,at:index+1);project.assets.append(copy.asset)
       }
       select(copy.clip.id)
-      notice = method == .relayVSR ? "Created a RelayVSR 2× copy. Use Upscale clip to run it."
+      notice = method == .relayVSR ? "Created a RelayVSR copy. Choose 2× or 4× and use Upscale clip to run it."
         : "Created a separate LTX 2× copy. Enable its experimental movie controls, then prepare."
     } catch { self.error=error.localizedDescription }
   }
@@ -1190,6 +1253,7 @@ extension Encodable {
         copied[value] = relative
         return relative
       }
+      try ProjectStorage.collectMOSSLayoutReferences(&p, collect: collect)
       for i in p.assets.indices where p.assets[i].kind != .lora {
         p.assets[i].path = try collect(p.assets[i].path)
         if let receipt = p.assets[i].upscaleReceipt { p.assets[i].upscaleReceipt = try collect(receipt) }
@@ -1380,7 +1444,7 @@ extension Encodable {
       + GenerationSelection.assetFingerprint(for: clip, assets: allAssets)
       + ((try? encoder.encode(relevantProfiles).base64EncodedString()) ?? "")
       + ((try? encoder.encode(loraGroups).base64EncodedString()) ?? "")
-      + String(clip.settings(in: project).fps) + profileMetadata + bindingMetadata + mediaMetadata + relay
+      + String(clip.settings(in: project).fps) + profileMetadata + bindingMetadata + mediaMetadata + relay + (clip.usesReCaVSR ? (runtime.reCaVSRWorkerPath ?? "") + (runtime.reCaVSRModelDirectory ?? "") : "")
   }
   func generationDescriptionTaskKey(for clip: Clip) -> String {
     // Reopening clears descriptions even when the selected clip's render inputs are identical.
@@ -1392,8 +1456,8 @@ extension Encodable {
     let key = generationRequestKey(for: clip)
     let session = documentSessionID
     do {
-      if clip.inferredTask == "video_upscale", !clip.usesRelayVSR, !runtime.usesNativeLTX25 { throw StudioError.invalid("LTX movie upscaling requires Swift LTX 2.5. Enable its native runtime.") }
-      let command = clip.usesRelayVSR ? "relay-native-describe"
+      if clip.inferredTask == "video_upscale", !clip.usesNativeMovieUpscaler, !runtime.usesNativeLTX25 { throw StudioError.invalid("LTX movie upscaling requires Swift LTX 2.5. Enable its native runtime.") }
+      let command = clip.usesReCaVSR ? "recavsr-native-describe" : clip.usesRelayVSR ? "relay-native-describe"
         : clip.engine == .ltx25 && runtime.usesNativeLTX25 ? "ltx-native-describe"
         : clip.engine == .h3 && runtime.usesNativeH3 ? "h3-native-describe" : "describe-generation"
       var result = try await descriptionBridge.independent().invoke(command, runtime: runtime, payload: try payload())
@@ -1423,7 +1487,7 @@ extension Encodable {
     guard !operationBusy else { return }
     let target = selectedClipID, originalSession = documentSessionID
     if selectedClip?.audioDriverSelection != nil,
-      selectedClip?.usesRelayVSR != true,
+      selectedClip?.usesNativeMovieUpscaler != true,
       !(selectedClip?.engine == .ltx25 && runtime.usesNativeLTX25),
       !(selectedClip?.engine == .h3 && runtime.usesNativeH3) {
       guard await prepareAudioDriver(), selectedClipID == target,
@@ -1450,12 +1514,12 @@ extension Encodable {
         (leader.continuity?.sceneDecodeMode ?? "single") != "single" {
         throw StudioError.invalid("Bounded scene decoding requires Swift LTX 2.5. Enable it or choose Full decode.")
       }
-      let nativeRelay = clip.usesRelayVSR
+      let nativeRelay = clip.usesNativeMovieUpscaler
       if clip.inferredTask == "video_upscale", !nativeRelay, !settings.usesNativeLTX25 { throw StudioError.invalid("LTX movie upscaling requires Swift LTX 2.5. Enable its native runtime.") }
       let body = try payload()
       let nativeLTX = !nativeRelay && clip.engine == .ltx25 && settings.usesNativeLTX25
       let nativeH3 = clip.engine == .h3 && settings.usesNativeH3
-      let describeCommand = nativeRelay ? "relay-native-describe"
+      let describeCommand = nativeRelay ? (clip.usesReCaVSR ? "recavsr-native-describe" : "relay-native-describe")
         : nativeLTX ? "ltx-native-describe" : nativeH3 ? "h3-native-describe" : "describe-generation"
       var description = try await descriptionBridge.invoke(describeCommand, runtime: settings, payload: body)
       guard isCurrent() else {
@@ -1469,7 +1533,7 @@ extension Encodable {
       generationDescriptions[clip.id] = description
       let snapshot = signature(for: clip)
       let destination = dataDirectory.appendingPathComponent("Jobs/\(requestID.uuidString)/prepared")
-      let prepareCommand = nativeRelay ? "relay-native-prepare"
+      let prepareCommand = nativeRelay ? (clip.usesReCaVSR ? "recavsr-native-prepare" : "relay-native-prepare")
         : nativeLTX ? "ltx-native-prepare" : nativeH3 ? "h3-native-prepare" : "prepare"
       var r = try await bridge.invoke(prepareCommand, runtime: settings, payload: body, output: destination)
       if nativeLTX || nativeH3, let recipePath = r["recipePath"] as? String {
@@ -1493,7 +1557,7 @@ extension Encodable {
       }
       validationErrors[clip.id] = nil
       preparedFingerprint = snapshot
-      notice = nativeRelay ? "RelayVSR is ready to upscale the source movie."
+      notice = nativeRelay ? clip.nativeMovieUpscalerName + " is ready to upscale the source movie."
         : "Preflight passed. Review the exact prompt, then render."
     } catch {
       guard isCurrent() else { return }
@@ -1536,7 +1600,7 @@ extension Encodable {
         throw StudioError.invalid("Prepare the complete continuous scene before rendering.")
       }
       // Native publication is immutable; each take gets its own destination.
-      let nativeRelay = c.usesRelayVSR
+      let nativeRelay = c.usesNativeMovieUpscaler
       let nativeLTX = !nativeRelay && c.engine == .ltx25 && settings.usesNativeLTX25
       let nativeH3 = c.engine == .h3 && settings.usesNativeH3
       if nativeLTX || nativeH3 { nativePreviewOwner = (requestID, session, projectID, c.id) }
@@ -1548,12 +1612,14 @@ extension Encodable {
           withIntermediateDirectories: true)
       }
       let r = try await bridge.invoke(
-        nativeRelay ? "relay-native-render"
+        nativeRelay ? (c.usesReCaVSR ? "recavsr-native-render" : "relay-native-render")
           : nativeLTX ? "ltx-native-render" : nativeH3 ? "h3-native-render" : "render",
         runtime: settings, payload: ["recipePath": path], output: renderDestination)
       guard let video = r["video"] as? String else {
         throw StudioError.invalid("Renderer did not return a movie.")
       }
+      let reCaReceipt = c.usesReCaVSR ? try await Self.verifyReCaVSRResult(output: video, recipe: path) : nil
+      try Task.checkCancellation()
       let info: [String: Any]
       if nativeLTX || nativeH3 || nativeRelay {
         info = try await Self.inspectNativeMovie(video, requiresAudio: !nativeRelay)
@@ -1644,6 +1710,7 @@ extension Encodable {
           name: c.name + " render", kind: .video, path: video, scope: .clip, owner: c.id)
         asset.duration = motionDuration ?? movieDuration ?? automaticDuration ?? (preserveEditorialDuration ? mediaDuration : min(c.duration, renderedDuration))
         if nativeRelay { asset.fps = measuredFPS }
+        asset.upscaleReceipt = reCaReceipt
         p.assets.append(asset)
       }
       if tooShort {

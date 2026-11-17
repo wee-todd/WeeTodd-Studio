@@ -48,7 +48,8 @@ public struct FlashVSRMemoryPlan:Codable,Equatable,Sendable {
       } else { sharedSource=try sum([sharedSource,bytes]) }
     }
     let streamedWeights=try sum([sharedSource/2,blockSources.values.max() ?? 0,largestSource])
-    let transformer=try sum([streamedWeights,ditCarry,product([pixels,1024]),64*1024*1024])
+    let transformer=try sum([streamedWeights,ditCarry,product([pixels,1024]),64*1024*1024,
+      FlashVSRGPURouting.maximumWorkspaceBytes])
     let decoder:UInt64,wanReplacementBytes:UInt64
     if recipe.decoder == .tiny {
       wanCarryDiskBytes=0;wanReplacementBytes=0

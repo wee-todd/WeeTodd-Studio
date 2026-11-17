@@ -1,6 +1,7 @@
 import AVKit
 import StudioCore
 import SwiftUI
+import InferenceContracts
 
 struct VideoUpscaleInspector: View {
   @EnvironmentObject var store: StudioStore
@@ -21,7 +22,8 @@ struct VideoUpscaleInspector: View {
       Picker("Restoration model", selection: $store.videoUpscaleTool) {
         Text("FlashVSR+").tag(NativeUpscalerTool.flashVSR)
         Text("H3 Regenerate").tag(NativeUpscalerTool.h3Regenerate)
-        Text("RelayVSR 2×").tag(NativeUpscalerTool.relayVSR)
+        Text("RelayVSR").tag(NativeUpscalerTool.relayVSR)
+        Text("ReCaVSR").tag(NativeUpscalerTool.reCaVSR)
       }.pickerStyle(.segmented).disabled(store.videoUpscaleBusy)
         .accessibilityIdentifier("native-upscaler-model")
       ScrollView {
@@ -35,12 +37,16 @@ struct VideoUpscaleInspector: View {
             .font(.caption).foregroundStyle(.secondary)
           Group {
             if store.videoUpscaleTool == .h3Regenerate { H3RegenerateInspector() }
+            else if store.videoUpscaleTool == .reCaVSR { ReCaVSRControls(settings: $store.reCaVSRSettings) }
             else if store.videoUpscaleTool == .relayVSR {
-              Text("Doubles an SDR movie’s dimensions and preserves its frame timing and audio.")
+              Picker("Scale", selection: Binding(get: { store.relayVSRScale }, set: { store.relayVSRScale = $0; store.relayVSRResult = nil })) {
+                ForEach(NativeRelayVSRScale.allCases, id: \.self) { Text($0.label).tag($0) }
+              }.accessibilityIdentifier("relayvsr-scale")
+              Text("Native 2× or 4× SDR upscaling with source frame timing and audio.")
                 .font(.caption).foregroundStyle(.secondary)
-              RelayVSRModelFolderControl()
+              RelayVSRModelFolderControl(scale: store.relayVSRScale)
             } else { flashControls }
-            if store.videoUpscaleTool != .relayVSR {
+            if store.videoUpscaleTool != .relayVSR && store.videoUpscaleTool != .reCaVSR {
               DisclosureGroup("Model setup", isExpanded: $setupOpen) { setupControls.padding(.top, 8) }
             }
           }.disabled(store.videoUpscaleBusy)
@@ -50,6 +56,13 @@ struct VideoUpscaleInspector: View {
           } else if store.videoUpscaleTool == .h3Regenerate, let receipt = store.h3RegenerateResult {
             H3RegenerateComparison(receipt: receipt).id(receipt.video.path)
             reveal(receipt.video.path)
+          } else if store.videoUpscaleTool == .reCaVSR, let receipt = store.reCaVSRResult,
+            receipt.source == store.videoUpscaleSourcePath {
+            HStack {
+              VideoPlayer(player: AVPlayer(url: URL(fileURLWithPath: receipt.source)))
+              VideoPlayer(player: AVPlayer(url: URL(fileURLWithPath: receipt.output)))
+            }.frame(height: 230)
+            reveal(receipt.output)
           } else if store.videoUpscaleTool == .relayVSR, let receipt = store.relayVSRResult,
             receipt.source == store.videoUpscaleSourcePath {
             reveal(receipt.output)
@@ -57,7 +70,7 @@ struct VideoUpscaleInspector: View {
         }
       }
       Divider()
-      Text(store.videoUpscaleBusy && store.videoUpscaleTool == .relayVSR && store.bridge.busy
+      Text(store.videoUpscaleBusy && [.relayVSR, .reCaVSR].contains(store.videoUpscaleTool) && store.bridge.busy
         ? store.bridge.message : store.videoUpscaleStatus).font(.callout).textSelection(.enabled).lineLimit(4).frame(maxWidth: .infinity, alignment: .leading)
       HStack {
         if store.videoUpscaleBusy { ProgressView().controlSize(.small); Button("Cancel") { store.cancelVideoProcessing() } }
@@ -71,6 +84,7 @@ struct VideoUpscaleInspector: View {
   }
   private func run(preflightOnly: Bool = false) {
     if store.videoUpscaleTool == .h3Regenerate { store.runH3Regenerate(preflightOnly: preflightOnly) }
+    else if store.videoUpscaleTool == .reCaVSR { store.runReCaVSRUpscale(preflightOnly: preflightOnly) }
     else if store.videoUpscaleTool == .relayVSR { store.runRelayVSRUpscale(preflightOnly: preflightOnly) }
     else { store.runVideoUpscale(preflightOnly: preflightOnly) }
   }

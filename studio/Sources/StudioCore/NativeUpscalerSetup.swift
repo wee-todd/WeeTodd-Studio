@@ -25,10 +25,10 @@ public enum NativeUpscalerSetup {
     reuseRoots: [String] = [], token: String? = nil, progress: @escaping NativeModelDownloads.Progress = { _, _ in }) async throws -> URL {
     let library = try existingLibrary(modelLibrary)
     guard let package = try NativeModelDownloads.catalog(at: catalog).first(where: { $0.descriptor.id == packageID }),
-      ["h3-regenerate", "h3-fast-vae", "h3-encoder-source", "h3-ref2va-source", "flashvsr-native"].contains(package.kind) else {
-      throw StudioError.invalid("Choose a pinned native H3 regeneration or FlashVSR+ package.")
+      ["h3-regenerate", "h3-fast-vae", "h3-encoder-source", "h3-ref2va-source", "flashvsr-native", "recavsr-native"].contains(package.kind) else {
+      throw StudioError.invalid("Choose a pinned native H3, FlashVSR+ or ReCaVSR package.")
     }
-    let family = package.kind == "flashvsr-native" ? "FlashVSR-Plus"
+    let family = package.kind == "recavsr-native" ? "WeeTodd/ReCaVSR" : package.kind == "flashvsr-native" ? "FlashVSR-Plus"
       : package.kind == "h3-ref2va-source" ? "WeeTodd/H3/Ref2VA"
       : ["h3-fast-vae", "h3-encoder-source"].contains(package.kind) ? "WeeTodd/H3-Video-VAE" : "WeeTodd/LoRAs/H3"
     let destination = library.appendingPathComponent(family)

@@ -9,5 +9,9 @@ checkpoints/
 docs/
 knowledge/
 models/
+integrations/weetodd-image-layout/.build/
+integrations/weetodd-image-layout/.swiftpm/
+integrations/weetodd-moss-mlx/.build/
+integrations/weetodd-moss-mlx/.swiftpm/
 output/
 outputs/

@@ -11,7 +11,7 @@ final class FlashVSRSupervisorTests: XCTestCase {
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let engine = root.appendingPathComponent("engine"), enginePID = root.appendingPathComponent("engine.pid")
-    try "#!/bin/sh\necho $$ > '\(enginePID.path)'\nexec 1>&- 2>&-\ntrap '' INT\nexec /bin/sleep 30\n".write(to: engine, atomically: true, encoding: .utf8)
+    try "#!/bin/sh\n: > '\(enginePID.path)'\n/bin/sleep 0.05\necho $$ > '\(enginePID.path)'\nexec 1>&- 2>&-\ntrap '' INT\nexec /bin/sleep 30\n".write(to: engine, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: engine.path)
     let commandURL = root.appendingPathComponent("command.json"), ready = root.appendingPathComponent("ready")
     let parent = Process(); parent.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -23,8 +23,16 @@ final class FlashVSRSupervisorTests: XCTestCase {
       log: root.appendingPathComponent("engine.log").path, lease: lease.path, ownerPID: parent.processIdentifier)
     try JSONEncoder().encode(command).write(to: commandURL); try Data().write(to: ready)
     let launched = Date().addingTimeInterval(5)
-    while !FileManager.default.fileExists(atPath: enginePID.path) && Date() < launched { usleep(10000) }
-    let pid = try XCTUnwrap(Int32(String(contentsOf: enginePID, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+    // Creation can precede the writer's first bytes; wait for a usable PID.
+    var publishedPID: Int32?
+    while Date() < launched {
+      if let text = try? String(contentsOf: enginePID, encoding: .utf8),
+        let candidate = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)), candidate > 1 {
+        publishedPID = candidate; break
+      }
+      usleep(10000)
+    }
+    let pid = try XCTUnwrap(publishedPID)
     defer { if kill(pid, 0) == 0 { kill(pid, SIGKILL) } }
     kill(parent.processIdentifier, SIGKILL); parent.waitUntilExit()
     let ended = Date().addingTimeInterval(5)

@@ -1,3 +1,4 @@
+import InferenceContracts
 import Foundation
 
 public enum GenerationProvider: String, CaseIterable, Identifiable {
@@ -236,6 +237,8 @@ public struct GenerationSelection: Codable, Equatable {
   public var ltx25DFR:LTX25DFRSettings?
   public var ltx25MovieUpscale:LTX25MovieUpscaleSettings?
   public var movieUpscaleMethod: MovieUpscaleMethod?
+  public var reCaVSRSettings: ReCaVSRSettings?
+  public var relayVSRScale: NativeRelayVSRScale?
   public init(task: String = "t2v", preset: GenerationPreset = .balanced) {
     self.task = task
     self.preset = preset
@@ -243,12 +246,14 @@ public struct GenerationSelection: Codable, Equatable {
   public var isModified: Bool {
     steps != nil || refinementSteps != nil || cfg != nil || shift != nil
       || memoryPolicy != nil || projectionBackend != nil || transformerBackend != nil
-      || ltx25AdapterBinding != nil
+      || ltx25AdapterBinding != nil || reCaVSRSettings != nil || relayVSRScale != nil
       || ltx25DiffusionVAE != nil || h3SamplingMethod != nil || h3VideoDecodePrecision != nil || h3AttentionPolicy != nil || h3TransformerWeightCacheGB != nil || h3Reference != nil || h3Joint != nil || h3MotionFidelity != nil || ltx25Guidance != nil || ltx25AutomaticDuration != nil || ltx25Keyframes != nil || ltx25SingleStage != nil || ltx25DFR != nil || ltx25MovieUpscale != nil
   }
   public mutating func resetOverrides() {
     ltx25ConfigID = nil; ltx25ConfigName = nil
     ltx25AdapterBinding = nil
+    reCaVSRSettings = nil
+    relayVSRScale = nil
     steps = nil; refinementSteps = nil; cfg = nil; shift = nil
     memoryPolicy = nil; projectionBackend = nil; transformerBackend = nil
     h3Reference=nil;h3Joint=nil;h3MotionFidelity=nil
@@ -265,7 +270,7 @@ public struct GenerationSelection: Codable, Equatable {
     case "a2v": return "Audio-driven video"
     case "control": return "Controlled video"
     case "extension": return "Video extension"
-    case "video_upscale": return "Source movie 2× upscale"
+    case "video_upscale": return "Source movie upscale"
     default: return task
     }
   }

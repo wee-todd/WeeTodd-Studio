@@ -2,9 +2,9 @@ import Foundation
 
 /// Training provenance filters candidates; the renderer validates tensor targets and shapes.
 public enum LoRAModel: String, Codable, CaseIterable, Identifiable {
-  case h3, ltx23, ltx25
+  case h3, ltx23, ltx25, mossImage = "moss_image"
   public var id: String { rawValue }
-  public var label: String { Engine(rawValue: rawValue)!.label }
+  public var label: String { self == .mossImage ? "MOSS-Image" : Engine(rawValue: rawValue)!.label }
   public func supports(_ engine: Engine) -> Bool {
     rawValue == engine.rawValue || (self == .ltx23 && engine == .ltx25)
   }
@@ -34,6 +34,12 @@ public struct LoRAMember: Codable, Identifiable, Equatable {
   public var fileKey: String {
     URL(fileURLWithPath: asset.path).standardizedFileURL.resolvingSymlinksInPath().path
   }
+  public func validateForMOSS() throws {
+    guard asset.kind == .lora, asset.loraModel == .mossImage, asset.path.hasPrefix("/"),
+      asset.path.hasSuffix(".safetensors"), strength.isFinite, (-10...10).contains(strength), h3Settings == nil else {
+      throw StudioError.invalid("Choose a MOSS-Image SafeTensors adapter and a finite strength from −10 to 10.")
+    }
+  }
   public func validate(for engine: Engine) throws {
     guard asset.kind == .lora, asset.loraModel?.supports(engine) == true else {
       throw StudioError.invalid(
@@ -61,6 +67,7 @@ public struct LoRAGroup: Codable, Identifiable, Equatable {
   public var id = UUID()
   public var name: String
   public var engine: Engine
+  public var imageProvider: ImageExecutionProvider?
   public var members: [LoRAMember]
   public init(name: String, engine: Engine, members: [LoRAMember] = []) {
     self.name = name
@@ -71,13 +78,16 @@ public struct LoRAGroup: Codable, Identifiable, Equatable {
     guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !members.isEmpty else {
       throw StudioError.invalid("Name the group and add at least one LoRA.")
     }
-    for member in members { try member.validate(for: engine) }
+    if imageProvider == .nativeMOSS {
+      guard engine == .drawThings, members.count <= 8 else { throw StudioError.invalid("MOSS groups support up to eight adapters.") }
+      for member in members { try member.validateForMOSS() }
+    } else { for member in members { try member.validate(for: engine) } }
     guard Set(members.map(\.fileKey)).count == members.count else {
       throw StudioError.invalid("A group can contain each LoRA file only once.")
     }
   }
   public func supports(_ target: Engine) -> Bool {
-    engine == target && (try? validate()) != nil
+    imageProvider == nil && engine == target && (try? validate()) != nil
   }
 }
 

@@ -7,7 +7,7 @@ struct InspectorColumn: View {
     VStack(spacing: 0) {
       PanelHeading(
         title: "CLIP", icon: "slider.horizontal.3",
-        trailing: store.selectedClip.map { $0.usesRelayVSR ? "RELAYVSR" : $0.engine.rawValue.uppercased() } ?? "—")
+        trailing: store.selectedClip.map { $0.usesNativeMovieUpscaler ? $0.nativeMovieUpscalerName.uppercased() : $0.engine.rawValue.uppercased() } ?? "—")
       ScrollViewReader { proxy in
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
@@ -99,7 +99,7 @@ struct ClipInspector: View {
       if clip.inferredTask == "video_upscale" {
         MovieUpscaleInspector(clip: clip, showLTXSettings: detail.showsAdvanced && store.runtime.usesNativeLTX25)
       }
-      if clip.engine != .movie && !clip.usesRelayVSR {
+      if clip.engine != .movie && !clip.usesNativeMovieUpscaler {
         field("RUN WITH") {
           Picker("Run with", selection: Binding(get: { clip.generationProvider }, set: { provider in
             store.editClip { $0.selectGenerationProvider(provider) }
@@ -176,7 +176,7 @@ struct ClipInspector: View {
           }.controlSize(.small)
         }
       }
-      if detail.showsAdvanced && !clip.usesRelayVSR {
+      if detail.showsAdvanced && !clip.usesNativeMovieUpscaler {
         if clip.engine != .drawThings { MotionFidelityInspector(clip: clip) }
         advancedSection
       }

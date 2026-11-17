@@ -19,6 +19,15 @@ The standalone app runs without ComfyUI.
 
 ## Get started
 
+| Make something | Start here |
+| --- | --- |
+| A photo, product image or reference-based edit | [Native H3 images](studio/README.md#native-h3-images), [Qwen images](studio/README.md#native-qwen-image-21--experimental), or [Draw Things](studio/README.md#images-clips-and-loras) |
+| An editable composition from an image, or positioned objects and exact text regions | [MOSS-Image layout canvas](integrations/weetodd-moss-mlx/README.md) · native Swift/MLX Base/SFT |
+| A short movie with consistent subjects | [Director](#make-a-movie-with-director) → [reusable assets](studio/README.md#production-library-and-object-relationships) → [clip continuity](#connect-shots-with-continuity) |
+| A music video, voice-over or original song | [Music-video planning](#create-a-music-video), [Voice](studio/README.md#native-voice-and-audio-mixing), [YuE2 music](studio/README.md#native-yue2-music) |
+| A character sheet or a restyled clip | [Character Director](#character-sheets-without-a-movie), [Ripple Director](studio/README.md#ltx-25-ripple-director) |
+| A repeatable render pipeline | [Headless jobs](studio/README.md#headless-movie-and-clip-jobs), [ComfyUI workflows](#choose-a-workflow) |
+
 The current release is a **source-build preview**. Use an Apple Silicon Mac with macOS 14 or
 later and **full Xcode 26 or newer**. Standalone Command Line Tools are insufficient.
 
@@ -39,7 +48,7 @@ open "studio/.build/WeeTodd Studio.app"
 ```
 
 The app bundles the GUI, CLI and renderer source. Building does not install Python dependencies
-or download models. **H3 Regenerate**, **FlashVSR+** and **RelayVSR 2×** use bundled Swift/MLX
+or download models. **H3 Regenerate**, **FlashVSR+**, **RelayVSR** and **ReCaVSR** use bundled Swift/MLX
 workers for native video processing without a Python model runtime. For features that use the
 managed renderer, choose **Set Up Managed Renderer** in **Studio Settings** or connect an existing
 compatible runtime. FFmpeg/FFprobe and optional finishing tools still require configuration.
@@ -237,7 +246,7 @@ Studio is the interface in each case. The engine choice determines where inferen
 | --- | --- | --- |
 | **Draw Things inference** | Fast image/video generation with models and tasks supported by your connection. | Studio sends jobs through its Draw Things adapter to a self-hosted gRPC server or supported Cloud API route. Model availability and controls come from that endpoint and the installed helper. |
 | **Native MLX video inference** | LTX 2.5, advanced conditioning and other native video features beyond the Draw Things integration. | Choose **Run with → WeeTodd (local)**, then H3, LTX 2.3 or LTX 2.5 and add its supported inputs. Compatible components are selected automatically and load in stages. Installed recipes remain available through Model profile. |
-| **Native MLX image inference** | H3 still images with native LoRAs and up to nine references, or Qwen-Image-2.1 with up to ten ordered inputs. | In **Generate Image…**, choose **Local H3** or **Local MLX · Qwen**. H3 defaults to the original VAE with five-frame sampling and a selected still; an experimental image-only VAE is optional. Qwen has live previews and a noncommercial research license. |
+| **Native MLX image inference** | MOSS-Image Base/SFT with editable layouts, H3 still images with native LoRAs and up to nine references, or Qwen-Image-2.1 with up to ten ordered inputs. | In **Generate Image…**, choose **Local MOSS**, **Local H3** or **Local MLX · Qwen**. MOSS provides an interactive [layout canvas](integrations/weetodd-moss-mlx/README.md). H3 defaults to the original VAE with five-frame sampling and a selected still; an experimental image-only VAE is optional. Qwen has live previews and a noncommercial research license. |
 | **Native inference with compatible Draw Things weights** | Use an existing supported model installation without another large checkpoint copy. | Selected H3 components can be read directly from Draw Things files. This runs WeeTodd's native sampler, not Draw Things inference, and has its own task and performance limits. |
 
 ComfyUI and headless jobs use these same shared adapters where supported. Selecting a different
@@ -3052,15 +3061,23 @@ caches, credentials, tokens, machine-specific paths, or private information.
 
 ## Native video upscaling and restoration
 
-Open **Upscale Video** in the media library and choose **RelayVSR 2×**, **FlashVSR+**, or
+Open **Upscale Video** in the media library and choose **ReCaVSR**, **RelayVSR**, **FlashVSR+**, or
 **H3 Regenerate**. The app bundles the Swift/MLX workers and Metal kernels.
 
-**RelayVSR 2×** doubles the dimensions of an SDR movie while retaining its source frame timestamps,
-including variable frame timing, and copies the original audio. Choose the folder containing both
-2× checkpoints, then click **Upscale**. Studio adds the result to **Project Assets**. To upscale
-only a timeline clip's source interval, choose **Clip actions → Upscale movie copy → RelayVSR 2×**,
-then **Upscale clip**. The result appears in the copy's **Versions**. The CLI uses the same Metal
+**RelayVSR** offers native **2×** and **4×** SDR movie upscaling while retaining source frame timestamps,
+including variable frame timing, and copies the original audio. Select the scale and choose the
+matching checkpoint pair, then click **Upscale**. Studio adds the result to **Project Assets**. To upscale
+only a timeline clip's source interval, choose **Clip actions → Upscale movie copy → RelayVSR**,
+select the scale, then **Upscale clip**. The result appears in the copy's **Versions**. Existing
+jobs default to 2×; 4× uses its separate native model and retains the exact raster above 4K.
+The CLI uses the same Metal
 inference and AVFoundation media pipeline. [RelayVSR setup and CLI guide](integrations/weetodd-mlx/RELAYVSR.md)
+
+**ReCaVSR** offers experimental native 4×, 2× and 1.5× movie upscaling with a one-step
+streaming transformer and LR-conditioned FlashDecoder. BF16 and INT8 ConvRot use separate
+profiles; source sample timing and audio are preserved. Use either **Upscale Video** or
+**Upscale movie copy → ReCaVSR**. Setup and inference use Swift without Python or ComfyUI.
+Cross-platform image parity remains unverified. [ReCaVSR setup, CLI and limits](integrations/weetodd-mlx/RECAVSR.md)
 
 For FlashVSR+ and H3, choose the shared model library in **Model setup** to reuse verified
 installed weights before acquiring missing pinned components.

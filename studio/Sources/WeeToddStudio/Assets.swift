@@ -136,6 +136,11 @@ struct AssetBrowser: View {
             )
             .contextMenu {
               roleButtons(asset)
+              if asset.kind == .image, asset.generation?.provider == ImageExecutionProvider.nativeMOSS.rawValue,
+                asset.generation?.mossLayout != nil {
+                Button("Open layout as a new draft") { store.reopenMOSSLayout(asset) }
+                  .disabled(store.operationBusy)
+              }
               Divider()
               Button("Add to timeline") { store.addAssetToTimeline(asset) }
               Button("Relink…") { store.relink(asset) }

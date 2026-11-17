@@ -160,7 +160,8 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
                  signing_identity: str = "-", native_worker: Path | None = None,
                  ltx_worker: Path | None = None,
                  h3_mlx_worker: Path | None = None, drama3_worker: Path | None = None,
-                 flashvsr_worker: Path | None = None, relay_worker: Path | None = None) -> None:
+                 flashvsr_worker: Path | None = None, relay_worker: Path | None = None,
+                 reca_worker: Path | None = None, moss_worker: Path | None = None) -> None:
     """Assemble a fresh bundle without requiring ignored agent configuration."""
     binaries = root / "studio" / ".build" / configuration
     macos = app / "Contents" / "MacOS"
@@ -168,6 +169,20 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
     for name in ("WeeToddStudio", "StudioMetal", "WeeToddCLI"):
         shutil.copy2(binaries / name, macos / name)
     resources = app / "Contents/Resources"
+    if moss_worker is not None:
+        manifest = json.loads((moss_worker / "manifest.json").read_text())
+        names = {"WeeToddMOSSImageWorker", "mlx.metallib", "Notices.txt"}
+        if (manifest.get("format") != "weetodd-moss-worker-v1"
+                or manifest.get("protocol") != 1 or set(manifest.get("files", {})) != names):
+            raise ValueError("Invalid native MOSS worker manifest")
+        target = resources / "MOSSNative"
+        target.mkdir(parents=True)
+        for name in names:
+            digest = hashlib.sha256((moss_worker / name).read_bytes()).hexdigest()
+            if digest != manifest["files"][name]:
+                raise ValueError("Native MOSS worker hash mismatch")
+            shutil.copy2(moss_worker / name, target / name)
+        shutil.copy2(moss_worker / "manifest.json", target / "manifest.json")
     if drawthings is not None:
         metadata = json.loads((drawthings / "manifest.json").read_text())
         if metadata.get("format") != "weetodd-drawthings-distribution-v1":
@@ -211,6 +226,17 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
         if not (resources / "LTXNative/mlx.metallib").is_file():
             raise ValueError("The shared MLX Metal library is missing for RelayVSR")
         shutil.copy2(relay_worker, macos / "WeeToddRelayVSR")
+    if reca_worker is not None:
+        if not (resources / "LTXNative/mlx.metallib").is_file():
+            raise ValueError("The shared MLX Metal library is missing for ReCaVSR")
+        shutil.copy2(reca_worker, macos / "WeeToddReCaVSR")
+        notices = resources / "ReCaVSR"
+        notices.mkdir(parents=True, exist_ok=True)
+        (notices / "Notices.txt").write_text(
+            "Native ReCaVSR implementation in WeeTodd Studio (Apache-2.0). "
+            "Architecture reference: USTC ReCaVSR / kopperx/ReCaVSR (Apache-2.0), "
+            "Wan2.2 and FlashDecoder. Model weights are separate downloads and retain "
+            "their published terms. The GPL ComfyUI wrapper is not bundled or imported.\n")
     source = resources / "RendererSource"
     source.mkdir(parents=True, exist_ok=True)
     shutil.copy2(root / "studio/Resources/AppIcon.icns", resources / "AppIcon.icns")
@@ -259,6 +285,17 @@ def build_bundle(root: Path, configuration: str, app: Path, drawthings: Path | N
             "codesign", "--force", "--sign", signing_identity,
             "--identifier", f"studio.weetodd.mac.{executable.name}", str(executable),
         ], check=True)
+    if moss_worker is not None:
+        installed = resources / "MOSSNative/WeeToddMOSSImageWorker"
+        subprocess.run(["codesign", "--force", "--sign", signing_identity,
+                        "--identifier", "studio.weetodd.mac.WeeToddMOSSImageWorker",
+                        str(installed)], check=True)
+        manifest_path = resources / "MOSSNative/manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["distributionBinarySHA256"] = manifest["files"]["WeeToddMOSSImageWorker"]
+        installed_digest = hashlib.sha256(installed.read_bytes()).hexdigest()
+        manifest["files"]["WeeToddMOSSImageWorker"] = installed_digest
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     if h3_mlx_worker is not None:
         from build_h3_mlx_worker import record_installed_signature
 
@@ -296,7 +333,8 @@ def package_app(root: Path, configuration: str, drawthings: Path | None = None,
                 signing_identity: str | None = None, output: Path | None = None,
                 native_worker: Path | None = None, ltx_worker: Path | None = None,
                 h3_mlx_worker: Path | None = None, drama3_worker: Path | None = None,
-                flashvsr_worker: Path | None = None, relay_worker: Path | None = None) -> Path:
+                flashvsr_worker: Path | None = None, relay_worker: Path | None = None,
+                reca_worker: Path | None = None, moss_worker: Path | None = None) -> Path:
     signing_identity = resolve_signing_identity(root, signing_identity)
     build = root / "studio" / ".build"
     app = output.resolve() if output is not None else build / "WeeTodd Studio.app"
@@ -309,7 +347,7 @@ def package_app(root: Path, configuration: str, drawthings: Path | None = None,
         staging = Path(temporary) / app.name
         build_bundle(root, configuration, staging, drawthings, signing_identity,
                      native_worker, ltx_worker, h3_mlx_worker, drama3_worker,
-                     flashvsr_worker, relay_worker)
+                     flashvsr_worker, relay_worker, reca_worker, moss_worker)
         # The user may have launched the app while the bundle was being assembled.
         assert_app_not_running(app)
         previous = Path(temporary) / "Previous.app"
@@ -391,9 +429,19 @@ def main():
         check=True, env=toolchain.env,
     )
     relay_worker = mlx_package / ".build/release/WeeToddRelayVSR"
+    subprocess.run(
+        [str(toolchain.swift), "build", "--package-path", str(mlx_package), "-c", "release",
+         "--product", "WeeToddReCaVSR", "--jobs", "2", "--disable-automatic-resolution",
+         *toolchain.build_arguments, "-Xcxx", "-DNDEBUG"], check=True, env=toolchain.env,
+    )
+    reca_worker = mlx_package / ".build/release/WeeToddReCaVSR"
+    subprocess.run([str(toolchain.swift), str(root / "scripts/build_moss_worker.swift"),
+                    "--root", str(root), "--configuration", "release"],
+                   check=True, env=toolchain.env)
+    moss_worker = root / "integrations/weetodd-moss-mlx/.build/worker-distribution"
     print(package_app(root, args.configuration, args.drawthings_distribution,
                       identity, args.output, native_worker, ltx_worker, h3_mlx_worker,
-                      drama3_worker, flashvsr_worker, relay_worker))
+                      drama3_worker, flashvsr_worker, relay_worker, reca_worker, moss_worker))
 
 
 if __name__ == "__main__":

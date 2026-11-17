@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageLayout
 
 public struct ImageWorkspaceInput: Codable, Equatable, Identifiable {
   public var id = UUID()
@@ -28,6 +29,8 @@ public struct DrawThingsImageDraft: Codable, Equatable {
   public var provider: ImageExecutionProvider?
   public var nativeImage: NativeImageSettings?
   public var h3Image: H3ImageSettings?
+  public var mossImage: MOSSImageSettings?
+  public var mossLayout: ImageLayoutDraft?
   public var providerSettings: [String: ImageProviderSettings]?
   public var destination: ImageAssetDestination
   public var name = "Generated image"
