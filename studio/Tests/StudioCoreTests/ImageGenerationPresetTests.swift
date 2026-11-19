@@ -75,8 +75,48 @@ final class ImageGenerationPresetTests: XCTestCase {
     let candidate = try ImagePresetRecipe.candidate(applying: snapshot, to: target, resolvedLibrary: library())
     XCTAssertEqual(candidate.mossLayout, target.mossLayout); XCTAssertEqual(candidate.mossImage?.regionalLayout, true)
     XCTAssertEqual(candidate.mossImage?.weightCacheGB, 8); XCTAssertEqual(candidate.steps, 6)
-    let qwen = try ImagePresetRecipe.capture(from: draft(.nativeMLX), resolvedLibrary: library())
-    XCTAssertThrowsError(try ImagePresetRecipe.candidate(applying: qwen, to: target, resolvedLibrary: library()))
+  }
+  func testSwitchingAwayFromMOSSAndBackPreservesEditableLayoutAndGuide() throws {
+    var original = draft(.nativeMOSS)
+    original.mossLayout = .init(width: original.width, height: original.height, caption: "Layout", regions: [
+      .init(type: .text, caption: "Blue letters", text: "MOVE ME", bounds: .init(x: 0.2, y: 0.1, width: 0.6, height: 0.2)),
+      .init(type: .object, caption: "Person holding a red umbrella", bounds: .init(x: 0.1, y: 0.3, width: 0.4, height: 0.6))])
+    original.mossLayout?.guideImagePath = "/source.png"
+    original.mossImage?.regionalLayout = true
+    original.mossImage?.weightCacheGB = 8
+    let moss = try ImagePresetRecipe.capture(from: original, resolvedLibrary: library())
+    for provider in [ImageExecutionProvider.nativeMLX, .nativeH3, .drawThings] {
+      let other = try ImagePresetRecipe.capture(from: draft(provider), resolvedLibrary: library())
+      let switched = try ImagePresetRecipe.candidate(applying: other, to: original, resolvedLibrary: library())
+      XCTAssertEqual(switched.executionProvider, provider)
+      XCTAssertEqual(switched.mossLayout, original.mossLayout)
+      XCTAssertEqual(switched.mossImage, original.mossImage)
+      XCTAssertEqual(switched.prompt, original.prompt)
+      XCTAssertEqual(switched.width, original.width); XCTAssertEqual(switched.height, original.height)
+      // The dormant layout also survives saving/reopening while another model is selected.
+      let reopened = try JSONDecoder().decode(DrawThingsImageDraft.self, from: JSONEncoder().encode(switched))
+      let restored = try ImagePresetRecipe.candidate(applying: moss, to: reopened, resolvedLibrary: library())
+      XCTAssertEqual(restored.executionProvider, .nativeMOSS)
+      XCTAssertEqual(restored.mossLayout, original.mossLayout)
+      XCTAssertEqual(restored.mossImage?.regionalLayout, true)
+      XCTAssertEqual(restored.mossImage?.weightCacheGB, 8)
+      XCTAssertEqual(restored.prompt, original.prompt); XCTAssertEqual(restored.destination, original.destination)
+      XCTAssertEqual(restored.width, original.width); XCTAssertEqual(restored.height, original.height)
+      XCTAssertEqual(try ImagePresetRecipe.capture(from: restored, resolvedLibrary: library()), moss)
+    }
+  }
+  func testModelOnlySwitchWithStoredMOSSLayoutKeepsSourceCanvasDimensions() throws {
+    var original = draft(.nativeMOSS); original.width = 1872; original.height = 1056
+    original.mossLayout = .init(width: original.width, height: original.height, caption: "Saved layout", regions: [])
+    original.mossImage?.regionalLayout = true
+    let choice = GenerationPresetSnapshot(context: .init(workspace: .image, task: "image"),
+      model: library().modelEntries[1].reference, fields: [:])
+    XCTAssertThrowsError(try ImagePresetRecipe.candidate(applying: choice, to: original, resolvedLibrary: library()))
+    let switched = try ImagePresetRecipe.selectingModel(XCTUnwrap(choice.model), to: original, resolvedLibrary: library())
+    XCTAssertEqual(switched.executionProvider, .nativeH3)
+    XCTAssertEqual(switched.width, 1872); XCTAssertEqual(switched.height, 1056)
+    XCTAssertEqual(switched.mossLayout, original.mossLayout)
+    XCTAssertEqual(switched.prompt, original.prompt)
   }
   func testOmittedFieldsPreserveButUnknownFieldsAndWrongContextsReject() throws {
     var target = draft(.nativeMOSS); target.steps = 30

@@ -236,6 +236,10 @@ struct ImageGenerationEditor: View {
   var settings: some View {
     Form {
       GenerationPresetControls(target: .image)
+      if !isMOSSImage, draft?.mossLayout != nil {
+        Text("Your MOSS layout is saved. Its boxes apply when a MOSS model is selected.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
       DisclosureGroup("Provider and connection setup") { backendPicker }
       if isMOSSImage { MOSSImageSettingsView() } else if isH3Image { H3ImageModelSettings() } else if isNative { nativeSettings } else {
       DisclosureGroup("Draw Things connection setup") {

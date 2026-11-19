@@ -29,17 +29,26 @@ struct ImagePresetUndo {
     guard let draft = imageDraft else { throw StudioError.invalid("Open an image workspace first.") }
     return try ImagePresetRecipe.capture(from: draft, resolvedLibrary: generationLibrary)
   }
-  func applyImagePreset(_ preset: StudioGenerationPreset, expectedTarget target: GenerationTargetToken, associate: Bool = true) async throws {
+  func applyImagePreset(_ preset: StudioGenerationPreset, expectedTarget target: GenerationTargetToken, associate: Bool = true,
+    modelSelectionOnly: Bool = false) async throws {
+    if modelSelectionOnly, associate || !preset.snapshot.fields.isEmpty || preset.snapshot.adapters != nil {
+      throw StudioError.invalid("Model selection cannot apply preset settings or adapters.")
+    }
     guard try imagePresetTargetToken() == target else { throw StudioError.invalid("The image workspace changed. Select the preset again.") }
     await refreshGenerationLibrary(force: true)
     try Task.checkCancellation()
     guard generationLibraryError == nil else { throw StudioError.invalid(generationLibraryError!) }
     guard try imagePresetTargetToken() == target, let previous = imageDraft else { throw StudioError.invalid("The image workspace changed while checking models. Its current edits were preserved.") }
-    let candidate = try ImagePresetRecipe.candidate(applying: preset.snapshot, to: previous, resolvedLibrary: generationLibrary)
-    let baseline = try ImagePresetRecipe.capture(from: candidate, resolvedLibrary: generationLibrary)
+    let candidate: DrawThingsImageDraft
+    if modelSelectionOnly, let model = preset.snapshot.model {
+      candidate = try ImagePresetRecipe.selectingModel(model, to: previous, resolvedLibrary: generationLibrary)
+    } else {
+      candidate = try ImagePresetRecipe.candidate(applying: preset.snapshot, to: previous, resolvedLibrary: generationLibrary)
+    }
+    let baseline = associate ? try ImagePresetRecipe.capture(from: candidate, resolvedLibrary: generationLibrary) : nil
     let priorSelection = imagePresetSelection
     if candidate != previous { imageDraft = candidate; imageEstimate = nil }
-    if associate { setImagePresetSelection(.init(preset, baseline: baseline)) }
+    if let baseline { setImagePresetSelection(.init(preset, baseline: baseline)) }
     imagePresetUndo = .init(after: try imagePresetTargetToken(), draft: previous, selection: priorSelection)
   }
   func undoImagePreset() throws {

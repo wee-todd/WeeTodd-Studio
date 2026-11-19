@@ -54,13 +54,24 @@ public enum ImagePresetRecipe {
   }
   public static func candidate(applying snapshot: GenerationPresetSnapshot, to draft: DrawThingsImageDraft,
     resolvedLibrary library: GenerationLibrarySnapshot) throws -> DrawThingsImageDraft {
+    let candidate = try applying(snapshot, to: draft, resolvedLibrary: library)
+    try validate(candidate)
+    return candidate
+  }
+  /// Selecting a model preserves project inputs even when they need adjustment before generation.
+  /// Preset application and execution retain their full validation contracts.
+  public static func selectingModel(_ model: GenerationModelRef, to draft: DrawThingsImageDraft,
+    resolvedLibrary library: GenerationLibrarySnapshot) throws -> DrawThingsImageDraft {
+    try applying(.init(context: .init(workspace: .image, task: "image"), model: model), to: draft, resolvedLibrary: library)
+  }
+  private static func applying(_ snapshot: GenerationPresetSnapshot, to draft: DrawThingsImageDraft,
+    resolvedLibrary library: GenerationLibrarySnapshot) throws -> DrawThingsImageDraft {
     try snapshot.validate()
     guard snapshot.context == .init(workspace: .image, task: "image"), let model = snapshot.model,
       let provider = ImageExecutionProvider(rawValue: model.backend) else { throw StudioError.invalid("Choose an image preset for this workspace.") }
     let context = context(draft), binding = try library.resolve(model, in: context)
-    if provider != .nativeMOSS, draft.mossImage?.regionalLayout == true || !(draft.mossLayout?.regions.isEmpty ?? true) || draft.mossLayout?.sourceReconstruction?.enabled == true {
-      throw StudioError.invalid("This image uses MOSS layout or source conditioning. Choose a compatible MOSS preset; its boxes are preserved.")
-    }
+    // MOSS-only inputs remain saved on the draft and are dormant on other providers.
+    // Their presence must not lock the shared model picker to MOSS.
     var candidate = draft; candidate.provider = provider
     switch binding {
     case .nativeMOSS(let transformer, let shared, let root):
@@ -108,7 +119,6 @@ public enum ImagePresetRecipe {
       candidate.h3Image = try GenerationPresetFields.applying(owned, to: candidate.h3Image ?? .init(), allowed: h3Keys)
     }
     candidate = try GenerationPresetFields.applying(fields, to: candidate, allowed: allowed)
-    try validate(candidate)
     return candidate
   }
   public static func validate(_ draft: DrawThingsImageDraft) throws {
@@ -139,7 +149,10 @@ public enum ImagePresetRecipe {
       }
     case .nativeMLX, .nativeH3:
       guard draft.guidance == 1, draft.strength == 1, draft.sampler == nil, draft.shift == nil, draft.negativePrompt.isEmpty,
-        !draft.loras.contains(where: \.isEnabled), draft.width % 32 == 0, draft.height % 32 == 0 else { throw StudioError.invalid("This native image model uses CFG 1, full-strength references and its fixed sampler. The current canvas and inputs were preserved.") }
+        !draft.loras.contains(where: \.isEnabled) else { throw StudioError.invalid("This native image model uses CFG 1, full-strength references and its fixed sampler. The current canvas and inputs were preserved.") }
+      guard draft.width % 32 == 0, draft.height % 32 == 0 else {
+        throw StudioError.invalid("This model requires canvas dimensions in multiples of 32 before generation. Your current canvas size is preserved.")
+      }
       if draft.executionProvider == .nativeH3 {
         guard (1...100).contains(draft.steps), [draft.width, draft.height].allSatisfy({ (32...1920).contains($0) }), draft.width * draft.height <= 1920 * 1088,
           draft.activeImageInputs.allSatisfy({ $0.input.strength == 1 }), (draft.h3Image?.loras.count ?? 0) <= 8 else { throw StudioError.invalid("The current canvas, reference strengths or evaluations are unsupported by H3.") }

@@ -682,8 +682,11 @@ existing quality and compatibility limits.
 Presets own logical model/LoRA references, order, enable state, strengths and supported sampling,
 decoding, seed and negative-guidance values. Applying one keeps the positive creative prompt,
 source/reference media, enabled input roles, source range, audio policy, canvas/aspect ratio,
-frame rate, duration and editable MOSS boxes. A preset that cannot honor these inputs is
-rejected without changing them. Continuous-scene recipes apply to the captured scene members
+frame rate, duration and editable MOSS boxes. Switching to another image provider keeps the
+MOSS layout saved; its boxes become active again when a MOSS model is selected. Model selection
+also preserves the canvas when the new model requires a different dimension grid; adjust the
+working dimensions before generation. Preset application still rejects unsupported input
+combinations without changing them. Continuous-scene recipes apply to the captured scene members
 as one undoable change. Paired Ripple and restoration components resolve per request without
 rewriting global runtime choices. Finishing presets preserve stage types, order, wiring and
 output geometry.

@@ -75,7 +75,12 @@ import StudioCore
       if tool == "reCaVSR", let precision = fields["precision"] { snapshot.fields["precision"] = .string(precision) }
       if tool == "relayVSR", let scale = fields["scale"].flatMap(Int64.init) { snapshot.fields["scale"] = .integer(scale) }
     }
-    try await applyLibrarySnapshot(snapshot, for: target, expectedTarget: token)
+    if case .image = target {
+      try await applyImagePreset(.init(name: "Working settings", snapshot: snapshot), expectedTarget: token,
+        associate: false, modelSelectionOnly: true)
+    } else {
+      try await applyLibrarySnapshot(snapshot, for: target, expectedTarget: token)
+    }
   }
   func applyLibrarySnapshot(_ snapshot: GenerationPresetSnapshot, for target: GenerationPresetTarget, expectedTarget token: GenerationTargetToken) async throws {
     let recipe = StudioGenerationPreset(name: "Working settings", snapshot: snapshot)

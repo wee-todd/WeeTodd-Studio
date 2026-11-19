@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 import StudioCore
+import ImageLayout
 @testable import WeeToddStudio
 
 final class GenerationLibraryInteractionTests: XCTestCase {
@@ -52,6 +53,47 @@ final class GenerationLibraryInteractionTests: XCTestCase {
     try await store.addGenerationLibraryLoRA(lora, for: target, expectedTarget: store.presetTargetToken(for: target))
     XCTAssertEqual(store.imageDraft?.mossImage?.loras?.count, 1); XCTAssertEqual(store.imageDraft?.prompt, prompt)
     XCTAssertNil(store.imagePresetSelection); XCTAssertFalse(store.bridge.busy)
+  }
+  @MainActor func testModelPickerCanLeaveMOSSWithItsCanvasAndLayoutThenUndoAndReturn() async throws {
+    let (store, _, _) = try fixture(), target = GenerationPresetTarget.image
+    store.imageDraft?.mossLayout = .init(width: 1872, height: 1056, caption: "Saved scene", regions: [
+      .init(type: .text, caption: "Red sign", text: "EDIT ME", bounds: .init(x: 0.1, y: 0.2, width: 0.4, height: 0.2))])
+    store.imageDraft?.mossLayout?.guideImagePath = "/editor-guide.png"
+    store.imageDraft?.mossImage?.regionalLayout = true
+    let original = try XCTUnwrap(store.imageDraft)
+    let moss = try ImagePresetRecipe.model(for: original, library: store.generationLibrary).reference
+    let root = store.dataDirectory.deletingLastPathComponent()
+    let profile = root.appendingPathComponent("h3.json"), vae = root.appendingPathComponent("vae.safetensors")
+    try Data("{}".utf8).write(to: profile); try Data([0]).write(to: vae)
+    let h3 = GenerationModelRef(id: "h3-image", backend: "nativeH3", family: "h3")
+    var index = store.generationLibraryIndex
+    try index.registerModel(.init(reference: h3, name: "H3 image", workspaces: [.image], tasks: ["image"], availability: .installed,
+      binding: .nativeH3Image(profileID: profile.path, imageVAE: vae.path)), alias: "h3-image")
+    try store.persistGenerationLibrary(index)
+    let preset = try await store.saveNewPreset(name: "Layout settings", for: target, expectedTarget: store.presetTargetToken(for: target))
+    store.imageEstimate = ["eligibility": "allowed"]
+    try await store.useGenerationLibraryModel(h3, for: target, expectedTarget: store.presetTargetToken(for: target))
+    XCTAssertEqual(store.imageDraft?.executionProvider, .nativeH3)
+    XCTAssertEqual(store.imageDraft?.mossLayout, original.mossLayout)
+    XCTAssertEqual(store.imageDraft?.prompt, original.prompt)
+    XCTAssertEqual(store.imageDraft?.width, 1872); XCTAssertEqual(store.imageDraft?.height, 1056)
+    XCTAssertNil(store.imageEstimate) // An old model's admitted request cannot be reused.
+    XCTAssertThrowsError(try ImagePresetRecipe.validate(XCTUnwrap(store.imageDraft))) // H3 still requires its 32-pixel grid before generation.
+    XCTAssertThrowsError(try NativeH3ImagePreparation.recipe(draft: XCTUnwrap(store.imageDraft), requestID: UUID(), seed: 1))
+    XCTAssertEqual(store.imagePresetSelection?.presetID, preset.id)
+    let reopened = StudioStore(dataDirectory: store.dataDirectory, restoreSession: false)
+    reopened.restoreImageWorkspaces()
+    XCTAssertEqual(reopened.imageDraft?.executionProvider, .nativeH3)
+    XCTAssertEqual(reopened.imageDraft?.mossLayout, original.mossLayout)
+    try store.undoImagePreset()
+    XCTAssertEqual(store.imageDraft, original)
+    try await store.useGenerationLibraryModel(h3, for: target, expectedTarget: store.presetTargetToken(for: target))
+    try await store.useGenerationLibraryModel(moss, for: target, expectedTarget: store.presetTargetToken(for: target))
+    XCTAssertEqual(store.imageDraft?.executionProvider, .nativeMOSS)
+    XCTAssertEqual(store.imageDraft?.mossLayout, original.mossLayout)
+    XCTAssertEqual(store.imageDraft?.mossImage?.regionalLayout, true)
+    XCTAssertEqual(store.imageDraft?.width, 1872); XCTAssertEqual(store.imageDraft?.height, 1056)
+    XCTAssertFalse(store.bridge.busy)
   }
   @MainActor func testStaleModelUseCannotOverwriteANewerImageWorkspaceEdit() async throws {
     let (store, model, _) = try fixture(), target = GenerationPresetTarget.image, token = try store.presetTargetToken(for: .image)
