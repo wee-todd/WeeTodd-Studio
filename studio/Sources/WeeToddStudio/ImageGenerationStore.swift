@@ -79,7 +79,7 @@ import StudioCore
       guard documentSessionID == documentSession, imageDraft == draft else { return }
       if draft.executionProvider == .nativeMLX { payload["expectedFingerprint"] = imageEstimate?["fingerprint"] }
       payload["name"] = draft.name; payload["scope"] = draft.destination.scope.rawValue
-      payload["project"] = try project.object()
+      payload["project"] = try project.generationInputProject.object()
       if let owner = draft.destination.owner { payload["owner"] = owner.uuidString }
       let result = try await bridge.invoke(draft.executionProvider == .nativeMLX ? "image-generate" : "dt-generate-image", runtime: runtime, payload: payload, output: output)
       guard let value = result["asset"] as? [String: Any], let path = value["path"] as? String else {

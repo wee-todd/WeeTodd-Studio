@@ -153,7 +153,7 @@ The four-step SFT profile recognizes the exact adapter from
 `moss_image_sft_4step_v2.0.safetensors`, SHA-256
 `154c7f1455c3bf9925945c2f1ea2e4f09d0d0c67256081384a094b2b585f913f`.
 Enabling it applies SFT, strength 1, CFG 1, shift 5 and four release Euler steps;
-4–8 steps are admitted. Disabling restores the saved stock recipe. Other files,
+4–8 steps are admitted. The shared **Preset** menu supplies Standard and pinned Fast 4/6/8 recipes; valid six/eight-step edits are preserved while Fast stays enabled. **Update…** reviews all saved/current changes before an explicit overwrite, or use **Save as new…**. See the [Studio preset guide](../../studio/README.md#models-loras-and-generation-presets). Disabling restores the saved stock recipe. Other files,
 including older auxiliary data-space/time-embedding recipes, cannot impersonate
 this profile by filename.
 

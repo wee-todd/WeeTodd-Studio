@@ -549,6 +549,23 @@ extension Encodable {
   var preparedH3Image: PreparedH3Image?
   var preparedMOSSImage: PreparedMOSSImage?
   @Published var mossModelLinks = MOSSModelLinks()
+  @Published var generationLibrary = GenerationLibrarySnapshot()
+  @Published var generationLibraryBusy = false
+  @Published var generationLibraryError: String?
+  @Published var showGenerationLibrary = false
+  var generationLibraryIndex = GenerationLibraryIndex()
+  var generationLibraryAttempt = UUID()
+  var generationLibraryRefreshTask: Task<Void, Never>?
+  var generationLibraryRefreshRequested = false
+  var generationLibraryWritable = true
+  var imagePresetUndo: ImagePresetUndo?
+  var restorationPresetUndo: RestorationPresetUndo?
+  @Published var generationPresets = GenerationPresetLibrary()
+  @Published var generationPresetError: String?
+  var generationPresetsWritable = true
+  var generationPresetStorageIdentity: String?
+  @Published var restorationPresetSelections: [String: PresetSelectionState] = [:]
+  @Published var restorationModelSelections: [String: GenerationModelRef] = [:]
   @Published var mossModelDiscoveryBusy = false
   @Published var mossAnalyzerFamily: ImageLayoutVisionModel?
   @Published var mossRecommendedGemmaDirectory: String?
@@ -735,8 +752,8 @@ extension Encodable {
   var selectedClip: Clip? { project.clips.first { $0.id == selectedClipID } }
   var allAssets: [MediaAsset] { globalAssets + project.assets }
   var selectedAsset: MediaAsset? { allAssets.first { $0.id == selectedAssetID } }
-  var canUndo: Bool { !undoStates.isEmpty }
-  var canRedo: Bool { !redoStates.isEmpty }
+  var canUndo: Bool { showVideoUpscale ? canUndoRestorationPreset : !undoStates.isEmpty }
+  var canRedo: Bool { !showVideoUpscale && !redoStates.isEmpty }
 
   init(dataDirectory: URL = StudioStore.supportDirectory, restoreSession: Bool = true,
        invocation: Bridge.Invocation? = nil) {
@@ -764,7 +781,10 @@ extension Encodable {
       defaults: runtimeDefaults)
     loadVideoUpscalePreferences()
     loadMOSSModelLinks()
+    loadGenerationLibrary()
     loadLTX25Configs()
+    loadGenerationPresets()
+    do { try migrateLegacyRestorationPresets() } catch { generationPresetError = error.localizedDescription }
     guard restoreSession else { return }
     try? FileManager.default.createDirectory(
       at: dataDirectory.appendingPathComponent("Profiles"),
@@ -788,6 +808,7 @@ extension Encodable {
     restoreImageWorkspaces()
     Task {
       await reloadProfiles()
+      await refreshGenerationLibrary(force: true)
       refreshPreview()
     }
   }
@@ -821,8 +842,9 @@ extension Encodable {
     lastUndoGroup = undoGroup
     if undoStates.count > 80 { undoStates.removeFirst() }
     redoStates.removeAll()
+    let metadataOnly = updated.generationContentProject == project.generationContentProject
     project = updated
-    changed()
+    if metadataOnly { persistProjectMetadata() } else { changed() }
   }
   func editClip(undoGroup: UUID? = nil, _ body: (inout Clip) -> Void) {
     guard let i = project.clips.firstIndex(where: { $0.id == selectedClipID }) else { return }
@@ -854,6 +876,10 @@ extension Encodable {
     preparedFingerprint = nil
     preparedPrompt = ""
     preparedReport = ""
+    persistProjectMetadata()
+  }
+  func persistProjectMetadata() {
+    dirty = true
     autosaveTask?.cancel()
     autosaveTask = Task { [weak self] in
       try? await Task.sleep(nanoseconds: 600_000_000)
@@ -866,20 +892,22 @@ extension Encodable {
     }
   }
   func undo() {
+    if showVideoUpscale { do { try undoRestorationPreset() } catch { notice = error.localizedDescription }; return }
     lastUndoGroup = nil
     guard let value = undoStates.popLast() else { return }
     redoStates.append(project)
+    let metadataOnly = value.generationContentProject == project.generationContentProject
     project = value
-    changed()
-    refreshPreview()
+    if metadataOnly { persistProjectMetadata() } else { changed(); refreshPreview() }
   }
   func redo() {
+    guard !showVideoUpscale else { return }
     lastUndoGroup = nil
     guard let value = redoStates.popLast() else { return }
     undoStates.append(project)
+    let metadataOnly = value.generationContentProject == project.generationContentProject
     project = value
-    changed()
-    refreshPreview()
+    if metadataOnly { persistProjectMetadata() } else { changed(); refreshPreview() }
   }
   func select(_ id: UUID) {
     preparedDrawThingsClip = nil
@@ -1384,6 +1412,7 @@ extension Encodable {
         }
         return ModelProfile(id: id, name: name, engine: engine, task: task, generation: generation)
       }
+      await refreshGenerationLibrary(force: true)
     } catch { notice = error.localizedDescription }
   }
   func importRecipes() {
@@ -1410,7 +1439,7 @@ extension Encodable {
   }
   func payload() throws -> [String: Any] {
     [
-      "project": try project.object(),
+      "project": try project.generationInputProject.object(),
       "globalAssets": try JSONSerialization.jsonObject(with: JSONEncoder().encode(globalAssets)),
       "clipID": selectedClipID?.uuidString ?? "",
     ]
@@ -1446,6 +1475,7 @@ extension Encodable {
       return asset.path + "|" + String(describing: attributes?[.modificationDate])
         + "|" + String(describing: attributes?[.size])
     }.joined(separator: "\n")
+    if let bindings = project.generationLibraryBindings?.filter({ $0.key == "clip-model:" + clip.id.uuidString || $0.key.hasPrefix("finishing:" + clip.id.uuidString + ":") }), !bindings.isEmpty { bindingMetadata += (try? encoder.encode(bindings).base64EncodedString()) ?? "" }
     let relay = clip.usesRelayVSR ? [runtime.relayVSRWorkerPath, runtime.relayVSRModelDirectory]
       .map { $0 ?? "" }.joined(separator: "|") : ""
     return clip.generationFingerprint + ((try? encoder.encode(runtime.generationSettings).base64EncodedString()) ?? "")
@@ -1470,7 +1500,7 @@ extension Encodable {
       let command = clip.usesReCaVSR ? "recavsr-native-describe" : clip.usesRelayVSR ? "relay-native-describe"
         : clip.engine == .ltx25 && runtime.usesNativeLTX25 ? "ltx-native-describe"
         : clip.engine == .h3 && runtime.usesNativeH3 ? "h3-native-describe" : "describe-generation"
-      var result = try await descriptionBridge.independent().invoke(command, runtime: runtime, payload: try payload())
+      var result = try await descriptionBridge.independent().invoke(command, runtime: try clipLibraryRuntime(for: clip), payload: try payload())
       guard documentSessionID == session, selectedClipID == clip.id,
         selectedClip.map({ generationRequestKey(for: $0) }) == key else { return }
       result["studioInput"] = key
@@ -1518,6 +1548,7 @@ extension Encodable {
     }
     preparedRecipe = nil; preparedFingerprint = nil
     do {
+      let settings = try clipLibraryRuntime(for: clip)
       _ = try await preflightClipVideoProcessing(clip)
       if clip.engine == .ltx25, !settings.usesNativeLTX25,
         let leader = try project.continuousSceneMembers(for: clip).first,
@@ -1586,6 +1617,7 @@ extension Encodable {
     activeNativeRequest = requestID
     defer { if activeNativeRequest == requestID { activeNativeRequest = nil } }
     do {
+      let settings = try clipLibraryRuntime(for: c)
       guard signature(for: c) == preparedFingerprint else {
         throw StudioError.invalid("Clip changed. Prepare it again before rendering.")
       }

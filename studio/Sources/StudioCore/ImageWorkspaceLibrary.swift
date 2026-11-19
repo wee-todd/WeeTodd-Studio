@@ -9,6 +9,7 @@ extension ImageAssetDestination {
 public struct ImageWorkspaceSession: Codable, Equatable {
   public var draft: DrawThingsImageDraft
   public var previewPath: String?
+  public var presetSelection: PresetSelectionState?
 }
 
 public struct ImageWorkspaceLibrary: Codable {
@@ -28,7 +29,7 @@ public struct ImageWorkspaceLibrary: Codable {
   public init() {}
   public mutating func record(_ draft: DrawThingsImageDraft, preview: String?) {
     let key = draft.storageKey
-    sessions[key] = ImageWorkspaceSession(draft: draft, previewPath: preview)
+    sessions[key] = ImageWorkspaceSession(draft: draft, previewPath: preview, presetSelection: sessions[key]?.presetSelection)
     activeKey = key
   }
   public func write(to url: URL) throws {

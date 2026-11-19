@@ -17,6 +17,7 @@ struct MovieUpscaleInspector:View {
   }
   var body:some View {
     VStack(alignment: .leading, spacing: 8) {
+      if clip.usesNativeMovieUpscaler { GenerationPresetControls(target: .clip(clip.id)) }
       Text(clip.usesNativeMovieUpscaler ? "Source movie upscale" : settings.mode == .enhance ? "Source movie enhancement" : "Source movie 2× upscale").font(.headline)
       Picker("Upscaler", selection: Binding(get: {
         clip.generationSelection?.movieUpscaleMethod ?? .ltx25

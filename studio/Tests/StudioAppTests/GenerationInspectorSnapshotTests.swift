@@ -6,6 +6,25 @@ import XCTest
 @testable import WeeToddStudio
 
 final class GenerationInspectorSnapshotTests: XCTestCase {
+  @MainActor func testSourceMovieRippleAndFinishingEntryPointsHostWithoutChangingCreativeInputs() throws {
+    var fixture = try h3Fixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+    fixture.clip.engine = .ltx25; fixture.clip.attachments = []; fixture.clip.generationSelection = .init(task: "video_upscale")
+    for method in MovieUpscaleMethod.allCases {
+      fixture.clip.generationSelection?.movieUpscaleMethod = method; fixture.store.project.clips = [fixture.clip]
+      try capture(ClipInspector(clip: fixture.clip, detail: .all), fixture: fixture, name: "movie-preset-" + method.rawValue, height: 2200)
+    }
+    fixture.clip.rippleDraft = .init(clip: fixture.clip, frameRate: 24); fixture.store.project.clips = [fixture.clip]; fixture.store.rippleClipID = fixture.clip.id
+    try capture(RippleEditor(), fixture: fixture, name: "ripple-preset-editor", height: 1300, width: 1100)
+    for tool in [NativeUpscalerTool.relayVSR, .reCaVSR] {
+      fixture.store.videoUpscaleTool = tool
+      try capture(VideoUpscaleInspector(), fixture: fixture, name: "restore-preset-" + tool.rawValue, height: 820, width: 872)
+    }
+    var first = VideoProcessingStep(h3Regenerate: .init()); first.id = "first"
+    var second = VideoProcessingStep(settings: .init()); second.id = "second"; second.input = "first"
+    fixture.clip.videoProcessing = try .init(steps: [first, second]); fixture.store.project.clips = [fixture.clip]
+    try capture(VideoProcessingInspector(clip: fixture.clip), fixture: fixture, name: "finishing-preset-chain", height: 2300)
+  }
   @MainActor func testNativeFlashToolHostsWithoutChangingTheSourceRecipe() throws {
     let fixture = try h3Fixture()
     defer { try? FileManager.default.removeItem(at: fixture.directory) }
@@ -253,6 +272,7 @@ final class GenerationInspectorSnapshotTests: XCTestCase {
                                     generation: [String: Any], profileName: String) throws -> StudioStore {
     let store = StudioStore(dataDirectory: directory, restoreSession: false,
       invocation: { command, _, _, _ in
+        if ["relay-native-describe", "recavsr-native-describe"].contains(command) { return ["readinessErrors": [], "warnings": []] }
         XCTFail("Inspector fixture attempted execution: \(command)")
         throw StudioError.invalid("Inspector snapshots never execute models or servers.")
       })

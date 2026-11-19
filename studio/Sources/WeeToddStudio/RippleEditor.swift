@@ -58,6 +58,7 @@ struct RippleEditor: View {
               ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                   Text("Render settings").font(.headline)
+                  GenerationPresetControls(target: .ripple(clip.id))
                   Text("Native LTX 2.5 · Ripple adapter").font(.caption).foregroundStyle(.secondary)
                   DiffusionVAEOptionsControl(settings:field(\.diffusionVAE))
                   TextField("Optional direction for the restyled clip", text: field(\.prompt), axis: .vertical)
@@ -407,6 +408,7 @@ struct RippleClipInspector: View {
       VStack(alignment: .leading, spacing: 8) {
         Button("Open Ripple Director…") { store.openRipple() }
         if let draft = clip.rippleDraft {
+          GenerationPresetControls(target: .ripple(clip.id))
           Text("\(draft.references.filter { !$0.path.isEmpty }.count) edited images · \(draft.width) × \(draft.height)")
             .font(.caption).foregroundStyle(.secondary)
           TextField("Optional restyling direction", text: binding(\.prompt), axis: .vertical)

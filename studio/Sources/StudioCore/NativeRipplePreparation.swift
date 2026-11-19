@@ -4,6 +4,18 @@ import Foundation
 
 /// Weight-free Studio preparation for the shared Swift Ripple worker.
 public enum NativeRipplePreparation {
+  public static func libraryModelFiles(profileID: String, adapterPath: String, profilesDirectory: String) throws -> [String] {
+    let adapter = try regular(adapterPath, label: "author adapter")
+    try GenerationLibraryFileIdentity.verifyRelease(adapter, bytes: 654_443_392, sha256: "bde543610144e5bba78782fb0ac18daa663fc087c2212244b8116deb1925ee2a")
+    let selected = try profile(["rippleProfileID": profileID, "profilesDirectory": profilesDirectory])
+    var files = [profileID, adapter.path]
+    for value in selected.components.values {
+      let url = URL(fileURLWithPath: value)
+      if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { files += GenerationLibraryFileIdentity.componentFiles(url) }
+      else { files.append(value) }
+    }
+    return Array(Set(files)).sorted()
+  }
   private static func regular(_ path: String, label: String) throws -> URL {
     guard path.hasPrefix("/"), !path.utf8.contains(0) else {
       throw StudioError.invalid("Select an absolute local \(label) path.")

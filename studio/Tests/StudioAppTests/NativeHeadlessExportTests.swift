@@ -5,6 +5,19 @@ import XCTest
 @testable import WeeToddStudio
 
 final class NativeHeadlessExportTests: XCTestCase {
+  @MainActor func testFlashExportUsesSelectedRootAndRejectsIncompatibleSharedRoots() throws {
+    let root = try directory(), store = StudioStore(dataDirectory: root, restoreSession: false)
+    store.videoUpscaleRuntime.modelRoot = "/global/flash"
+    var clip = Clip(); clip.videoProcessing = .init()
+    let ref = GenerationModelRef(id: "selected-flash", backend: "restoration", family: "flashVSR")
+    var index = GenerationLibraryIndex()
+    try index.registerModel(.init(reference: ref, name: "Selected Flash", workspaces: [.finishing], tasks: ["flashVSR"], availability: .installed, binding: .restoration(tool: "flashVSR", components: ["modelRoot": "/selected/flash", "variant": "turbo", "decoder": "tiny"])), alias: "fixture")
+    try store.persistGenerationLibrary(index); store.project.clips = [clip]
+    store.project.generationLibraryBindings = [store.finishingBindingKey(clip.id, stage: clip.videoProcessing!.steps[0].id): ref]
+    let runtime = try store.flashRuntimeForExport(clip, previous: nil)
+    XCTAssertEqual(runtime.modelRoot, "/selected/flash")
+    XCTAssertThrowsError(try store.flashRuntimeForExport(clip, previous: store.videoUpscaleRuntime))
+  }
   private func directory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("NativeExport-\(UUID())")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -169,6 +182,7 @@ final class NativeHeadlessExportTests: XCTestCase {
       let store = StudioStore(dataDirectory: root, restoreSession: false, invocation: { command, runtime, payload, output in
         commands.append(command); XCTAssertEqual(runtime.pythonPath, "/unavailable/python")
         if command == "ripple-native-prepare" {
+          XCTAssertEqual(runtime.rippleProfileID, "/selected/profile.json"); XCTAssertEqual(runtime.rippleAdapterPath, "/selected/author.safetensors")
           let target = try XCTUnwrap(output), take = try XCTUnwrap(payload["takeOutput"] as? String)
           frozenTake = URL(fileURLWithPath: take)
           let draft = try JSONDecoder().decode(RippleDraft.self, from: JSONSerialization.data(withJSONObject: payload["draft"]!))
@@ -198,6 +212,10 @@ final class NativeHeadlessExportTests: XCTestCase {
       var clip = Clip(engine: engine); clip.sourcePath = source.path; clip.sourceIn = 0.5; clip.duration = 1
       var draft = RippleDraft(clip: clip, frameRate: 24); draft.width = 64; draft.height = 64
       draft.seed = 47; draft.audioPolicy = .silent; draft.references[0].path = edited.path; draft.references[0].strength = 0.7
+      let selected = GenerationModelRef(id: "ripple-choice", backend: "ripple", family: "ltx25", variant: "distilled")
+      var index = GenerationLibraryIndex()
+      try index.registerModel(.init(reference: selected, name: "Selected Ripple", workspaces: [.ripple], tasks: ["ripple"], availability: .installed, binding: .ripple(profileID: "/selected/profile.json", adapterPath: "/selected/author.safetensors")), alias: "fixture")
+      try store.persistGenerationLibrary(index); draft.libraryModel = selected
       clip.rippleDraft = draft; store.project.clips = [clip]; store.selectedClipID = clip.id
       var body = try store.payload(); body["generateIDs"] = [] // Imported movie clips still have explicit pending Ripple work.
       let destination = root.appendingPathComponent("ripple.weetodd-job.json")

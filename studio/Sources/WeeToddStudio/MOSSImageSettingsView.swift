@@ -16,6 +16,7 @@ struct MOSSImageSettingsView: View {
   }
   var body: some View {
     Section("MOSS-Image") {
+      DisclosureGroup("Advanced model setup") {
       Picker("Model", selection: Binding(get: { settings.variant }, set: { value in
         var changed = settings
         do { try changed.selectVariant(value) } catch { setupMessage = error.localizedDescription; return }
@@ -51,6 +52,7 @@ struct MOSSImageSettingsView: View {
         Text("Choose a new folder in your model library. Conversion preserves source weights; link the resulting folder after it completes. Q4/Q8 are explicit quality tradeoffs.").font(.caption2)
       }
       Text("Weighted stages unload between conditioning, sampling and decoding. A larger cache reduces repeated transformer reads.").font(.caption2).foregroundStyle(.secondary)
+      }
       Toggle("Enforce subject boxes", isOn: Binding(get: { settings.regionalLayout == true }, set: { value in
         binding(\.regionalLayout, nil).wrappedValue = value; store.imageEstimate = nil
       })).disabled(store.imageDraft?.mossLayout == nil)

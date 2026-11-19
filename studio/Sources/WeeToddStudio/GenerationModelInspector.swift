@@ -21,6 +21,7 @@ struct GenerationModelInspector: View {
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
+      DisclosureGroup("Advanced model setup") {
       Picker("Model", selection: Binding(get: { clip.engine }, set: { engine in
         store.editClip { $0.selectLocalModel(engine) }
       })) {
@@ -41,6 +42,7 @@ struct GenerationModelInspector: View {
         }
       }
       .help("Select installed model components and required adapters. Your inputs and explicit sampling settings are retained.")
+      }
       }
       Label(GenerationPresentation.methodLabel(for: clip, referenceFamily: family), systemImage: "sparkles")
         .font(.caption).foregroundStyle(.secondary)

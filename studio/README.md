@@ -655,10 +655,73 @@ Write a complete H3 prompt, select the installed compatible Ref2VA profile, and 
 | Use local Qwen models already installed by Draw Things | [Prompt Assistant](#local-qwen35-prompt-assistant) |
 | Automate a movie or use ComfyUI graphs | [Headless jobs](#headless-movie-and-clip-jobs) / [Nodes](../README.md#comfyui-nodes) |
 
+## Models, LoRAs and generation presets
+
+Open **Models & LoRAs…** from the toolbar, Movie menu, Assets or Studio Settings. The same
+library opens beside each generator's model picker, with a compatible-only filter, search,
+installed/offline status and component details. **Link model library…** remembers the shared
+model root. Known family folders and existing component links are indexed in the background;
+files stay in place. **Add existing…** registers an installed package, native model recipe,
+prepared Qwen manifest or compatible LoRA. **Add and use…** also applies it to the captured
+editing destination; if that destination changed during inspection, the import remains in the
+library and the newer draft is preserved. Native and Draw Things retain their own file formats,
+capability limits and execution adapters. Browsing does not download, convert or generate.
+
+Image generators, timeline clips, continuous LTX scenes, Ripple, source-movie upscaling,
+standalone restoration and finishing have a **Preset** menu. Choose a supplied recipe or a
+saved preset, then use its values or adjust the working controls. Presets can be chosen before
+writing a positive prompt; preparation and generation still validate the actual creative prompt
+and required inputs. MOSS offers Standard and pinned SFT Fast recipes at four, six and eight steps
+when the matching adapter is linked.
+Fast fixes SFT, strength 1, CFG 1, shift 5 and the release Euler schedule; valid four-to-eight
+step edits remain intact while the adapter is enabled. The six-step BF16 regional smoke case
+completed at 1200×1696, with six actual sampling updates. This verifies execution, not a new
+quality ranking or a guarantee of exact source reconstruction. Precision variants retain their
+existing quality and compatibility limits.
+
+Presets own logical model/LoRA references, order, enable state, strengths and supported sampling,
+decoding, seed and negative-guidance values. Applying one keeps the positive creative prompt,
+source/reference media, enabled input roles, source range, audio policy, canvas/aspect ratio,
+frame rate, duration and editable MOSS boxes. A preset that cannot honor these inputs is
+rejected without changing them. Continuous-scene recipes apply to the captured scene members
+as one undoable change. Paired Ripple and restoration components resolve per request without
+rewriting global runtime choices. Finishing presets preserve stage types, order, wiring and
+output geometry.
+
+- **No preset** keeps the current working values and offers **Save as new…**.
+- A selected preset retains its association while values are edited and shows **Modified**.
+  **Save as new…** creates and selects a different stable record, leaving the original intact.
+- **Update…** is disabled when there are no changes. Otherwise it opens a **Setting / Saved
+  value / Current value** review. **Cancel** preserves both records and working values;
+  **Update preset** explicitly saves the reviewed overwrite. A changed destination, preset
+  revision, component identity or library file requires a fresh review.
+
+Image and standalone restoration controls offer **Undo settings** for the last preset/model
+application. Restoration also uses the app's Undo command while that tool is open. Undo restores
+the working recipe, model and preset association together; newer source or settings edits prevent
+a stale undo. Reapplying identical effective settings keeps prepared work.
+
+Selections, applied baselines and modified working values survive restart. Supplied recipes
+can be updated through persistent personal overrides; a library refresh does not replace those
+overrides. Missing components remain visible and cannot start generation. Old FlashVSR presets
+and resolvable saved LTX configs are adopted additively; their original records remain available.
+Unresolved LTX configs stay in Advanced setup; Flash presets migrate after matching installed
+components are discovered. Original saved records are retained. Opening
+historical takes retains their settings and provenance without inventing a selected preset.
+
+The local `generation-library.json` stores IDs and machine-local bindings; reusable recipe
+records live in `generation-presets.json`. Both live in Studio app data, separate from model
+weights and source checkouts. Creative inputs belong to the project/image workspace. Existing
+LoRA groups and explicit trigger-guidance actions remain available. Shared-library **Add to
+LoRA stack** and preset application do not insert positive prompt text. Advanced links,
+conversion and component setup remain accessible through the library's **Advanced setup**.
+The library and preset implementation is Swift and retains each engine's existing runtime
+requirements; it adds no Python dependency or new sampler.
+
 ## Inference and model storage
 
 Choose **Run with → Draw Things** to submit to a configured Draw Things endpoint.
-Choose **Run with → WeeTodd (local)**, then **H3**, **LTX 2.3** or **LTX 2.5** in **Model** for native
+Choose a native **H3**, **LTX 2.3** or **LTX 2.5** entry in the shared **Model** picker for native
 execution. Compatible installed components are selected automatically, with no template step. These are
 explicit choices; Studio does not silently substitute one backend for another.
 
@@ -1423,7 +1486,7 @@ For a complete CLI walkthrough, see [download and create an LTX 2.5 recipe](../e
 
 Choose **Run with → WeeTodd (local) / Draw Things → Model** in the clip inspector. Local models
 include MiniMax H3, LTX 2.3 and LTX 2.5. Swift LTX 2.5 replaces the separate model-profile and
-generation-mode choices with **Config**: **Distilled · Recommended**, **Dev · Recommended**,
+generation-mode choices with the **Config** controls under **Advanced model setup**: **Distilled · Recommended**, **Dev · Recommended**,
 **Dev · HQ**, **Dev · Fast (query8192)**, and **My configs**. **Try recommended settings** applies the model's defaults;
 the config menu offers **Save as…**, **Reset config**, and deletion of user-saved entries.
 Applying a config replaces sampling, guidance and advanced execution settings together while
@@ -3273,7 +3336,7 @@ Use the same image workspace for the native image models below and connected Dra
 
 ### Native MOSS-Image and layout canvas
 
-Choose **Run with → Local MOSS** and select Base/SFT. Installed components are found
+Choose a MOSS Base/SFT entry in **Model**, then optionally select a Standard/Fast **Preset**. Legacy provider/component controls remain under **Provider and connection setup** and **Advanced model setup**. Installed components are found
 automatically; link or download them in your model library if needed. Draw text, object and character regions directly on the canvas;
 edit exact words and pixel bounds in the inspector. Layout actions import the supplied
 Pixaroma boxes workflow or official drafts, export editable layouts and copy the compiled

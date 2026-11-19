@@ -14,6 +14,13 @@ struct VideoProcessingInspector: View {
         set: { store.setVideoProcessingEnabled($0) }))
         .accessibilityIdentifier("video-processing-enabled")
       if let recipe = clip.videoProcessing {
+        GenerationPresetControls(target: .finishing(clip.id))
+        ForEach(Array(recipe.steps.enumerated()), id: \.element.id) { index, step in
+          VStack(alignment: .leading) {
+            Text("\(index + 1). \(step.label)").font(.caption.bold())
+            GenerationModelPicker(target: .finishing(clip.id), stageIndex: index)
+          }
+        }
         Picker("Upscaler", selection: Binding(get: { recipe.hasH3Regenerate ? (recipe.hasFlashVSR ? "h3-regenerate-flashvsr" : "h3-regenerate") : recipe.isChain ? "native-pixel-cq-flashvsr" : recipe.steps[0].kind }, set: { store.setVideoProcessingEngine($0) })) {
           Text("H3 Regenerate · native · 24 FPS").tag("h3-regenerate")
           Text("H3 Regenerate → FlashVSR+").tag("h3-regenerate-flashvsr")

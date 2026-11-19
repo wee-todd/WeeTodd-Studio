@@ -13,10 +13,10 @@ import StudioCore
     let manual = loraFolders.map { "\($0.path)|\($0.enabled)|\($0.recursive)|\($0.modelHint?.rawValue ?? "")" }
       .joined(separator: "\n")
     guard automaticLoRADiscoveryEnabled else { return manual + "|automatic:false" }
-    let links = (allAssets.filter { $0.kind == .lora } + loraGroups.flatMap { $0.members.map(\.asset) })
+    let links = (allAssets.filter { $0.kind == .lora } + generationLinkedLoRAAssets + loraGroups.flatMap { $0.members.map(\.asset) })
       .map { $0.path + "|" + ($0.loraModel?.rawValue ?? "") }.sorted().joined(separator: "\n")
     return manual + "|automatic:true|" + runtime.profilesDirectory + "|" + links
-      + "|" + profiles.map(\.id).sorted().joined(separator: "\n") + "|" + (runtime.rippleAdapterPath ?? "")
+      + "|" + profiles.map(\.id).sorted().joined(separator: "\n") + "|" + (runtime.rippleAdapterPath ?? "") + "|" + generationLibraryRootDirectory
   }
   var folderLoRAEntries: [LoRAFolderEntry] {
     loraFolderScanKey == loraFolderConfigurationKey ? scannedLoRAEntries : []
@@ -28,14 +28,15 @@ import StudioCore
     repeat {
       loraFolderRefreshRequested = false
       let key = loraFolderConfigurationKey, settings = runtime, folders = loraFolders
-      let assets = allAssets, groups = loraGroups, automatic = automaticLoRADiscoveryEnabled
+      let assets = allAssets + generationLinkedLoRAAssets, groups = loraGroups, automatic = automaticLoRADiscoveryEnabled
+      let libraryRoot = generationLibraryIndex.rootDirectory
       do {
         if folders.contains(where: { $0.enabled && $0.path == defaultLoRAFolder.path }) {
           try FileManager.default.createDirectory(at: defaultLoRAFolder, withIntermediateDirectories: true)
         }
         let discovery = try await Task.detached(priority: .utility) {
           try LoRAFolderDiscovery.discover(folders: folders, profilesDirectory: settings.profilesDirectory,
-            assets: assets, groups: groups, additionalPaths: [settings.rippleAdapterPath].compactMap { $0 }, enabled: automatic)
+            assets: assets, groups: groups, additionalPaths: [settings.rippleAdapterPath].compactMap { $0 }, enabled: automatic, libraryRoot: libraryRoot)
         }.value
         let result: [String: Any]
         if !discovery.folders.contains(where: \.enabled) {

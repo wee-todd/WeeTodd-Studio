@@ -222,6 +222,7 @@ struct PathPicker: View {
 }
 struct RuntimeView: View {
   @EnvironmentObject var store: StudioStore
+  var onClose: (() -> Void)? = nil
   @AppStorage("appearance") var appearance = "system"
   @StateObject private var installer = RuntimeInstaller()
   @StateObject private var modelSetup = ModelSetupState()
@@ -232,7 +233,7 @@ struct RuntimeView: View {
         Spacer()
         Button("Done") {
           store.saveRuntime()
-          store.showRuntime = false
+          if let onClose { onClose() } else { store.showRuntime = false }
         }.keyboardShortcut(.defaultAction)
       }
       ScrollView {
@@ -242,7 +243,8 @@ struct RuntimeView: View {
             Text("Light").tag("light")
             Text("Dark").tag("dark")
           }.pickerStyle(.segmented)
-          LoRAFolderSettings()
+          Button("Models & LoRAs…") { store.showGenerationLibrary = true }
+          DisclosureGroup("Advanced model-library folders") { LoRAFolderSettings() }
           Divider()
           RippleRuntimeSettings()
           Divider()

@@ -100,6 +100,7 @@ struct ClipInspector: View {
         MovieUpscaleInspector(clip: clip, showLTXSettings: detail.showsAdvanced && store.runtime.usesNativeLTX25)
       }
       if clip.engine != .movie && !clip.usesNativeMovieUpscaler {
+        GenerationPresetControls(target: .clip(clip.id))
         field("RUN WITH") {
           Picker("Run with", selection: Binding(get: { clip.generationProvider }, set: { provider in
             store.editClip { $0.selectGenerationProvider(provider) }

@@ -235,9 +235,10 @@ struct ImageGenerationEditor: View {
   }
   var settings: some View {
     Form {
-      backendPicker
+      GenerationPresetControls(target: .image)
+      DisclosureGroup("Provider and connection setup") { backendPicker }
       if isMOSSImage { MOSSImageSettingsView() } else if isH3Image { H3ImageModelSettings() } else if isNative { nativeSettings } else {
-      Section("Draw Things") {
+      DisclosureGroup("Draw Things connection setup") {
         Picker("Connection", selection: Binding(get: { draft?.profileID ?? "" }, set: { id in
           store.selectImageConnection(id)
         })) {

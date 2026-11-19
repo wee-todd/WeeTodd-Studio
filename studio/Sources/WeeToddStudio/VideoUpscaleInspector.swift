@@ -36,6 +36,7 @@ struct VideoUpscaleInspector: View {
           Text("Processes the complete source movie. Use a clip’s finishing controls for generation and ordered processing. Originals and completed results stay available.")
             .font(.caption).foregroundStyle(.secondary)
           Group {
+            GenerationPresetControls(target: .restoration(store.videoUpscaleTool))
             if store.videoUpscaleTool == .h3Regenerate { H3RegenerateInspector() }
             else if store.videoUpscaleTool == .reCaVSR { ReCaVSRControls(settings: $store.reCaVSRSettings) }
             else if store.videoUpscaleTool == .relayVSR {
@@ -119,11 +120,6 @@ struct VideoUpscaleInspector: View {
           .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
       }
       HStack {
-        if !store.videoUpscalePresets.isEmpty {
-          Menu("Saved presets") { ForEach(store.videoUpscalePresets) { preset in Button(preset.name) { store.videoUpscaleSettings = preset.settings; store.videoUpscalePlan = nil } } }
-        }
-        TextField("Preset name", text: $store.videoUpscalePresetName)
-        Button("Save preset") { store.saveVideoUpscalePreset() }.disabled(store.videoUpscalePresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       }
       DisclosureGroup("Restoration settings") {
         VStack(alignment: .leading, spacing: 10) {

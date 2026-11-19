@@ -18,7 +18,7 @@ import ImageLayout
     guard value != mossModelLinks else { return }
     mossModelLinks = value
     guard mossModelLinksWritable else { return }
-    do { try value.write(to: dataDirectory.appendingPathComponent("moss-model-links.json")) }
+    do { try value.write(to: dataDirectory.appendingPathComponent("moss-model-links.json")); Task { await refreshGenerationLibrary(force: true) } }
     catch { notice = "MOSS folder preferences could not be saved: \(error.localizedDescription)" }
   }
   func rememberMOSSComponents(_ settings: MOSSImageSettings) {

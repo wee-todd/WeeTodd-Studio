@@ -2,6 +2,11 @@ import Foundation
 import StudioCore
 
 @MainActor extension StudioStore {
+  func flashRuntimeForExport(_ clip: Clip, previous: FlashVSRRuntime?) throws -> FlashVSRRuntime {
+    let selected = try finishingFlashRuntime(for: clip)
+    guard previous == nil || previous == selected else { throw StudioError.invalid("This job uses different FlashVSR component selections. Export those clips separately or choose the same finishing model for all clips.") }
+    return selected
+  }
   func pixelRuntimeForExport(_ plan: NativeVideoProcessingPlan, previous: NativePixelCQRuntime?) throws -> NativePixelCQRuntime {
     let steps = plan.recipe.steps.filter(\.isNative)
     let candidates: [NativePixelCQRuntime]
@@ -81,7 +86,7 @@ import StudioCore
           guard let plan else { throw StudioError.invalid("Native processing was not admitted before job export.") }
           nativeProcessingRuntime = try pixelRuntimeForExport(plan, previous: nativeProcessingRuntime)
         }
-        if recipe.hasFlashVSR { loadVideoUpscalePreferences(); processingRuntime = videoUpscaleRuntime }
+        if recipe.hasFlashVSR { loadVideoUpscalePreferences(); processingRuntime = try flashRuntimeForExport(clip, previous: processingRuntime) }
         if recipe.hasH3Regenerate { loadVideoUpscalePreferences(); h3ProcessingRuntime = h3RegenerateRuntime }
       }
     }
@@ -102,11 +107,12 @@ import StudioCore
       if ripple {
         request = ["draft": try clip.rippleDraft!.object(), "takeOutput": take.path]
       }
+      let executionRuntime = ripple ? try rippleRuntime(for: clip.rippleDraft!) : try clipLibraryRuntime(for: clip)
       let result = try await bridge.invoke(ripple ? "ripple-native-prepare" : h3 ? "h3-native-prepare" : "ltx-native-prepare",
-        runtime: settings, payload: request, output: target)
+        runtime: executionRuntime, payload: request, output: target)
       guard let recipePath = result["recipePath"] as? String else { throw StudioError.invalid("Native job preparation returned no recipe.") }
       _ = try await bridge.invoke(h3 ? "h3-native-preflight" : "ltx-native-preflight",
-        runtime: settings, payload: ["recipePath": recipePath], output: ripple ? take : target.appendingPathComponent("preflight"))
+        runtime: executionRuntime, payload: ["recipePath": recipePath], output: ripple ? take : target.appendingPathComponent("preflight"))
       let report: Any = ripple ? ["rippleDraft": try clip.rippleDraft!.object()] : result["report"] ?? [:]
       recipes[clip.id.uuidString] = NativeHeadlessJob.Recipe(engine: h3 ? "h3" : "ltx25",
         bytes: try Data(contentsOf: URL(fileURLWithPath: recipePath)),

@@ -364,6 +364,15 @@ public struct AudioRegion: Codable, Identifiable, Equatable {
   }
 }
 public struct StudioProject: Codable, Equatable {
+  /// UI associations never enter worker payloads or clip render identity.
+  public var generationPresetSelections: [String: PresetSelectionState]?
+  public var generationLibraryBindings: [String: GenerationModelRef]?
+  public var generationContentProject: Self {
+    var value = self; value.generationPresetSelections = nil; return value
+  }
+  public var generationInputProject: Self {
+    var value = generationContentProject; value.generationLibraryBindings = nil; return value
+  }
   public var audioPresentation: AudioPresentation?
   public var production: MusicVideoProduction?
   public var musicDraft: MusicDraft?

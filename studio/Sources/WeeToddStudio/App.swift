@@ -78,9 +78,13 @@ import SwiftUI
         Button("Add Title") { store.addTitle() }
         Button("Export Movie…") { store.exportMovie() }.keyboardShortcut("e")
         Button("Draw Things Connections…") { store.showDrawThings = true }
+        Button("Models & LoRAs…") { store.showGenerationLibrary = true }
         Button("Runtime Settings…") { store.showRuntime = true }.keyboardShortcut(",")
       }
     }
+    Window("Models & LoRAs", id: "generation-library") {
+      GenerationLibraryView().environmentObject(store)
+    }.defaultSize(width: 940, height: 650)
   }
 }
 
@@ -125,6 +129,7 @@ struct SmallLabel: View {
 }
 struct StudioView: View {
   @EnvironmentObject var store: StudioStore
+  @Environment(\.openWindow) private var openWindow
   @State private var leftWidth: CGFloat = 280
   var body: some View {
     ZStack {
@@ -153,6 +158,15 @@ struct StudioView: View {
       }
     }
     .background(Theme.background).foregroundStyle(Theme.text).tint(.accentColor)
+    .onChange(of: store.showGenerationLibrary) { show in
+      if show { openWindow(id: "generation-library"); store.showGenerationLibrary = false }
+    }
+    .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in
+      Task { await store.refreshGenerationLibrary(force: true) }
+    }
+    .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in
+      Task { await store.refreshGenerationLibrary(force: true) }
+    }
     .sheet(isPresented: $store.showProjectSettings) {
       VStack(alignment: .leading, spacing: 20) {
         HStack {
@@ -228,6 +242,8 @@ struct StudioView: View {
       Button { store.showWorkflows = true } label: { Label("Director", systemImage: "sparkles") }
         .help("Plan a movie, review production objects and shot plans").disabled(store.operationBusy)
       Button { store.showShotList = true } label: { Label("Shot List", systemImage: "list.bullet.rectangle") }
+      Button { store.showGenerationLibrary = true } label: { Image(systemName: "shippingbox") }
+        .help("Models & LoRAs").accessibilityLabel("Models & LoRAs")
       Button {
         store.save()
       } label: {

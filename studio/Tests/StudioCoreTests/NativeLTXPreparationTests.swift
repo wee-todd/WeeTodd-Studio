@@ -713,6 +713,17 @@ final class NativeLTXPreparationTests: XCTestCase {
     let content=try NativeLTXPreparation.compose(request:request(project,runtime))["recipe"] as! [String:Any]
     let effective=content["config"] as! [String:Any]
     XCTAssertEqual(effective["dfr_temporal_rounds"] as? Int,1)
+    let descriptor = try JSONDecoder().decode(GenerationDescriptor.self, from: JSONSerialization.data(withJSONObject: profiles[0]["generation"]!))
+    let plain = GenerationModelEntry(reference: .init(id: "ordinary", backend: "ltx25", family: "ltx25"), name: "Ordinary", workspaces: [.clip], tasks: ["t2v"], availability: .installed, binding: .nativeVideo(profileID: "/ordinary.json"))
+    let temporal = GenerationModelEntry(reference: .init(id: "temporal", backend: "ltx25", family: "ltx25"), name: "Temporal", workspaces: [.clip], tasks: ["t2v"], availability: .installed, binding: .nativeVideo(profileID: url.path), generation: descriptor)
+    let library = GenerationLibrarySnapshot(models: [plain, temporal])
+    var ordinary = original.clips[0]; ordinary.profileID = "/ordinary.json"
+    let preset = try ClipPresetRecipe.capture(from: project.clips[0], project: project, resolvedLibrary: library)
+    XCTAssertThrowsError(try ClipPresetRecipe.candidate(applying: preset, to: ordinary, project: original, resolvedLibrary: library), "Inherited temporal rounds must preserve the existing effective clock")
+    XCTAssertEqual(try NativeLTXPreparation.presetClock(request: request(project, runtime)), [24, 48])
+    config["frame_rate"] = 25; recipe["config"] = config
+    try JSONSerialization.data(withJSONObject: recipe).write(to: url)
+    XCTAssertEqual(try NativeLTXPreparation.presetClock(request: request(project, runtime)), [25, 50])
     XCTAssertEqual(effective["dfr_detailing_lora_strength"] as? Double,0.5)
     project.clips[0].generationSelection?.task="a2v"
     XCTAssertThrowsError(try NativeLTXPreparation.compose(request:request(project,runtime)))

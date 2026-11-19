@@ -24,6 +24,7 @@ struct AssetBrowser: View {
       Button("Generate Music…") { store.openMusic() }
       Button("Generate Voice…") { store.openVoice() }
       Button("Production Library…") { store.showProductionLibrary = true }
+      Button("Models & LoRAs…") { store.showGenerationLibrary = true }
       Button("LoRAs & Groups…") { store.showLoRALibrary = true }
         .padding(.horizontal, 12).padding(.bottom, 10)
       ScrollView {

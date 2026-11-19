@@ -190,7 +190,7 @@ public enum NativeLTXPreparation {
       && (config["dfr_prebaked_transformer_path"] as? String ?? "").isEmpty
       && (config["generated_keyframes"] as? Int ?? 0) == 0
       && (components["loras"] as? [Any] ?? []).isEmpty
-    return ["pipelineMode": config["pipeline_mode"] as? String ?? "distilled",
+    return ["pipelineMode": config["pipeline_mode"] as? String ?? "distilled", "frameRate": fps,
       "durationMode":durationMode,"automaticDurationAvailable":automaticAvailable,
       "automaticDuration": ["minimum_seconds":config["auto_duration_min_seconds"] ?? 1.0,
         "maximum_seconds":config["auto_duration_max_seconds"] ?? 20.0],
@@ -766,8 +766,8 @@ public enum NativeLTXPreparation {
   /// Resolve model paths only after admitting the actual movie editor intent.
   /// The independent probe is never composed or rendered; its schedule and duration
   /// do not become movie settings. The dedicated movie request owns all execution.
-  public static func componentsForMovie(request:[String:Any],settings:LTX25MovieUpscaleSettings)
-    throws -> (components:[String:String],profileID:String,selectionFingerprint:String,ffmpeg:URL) {
+  private static func movieModelContext(request:[String:Any],settings:LTX25MovieUpscaleSettings)
+    throws -> (Context,[String:String]) {
     guard let value=request["project"],let clipID=request["clipID"] as? String else {
       throw StudioError.invalid("Missing Studio movie preparation request.")
     }
@@ -801,6 +801,17 @@ public enum NativeLTXPreparation {
     }
     let paths=try NativeLTXMoviePreparation.components(from:modelComponents,
       mode:settings.mode,pixelSpatialAdapterPath:settings.pixelSpatialAdapterPath)
+    return (context,paths)
+  }
+  /// Component-only catalog admission. Does not inspect/extract source media or execute a tool.
+  public static func movieModelBinding(request:[String:Any],settings:LTX25MovieUpscaleSettings)
+    throws -> (components:[String:String],profileID:String,selectionFingerprint:String) {
+    let (context,paths)=try movieModelContext(request:request,settings:settings)
+    return (paths,context.profile,try fingerprint(context.recipe))
+  }
+  public static func componentsForMovie(request:[String:Any],settings:LTX25MovieUpscaleSettings)
+    throws -> (components:[String:String],profileID:String,selectionFingerprint:String,ffmpeg:URL) {
+    let (context,paths)=try movieModelContext(request:request,settings:settings)
     let configured=context.runtime["ffmpegPath"] as? String ?? ""
     let executable=configured.isEmpty ? [context.recipe["ffmpeg"] as? String ?? "","/opt/homebrew/bin/ffmpeg","/usr/local/bin/ffmpeg"].first {
       !$0.isEmpty && FileManager.default.isExecutableFile(atPath:$0)
@@ -811,6 +822,16 @@ public enum NativeLTXPreparation {
     return (paths,context.profile,try fingerprint(context.recipe),URL(fileURLWithPath:try canonical(executable)))
   }
 
+  /// Effective model clock for preset admission; does not compose pixels or load weights.
+  public static func presetClock(request: [String: Any]) throws -> [Double] {
+    let context = try resolve(request), config = context.recipe["config"] as? [String: Any] ?? [:]
+    guard let fps = (config["frame_rate"] as? NSNumber)?.doubleValue, fps.isFinite, fps > 0 else { throw StudioError.invalid("The selected native profile has no valid frame clock.") }
+    let explicit = context.clip.generationSelection?.ltx25DFR
+    let enabled = explicit?.enabled ?? (config["dfr_enabled"] as? Bool ?? false)
+    let rounds = enabled ? (explicit?.temporalRounds ?? (config["dfr_temporal_rounds"] as? Int ?? 0)) : 0
+    guard (0...2).contains(rounds) else { throw StudioError.invalid("Invalid native temporal rounds.") }
+    return [fps, fps * Double(1 << rounds)]
+  }
   public static func describe(request: [String: Any]) throws -> [String: Any] {
     if try NativeLTXMovieEditorPreparation.matches(request:request) { return try NativeLTXMovieEditorPreparation.describe(request:request) }
     try NativeMovieIntervalAdmission.rejectInOrdinaryRequest(request)

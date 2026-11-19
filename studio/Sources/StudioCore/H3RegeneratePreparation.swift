@@ -5,6 +5,23 @@ import InferenceContracts
 import TensorIO
 
 public enum H3RegeneratePreparation {
+  private final class LibraryCache: @unchecked Sendable {
+    let lock = NSLock(); var entries: [String: (files: [String], signature: String)] = [:]
+  }
+  private static let libraryCache = LibraryCache()
+  /// Complete pinned model admission without requiring tools, media, or loading tensors.
+  public static func libraryModelFiles(settings: H3RegenerateSettings) throws -> [String] {
+    try settings.validate()
+    let key = [settings.baseProfilePath, settings.modelLibraryRoot, settings.publisherEncoderPath, settings.fastDecoderPath,
+      settings.decoder.rawValue, settings.encoderProfile.rawValue].joined(separator: "\n")
+    libraryCache.lock.lock(); let cached = libraryCache.entries[key]; libraryCache.lock.unlock()
+    if let cached, GenerationLibraryFileIdentity.signature(cached.files) == cached.signature { return cached.files }
+    let admitted = try modelResources(settings: settings, cancellation: NativeHeadlessCancellation())
+    let files = admitted.files.map(\.path), signature = GenerationLibraryFileIdentity.signature(admitted.files.map(\.path))
+    libraryCache.lock.lock(); defer { libraryCache.lock.unlock() }
+    if libraryCache.entries.count >= 16 { libraryCache.entries.removeAll() }
+    libraryCache.entries[key] = (files, signature); return files
+  }
   static let supportedOriginalBaseSHA256:Set<String>=["600307eba6a67388b333aa5a94537a9ea83da65a6f37664ba22cf079e40a1f3b","37488d7799577d40db8e74318311344cb909c38632c0f693c52976a5509811ff"]
   struct Geometry { let sourceWidth:Int,sourceHeight:Int,frames:Int,paddedFrames:Int,temporaryBytes:Int64 }
   static func hash(_ data:Data)->String { SHA256.hash(data:data).map{String(format:"%02x",$0)}.joined() }
@@ -78,7 +95,14 @@ public enum H3RegeneratePreparation {
     try latent.validate(sourceSHA256:sourceSHA256,firstFrame:firstFrame,frames:frames)
   }
   static func resources(settings:H3RegenerateSettings,runtime:H3RegenerateRuntime,cancellation:NativeHeadlessCancellation) throws -> H3RegenerateResources {
-    try settings.validate();let resolved=try runtime.resolved()
+    try settings.validate(); let resolved = try runtime.resolved()
+    let model = try modelResources(settings: settings, cancellation: cancellation)
+    let engine = try [resolved.workerPath, resolved.ffmpegPath, resolved.ffprobePath, NativeMLXMetalLibrary.resolve(executable: URL(fileURLWithPath: resolved.workerPath)).path].map { try FlashVSRFile.capture(URL(fileURLWithPath: $0)) }
+    try model.profile.verify(); try cancellation.check()
+    return .init(components: model.components, qwen: model.qwen, modelFiles: model.modelFiles, engineFiles: engine, profile: model.profile, runtime: resolved)
+  }
+  private static func modelResources(settings:H3RegenerateSettings,cancellation:NativeHeadlessCancellation) throws -> H3RegenerateResources {
+    try settings.validate()
     guard !settings.baseProfilePath.isEmpty,!settings.modelLibraryRoot.isEmpty else { throw StudioError.invalid("Select an existing ordinary native H3 Ref2VA profile and model library.") }
     let profileURL=URL(fileURLWithPath:settings.baseProfilePath),paths=try profileComponents(boundedJSON(profileURL))
     let root=URL(fileURLWithPath:settings.modelLibraryRoot).resolvingSymlinksInPath()
@@ -144,9 +168,8 @@ public enum H3RegeneratePreparation {
     let tokenDirectory=try tokenURL.resourceValues(forKeys:[.isDirectoryKey]).isDirectory==true
     let tokenizer=try capture(tokenDirectory ? tokenURL.appendingPathComponent("tokenizer.json").path:tokenURL.path)
     guard tokenizer.bytes<=32*1024*1024 else { throw StudioError.invalid("H3 tokenizer exceeds its bounded JSON contract.") }
-    let engine=try [resolved.workerPath,resolved.ffmpegPath,resolved.ffprobePath,NativeMLXMetalLibrary.resolve(executable:URL(fileURLWithPath:resolved.workerPath)).path].map{try FlashVSRFile.capture(URL(fileURLWithPath:$0))}
     try profile.verify();try cancellation.check()
     return .init(components:.init(transformer:transformer,refiner:refiner,sharpCurve:sharp,sharpInput:table,latentUpscaler:upscale,videoVAE:video,audioVAE:audio,publisherEncoder:encoder,fastDecoder:fast),
-      qwen:.init(checkpointRoot:textURL.path,tokenizer:.init(path:tokenizer.path,sha256:tokenizer.sha256),files:textFiles),modelFiles:modelFiles,engineFiles:engine,profile:profile,runtime:resolved)
+      qwen:.init(checkpointRoot:textURL.path,tokenizer:.init(path:tokenizer.path,sha256:tokenizer.sha256),files:textFiles),modelFiles:modelFiles,engineFiles:[],profile:profile,runtime:.init())
   }
 }

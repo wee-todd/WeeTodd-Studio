@@ -4,6 +4,20 @@ import XCTest
 @testable import StudioCore
 
 final class MOSSImageTests: XCTestCase {
+  func testFastStackEditsPreserveValidSixStepOverrideAndRestoreStockOnExit() throws {
+    var draft = DrawThingsImageDraft(destination: .init(scope: .project, projectID: UUID()))
+    draft.selectProvider(.nativeMOSS); draft.steps = 50; draft.guidance = 3
+    var asset = MediaAsset(name: "Fast", kind: .lora, path: "/models/fast.safetensors", scope: .global)
+    asset.loraModel = .mossImage; asset.loraProfile = "moss_sft_4step_v2"
+    try draft.applyMOSSLoRAs([.init(asset: asset)])
+    XCTAssertEqual(draft.steps, 4)
+    draft.steps = 6
+    try draft.reconcileMOSSFastRecipe()
+    XCTAssertEqual(draft.steps, 6)
+    let id = try XCTUnwrap(draft.mossImage?.loras?.first?.id)
+    try draft.setMOSSAdapterEnabled(id: id, enabled: false)
+    XCTAssertEqual(draft.steps, 50); XCTAssertEqual(draft.guidance, 3)
+  }
   func testRegionalControlCannotBeSilentlyIgnoredByAnOlderWorker() throws {
     XCTAssertThrowsError(try NativeMOSSImageResult.validateRegionalControl(["normalizedRequest":["configuration":[:]]], required: true))
     var result: [String:Any] = ["normalizedRequest":["configuration":["regionalLayout":true]],

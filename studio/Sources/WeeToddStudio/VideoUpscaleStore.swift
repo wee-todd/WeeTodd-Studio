@@ -18,6 +18,8 @@ private struct VideoUpscalePreferences: Codable {
   var reCaSettings: ReCaVSRSettings?
   var relayScale: NativeRelayVSRScale?
   var modelLibrary: String?
+  var presetSelections: [String: PresetSelectionState]?
+  var modelSelections: [String: GenerationModelRef]?
 }
 @MainActor extension StudioStore {
   func loadVideoUpscalePreferences() {
@@ -29,6 +31,8 @@ private struct VideoUpscalePreferences: Codable {
       reCaVSRSettings = value.reCaSettings ?? (try! ReCaVSRSettings())
       relayVSRScale = value.relayScale ?? .x2
       nativeUpscalerModelLibrary = value.modelLibrary ?? h3RegenerateSettings.modelLibraryRoot
+      restorationPresetSelections = value.presetSelections ?? [:]
+      restorationModelSelections = value.modelSelections ?? [:]
     }
     let sibling = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("WeeToddCLI").path ?? ""
     if FileManager.default.isExecutableFile(atPath: sibling) { videoUpscaleRuntime.supervisorPath = sibling }
@@ -55,7 +59,9 @@ private struct VideoUpscalePreferences: Codable {
       try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
       let value = VideoUpscalePreferences(settings: videoUpscaleSettings, runtime: videoUpscaleRuntime, presets: videoUpscalePresets,
         tool: videoUpscaleTool, h3Settings: h3RegenerateSettings, reCaSettings: reCaVSRSettings,
-        relayScale: relayVSRScale, modelLibrary: nativeUpscalerModelLibrary)
+        relayScale: relayVSRScale, modelLibrary: nativeUpscalerModelLibrary,
+        presetSelections: restorationPresetSelections.isEmpty ? nil : restorationPresetSelections,
+        modelSelections: restorationModelSelections.isEmpty ? nil : restorationModelSelections)
       try JSONEncoder().encode(value).write(to: dataDirectory.appendingPathComponent("video-upscale.json"), options: .atomic)
     } catch { self.error = error.localizedDescription }
   }

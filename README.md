@@ -55,11 +55,11 @@ compatible runtime. FFmpeg/FFprobe and optional finishing tools still require co
 See the [build and runtime guide](studio/README.md#build-and-open).
 
 In the clip inspector, choose **Run with → WeeTodd (local) / Draw Things**, then select a model.
-Swift LTX 2.5 uses a single **Config** picker with built-in Distilled, Dev and Dev HQ settings,
-automatic installed-component resolution, and user configs saved with **Save as…**. Separate
-recipe and generation-mode choices are removed from this path. Other native **Model profile**
-controls select automatic components or an installed recipe; LoRAs and groups
-appear beside the model controls. Write the **Prompt**, add named **Inputs**, and use **Settings →
+The shared **Preset**, **Model** and LoRA controls cover image generation, timeline video,
+Ripple, source-movie upscaling, standalone restoration and finishing. Presets populate editable
+working values; **Update…** reviews saved/current differences before an explicit overwrite.
+**Save as new…** preserves the original. Native component/config setup remains under **Advanced
+model setup**. See [Models, LoRAs and generation presets](studio/README.md#models-loras-and-generation-presets). Write the **Prompt**, add named **Inputs**, and use **Settings →
 Basic / Advanced / All** to choose the controls shown. Existing clips retain their saved recipe
 and settings when changing the view.
 

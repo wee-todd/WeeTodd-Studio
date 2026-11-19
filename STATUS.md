@@ -1,5 +1,24 @@
 # WeeTodd Studio implementation status
 
+## November 18 shared model library and editable generation presets
+
+Swift library and preset controls now cover the four image providers, native/Draw Things
+video clips, continuous LTX scenes, Ripple, source-movie upscaling, standalone restoration
+and finishing. Logical references resolve through existing runtime adapters; source media,
+creative prompts, layout boxes, geometry and timing stay project-owned. Updates require an
+explicit saved/current review. New copies retain the original, supplied presets use persistent
+personal overrides, and legacy records are adopted additively. Availability and source pins
+prevent stale/offline components from being applied. Library actions add no Python dependency,
+weight conversion or sampler implementation.
+
+Focused tests cover transactional apply/undo, precise save states, stale targets/revisions,
+file replacement, cancellation, offline persistence, source-clock/scale refusal and request-local
+restoration/Ripple bindings. A temporary-data qualification indexed installed models/LoRAs,
+applied MOSS Fast 6, updated it to eight through review and restored its override/selection
+after restart. The unchanged native BF16 worker completed one 1200×1696 regional-layout render
+from noise with exactly six sampling updates. Earlier four/eight-step receipts remain the
+qualification for those unchanged recipes; no new twelve-image batch or quality ranking ran.
+
 ## November 17 automatic MOSS and analyzer folder links
 
 MOSS folder preferences are stored independently of image drafts. Known library layouts

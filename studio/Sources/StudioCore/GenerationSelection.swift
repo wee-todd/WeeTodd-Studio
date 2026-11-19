@@ -300,6 +300,7 @@ public struct GenerationDescriptor: Codable, Equatable {
   public var presets: [Preset]
   public var referenceFamily: String? = nil
   public var pipelineMode: String? = nil
+  public var frameRate: Double? = nil
   public var samplingMethod: String? = nil
   public var videoDecodePrecision: String? = nil
   public var videoDecodePrecisionEditable: Bool? = nil

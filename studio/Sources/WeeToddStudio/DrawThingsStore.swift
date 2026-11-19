@@ -179,6 +179,7 @@ extension StudioStore {
     if drawThingsConnections.contains(connection), imageDraft?.profileID == connection.id {
       configureCharacterSheetAdapter()
     }
+    await refreshGenerationLibrary(force: true)
   }
   func drawThingsModels(_ profileID: String, operation: String, task: String? = nil) -> [(id: String, name: String)] {
     guard let catalog = drawThingsCatalogs[profileID], let rules = catalog["capabilities"] as? [String: Any] else { return [] }

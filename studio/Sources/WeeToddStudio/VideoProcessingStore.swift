@@ -7,14 +7,16 @@ struct VideoProcessingDestination {
   let clips: [Clip]
   let session: UUID
   let projectID: UUID
+  var modelBindings: [String: GenerationModelRef] = [:]
 }
 
 @MainActor extension StudioStore {
   func videoProcessingDestination(for clip: Clip) -> VideoProcessingDestination {
-    .init(clips: videoProcessingClips(for: clip), session: documentSessionID, projectID: project.id)
+    let clips = videoProcessingClips(for: clip)
+    return .init(clips: clips, session: documentSessionID, projectID: project.id, modelBindings: finishingModelBindings(for: clips))
   }
   private func matchesVideoProcessingDestination(_ target: VideoProcessingDestination) -> Bool {
-    documentSessionID == target.session && project.id == target.projectID && target.clips.allSatisfy { frozen in
+    documentSessionID == target.session && project.id == target.projectID && matchesVideoProcessingModelBindings(target) && target.clips.allSatisfy { frozen in
       project.clips.first(where: { $0.id == frozen.id }) == frozen
     }
   }
@@ -119,13 +121,14 @@ struct VideoProcessingDestination {
       throw StudioError.invalid("Use the same upscale recipe for every shot in a continuous scene.")
     }
     let plan: NativeVideoProcessingPlan
+    let flashRuntime = try finishingFlashRuntime(for: clip)
     if !recipe.hasNative && !recipe.hasH3Regenerate, let admission {
-      plan = try await admission(recipe, videoUpscaleRuntime)
+      plan = try await admission(recipe, flashRuntime)
     } else {
       loadVideoUpscalePreferences()
       let pixel = recipe.hasNative ? try await nativePixelCQRuntime(for: recipe) : nil
       plan = try await NativeVideoProcessingPlan.preflight(recipe: recipe,
-        runtime: recipe.hasFlashVSR ? videoUpscaleRuntime : nil,
+        runtime: recipe.hasFlashVSR ? flashRuntime : nil,
         nativeRuntime: pixel, h3Runtime: recipe.hasH3Regenerate ? h3RegenerateRuntime : nil)
     }
     guard matchesVideoProcessingDestination(target) else {

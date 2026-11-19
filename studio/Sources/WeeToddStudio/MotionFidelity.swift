@@ -128,7 +128,7 @@ struct MotionFidelityInspector: View {
     motionPromptEditorError = nil
     do {
       let body: [String: Any] = [
-        "project": try project.object(),
+        "project": try project.generationInputProject.object(),
         "globalAssets": try JSONSerialization.jsonObject(with: JSONEncoder().encode(globalAssets)),
         "clipID": clip.id.uuidString,
       ]

@@ -26,7 +26,7 @@ import StudioCore
     guard !operationBusy, !videoUpscaleSourcePath.isEmpty else { return }
     saveVideoUpscalePreferences()
     let source = videoUpscaleSourcePath, sourceAssetID = videoUpscaleSourceAssetID
-    let session = documentSessionID, projectID = project.id, settings = runtime
+    let session = documentSessionID, projectID = project.id
     let options = reCaVSRSettings
     let directory = dataDirectory.appendingPathComponent("Upscales/" + UUID().uuidString)
     videoUpscaleBusy = true
@@ -35,6 +35,10 @@ import StudioCore
       guard let self else { return }
       defer { self.videoUpscaleBusy = false; self.videoUpscaleTask = nil }
       do {
+        await self.refreshGenerationLibrary(force: true)
+        try Task.checkCancellation()
+        guard self.documentSessionID == session, self.project.id == projectID, self.videoUpscaleSourcePath == source, self.reCaVSRSettings == options else { throw StudioError.invalid("The restoration destination changed during model inspection.") }
+        let settings = try self.standaloneRestorationRuntime(for: .reCaVSR)
         let prepared = preflightOnly ? FileManager.default.temporaryDirectory
           .appendingPathComponent(UUID().uuidString) : directory.appendingPathComponent("prepared")
         defer { if preflightOnly { try? FileManager.default.removeItem(at: prepared) } }

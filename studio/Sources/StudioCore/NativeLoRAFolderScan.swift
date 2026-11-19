@@ -2,6 +2,7 @@ import Foundation
 
 /// A bounded in-place index; every generation revalidates enabled adapters.
 public enum NativeLoRAFolderScan {
+  private static let cache = NSCache<NSString, NSDictionary>()
   public static func scan(_ folders: [LoRAFolder], maximumFiles: Int = 1000,
     maximumVisits: Int = 20_000, modelHints: [String: LoRAModel] = [:]) throws -> [String: Any] {
     guard folders.count <= 64, (1...1000).contains(maximumFiles), (1...20_000).contains(maximumVisits) else {
@@ -53,7 +54,13 @@ public enum NativeLoRAFolderScan {
           entries.append(entry); continue
         }
         do {
-          let info = try NativeLoRAInspection.inspect(source, modelHint: hint)
+          let key = (GenerationLibraryFileIdentity.signature([source.path]) + "|" + (hint?.rawValue ?? "")) as NSString
+          let info: [String: Any]
+          if let cached = cache.object(forKey: key) as? [String: Any] { info = cached }
+          else {
+            info = try NativeLoRAInspection.inspect(source, modelHint: hint)
+            cache.countLimit = 1000; cache.setObject(info as NSDictionary, forKey: key)
+          }
           entry.merge(info) { _, new in new }
           entry["status"] = info["loraModel"] == nil ? "needsModel" : "ready"
         } catch {

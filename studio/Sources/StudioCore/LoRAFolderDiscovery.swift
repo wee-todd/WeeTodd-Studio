@@ -9,7 +9,8 @@ public enum LoRAFolderDiscovery {
     public var warnings: [String]
   }
   public static func discover(folders: [LoRAFolder], profilesDirectory: String,
-    assets: [MediaAsset], groups: [LoRAGroup], additionalPaths: [String] = [], enabled: Bool = true) throws -> Result {
+    assets: [MediaAsset], groups: [LoRAGroup], additionalPaths: [String] = [], enabled: Bool = true,
+    libraryRoot: String? = nil) throws -> Result {
     var result = Result(folders: folders, automaticFolders: [], modelHints: [:], warnings: [])
     guard enabled else { return result }
     let fm = FileManager.default
@@ -65,6 +66,19 @@ public enum LoRAFolderDiscovery {
       else if models.isSubset(of: [.ltx23, .ltx25]) { result.modelHints[path] = .ltx23 }
     }
     let configured = folders.map { (canonical($0.path), $0) }
+    if let libraryRoot, libraryRoot.hasPrefix("/") {
+      for (name, model) in [("H3", LoRAModel.h3), ("H3-Image", .h3), ("LTX-2.5", .ltx25), ("MOSS-Image", .mossImage)] {
+        let root = canonical(URL(fileURLWithPath: libraryRoot).appendingPathComponent("WeeTodd/LoRAs/" + name).path)
+        guard fm.fileExists(atPath: root), !configured.contains(where: { parent, folder in
+          !folder.enabled && (root == parent || root.hasPrefix(parent + "/"))
+        }), result.folders.count < 64 else { continue }
+        // A family-specific child supplies a hint without assigning its family to unrelated siblings.
+        if !configured.contains(where: { $0.0 == root }) {
+          var folder = LoRAFolder(path: root); folder.modelHint = model
+          result.folders.insert(folder, at: 0); result.automaticFolders.append(folder)
+        }
+      }
+    }
     for root in roots.sorted() {
       // Explicit exclusions and nonrecursive parents remain authoritative.
       if configured.contains(where: { parent, _ in root == parent || root.hasPrefix(parent + "/") }) { continue }

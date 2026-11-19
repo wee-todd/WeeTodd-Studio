@@ -16,6 +16,8 @@ public struct RippleReference: Codable, Equatable, Identifiable {
 }
 
 public struct RippleDraft: Codable, Equatable {
+  /// Optional paired installed model/required author adapter; nil preserves legacy runtime selection.
+  public var libraryModel: GenerationModelRef?
   public var sourcePath: String
   public var sourceSHA256: String?
   public var sourceIn: Double

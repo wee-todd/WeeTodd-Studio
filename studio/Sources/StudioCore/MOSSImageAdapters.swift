@@ -22,9 +22,11 @@ extension DrawThingsImageDraft {
     let fast = (mossImage?.loras ?? []).filter { $0.isEnabled && $0.strength != 0 && $0.asset.loraProfile == "moss_sft_4step_v2" }
     if !fast.isEmpty {
       guard fast.count == 1, mossImage?.variant == "sft", fast[0].strength == 1 else { throw StudioError.invalid("The four-step adapter requires SFT and strength 1.") }
-      if mossImage?.stockRecipe == nil { let saved = MOSSRecipeSnapshot(draft: self); mossImage?.stockRecipe = saved }
-      steps = 4; guidance = 1; shift = 5
-      mossImage?.sampler = "euler"; mossImage?.schedule = "release"
+      if mossImage?.stockRecipe == nil {
+        let saved = MOSSRecipeSnapshot(draft: self); mossImage?.stockRecipe = saved
+        steps = 4; guidance = 1; shift = 5
+        mossImage?.sampler = "euler"; mossImage?.schedule = "release"
+      }
     } else if let stock = mossImage?.stockRecipe {
       stock.apply(to: &self); mossImage?.stockRecipe = nil
     }

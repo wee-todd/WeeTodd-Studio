@@ -22,6 +22,7 @@ extension StudioStore {
       refreshed.seed = draft.seed
       refreshed.loraStrength = draft.loraStrength
       refreshed.audioPolicy = draft.audioPolicy
+      refreshed.libraryModel = draft.libraryModel; refreshed.diffusionVAE = draft.diffusionVAE
       if draft.sourcePath == clip.sourcePath {
         refreshed.width = draft.width
         refreshed.height = draft.height
@@ -171,17 +172,25 @@ extension StudioStore {
     defer { if native { try? FileManager.default.removeItem(at: inputs) } }
     do {
       let result: [String: Any]
+      if draft.libraryModel != nil {
+        await refreshGenerationLibrary(force: true)
+        guard generationLibraryError == nil else { throw StudioError.invalid(generationLibraryError!) }
+        guard documentSessionID == session, project.clips.first(where: { $0.id == clip.id })?.rippleDraft == draft else {
+          throw StudioError.invalid("The Ripple draft changed while checking its model. Generate again from the current draft.")
+        }
+      }
+      let executionRuntime = try rippleRuntime(for: draft)
       if native {
-        let prepared = try await bridge.invoke("ripple-native-prepare", runtime: runtime,
+        let prepared = try await bridge.invoke("ripple-native-prepare", runtime: executionRuntime,
           payload: ["draft": try draft.object(), "takeOutput": job.path], output: inputs)
         guard let recipePath = prepared["recipePath"] as? String else {
           throw StudioError.invalid("Swift Ripple did not prepare a worker request.")
         }
-        result = try await bridge.invoke("ltx-native-render", runtime: runtime,
+        result = try await bridge.invoke("ltx-native-render", runtime: executionRuntime,
           payload: ["recipePath": recipePath], output: job)
       } else {
         let body = try draft.bridgeObject()
-        result = try await bridge.invoke("ripple-generate", runtime: runtime,
+        result = try await bridge.invoke("ripple-generate", runtime: executionRuntime,
           payload: ["ripple": body], output: job)
       }
       guard let path = result["video_path"] as? String ?? result["path"] as? String,
