@@ -1141,6 +1141,12 @@ def export_movie_base(request, destination, *, cache_directory=None):
         raise ValueError("Choose a new export filename. Existing movies are never overwritten.")
     destination.parent.mkdir(parents=True, exist_ok=True)
     ffmpeg = executable("ffmpeg", runtime)
+    ffmpeg_options = run([ffmpeg, "-hide_banner", "-h", "full"], capture=True)
+    filter_file_option = (
+        "-filter_complex_script"
+        if re.search(r"(?m)^-filter_complex_script\s", ffmpeg_options)
+        else "-/filter_complex"
+    )
     project = copy.deepcopy(project)
     for clip in project["clips"]:
         resolve_motion_output(clip)
@@ -1272,7 +1278,7 @@ def export_movie_base(request, destination, *, cache_directory=None):
         args += [
             "-filter_complex_threads",
             "1",
-            "-filter_complex_script",
+            filter_file_option,
             str(filter_file),
             "-map",
             f"[{v}]",

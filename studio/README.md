@@ -1127,6 +1127,8 @@ LoRAs, prompt and named inputs; automatic component selection inspects
 compatible recipe contents. FFmpeg/FFprobe and
 optional RIFE remain separately configured tools; a retail installer must package these tools
 with their licenses and complete clean-Mac qualification.
+Timeline assembly supports the current `-/filter_complex` syntax and the legacy
+`-filter_complex_script` option for loading the filter graph from a file.
 
 Runtime settings, autosave, global assets, recipes, previews and jobs live under
 `~/Library/Application Support/WeeTodd Studio`. User media and model weights stay in their existing
